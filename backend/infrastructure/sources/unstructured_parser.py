@@ -1,5 +1,3 @@
-"""Unstructured.io parser + ArXiv + YouTube transcript adapters."""
-
 from __future__ import annotations
 
 import asyncio
@@ -16,22 +14,7 @@ from domain.entities import SourceDocument
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# ArXiv
-# ---------------------------------------------------------------------------
-
-
 async def fetch_arxiv_papers(topic: str, max_results: int = 5) -> list[SourceDocument]:
-    """
-    Search ArXiv for papers related to the topic.
-
-    Args:
-        topic: Expert topic.
-        max_results: Maximum number of papers to retrieve.
-
-    Returns:
-        List of SourceDocument with abstract + metadata.
-    """
     logger.info("arxiv_search", topic=topic)
     try:
         loop = asyncio.get_event_loop()
@@ -67,13 +50,7 @@ async def fetch_arxiv_papers(topic: str, max_results: int = 5) -> list[SourceDoc
         return []
 
 
-# ---------------------------------------------------------------------------
-# YouTube Transcripts
-# ---------------------------------------------------------------------------
-
-
 def _extract_video_id(url: str) -> str | None:
-    """Extract YouTube video ID from URL."""
     import re
 
     patterns = [
@@ -91,16 +68,6 @@ async def fetch_youtube_transcript(
     video_url: str,
     title: str = "",
 ) -> SourceDocument | None:
-    """
-    Fetch transcript for a YouTube video.
-
-    Args:
-        video_url: Full YouTube URL.
-        title: Optional title hint.
-
-    Returns:
-        SourceDocument or None on failure.
-    """
     video_id = _extract_video_id(video_url)
     if not video_id:
         logger.warning("youtube_invalid_url", url=video_url)
@@ -126,21 +93,7 @@ async def fetch_youtube_transcript(
         return None
 
 
-# ---------------------------------------------------------------------------
-# Unstructured.io for local file parsing (PDFs, DOCX, etc.)
-# ---------------------------------------------------------------------------
-
-
 async def parse_file_with_unstructured(file_path: str) -> SourceDocument | None:
-    """
-    Parse a local file (PDF, DOCX, etc.) using Unstructured.
-
-    Args:
-        file_path: Absolute path to the file.
-
-    Returns:
-        SourceDocument or None on failure.
-    """
     try:
         from unstructured.partition.auto import partition
 

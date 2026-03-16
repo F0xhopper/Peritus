@@ -1,5 +1,3 @@
-"""Pinecone vector store repository."""
-
 from __future__ import annotations
 
 from pinecone import Pinecone, ServerlessSpec
@@ -10,7 +8,7 @@ from core.logger import get_logger
 
 logger = get_logger(__name__)
 
-EMBEDDING_DIMENSION = 1024  # voyage-3 output dim
+EMBEDDING_DIMENSION = 1024
 
 
 def _get_pinecone_client() -> Pinecone:
@@ -19,7 +17,6 @@ def _get_pinecone_client() -> Pinecone:
 
 
 def ensure_index_exists() -> None:
-    """Create the Pinecone index if it doesn't exist yet."""
     settings = get_settings()
     pc = _get_pinecone_client()
     existing = [idx.name for idx in pc.list_indexes()]
@@ -36,12 +33,6 @@ def ensure_index_exists() -> None:
 
 
 def get_vector_store(namespace: str) -> PineconeVectorStore:
-    """
-    Return a PineconeVectorStore scoped to a specific namespace.
-
-    Args:
-        namespace: e.g. "peritus-quantum-computing"
-    """
     ensure_index_exists()
     settings = get_settings()
     pc = _get_pinecone_client()

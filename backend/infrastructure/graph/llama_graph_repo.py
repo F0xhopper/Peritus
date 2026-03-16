@@ -1,5 +1,3 @@
-"""LlamaIndex PropertyGraphIndex repository."""
-
 from __future__ import annotations
 
 import os
@@ -32,7 +30,6 @@ logger = get_logger(__name__)
 
 
 def _configure_llama_settings() -> None:
-    """Set global LlamaIndex LLM + embedding."""
     LlamaSettings.llm = get_llama_llm()
     LlamaSettings.embed_model = get_voyage_embedding()
     LlamaSettings.chunk_size = 512
@@ -50,23 +47,6 @@ def build_graph_index(
     slug: str,
     documents: list[Document],
 ) -> PropertyGraphIndex:
-    """
-    Build a PropertyGraphIndex from the given documents.
-
-    Uses three extractors:
-      - SimpleLLMPathExtractor (entity-relation triples via LLM)
-      - ImplicitPathExtractor (keyword co-occurrence paths)
-      - EntityExtractor (named entity recognition)
-
-    Persists the graph to disk and upserts vectors to Pinecone.
-
-    Args:
-        slug: URL-safe expert identifier.
-        documents: Ingested LlamaIndex Document objects.
-
-    Returns:
-        The built PropertyGraphIndex.
-    """
     _configure_llama_settings()
     settings = get_settings()
     storage_path = _storage_path(slug)
@@ -92,7 +72,6 @@ def build_graph_index(
         show_progress=True,
     )
 
-    # Persist locally
     index.storage_context.persist(persist_dir=str(storage_path))
     logger.info("graph_index_persisted", path=str(storage_path))
 
@@ -100,18 +79,6 @@ def build_graph_index(
 
 
 def load_graph_index(slug: str) -> PropertyGraphIndex:
-    """
-    Load a previously-built PropertyGraphIndex from disk.
-
-    Args:
-        slug: Expert identifier.
-
-    Returns:
-        Loaded PropertyGraphIndex.
-
-    Raises:
-        FileNotFoundError: If storage directory does not exist.
-    """
     _configure_llama_settings()
     storage_path = _storage_path(slug)
     namespace = f"peritus-{slug}"
@@ -133,12 +100,6 @@ def load_graph_index(slug: str) -> PropertyGraphIndex:
 
 
 def get_graph_stats(index: PropertyGraphIndex) -> dict:
-    """
-    Extract node/relation counts from the graph store.
-
-    Returns:
-        Dict with node_count and relation_count.
-    """
     try:
         graph_store = index.property_graph_store
         nodes = list(graph_store.get_all_nodes())

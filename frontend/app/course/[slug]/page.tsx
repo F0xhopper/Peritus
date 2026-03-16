@@ -68,7 +68,6 @@ export default function CoursePage() {
         const chunk = decoder.decode(value);
         buffer += chunk;
         setCourseMarkdown(buffer);
-        // Scroll to bottom as content streams in
         setTimeout(() => {
           courseRef.current?.scrollTo({
             top: courseRef.current.scrollHeight,
@@ -93,7 +92,6 @@ export default function CoursePage() {
         Generate Course{expert?.topic ? `: ${expert.topic}` : ""}
       </h1>
 
-      {/* Course configuration */}
       {!started && (
         <div style={{ marginTop: "2rem" }}>
           <p className="muted">
@@ -155,7 +153,6 @@ export default function CoursePage() {
 
       {error && <div className="error-box mt-3">{error}</div>}
 
-      {/* Streaming course content */}
       {started && (
         <div style={{ marginTop: "2rem" }}>
           {generating && !courseMarkdown && (

@@ -1,5 +1,3 @@
-"""Use case: create a Peritus Expert from a topic string."""
-
 from __future__ import annotations
 
 import json
@@ -36,7 +34,6 @@ def _save_registry(registry: dict[str, dict]) -> None:
 
 
 def get_expert(slug: str) -> Expert | None:
-    """Load an Expert from the local registry by slug."""
     registry = _load_registry()
     data = registry.get(slug)
     if not data:
@@ -45,7 +42,6 @@ def get_expert(slug: str) -> Expert | None:
 
 
 def list_experts() -> list[Expert]:
-    """Return all registered experts."""
     registry = _load_registry()
     return [Expert.model_validate(v) for v in registry.values()]
 
@@ -57,7 +53,6 @@ def _save_expert(expert: Expert) -> None:
 
 
 async def _generate_expert_description(topic: str, sources: list[SourceDocument]) -> str:
-    """Use Claude to produce a short expert description based on ingested sources."""
     sample_titles = [s.title for s in sources[:8]]
     prompt = (
         f"You are writing a one-paragraph (3–5 sentence) description of an AI expert "
@@ -76,22 +71,6 @@ async def _generate_expert_description(topic: str, sources: list[SourceDocument]
 
 
 async def create_expert_stream(topic: str) -> AsyncIterator[str]:
-    """
-    Stream progress events while building a Peritus Expert for a topic.
-
-    Yields plain-text progress lines (newline-terminated) suitable for
-    Server-Sent Events or streaming HTTP response.
-
-    Args:
-        topic: The domain topic string (e.g. "Quantum Computing").
-
-    Yields:
-        Progress lines, one per logical step.
-
-    Raises:
-        ExpertAlreadyExistsError: If an expert with this slug already exists.
-        IndexBuildError: On graph build failure.
-    """
     slug = slugify(topic)
     settings = get_settings()
 
@@ -103,7 +82,6 @@ async def create_expert_stream(topic: str) -> AsyncIterator[str]:
         yield f"data: DONE slug={slug}\n\n"
         return
 
-    # Register as building
     expert = Expert(
         slug=slug,
         topic=topic,
@@ -115,23 +93,19 @@ async def create_expert_stream(topic: str) -> AsyncIterator[str]:
     _save_expert(expert)
 
     try:
-        # --- Step 1: Discover sources via Exa ---
         yield f"data: [1/5] Discovering sources via Exa...\n\n"
         sources = await discover_sources(topic, max_results=settings.max_source_docs)
         yield f"data: [1/5] Found {len(sources)} web sources.\n\n"
 
-        # --- Step 2: Enrich top sources with Firecrawl ---
         yield f"data: [2/5] Enriching sources with Firecrawl...\n\n"
         sources = await enrich_sources(sources, limit=5)
         yield f"data: [2/5] Enrichment complete.\n\n"
 
-        # --- Step 3: Fetch ArXiv papers ---
         yield f"data: [3/5] Fetching ArXiv papers...\n\n"
         arxiv_docs = await fetch_arxiv_papers(topic, max_results=5)
         sources.extend(arxiv_docs)
         yield f"data: [3/5] Total sources: {len(sources)}.\n\n"
 
-        # --- Step 4: Build PropertyGraphIndex ---
         yield f"data: [4/5] Building knowledge graph (this may take a few minutes)...\n\n"
 
         llama_docs = [
@@ -152,7 +126,6 @@ async def create_expert_stream(topic: str) -> AsyncIterator[str]:
         stats = get_graph_stats(index)
         yield f"data: [4/5] Graph built: {stats['node_count']} nodes, {stats['relation_count']} relations.\n\n"
 
-        # --- Step 5: Generate expert description ---
         yield f"data: [5/5] Generating expert persona...\n\n"
         description = await _generate_expert_description(topic, sources)
 
@@ -176,7 +149,6 @@ async def create_expert_stream(topic: str) -> AsyncIterator[str]:
 
 
 async def _async_build_index(slug: str, documents: list[Document]):
-    """Run synchronous index build in thread pool to avoid blocking event loop."""
     import asyncio
 
     loop = asyncio.get_event_loop()

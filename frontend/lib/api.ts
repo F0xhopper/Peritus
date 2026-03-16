@@ -1,8 +1,3 @@
-/**
- * Peritus API client helpers.
- * All requests proxy through Next.js rewrites to http://localhost:8000.
- */
-
 const BASE = "";
 
 export interface ExpertSummary {
@@ -19,10 +14,6 @@ export interface ExpertSummary {
 
 export type Difficulty = "beginner" | "intermediate" | "advanced" | "custom";
 
-// ---------------------------------------------------------------------------
-// Experts
-// ---------------------------------------------------------------------------
-
 export async function fetchExperts(): Promise<ExpertSummary[]> {
   const res = await fetch(`${BASE}/api/experts`);
   if (!res.ok) throw new Error(`Failed to fetch experts: ${res.status}`);
@@ -35,11 +26,6 @@ export async function fetchExpert(slug: string): Promise<ExpertSummary> {
   return res.json();
 }
 
-/**
- * Stream expert creation progress.
- * Calls onProgress with each progress line.
- * Returns the slug when done.
- */
 export async function createExpert(
   topic: string,
   onProgress: (line: string) => void
@@ -74,14 +60,6 @@ export async function createExpert(
   return slug;
 }
 
-// ---------------------------------------------------------------------------
-// Courses
-// ---------------------------------------------------------------------------
-
-/**
- * Stream a generated course as raw Markdown text.
- * Calls onChunk with each streamed chunk.
- */
 export async function generateCourse(
   expertSlug: string,
   difficulty: Difficulty,
@@ -105,10 +83,6 @@ export async function generateCourse(
   }
 }
 
-// ---------------------------------------------------------------------------
-// Chat
-// ---------------------------------------------------------------------------
-
 export interface ChatHistoryItem {
   role: "user" | "assistant";
   content: string;
@@ -126,10 +100,6 @@ export async function clearChatHistory(slug: string): Promise<void> {
   await fetch(`${BASE}/api/chat/${slug}/history`, { method: "DELETE" });
 }
 
-/**
- * Send a chat message and stream the SSE response.
- * Calls onChunk with each token chunk.
- */
 export async function sendChatMessage(
   slug: string,
   message: string,

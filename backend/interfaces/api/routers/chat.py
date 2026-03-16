@@ -1,5 +1,3 @@
-"""Chat (SSE) endpoints for expert conversation."""
-
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
@@ -33,18 +31,6 @@ class ConversationHistoryItem(BaseModel):
 
 @router.post("/{expert_slug}")
 async def chat_with_expert(expert_slug: str, body: ChatRequest):
-    """
-    Send a message to a Peritus Expert and receive a streamed SSE response.
-
-    The conversation is stateful – history is maintained in memory per expert.
-
-    Args path:
-        expert_slug: Expert identifier.
-
-    Args body:
-        message: The user's message.
-        use_graph: Whether to augment with graph context (default: true).
-    """
     expert = get_expert(expert_slug)
     if not expert:
         raise HTTPException(status_code=404, detail=f"Expert '{expert_slug}' not found.")
@@ -65,7 +51,6 @@ async def chat_with_expert(expert_slug: str, body: ChatRequest):
                 user_message=body.message.strip(),
                 use_graph=body.use_graph,
             ):
-                # Format as SSE
                 yield f"data: {chunk}\n\n"
             yield "data: [DONE]\n\n"
         except (ConversationError, ExpertNotFoundError) as exc:
@@ -84,7 +69,6 @@ async def chat_with_expert(expert_slug: str, body: ChatRequest):
 
 @router.get("/{expert_slug}/history")
 async def get_conversation_history(expert_slug: str):
-    """Return the conversation history for an expert."""
     expert = get_expert(expert_slug)
     if not expert:
         raise HTTPException(status_code=404, detail=f"Expert '{expert_slug}' not found.")
@@ -105,6 +89,5 @@ async def get_conversation_history(expert_slug: str):
 
 @router.delete("/{expert_slug}/history")
 async def clear_conversation_history(expert_slug: str):
-    """Clear the conversation history for an expert (start fresh)."""
     reset_conversation(expert_slug)
     return {"status": "cleared", "expert_slug": expert_slug}

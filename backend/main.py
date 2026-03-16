@@ -1,5 +1,3 @@
-"""Peritus FastAPI application entry point."""
-
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -17,7 +15,6 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application startup / shutdown lifecycle."""
     settings = get_settings()
     logger.info(
         "peritus_starting",
@@ -36,7 +33,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS – allow the Next.js dev server
 settings = get_settings()
 app.add_middleware(
     CORSMiddleware,
@@ -46,7 +42,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
 app.include_router(experts.router)
 app.include_router(courses.router)
 app.include_router(chat.router)
@@ -54,7 +49,6 @@ app.include_router(chat.router)
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
     return {"status": "ok", "service": "peritus"}
 
 

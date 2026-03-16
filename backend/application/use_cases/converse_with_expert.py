@@ -1,5 +1,3 @@
-"""Use case: stateful, graph-grounded conversation with a Peritus Expert."""
-
 from __future__ import annotations
 
 import asyncio
@@ -16,31 +14,22 @@ from infrastructure.llm.anthropic_adapter import (
 
 logger = get_logger(__name__)
 
-# In-memory conversation store (keyed by expert slug → Conversation)
-# In production this would be Redis or a DB
 _CONVERSATIONS: dict[str, Conversation] = {}
 
-_MAX_HISTORY_MESSAGES = 20  # keep last N messages to stay within context window
+_MAX_HISTORY_MESSAGES = 20
 
 
 def get_or_create_conversation(expert_slug: str) -> Conversation:
-    """Retrieve or initialise a conversation for an expert."""
     if expert_slug not in _CONVERSATIONS:
         _CONVERSATIONS[expert_slug] = Conversation(expert_slug=expert_slug)
     return _CONVERSATIONS[expert_slug]
 
 
 def reset_conversation(expert_slug: str) -> None:
-    """Clear conversation history for an expert."""
     _CONVERSATIONS.pop(expert_slug, None)
 
 
 async def _retrieve_graph_context(expert: Expert, user_message: str) -> str:
-    """
-    Query the PropertyGraphIndex for relevant context snippets.
-
-    Returns a formatted context block to prepend to the system prompt.
-    """
     try:
         index = await asyncio.get_event_loop().run_in_executor(
             None, load_graph_index, expert.slug
@@ -65,50 +54,27 @@ async def chat_stream(
     user_message: str,
     use_graph: bool = True,
 ) -> AsyncIterator[str]:
-    """
-    Send a message to the expert and stream the response.
-
-    Maintains conversation history for multi-turn dialogue.
-    Optionally retrieves graph context for grounded answers.
-
-    Args:
-        expert: The Peritus Expert entity.
-        user_message: The user's message.
-        use_graph: Whether to retrieve from the knowledge graph.
-
-    Yields:
-        Text chunks from the expert's response.
-
-    Raises:
-        ExpertNotFoundError: If expert is not ready.
-        ConversationError: On LLM failure.
-    """
     if expert.status != ExpertStatus.READY:
         raise ExpertNotFoundError(expert.slug)
 
     conversation = get_or_create_conversation(expert.slug)
     conversation.add_message("user", user_message)
 
-    # Build graph context
     graph_context = ""
     if use_graph:
         graph_context = await _retrieve_graph_context(expert, user_message)
 
-    # Build system prompt with persona + optional graph context
     system_prompt = build_expert_system_prompt(expert.topic, expert.description)
     if graph_context:
         system_prompt += graph_context
 
-    # Build message history (trimmed)
     history = conversation.messages[-(1 + _MAX_HISTORY_MESSAGES) : -1]
     messages = [
         {"role": msg.role, "content": msg.content}
         for msg in history
     ]
-    # Add current user message
     messages.append({"role": "user", "content": user_message})
 
-    # Stream response
     full_response: list[str] = []
     try:
         async for chunk in stream_completion(
@@ -118,7 +84,6 @@ async def chat_stream(
             full_response.append(chunk)
             yield chunk
 
-        # Save assistant response to history
         conversation.add_message("assistant", "".join(full_response))
         logger.info(
             "chat_turn_complete",

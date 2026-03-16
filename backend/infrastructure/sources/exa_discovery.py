@@ -1,5 +1,3 @@
-"""Exa search API – primary source discovery."""
-
 from __future__ import annotations
 
 from typing import AsyncIterator
@@ -20,23 +18,9 @@ def _get_exa_client() -> Exa:
 
 
 async def discover_sources(topic: str, max_results: int = 15) -> list[SourceDocument]:
-    """
-    Use Exa neural search to discover relevant web sources for a topic.
-
-    Args:
-        topic: The expert's topic string.
-        max_results: Maximum number of results to return.
-
-    Returns:
-        List of SourceDocument instances with fetched text content.
-
-    Raises:
-        SourceIngestionError: On API failure.
-    """
     logger.info("exa_discover_sources", topic=topic, max_results=max_results)
     try:
         client = _get_exa_client()
-        # Exa returns full text with highlights
         results = client.search_and_contents(
             f"{topic} comprehensive overview tutorial",
             num_results=max_results,
@@ -54,7 +38,7 @@ async def discover_sources(topic: str, max_results: int = 15) -> list[SourceDocu
                 SourceDocument(
                     url=r.url,
                     title=r.title or r.url,
-                    content=text[:12_000],  # cap per-doc tokens
+                    content=text[:12_000],
                     source_type="web",
                     metadata={"score": r.score, "published_date": r.published_date},
                 )

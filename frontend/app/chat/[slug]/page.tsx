@@ -51,8 +51,7 @@ export default function ChatPage() {
     setMessages((prev) => [...prev, userMsg]);
     setStreaming(true);
 
-    // Append empty assistant message to stream into
-    const assistantIdx = messages.length + 1; // index after user msg
+    const assistantIdx = messages.length + 1;
     setMessages((prev) => [...prev, { role: "assistant", content: "" }]);
 
     try {
@@ -101,7 +100,7 @@ export default function ChatPage() {
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
-      setMessages((prev) => prev.slice(0, -1)); // remove empty assistant msg
+      setMessages((prev) => prev.slice(0, -1));
     } finally {
       setStreaming(false);
       setTimeout(() => inputRef.current?.focus(), 100);
@@ -123,7 +122,6 @@ export default function ChatPage() {
 
   return (
     <main style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 8rem)" }}>
-      {/* Header */}
       <div style={{ marginBottom: "1rem" }}>
         <p className="small muted">
           <Link href={`/experts/${slug}`}>← {expert?.topic || slug}</Link>
@@ -144,7 +142,6 @@ export default function ChatPage() {
 
       {error && <div className="error-box mb-2">{error}</div>}
 
-      {/* Messages */}
       <div
         className="chat-messages"
         style={{ flex: 1, overflowY: "auto", paddingRight: "0.5rem" }}
@@ -193,7 +190,6 @@ export default function ChatPage() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input */}
       <div className="chat-input-row">
         <input
           ref={inputRef}
