@@ -1,0 +1,419 @@
+/* =============================================================================
+   Peritus – Textbook Monospace UI
+   Philosophy: plain text, high readability, no decoration
+   ============================================================================= */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,300;0,400;0,500;0,700;1,400&family=Inconsolata:wght@300;400;500;700&display=swap');
+
+/* Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --font-mono: 'JetBrains Mono', 'Inconsolata', 'Fira Mono', 'IBM Plex Mono',
+               'Consolas', 'Courier New', monospace;
+  --bg: #fdfdf6;
+  --bg-code: #f4f4ee;
+  --text: #111111;
+  --text-muted: #555555;
+  --link: #0055cc;
+  --border: #cccccc;
+  --accent: #333333;
+  --max-width: 82ch;
+  --font-size: 17px;
+  --line-height: 1.8;
+}
+
+html {
+  font-size: var(--font-size);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-mono);
+  background: var(--bg);
+  color: var(--text);
+  line-height: var(--line-height);
+  min-height: 100vh;
+}
+
+/* =============================================================================
+   Layout
+   ============================================================================= */
+
+.page-wrapper {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 3rem 1.5rem 6rem;
+}
+
+/* =============================================================================
+   Typography
+   ============================================================================= */
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  line-height: 1.3;
+  color: var(--text);
+  margin-top: 2.5rem;
+  margin-bottom: 0.75rem;
+}
+
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.3rem; border-bottom: 1px solid var(--border); padding-bottom: 0.25rem; }
+h3 { font-size: 1.1rem; }
+h4 { font-size: 1rem; }
+
+p {
+  margin-bottom: 1.2rem;
+  max-width: var(--max-width);
+}
+
+a {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: #003399;
+}
+
+ul, ol {
+  padding-left: 2rem;
+  margin-bottom: 1.2rem;
+}
+
+li {
+  margin-bottom: 0.3rem;
+}
+
+strong { font-weight: 700; }
+em { font-style: italic; }
+
+/* =============================================================================
+   Code blocks
+   ============================================================================= */
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-code);
+  padding: 0.15em 0.35em;
+  border-radius: 2px;
+}
+
+pre {
+  background: var(--bg-code);
+  border-left: 3px solid var(--border);
+  padding: 1rem 1.25rem;
+  margin: 1.5rem 0;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+/* =============================================================================
+   Forms & inputs
+   ============================================================================= */
+
+input[type="text"],
+input[type="search"],
+textarea {
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--text);
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0.5rem 0.75rem;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.1s;
+}
+
+input[type="text"]:focus,
+textarea:focus {
+  border-color: var(--text);
+}
+
+button {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--text);
+  background: #efefef;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  padding: 0.45rem 1rem;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+button:hover {
+  background: #e0e0e0;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+button.primary {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+button.primary:hover {
+  background: #333;
+}
+
+select {
+  font-family: var(--font-mono);
+  font-size: 0.95rem;
+  padding: 0.45rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: #fff;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* =============================================================================
+   Navigation
+   ============================================================================= */
+
+nav {
+  border-bottom: 1px solid var(--border);
+  padding: 1rem 0;
+  margin-bottom: 3rem;
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+}
+
+nav .brand {
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--text);
+  letter-spacing: 0.05em;
+}
+
+nav a {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+nav a:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+/* =============================================================================
+   Status / progress indicators (text only, no spinners)
+   ============================================================================= */
+
+.status-line {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+  font-style: italic;
+}
+
+.status-line::before {
+  content: '> ';
+  color: var(--text);
+  font-style: normal;
+}
+
+.error-box {
+  border-left: 3px solid #cc0000;
+  padding: 0.75rem 1rem;
+  margin: 1rem 0;
+  color: #cc0000;
+  background: #fff8f8;
+  font-size: 0.9rem;
+}
+
+/* =============================================================================
+   Chat interface
+   ============================================================================= */
+
+.chat-container {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 10rem);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.chat-message {
+  padding: 0.75rem 0;
+  border-bottom: 1px dotted var(--border);
+  line-height: var(--line-height);
+}
+
+.chat-message:last-child {
+  border-bottom: none;
+}
+
+.chat-message.user-message {
+  color: var(--text-muted);
+}
+
+.chat-message.user-message .msg-prefix {
+  color: var(--text);
+  font-weight: 700;
+  user-select: none;
+}
+
+.chat-message.assistant-message .msg-prefix {
+  font-weight: 700;
+  color: var(--text);
+  user-select: none;
+}
+
+.chat-message .msg-body {
+  display: inline;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  padding-top: 1rem;
+}
+
+.chat-input-row input {
+  flex: 1;
+}
+
+/* =============================================================================
+   Course display
+   ============================================================================= */
+
+.course-content {
+  margin-top: 2rem;
+}
+
+.course-content h1 {
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.course-content h2 {
+  margin-top: 3rem;
+}
+
+/* =============================================================================
+   Expert card / list
+   ============================================================================= */
+
+.expert-list {
+  list-style: none;
+  padding: 0;
+  margin-top: 2rem;
+}
+
+.expert-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 1rem 0;
+  border-bottom: 1px dotted var(--border);
+  gap: 1rem;
+}
+
+.expert-item:last-child {
+  border-bottom: none;
+}
+
+.expert-item-title {
+  font-weight: 700;
+  text-decoration: none;
+  color: var(--text);
+  margin-bottom: 0.25rem;
+  display: block;
+}
+
+.expert-item-title:hover {
+  text-decoration: underline;
+}
+
+.expert-meta {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.badge {
+  display: inline-block;
+  font-size: 0.75rem;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.badge.ready { border-color: #006600; color: #006600; }
+.badge.building { border-color: #886600; color: #886600; }
+.badge.failed { border-color: #cc0000; color: #cc0000; }
+
+/* =============================================================================
+   Utility classes
+   ============================================================================= */
+
+.mt-1 { margin-top: 0.5rem; }
+.mt-2 { margin-top: 1rem; }
+.mt-3 { margin-top: 1.5rem; }
+.mt-4 { margin-top: 2rem; }
+.mb-1 { margin-bottom: 0.5rem; }
+.mb-2 { margin-bottom: 1rem; }
+.muted { color: var(--text-muted); }
+.small { font-size: 0.85rem; }
+.row { display: flex; gap: 0.75rem; align-items: center; }
+.col { display: flex; flex-direction: column; gap: 0.5rem; }
+.flex-1 { flex: 1; }
+
+/* Markdown rendered content */
+.prose h1 { margin-top: 2rem; }
+.prose h2 { margin-top: 2.5rem; }
+.prose h3 { margin-top: 2rem; }
+.prose blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 1rem;
+  color: var(--text-muted);
+  margin: 1.5rem 0;
+}
+.prose table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1.5rem 0;
+  font-size: 0.9rem;
+}
+.prose th, .prose td {
+  border: 1px solid var(--border);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.prose th { font-weight: 700; background: var(--bg-code); }
