@@ -1,0 +1,163 @@
+import json
+from collections import defaultdict
+
+import asyncpg
+
+from peritus.graph.domain import Edge, EdgeType, Node, NodeType
+
+
+class GraphRepository:
+    def __init__(self, pool: asyncpg.Pool) -> None:
+        self._pool = pool
+
+    async def bulk_insert_from_extractions(
+        self,
+        expert_id: int,
+        extractions: list[dict],
+    ) -> tuple[int, int]:
+        """Ingest a list of raw extraction dicts. Returns (node_count, edge_count)."""
+        # Merge nodes across batches — deduplicate by normalised label
+        merged_nodes: dict[str, dict] = {}
+        for ext in extractions:
+            for node in ext.get("nodes", []):
+                key = node["label"].lower().strip()
+                if key not in merged_nodes:
+                    merged_nodes[key] = {
+                        "label": node["label"],
+                        "node_type": node.get("node_type", "concept"),
+                        "description": node.get("description", ""),
+                        "properties": {
+                            "difficulty": node.get("difficulty"),
+                            "content_type": node.get("content_type"),
+                            "confidence": node.get("confidence"),
+                        },
+                        "chunk_ids": [],
+                    }
+                merged_nodes[key]["chunk_ids"].extend(node.get("chunk_db_ids", []))
+
+        async with self._pool.acquire() as conn:
+            # Insert nodes, get back label→id mapping
+            label_to_id: dict[str, int] = {}
+            for key, node in merged_nodes.items():
+                row = await conn.fetchrow(
+                    """
+                    INSERT INTO expert_nodes
+                        (expert_id, node_type, label, description, properties, chunk_ids)
+                    VALUES ($1, $2, $3, $4, $5::jsonb, $6)
+                    RETURNING id
+                    """,
+                    expert_id,
+                    node["node_type"],
+                    node["label"],
+                    node["description"],
+                    json.dumps(node["properties"]),
+                    list(set(node["chunk_ids"])),
+                )
+                label_to_id[key] = row["id"]
+
+            # Insert edges using label→id mapping
+            edge_count = 0
+            for ext in extractions:
+                for edge in ext.get("edges", []):
+                    from_key = edge["from_label"].lower().strip()
+                    to_key = edge["to_label"].lower().strip()
+                    if from_key not in label_to_id or to_key not in label_to_id:
+                        continue
+                    await conn.execute(
+                        """
+                        INSERT INTO expert_edges
+                            (expert_id, from_node_id, to_node_id, edge_type, weight)
+                        VALUES ($1, $2, $3, $4, $5)
+                        ON CONFLICT DO NOTHING
+                        """,
+                        expert_id,
+                        label_to_id[from_key],
+                        label_to_id[to_key],
+                        edge.get("edge_type", "builds_on"),
+                        float(edge.get("weight", 1.0)),
+                    )
+                    edge_count += 1
+
+        return len(merged_nodes), edge_count
+
+    async def get_top_nodes(self, expert_id: int, limit: int = 20) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT n.id, n.label, n.node_type, n.description,
+                       COUNT(e.id) AS degree
+                FROM expert_nodes n
+                LEFT JOIN expert_edges e
+                    ON e.from_node_id = n.id OR e.to_node_id = n.id
+                WHERE n.expert_id = $1
+                GROUP BY n.id, n.label, n.node_type, n.description
+                ORDER BY degree DESC
+                LIMIT $2
+                """,
+                expert_id, limit,
+            )
+        return [dict(r) for r in rows]
+
+    async def get_nodes_for_chunks(
+        self, expert_id: int, chunk_ids: list[int]
+    ) -> list[dict]:
+        if not chunk_ids:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT id, label, node_type, description, chunk_ids
+                FROM expert_nodes
+                WHERE expert_id = $1
+                  AND chunk_ids && $2::integer[]
+                """,
+                expert_id, chunk_ids,
+            )
+        return [dict(r) for r in rows]
+
+    async def get_neighbours(
+        self, expert_id: int, node_ids: list[int], hops: int = 1
+    ) -> tuple[list[dict], list[dict]]:
+        """Return (nodes, edges) reachable within `hops` from node_ids."""
+        if not node_ids:
+            return [], []
+
+        async with self._pool.acquire() as conn:
+            visited_ids = set(node_ids)
+            frontier = list(node_ids)
+
+            for _ in range(hops):
+                edge_rows = await conn.fetch(
+                    """
+                    SELECT from_node_id, to_node_id, edge_type, weight
+                    FROM expert_edges
+                    WHERE expert_id = $1
+                      AND (from_node_id = ANY($2) OR to_node_id = ANY($2))
+                    """,
+                    expert_id, frontier,
+                )
+                new_ids = []
+                for r in edge_rows:
+                    for nid in (r["from_node_id"], r["to_node_id"]):
+                        if nid not in visited_ids:
+                            visited_ids.add(nid)
+                            new_ids.append(nid)
+                frontier = new_ids
+
+            all_node_ids = list(visited_ids)
+            node_rows = await conn.fetch(
+                "SELECT id, label, node_type, description FROM expert_nodes WHERE id = ANY($1)",
+                all_node_ids,
+            )
+            edge_rows = await conn.fetch(
+                """
+                SELECT from_node_id, to_node_id, edge_type, weight
+                FROM expert_edges
+                WHERE expert_id = $1
+                  AND from_node_id = ANY($2)
+                  AND to_node_id = ANY($2)
+                """,
+                expert_id, all_node_ids,
+            )
+
+        return [dict(r) for r in node_rows], [dict(r) for r in edge_rows]
