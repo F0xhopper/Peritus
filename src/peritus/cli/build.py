@@ -266,7 +266,6 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
         Panel(
             f"[bold green]Expert ready:[/bold green] [bold cyan]\"{persona}\"[/bold cyan]\n"
             f"Trained on [green]{result.source_count}[/green] sources"
-            + (f"  ([dim]{result.dropped_count} dropped[/dim])" if result.dropped_count else "")
             + f" · [green]{result.chunk_count}[/green] chunks"
             + f" · [green]{result.node_count}[/green] concepts\n"
             + f"Avg quality [yellow]{avg_q}[/yellow] / 10\n\n"
