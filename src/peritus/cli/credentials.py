@@ -46,12 +46,12 @@ async def _credentials_async(
     passed = [dict(r) for r in source_rows if r["passed"]]
     dropped = [dict(r) for r in source_rows if not r["passed"]]
 
-    # Top concepts
+    # Top concepts — always fetch a small set for the credential card; more with --graph
     graph_repo = GraphRepository(pool)
-    top_nodes = await graph_repo.get_top_nodes(expert.id, 10) if show_graph or True else []
+    top_nodes = await graph_repo.get_top_nodes(expert.id, 15 if show_graph else 5)
 
     show_passed = passed if (show_sources or not show_dropped) else []
-    show_drop = dropped if show_dropped else (dropped if not show_sources else [])
+    show_drop = dropped if show_dropped else []
 
     console.print(credential_card(expert, show_passed, show_drop, top_nodes))
 

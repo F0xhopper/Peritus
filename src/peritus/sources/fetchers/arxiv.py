@@ -1,5 +1,6 @@
 """ArXiv fetcher — searches papers and fetches full HTML text via ar5iv."""
 
+import asyncio
 import re
 
 import arxiv  # type: ignore
@@ -20,13 +21,11 @@ _MAX_FULL_TEXT = 120_000
 class ArxivFetcher:
     async def fetch(self, topic: str, max_results: int = 3) -> list[RawSource]:
         try:
-            client = arxiv.Client()
-            search = arxiv.Search(
-                query=topic,
-                max_results=max_results,
-                sort_by=arxiv.SortCriterion.Relevance,
+            papers = await asyncio.to_thread(
+                lambda: list(arxiv.Client().results(
+                    arxiv.Search(query=topic, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
+                ))
             )
-            papers = list(client.results(search))
         except Exception as exc:
             logger.warning("ArXiv search failed for %r: %s", topic, exc)
             return []

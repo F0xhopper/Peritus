@@ -12,6 +12,7 @@ Stages:
 
 import asyncio
 import json
+import math
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass, field
 from typing import Any
@@ -28,7 +29,7 @@ from peritus.graph.extractor import extract_graph_from_chunks
 from peritus.graph.repository import GraphRepository
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.embeddings import embed_batch
-from peritus.ingestion.chunker import TextChunk, chunk_text
+from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_source
 from peritus.sources.domain import DroppedSource, RawSource, SourceType, ValidatedSource
 from peritus.sources.fetchers.arxiv import (
@@ -185,9 +186,8 @@ class ExpertBuilder:
 
         for vsource, src_db_id in zip(passed, source_db_ids):
             try:
-                chunk_ids = await ingest_source(vsource, expert.id, src_db_id, self._pool)
+                chunk_ids, raw_chunks = await ingest_source(vsource, expert.id, src_db_id, self._pool)
                 all_chunk_ids.extend(chunk_ids)
-                raw_chunks = chunk_text(vsource.text, vsource.title)
                 all_chunks_for_graph.extend(zip(raw_chunks, chunk_ids))
                 await _emit_event(on_event, {
                     "type": "source_ingested",
@@ -203,7 +203,6 @@ class ExpertBuilder:
             raise BuildError("No chunks were embedded — ingestion failed for all sources.")
 
         # Stage 4: Graph extraction
-        import math
         total_batches = math.ceil(len(all_chunks_for_graph) / settings.GRAPH_BATCH_SIZE)
         await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "graph", "total_batches": total_batches})
 
@@ -268,14 +267,10 @@ class ExpertBuilder:
         fetcher_queries = plan.get("fetcher_queries", {})
         active = set(self._fetchers.keys())
 
-        # Expand into subtopic queries for broader coverage
-        queries = await _expand_topic(topic)
-
         await _emit_event(on_event, {
             "type": "discovery_started",
             "fetchers": all_fetcher_names,
             "active": list(active),
-            "queries": queries,
         })
 
         # thought_leaders already does its own internal expansion; run it once
@@ -447,8 +442,9 @@ async def _snowball_citations(
         for cand in candidates[:max_extra]:
             aid = cand["arxiv_id"]
             try:
-                lib_client = arxiv_lib.Client()
-                papers = list(lib_client.results(arxiv_lib.Search(id_list=[aid])))
+                papers = await asyncio.to_thread(
+                    lambda a=aid: list(arxiv_lib.Client().results(arxiv_lib.Search(id_list=[a])))
+                )
                 if not papers:
                     continue
                 paper = papers[0]
@@ -625,52 +621,6 @@ def _avg_quality(passed: list[ValidatedSource]) -> float | None:
         return None
     scores = [vs.quality_score for vs in passed if vs.quality_score is not None]
     return round(sum(scores) / len(scores), 2) if scores else None
-
-
-async def _expand_topic(topic: str) -> list[str]:
-    """Return the topic plus up to 2 focused subtopic queries for broader discovery."""
-    _TOOL = {
-        "name": "expand_topic",
-        "description": "Generate focused search queries to discover comprehensive content about a topic.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "queries": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "2 distinct search queries targeting different aspects of the topic.",
-                    "maxItems": 2,
-                },
-            },
-            "required": ["queries"],
-        },
-    }
-    try:
-        client = get_anthropic_client()
-        resp = await client.messages.create(
-            model=settings.FAST_MODEL,
-            max_tokens=200,
-            system=(
-                "Generate focused search queries for discovering educational content. "
-                "Each query should target a distinct angle: history/origins, practical application, "
-                "key figures, or underlying theory. Keep queries short and search-engine-friendly."
-            ),
-            tools=[_TOOL],
-            tool_choice={"type": "tool", "name": "expand_topic"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Topic: {topic}\n\n"
-                    "Generate 2 additional search queries to find content about different aspects of this topic."
-                ),
-            }],
-        )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        extras = [q for q in block.input.get("queries", []) if q and q != topic]
-        return [topic] + extras[:2]
-    except Exception as exc:
-        logger.warning("Topic expansion failed: %s", exc)
-        return [topic]
 
 
 def _deduplicate_sources(sources: list[RawSource]) -> list[RawSource]:

@@ -2,6 +2,7 @@
 
 import asyncio
 import math
+import traceback
 from collections import OrderedDict
 from typing import Annotated
 
@@ -260,7 +261,7 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
     except Exception as exc:
         await svc.mark_failed(expert.id, str(exc))
         console.print(f"\n[bold red]Unexpected error:[/bold red] {exc}")
-        import traceback; traceback.print_exc()
+        traceback.print_exc()
         raise typer.Exit(1)
 
     await svc.mark_ready(expert.id)

@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 import asyncpg
 
@@ -148,10 +149,9 @@ class SearchService:
 
 
 def _row_to_result(row) -> SearchResult:
-    import json as _json
     meta = row["chunk_meta"] or {}
     if isinstance(meta, str):
-        meta = _json.loads(meta)
+        meta = json.loads(meta)
     return SearchResult(
         chunk_id=row["id"],
         expert_id=row["expert_id"],

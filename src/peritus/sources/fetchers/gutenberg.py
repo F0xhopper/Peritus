@@ -179,11 +179,9 @@ async def _download_text(client: httpx.AsyncClient, book: dict) -> str:
 
 def _strip_gutenberg_boilerplate(text: str) -> str:
     start = _START_RE.search(text)
-    end = _END_RE.search(text)
     if start:
         text = text[start.end():]
+    end = _END_RE.search(text)
     if end:
-        match = _END_RE.search(text)
-        if match:
-            text = text[: match.start()]
+        text = text[: end.start()]
     return text.strip()

@@ -2,6 +2,8 @@
 
 import asyncio
 import json
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -71,12 +73,15 @@ _SYSTEM = (
 )
 
 
+BatchCallback = Callable[[list[str], int], Coroutine[Any, Any, None]]
+
+
 async def extract_graph_from_chunks(
     topic: str,
     chunks: list[TextChunk],
     chunk_db_ids: list[int],
     batch_size: int | None = None,
-    on_batch: "asyncio.coroutines | None" = None,
+    on_batch: BatchCallback | None = None,
 ) -> list[dict]:
     """Extract graph data from chunks in batches. Returns raw extraction dicts."""
     size = batch_size or settings.GRAPH_BATCH_SIZE
@@ -109,7 +114,7 @@ async def _extract_batch(
     chunks: list[TextChunk],
     chunk_db_ids: list[int],
     sem: asyncio.Semaphore,
-    on_batch=None,
+    on_batch: BatchCallback | None = None,
 ) -> dict:
     chunk_block = "\n\n".join(
         f"[{i}] {c.text[:600]}" for i, c in enumerate(chunks)

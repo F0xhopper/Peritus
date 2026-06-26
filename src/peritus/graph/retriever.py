@@ -80,21 +80,16 @@ class GraphRetriever:
                 n for n in anchor_nodes
                 if result.chunk_id in (n.get("chunk_ids") or [])
             ]
-            node_ids = {n["id"] for n in matching_nodes}
+            matching_labels = {n["label"] for n in matching_nodes}
             local_edges = [
                 e for e in edge_list
-                if any(
-                    n["id"] == e_raw["from_node_id"] or n["id"] == e_raw["to_node_id"]
-                    for n in matching_nodes
-                    for e_raw in edges
-                    if e_raw["from_node_id"] in node_ids or e_raw["to_node_id"] in node_ids
-                )
+                if e["from_label"] in matching_labels or e["to_label"] in matching_labels
             ][:5]
 
             enriched.append(EnrichedResult(
                 result=result,
                 related_concepts=list(neighbour_nodes)[:8],
-                relationships=local_edges[:5],
+                relationships=local_edges,
                 has_contradiction=has_contradiction,
             ))
 

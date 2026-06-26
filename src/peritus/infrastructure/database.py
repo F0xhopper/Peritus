@@ -7,6 +7,8 @@ _pool: asyncpg.Pool | None = None
 
 async def init_pool() -> None:
     global _pool
+    if _pool is not None:
+        return
     ssl = "require" if settings.DATABASE_SSL else None
     _pool = await asyncpg.create_pool(
         settings.DATABASE_URL,

@@ -1,3 +1,6 @@
+import asyncio
+from urllib.parse import parse_qs, urlparse
+
 from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
 
 from peritus.core.config import settings
@@ -17,7 +20,7 @@ class YoutubeFetcher:
         sources = []
         for vid_id, title in video_ids:
             try:
-                transcript = _fetch_transcript(vid_id)
+                transcript = await asyncio.to_thread(_fetch_transcript, vid_id)
                 if not transcript:
                     continue
                 sources.append(RawSource(
@@ -46,13 +49,27 @@ async def _discover_video_ids(topic: str, limit: int) -> list[tuple[str, str]]:
         pairs = []
         for r in results.results:
             url = r.url or ""
-            if "youtube.com/watch?v=" in url:
-                vid_id = url.split("v=")[1].split("&")[0]
+            vid_id = _extract_video_id(url)
+            if vid_id:
                 pairs.append((vid_id, r.title or url))
         return pairs
     except Exception as exc:
         logger.warning("YouTube discovery via Exa failed: %s", exc)
         return []
+
+
+def _extract_video_id(url: str) -> str | None:
+    """Extract YouTube video ID from any supported URL format."""
+    try:
+        parsed = urlparse(url)
+        if parsed.hostname in ("www.youtube.com", "youtube.com", "m.youtube.com"):
+            vid_id = parse_qs(parsed.query).get("v", [None])[0]
+            return vid_id
+        if parsed.hostname in ("youtu.be",):
+            return parsed.path.lstrip("/") or None
+    except Exception:
+        pass
+    return None
 
 
 def _fetch_transcript(video_id: str) -> str:

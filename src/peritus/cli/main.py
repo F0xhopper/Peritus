@@ -9,6 +9,8 @@ from peritus.cli.chat import chat_command, _chat_async
 from peritus.cli.credentials import credentials_command
 from peritus.cli.experts import app as experts_app, _experts_with_concepts
 from peritus.cli.display import console, suite_view
+from peritus.core.config import settings
+from peritus.core.logging import setup_logging
 
 app = typer.Typer(
     name="peritus",
@@ -82,8 +84,6 @@ def rebuild(
 ) -> None:
     """Delete an existing expert and rebuild it from scratch."""
     from peritus.cli.build import build_command as _build
-    # Resolve the name to get the topic, then rebuild
-    import asyncio
     from peritus.experts.service import ExpertService
     from peritus.infrastructure.database import get_pool, init_pool
 
@@ -142,4 +142,5 @@ def config(
 
 
 def main() -> None:
+    setup_logging(settings.LOG_LEVEL)
     app()

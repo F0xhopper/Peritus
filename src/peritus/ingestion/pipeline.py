@@ -1,6 +1,5 @@
 """Ingestion pipeline — chunk → contextualise → embed → store for a single ValidatedSource."""
 
-import asyncio
 import json
 
 import asyncpg
@@ -8,7 +7,7 @@ import asyncpg
 from peritus.core.exceptions import IngestionError
 from peritus.core.logging import get_logger
 from peritus.infrastructure.embeddings import embed_batch
-from peritus.ingestion.chunker import chunk_text
+from peritus.ingestion.chunker import TextChunk, chunk_text
 from peritus.ingestion.contextualizer import contextualize_chunks
 from peritus.sources.domain import ValidatedSource
 
@@ -23,13 +22,17 @@ async def ingest_source(
     expert_id: int,
     source_db_id: int,
     pool: asyncpg.Pool,
-) -> list[int]:
-    """Chunk, contextualise, embed and store a validated source. Returns inserted chunk IDs."""
+) -> tuple[list[int], list[TextChunk]]:
+    """Chunk, contextualise, embed and store a validated source.
+
+    Returns (inserted_chunk_ids, text_chunks) so callers can pair IDs with chunks
+    without re-running chunking.
+    """
     try:
         chunks = chunk_text(source.text, source.title)
         if not chunks:
             logger.warning("No chunks produced for source %r", source.title)
-            return []
+            return [], []
 
         contexts = await contextualize_chunks(chunks, source.title, source.text)
         for chunk, ctx in zip(chunks, contexts):
@@ -48,7 +51,7 @@ async def ingest_source(
             "Ingested %d chunks for source %r (expert %d)",
             len(chunk_ids), source.title, expert_id,
         )
-        return chunk_ids
+        return chunk_ids, chunks
 
     except Exception as exc:
         logger.exception("Ingestion failed for source %r", source.title)
@@ -61,8 +64,6 @@ async def _embed_in_batches(texts: list[str]) -> list[list[float]]:
         batch = texts[i: i + _EMBED_BATCH_SIZE]
         batch_embs = await embed_batch(batch)
         all_embeddings.extend(batch_embs)
-        if i + _EMBED_BATCH_SIZE < len(texts):
-            await asyncio.sleep(1)
     return all_embeddings
 
 
