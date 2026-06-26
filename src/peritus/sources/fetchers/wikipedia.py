@@ -22,7 +22,7 @@ class WikipediaFetcher:
             for title in titles:
                 try:
                     text = await _fetch_article(client, title)
-                    if len(text) < 200:
+                    if len(text) < 500:
                         continue
                     sources.append(RawSource(
                         source_type=SourceType.WIKIPEDIA,

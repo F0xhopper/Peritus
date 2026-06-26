@@ -47,11 +47,27 @@ async def _fetch_post(client: httpx.AsyncClient, url: str) -> RawSource | None:
         title_el = soup.select_one("a.title")
         title = title_el.get_text(strip=True) if title_el else old_url
 
+        # OP body (absent for pure link posts)
         usertext = soup.select_one(".usertext-body .md")
-        if not usertext:
-            return None
-        text = usertext.get_text(separator="\n", strip=True)
-        if len(text) < 200:
+        op_text = usertext.get_text(separator="\n", strip=True) if usertext else ""
+
+        # Top-level comments — the real content in most threads
+        comment_blocks = soup.select(
+            ".commentarea .sitetable .thing.comment > .entry .usertext .md"
+        )
+        comment_parts = [
+            b.get_text(separator="\n", strip=True)
+            for b in comment_blocks[:10]
+            if len(b.get_text(strip=True)) > 100
+        ]
+
+        full_text = title
+        if op_text:
+            full_text += f"\n\n{op_text}"
+        if comment_parts:
+            full_text += "\n\n" + "\n\n---\n\n".join(comment_parts)
+
+        if len(full_text) < 500:
             return None
 
         return RawSource(
@@ -59,7 +75,7 @@ async def _fetch_post(client: httpx.AsyncClient, url: str) -> RawSource | None:
             url=url,
             title=title,
             author=None,
-            text=f"{title}\n\n{text}"[:_MAX_CHARS],
+            text=full_text[:_MAX_CHARS],
             metadata={"subreddit": _extract_subreddit(url)},
         )
     except Exception as exc:

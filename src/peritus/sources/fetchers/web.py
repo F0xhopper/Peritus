@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 from bs4 import BeautifulSoup
 
@@ -15,21 +17,25 @@ class WebFetcher:
         urls = await _ddg_search(topic, max_results)
         sources = []
         async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HEADERS) as client:
-            for url in urls:
-                try:
-                    text, title = await _fetch_page(client, url)
-                    if len(text) < 200:
-                        continue
-                    sources.append(RawSource(
-                        source_type=SourceType.WEB,
-                        url=url,
-                        title=title,
-                        author=None,
-                        text=text,
-                        metadata={},
-                    ))
-                except Exception as exc:
-                    logger.warning("Web fetch failed for %r: %s", url, exc)
+            results = await asyncio.gather(
+                *[_fetch_page(client, url) for url in urls],
+                return_exceptions=True,
+            )
+        for url, result in zip(urls, results):
+            if isinstance(result, Exception):
+                logger.warning("Web fetch failed for %r: %s", url, result)
+                continue
+            text, title = result
+            if len(text) < 500:
+                continue
+            sources.append(RawSource(
+                source_type=SourceType.WEB,
+                url=url,
+                title=title,
+                author=None,
+                text=text,
+                metadata={},
+            ))
         return sources
 
 
