@@ -61,10 +61,16 @@ def config(
 
     if action == "show":
         console.print("[bold]Current configuration:[/bold]")
-        console.print(f"  DATABASE_URL       {'[green]set[/green]' if settings.DATABASE_URL else '[red]missing[/red]'}")
-        console.print(f"  OPENAI_API_KEY     {'[green]set[/green]' if settings.OPENAI_API_KEY else '[red]missing[/red]'}")
-        console.print(f"  ANTHROPIC_API_KEY  {'[green]set[/green]' if settings.ANTHROPIC_API_KEY else '[red]missing[/red]'}")
-        console.print(f"  EXA_API_KEY        {'[green]set[/green]' if settings.EXA_API_KEY else '[yellow]optional[/yellow]'}")
+        def _key(val: str, required: bool = True) -> str:
+            if val:
+                return "[green]set[/green]"
+            return "[red]missing[/red]" if required else "[yellow]optional — enables more sources[/yellow]"
+
+        console.print(f"  DATABASE_URL       {_key(settings.DATABASE_URL)}")
+        console.print(f"  OPENAI_API_KEY     {_key(settings.OPENAI_API_KEY)}")
+        console.print(f"  ANTHROPIC_API_KEY  {_key(settings.ANTHROPIC_API_KEY)}")
+        console.print(f"  MISTRAL_API_KEY    {_key(settings.MISTRAL_API_KEY, required=False)}  [dim](PDF/OCR fetcher)[/dim]")
+        console.print(f"  EXA_API_KEY        {_key(settings.EXA_API_KEY, required=False)}  [dim](YouTube + Exa fetchers)[/dim]")
         console.print(f"  EMBED_MODEL        {settings.EMBED_MODEL}")
         console.print(f"  CLAUDE_MODEL       {settings.CLAUDE_MODEL}")
         console.print(f"  FAST_MODEL         {settings.FAST_MODEL}")

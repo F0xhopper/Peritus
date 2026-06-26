@@ -8,6 +8,8 @@ class SourceType(str, Enum):
     YOUTUBE = "youtube"
     EXA = "exa"
     WEB = "web"
+    GUTENBERG = "gutenberg"
+    PDF = "pdf"
 
 
 @dataclass

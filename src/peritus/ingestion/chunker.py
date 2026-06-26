@@ -81,11 +81,20 @@ def _detect_sections(text: str) -> list[tuple[str, str]]:
 
 def _split_paragraphs(text: str, max_chars: int, overlap: int) -> list[str]:
     raw_paras = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
+
+    # Flatten any paragraph that exceeds max_chars (e.g. transcript with no blank lines)
+    paras: list[str] = []
+    for para in raw_paras:
+        if len(para) > max_chars:
+            paras.extend(_hard_split(para, max_chars))
+        else:
+            paras.append(para)
+
     chunks: list[str] = []
     current: list[str] = []
     current_len = 0
 
-    for para in raw_paras:
+    for para in paras:
         if current_len + len(para) + 1 > max_chars and current:
             chunks.append("\n\n".join(current))
             tail: list[str] = []
@@ -106,3 +115,28 @@ def _split_paragraphs(text: str, max_chars: int, overlap: int) -> list[str]:
         chunks.append("\n\n".join(current))
 
     return [c for c in chunks if c.strip()]
+
+
+def _hard_split(text: str, max_chars: int) -> list[str]:
+    """Split an oversized block at sentence boundaries, falling back to character slicing."""
+    sentences = re.split(r"(?<=[.!?])\s+", text)
+    chunks: list[str] = []
+    current = ""
+
+    for sentence in sentences:
+        if len(sentence) > max_chars:
+            if current:
+                chunks.append(current.strip())
+                current = ""
+            for i in range(0, len(sentence), max_chars):
+                chunks.append(sentence[i : i + max_chars])
+        elif current and len(current) + 1 + len(sentence) > max_chars:
+            chunks.append(current.strip())
+            current = sentence
+        else:
+            current = (current + " " + sentence).strip() if current else sentence
+
+    if current:
+        chunks.append(current.strip())
+
+    return chunks

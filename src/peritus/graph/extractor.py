@@ -76,6 +76,7 @@ async def extract_graph_from_chunks(
     chunks: list[TextChunk],
     chunk_db_ids: list[int],
     batch_size: int | None = None,
+    on_batch: "asyncio.coroutines | None" = None,
 ) -> list[dict]:
     """Extract graph data from chunks in batches. Returns raw extraction dicts."""
     size = batch_size or settings.GRAPH_BATCH_SIZE
@@ -88,7 +89,7 @@ async def extract_graph_from_chunks(
     ]
 
     results = await asyncio.gather(
-        *[_extract_batch(client, topic, batch_chunks, batch_ids, sem)
+        *[_extract_batch(client, topic, batch_chunks, batch_ids, sem, on_batch)
           for batch_chunks, batch_ids in batches],
         return_exceptions=True,
     )
@@ -108,13 +109,14 @@ async def _extract_batch(
     chunks: list[TextChunk],
     chunk_db_ids: list[int],
     sem: asyncio.Semaphore,
+    on_batch=None,
 ) -> dict:
     chunk_block = "\n\n".join(
         f"[{i}] {c.text[:600]}" for i, c in enumerate(chunks)
     )
     async with sem:
         resp = await client.messages.create(
-            model=settings.CLAUDE_MODEL,
+            model=settings.GRAPH_MODEL,
             max_tokens=2048,
             system=_SYSTEM,
             tools=[_TOOL],
@@ -129,11 +131,13 @@ async def _extract_batch(
         )
     block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
     data = dict(block.input)
-    # Map chunk indices → DB IDs
     for node in data.get("nodes", []):
         node["chunk_db_ids"] = [
             chunk_db_ids[idx]
             for idx in node.get("chunk_indices", [])
             if idx < len(chunk_db_ids)
         ]
+    if on_batch:
+        labels = [n["label"] for n in data.get("nodes", []) if n.get("label")]
+        await on_batch(labels, len(data.get("edges", [])))
     return data

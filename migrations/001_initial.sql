@@ -57,7 +57,12 @@ CREATE INDEX IF NOT EXISTS idx_chunks_user_id   ON chunks (user_id);
 CREATE INDEX IF NOT EXISTS idx_chunks_sequence  ON chunks (book_id, sequence);
 CREATE INDEX IF NOT EXISTS idx_chunks_fts       ON chunks USING gin (fts);
 
--- HNSW index for vector search (faster than ivfflat for < 1M vectors)
-CREATE INDEX IF NOT EXISTS idx_chunks_embedding
-    ON chunks USING hnsw (embedding vector_cosine_ops)
-    WITH (m = 16, ef_construction = 64);
+DO $$ BEGIN
+    BEGIN
+        CREATE INDEX idx_chunks_embedding
+            ON chunks USING hnsw (embedding vector_cosine_ops)
+            WITH (m = 16, ef_construction = 64);
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'HNSW index skipped (dimension limit): %', SQLERRM;
+    END;
+END $$;

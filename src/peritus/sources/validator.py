@@ -54,25 +54,37 @@ _TOOL = {
 async def validate_sources(
     topic: str,
     sources: list[RawSource],
-    on_progress: "asyncio.Queue | None" = None,
+    on_result=None,
 ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
     sem = asyncio.Semaphore(settings.VALIDATE_CONCURRENCY)
-    tasks = [_validate_one(topic, s, sem) for s in sources]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _one(source: RawSource):
+        try:
+            result = await _validate_one(topic, source, sem)
+        except Exception as exc:
+            logger.warning("Validation error for %r: %s", source.title, exc)
+            result = {
+                "quality_score": 0.0, "relevance_score": 0.0,
+                "content_type": "other", "difficulty": 1,
+                "key_claims": [], "drop_reason": "validation error", "drop": True,
+            }
+        if on_result:
+            await on_result({
+                "title": source.title,
+                "source_type": source.source_type.value,
+                "q": result["quality_score"],
+                "r": result["relevance_score"],
+                "passed": not result["drop"],
+                "drop_reason": result.get("drop_reason"),
+            })
+        return source, result
+
+    pairs = await asyncio.gather(*[_one(s) for s in sources])
 
     passed: list[ValidatedSource] = []
     dropped: list[DroppedSource] = []
-
-    for source, result in zip(sources, results):
-        if isinstance(result, Exception):
-            logger.warning("Validation error for %r: %s", source.title, result)
-            dropped.append(DroppedSource(
-                raw=source,
-                quality_score=0.0,
-                relevance_score=0.0,
-                drop_reason="validation error",
-            ))
-        elif result["drop"]:
+    for source, result in pairs:
+        if result["drop"]:
             dropped.append(DroppedSource(
                 raw=source,
                 quality_score=result["quality_score"],
@@ -88,9 +100,6 @@ async def validate_sources(
                 difficulty=result["difficulty"],
                 key_claims=result["key_claims"],
             ))
-        if on_progress:
-            await on_progress.put(1)
-
     return passed, dropped
 
 

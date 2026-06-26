@@ -16,7 +16,7 @@ async def main() -> None:
         raise SystemExit("DATABASE_URL not set")
 
     ssl = "require" if os.getenv("DATABASE_SSL", "false").lower() == "true" else None
-    conn = await asyncpg.connect(url, ssl=ssl)
+    conn = await asyncpg.connect(url, ssl=ssl, statement_cache_size=0)
 
     await conn.execute("""
         CREATE TABLE IF NOT EXISTS _migrations (

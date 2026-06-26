@@ -15,6 +15,7 @@ from peritus.sources.domain import ValidatedSource
 logger = get_logger(__name__)
 
 _EMBED_BATCH_SIZE = 20
+_MAX_EMBED_CHARS = 30_000  # ~8 000 tokens for text-embedding-3-large
 
 
 async def ingest_source(
@@ -35,7 +36,7 @@ async def ingest_source(
             chunk.chunk_meta["context"] = ctx
 
         embed_inputs = [
-            f"{ctx}\n\n{chunk.text}" if ctx else chunk.text
+            (f"{ctx}\n\n{chunk.text}" if ctx else chunk.text)[:_MAX_EMBED_CHARS]
             for chunk, ctx in zip(chunks, contexts)
         ]
         embeddings = await _embed_in_batches(embed_inputs)

@@ -23,12 +23,19 @@ class Settings:
     # Fast model for contextualisation, reranking, planning, coverage
     FAST_MODEL: str = os.getenv("FAST_MODEL", "claude-haiku-4-5-20251001")
 
+    # Graph extraction model — Haiku is sufficient and much cheaper than Sonnet
+    GRAPH_MODEL: str = os.getenv("GRAPH_MODEL", "claude-haiku-4-5-20251001")
+
     # Source fetchers
     EXA_API_KEY: str = os.getenv("EXA_API_KEY", "")
 
+    # Mistral OCR (PDF parsing)
+    MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
+    MISTRAL_OCR_MODEL: str = os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest")
+
     # Contextual retrieval
     CONTEXT_ENABLED: bool = os.getenv("CONTEXT_ENABLED", "true").lower() == "true"
-    CONTEXT_MAX_CHARS: int = int(os.getenv("CONTEXT_MAX_CHARS", "8000"))
+    CONTEXT_MAX_CHARS: int = int(os.getenv("CONTEXT_MAX_CHARS", "2000"))
     CONTEXT_CONCURRENCY: int = int(os.getenv("CONTEXT_CONCURRENCY", "4"))
 
     # Reranking
@@ -39,7 +46,7 @@ class Settings:
     VALIDATE_CONCURRENCY: int = int(os.getenv("VALIDATE_CONCURRENCY", "5"))
 
     # Graph extraction batch size (chunks per Claude call)
-    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "10"))
+    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "20"))
 
     # Chunking
     CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))
