@@ -25,7 +25,7 @@ class EnrichedResult:
 
     def context_block(self) -> str:
         """Formatted context for the chat agent prompt."""
-        lines = [self.text]
+        lines = [self.text[:800]]
         if self.related_concepts:
             lines.append("\nRelated concepts:")
             for c in self.related_concepts:
