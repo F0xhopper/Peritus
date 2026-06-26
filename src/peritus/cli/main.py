@@ -5,15 +5,62 @@ import asyncio
 import typer
 
 from peritus.cli.build import build_command
-from peritus.cli.chat import chat_command
+from peritus.cli.chat import chat_command, _chat_async
 from peritus.cli.credentials import credentials_command
 from peritus.cli.experts import app as experts_app, _experts_with_concepts
+from peritus.cli.display import console, suite_view
 
 app = typer.Typer(
     name="peritus",
     help="Build grounded AI subject-matter experts from multi-source corpora.",
-    no_args_is_help=True,
+    invoke_without_command=True,
 )
+
+
+@app.callback()
+def default(ctx: typer.Context) -> None:
+    """When invoked with no subcommand, show expert cards and launch a chat."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    import questionary
+
+    async def _pick_and_chat() -> None:
+        from peritus.infrastructure.database import init_pool
+        await init_pool()
+
+        pairs = await _experts_with_concepts()
+        ready = [(e, c) for e, c in pairs if e.status.value == "ready"]
+
+        if not pairs:
+            console.print("\n[dim]No experts yet. Run [bold]peritus build <topic>[/bold] to create one.[/dim]\n")
+            raise typer.Exit()
+
+        if not ready:
+            console.print("[dim]No experts are ready to chat yet.[/dim]\n")
+            raise typer.Exit()
+
+        choices = [
+            questionary.Choice(title=f"{e.persona_name or e.name.title()}  ({e.topic})", value=e.name)
+            for e, _ in ready
+        ]
+        name = await questionary.select(
+            "Select an expert",
+            choices=choices,
+            style=questionary.Style([
+                ("selected", "bold cyan"),
+                ("pointer", "bold cyan"),
+                ("question", "bold"),
+            ]),
+        ).ask_async()
+
+        if name is None:
+            raise typer.Exit()
+
+        console.print()
+        await _chat_async(name)
+
+    asyncio.run(_pick_and_chat())
 
 app.command("build")(build_command)
 app.command("chat")(chat_command)

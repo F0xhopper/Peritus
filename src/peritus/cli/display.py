@@ -30,85 +30,91 @@ def expert_status_badge(status: str) -> Text:
     return Text(f"{icon} {status}", style=f"bold {colour}")
 
 
-def _expert_card(expert, top_concepts: list[dict]) -> Panel:
+def _expert_card(expert, top_concepts: list[dict], width: int = 40) -> Panel:
     """Single expert card for the suite view."""
     status_colours = {"ready": "bright_blue", "building": "yellow", "failed": "red"}
     border = status_colours.get(expert.status.value, "dim")
 
+    status_icon = {
+        "ready": "[bold green]●[/bold green]",
+        "building": "[bold yellow]◌[/bold yellow]",
+        "failed": "[bold red]✗[/bold red]",
+    }
     persona = expert.persona_name or expert.name.title()
-    lines: list[str] = []
+    inner = width - 6  # account for panel border + padding
 
+    lines: list[str] = []
     lines.append(f"[bold white]{persona}[/bold white]")
     lines.append(f"[dim]{expert.topic.title()}[/dim]")
     lines.append("")
-
-    # Status
-    status_icon = {"ready": "[bold green]●[/bold green]", "building": "[bold yellow]◌[/bold yellow]", "failed": "[bold red]✗[/bold red]"}
     lines.append(status_icon.get(expert.status.value, "·") + f"  [dim]{expert.status.value}[/dim]")
-    lines.append("")
 
     if expert.persona_bio:
-        bio = expert.persona_bio[:160].rstrip()
-        if len(expert.persona_bio) > 160:
+        bio = expert.persona_bio[: inner * 3].rstrip()
+        if len(expert.persona_bio) > inner * 3:
             bio += "…"
-        lines.append(f"[dim]{bio}[/dim]")
         lines.append("")
+        lines.append(f"[dim]{bio}[/dim]")
 
-    # Stats grid
     avg_q = f"{expert.avg_quality:.1f}" if expert.avg_quality is not None else "—"
     built = expert.created_at.strftime("%Y-%m-%d") if expert.created_at else "—"
-    lines.append(f"  [cyan]{expert.source_count}[/cyan] sources    [cyan]{expert.chunk_count}[/cyan] chunks")
-    lines.append(f"  [cyan]{expert.node_count}[/cyan] concepts   [cyan]{expert.edge_count}[/cyan] edges")
-    lines.append(f"  Avg quality [yellow]{avg_q}[/yellow] / 10")
-    lines.append(f"  Built [dim]{built}[/dim]")
+    lines.append("")
+    lines.append(f"[cyan]{expert.source_count}[/cyan] sources  [cyan]{expert.chunk_count}[/cyan] chunks")
+    lines.append(f"[cyan]{expert.node_count}[/cyan] concepts  [cyan]{expert.edge_count}[/cyan] edges")
+    lines.append(f"Quality [yellow]{avg_q}[/yellow]/10  Built [dim]{built}[/dim]")
 
     if top_concepts:
-        lines.append("")
         labels = "  ".join(c["label"] for c in top_concepts[:5])
+        if len(labels) > inner:
+            labels = labels[:inner - 1] + "…"
+        lines.append("")
         lines.append(f"[dim]{labels}[/dim]")
 
     if expert.status.value == "ready":
         lines.append("")
-        lines.append(f"  [dim]peritus chat \"{expert.name}\"[/dim]")
+        lines.append(f'[dim]peritus chat "{expert.name}"[/dim]')
     elif expert.error:
         lines.append("")
-        lines.append(f"  [red dim]{expert.error[:60]}[/red dim]")
+        lines.append(f"[red dim]{expert.error[:inner]}[/red dim]")
 
     return Panel(
         "\n".join(lines),
         border_style=border,
         padding=(1, 2),
-        width=42,
+        width=width,
     )
 
 
 def suite_view(experts_with_concepts: list[tuple]) -> None:
-    """Render all experts as a gallery of cards, 3 per row."""
+    """Render all experts as a responsive gallery of cards."""
     if not experts_with_concepts:
         console.print(
             "\n[dim]No experts yet. Run [bold]peritus build <topic>[/bold] to create one.[/dim]\n"
         )
         return
 
+    terminal_width = console.width
+    # card width: aim for ~42 cols but shrink to fit; minimum 30
+    card_min, card_ideal = 30, 42
+    gap = 2  # Columns adds a small gap between cards
+    cols_per_row = max(1, (terminal_width + gap) // (card_ideal + gap))
+    card_width = max(card_min, (terminal_width - gap * (cols_per_row - 1)) // cols_per_row)
+
     console.print()
     console.rule("[bold]Your Expert Suite[/bold]", style="bright_blue")
     console.print()
 
-    cards = [_expert_card(expert, concepts) for expert, concepts in experts_with_concepts]
+    cards = [_expert_card(e, c, width=card_width) for e, c in experts_with_concepts]
 
-    # Render in rows of 3
-    chunk_size = 3
-    for i in range(0, len(cards), chunk_size):
-        row = cards[i: i + chunk_size]
-        console.print(Columns(row, equal=True, expand=False))
+    for i in range(0, len(cards), cols_per_row):
+        console.print(Columns(cards[i : i + cols_per_row], equal=True, expand=False))
+        if i + cols_per_row < len(cards):
+            console.print()
 
     console.print()
     ready = sum(1 for e, _ in experts_with_concepts if e.status.value == "ready")
     total = len(experts_with_concepts)
-    console.print(
-        f"  [dim]{ready}/{total} ready  ·  "
-        f"peritus build <topic> to add more[/dim]\n"
-    )
+    console.print(f"  [dim]{ready}/{total} ready  ·  peritus build <topic> to add more[/dim]\n")
 
 
 def experts_table(experts: list) -> Table:
