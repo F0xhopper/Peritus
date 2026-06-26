@@ -23,7 +23,7 @@ class ExaFetcher:
             sources = []
             for r in results.results:
                 text = getattr(r, "text", None) or ""
-                if len(text) < 100:
+                if len(text) < 500:
                     continue
                 sources.append(RawSource(
                     source_type=SourceType.EXA,

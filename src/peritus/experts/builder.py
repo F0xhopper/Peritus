@@ -191,14 +191,33 @@ class ExpertBuilder:
             "youtube", "exa", "web", "reddit", "thought_leaders",
         ]
         active = set(self._fetchers.keys())
+
+        # Expand into subtopic queries for broader coverage
+        queries = await _expand_topic(topic)
+
         await _emit_event(on_event, {
             "type": "discovery_started",
             "fetchers": all_fetcher_names,
             "active": list(active),
+            "queries": queries,
         })
 
+        # thought_leaders already does its own internal expansion; run it once
+        _SINGLE_QUERY_FETCHERS = {"thought_leaders"}
+
         async def _fetch_one(name: str, fetcher, max_results: int) -> list[RawSource]:
-            results = await _safe_fetch(name, fetcher, topic, max_results)
+            fetch_queries = [topic] if name in _SINGLE_QUERY_FETCHERS else queries
+            per_q = max(2, max_results // len(fetch_queries))
+
+            seen_urls: set[str] = set()
+            results: list[RawSource] = []
+            for query in fetch_queries:
+                for src in await _safe_fetch(name, fetcher, query, per_q):
+                    key = src.url.rstrip("/").lower()
+                    if key not in seen_urls:
+                        seen_urls.add(key)
+                        results.append(src)
+
             skipped, reason = _is_skipped(name, results)
             await _emit_event(on_event, {
                 "type": "fetcher_done",
@@ -213,7 +232,8 @@ class ExpertBuilder:
             _fetch_one(name, fetcher, max_results)
             for name, (fetcher, max_results) in self._fetchers.items()
         ])
-        return [src for sources in results_list for src in sources]
+        all_sources = [src for sources in results_list for src in sources]
+        return _deduplicate_sources(all_sources)
 
     async def _persist_sources(
         self,
@@ -348,6 +368,64 @@ def _avg_quality(passed: list[ValidatedSource]) -> float | None:
         return None
     scores = [vs.quality_score for vs in passed if vs.quality_score is not None]
     return round(sum(scores) / len(scores), 2) if scores else None
+
+
+async def _expand_topic(topic: str) -> list[str]:
+    """Return the topic plus up to 2 focused subtopic queries for broader discovery."""
+    _TOOL = {
+        "name": "expand_topic",
+        "description": "Generate focused search queries to discover comprehensive content about a topic.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2 distinct search queries targeting different aspects of the topic.",
+                    "maxItems": 2,
+                },
+            },
+            "required": ["queries"],
+        },
+    }
+    try:
+        client = get_anthropic_client()
+        resp = await client.messages.create(
+            model=settings.FAST_MODEL,
+            max_tokens=200,
+            system=(
+                "Generate focused search queries for discovering educational content. "
+                "Each query should target a distinct angle: history/origins, practical application, "
+                "key figures, or underlying theory. Keep queries short and search-engine-friendly."
+            ),
+            tools=[_TOOL],
+            tool_choice={"type": "tool", "name": "expand_topic"},
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Topic: {topic}\n\n"
+                    "Generate 2 additional search queries to find content about different aspects of this topic."
+                ),
+            }],
+        )
+        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
+        extras = [q for q in block.input.get("queries", []) if q and q != topic]
+        return [topic] + extras[:2]
+    except Exception as exc:
+        logger.warning("Topic expansion failed: %s", exc)
+        return [topic]
+
+
+def _deduplicate_sources(sources: list[RawSource]) -> list[RawSource]:
+    """Remove sources with duplicate URLs, keeping the first occurrence."""
+    seen: set[str] = set()
+    unique: list[RawSource] = []
+    for src in sources:
+        key = src.url.rstrip("/").lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(src)
+    return unique
 
 
 async def _emit_event(cb: EventCallback | None, event: dict) -> None:

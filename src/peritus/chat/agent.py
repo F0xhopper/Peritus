@@ -175,8 +175,5 @@ class ChatAgent:
 def _build_context(enriched: list[EnrichedResult]) -> str:
     parts = []
     for i, e in enumerate(enriched[:15], 1):
-        parts.append(f"[{i}] {e.citation}\n{e.text[:800]}")
-        if e.related_concepts:
-            concepts = ", ".join(c["label"] for c in e.related_concepts[:4])
-            parts.append(f"  Related: {concepts}")
+        parts.append(f"[{i}] {e.citation}\n{e.context_block()}")
     return "\n\n".join(parts)

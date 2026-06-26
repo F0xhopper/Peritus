@@ -102,7 +102,7 @@ async def _fetch_via_exa(query: str, name: str, leader: dict) -> list[RawSource]
         sources = []
         for r in results.results:
             text = getattr(r, "text", None) or ""
-            if len(text) < 200:
+            if len(text) < 500:
                 continue
             sources.append(RawSource(
                 source_type=SourceType.THOUGHT_LEADER,
@@ -132,7 +132,7 @@ async def _fetch_via_web(query: str, name: str, leader: dict) -> list[RawSource]
         for url in urls:
             try:
                 text, title = await _fetch_page(client, url)
-                if len(text) < 200:
+                if len(text) < 500:
                     continue
                 sources.append(RawSource(
                     source_type=SourceType.THOUGHT_LEADER,
