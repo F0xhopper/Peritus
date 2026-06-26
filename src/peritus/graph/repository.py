@@ -98,6 +98,55 @@ class GraphRepository:
             )
         return [dict(r) for r in rows]
 
+    async def get_all_nodes(self, expert_id: int) -> list[dict]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT id, label, chunk_ids FROM expert_nodes WHERE expert_id = $1",
+                expert_id,
+            )
+        return [dict(r) for r in rows]
+
+    async def merge_nodes(self, expert_id: int, keep_id: int, drop_id: int) -> None:
+        """Redirect all edges from drop_id to keep_id, merge chunk_ids, delete drop_id."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE expert_nodes
+                SET chunk_ids = ARRAY(
+                    SELECT DISTINCT x FROM unnest(
+                        chunk_ids || (SELECT chunk_ids FROM expert_nodes WHERE id = $2)
+                    ) x
+                )
+                WHERE id = $1
+                """,
+                keep_id, drop_id,
+            )
+            await conn.execute(
+                "UPDATE expert_edges SET from_node_id = $1 WHERE from_node_id = $2 AND expert_id = $3",
+                keep_id, drop_id, expert_id,
+            )
+            await conn.execute(
+                "UPDATE expert_edges SET to_node_id = $1 WHERE to_node_id = $2 AND expert_id = $3",
+                keep_id, drop_id, expert_id,
+            )
+            await conn.execute(
+                "DELETE FROM expert_edges WHERE from_node_id = to_node_id AND expert_id = $1",
+                expert_id,
+            )
+            await conn.execute(
+                """
+                DELETE FROM expert_edges e1
+                USING expert_edges e2
+                WHERE e1.expert_id = $1
+                  AND e1.from_node_id = e2.from_node_id
+                  AND e1.to_node_id = e2.to_node_id
+                  AND e1.edge_type = e2.edge_type
+                  AND e1.id > e2.id
+                """,
+                expert_id,
+            )
+            await conn.execute("DELETE FROM expert_nodes WHERE id = $1", drop_id)
+
     async def get_nodes_for_chunks(
         self, expert_id: int, chunk_ids: list[int]
     ) -> list[dict]:

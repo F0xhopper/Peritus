@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 _PASS_THRESHOLD_Q = 5.0
 _PASS_THRESHOLD_R = 5.0
-_PREVIEW_CHARS = 2000
+_PREVIEW_CHARS = 5000
 
 _TOOL = {
     "name": "validate_source",

@@ -1,10 +1,12 @@
 """Build pipeline coordinator — orchestrates all 5 stages with progress callbacks.
 
 Stages:
-  1. DISCOVER — run all fetchers concurrently
+  0. PLAN    — Claude generates per-fetcher search queries and key concepts
+  1. DISCOVER — run all fetchers concurrently using planned queries
   2. VALIDATE — Claude validates each raw source (concurrency-limited)
   3. CHUNK + EMBED — chunk, contextualise, embed, store each validated source
   4. GRAPH EXTRACT — Claude reads chunks in batches, extracts concept graph
+  4b. RESOLVE — merge semantically duplicate graph nodes via embedding similarity
   5. PERSONA — Claude generates expert persona from corpus digest
 """
 
@@ -15,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import asyncpg
+import httpx
 
 from peritus.core.config import settings
 from peritus.core.exceptions import BuildError
@@ -24,10 +27,17 @@ from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
 from peritus.graph.repository import GraphRepository
 from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.embeddings import embed_batch
 from peritus.ingestion.chunker import TextChunk, chunk_text
 from peritus.ingestion.pipeline import ingest_source
 from peritus.sources.domain import DroppedSource, RawSource, SourceType, ValidatedSource
-from peritus.sources.fetchers.arxiv import ArxivFetcher
+from peritus.sources.fetchers.arxiv import (
+    ArxivFetcher,
+    _HEADERS as _ARXIV_HEADERS,
+    _MAX_FULL_TEXT,
+    _MIN_FULL_TEXT,
+    _fetch_ar5iv,
+)
 from peritus.sources.fetchers.exa import ExaFetcher
 from peritus.sources.fetchers.gutenberg import GutenbergFetcher
 from peritus.sources.fetchers.pdf import PdfFetcher
@@ -41,6 +51,42 @@ from peritus.sources.validator import validate_sources
 logger = get_logger(__name__)
 
 EventCallback = Callable[[dict], Coroutine[Any, Any, None]]
+
+_PLAN_TOOL = {
+    "name": "create_research_plan",
+    "description": "Generate targeted search queries for each source fetcher.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "fetcher_queries": {
+                "type": "object",
+                "description": (
+                    "A specific search query for each fetcher, tuned to what that source "
+                    "type does best. If a fetcher is irrelevant for the topic, use the "
+                    "original topic string as the query."
+                ),
+                "properties": {
+                    "wikipedia":      {"type": "string"},
+                    "arxiv":          {"type": "string"},
+                    "youtube":        {"type": "string"},
+                    "exa":            {"type": "string"},
+                    "web":            {"type": "string"},
+                    "gutenberg":      {"type": "string"},
+                    "pdf":            {"type": "string"},
+                    "reddit":         {"type": "string"},
+                    "thought_leaders": {"type": "string"},
+                },
+            },
+            "key_concepts": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "5–8 core concepts this corpus must cover.",
+                "maxItems": 8,
+            },
+        },
+        "required": ["fetcher_queries", "key_concepts"],
+    },
+}
 
 
 @dataclass
@@ -74,7 +120,7 @@ class ExpertBuilder:
     def _build_fetchers(self, multiplier: int, source_filter: list[str] | None):
         all_fetchers = {
             "wikipedia":      (WikipediaFetcher(),      3 * multiplier),
-            "gutenberg":      (GutenbergFetcher(),      2 * multiplier),
+            "gutenberg":      (GutenbergFetcher(),      4 * multiplier),
             "arxiv":          (ArxivFetcher(),          2 * multiplier),
             "pdf":            (PdfFetcher(),            3 * multiplier),
             "youtube":        (YoutubeFetcher(),        3 * multiplier),
@@ -94,9 +140,26 @@ class ExpertBuilder:
     ) -> BuildResult:
         topic = expert.topic
 
+        # Stage 0: Research planning
+        await _emit_event(on_event, {"type": "stage", "stage": 0, "name": "plan"})
+        plan = await _plan_research(topic)
+        await _emit_event(on_event, {
+            "type": "plan_ready",
+            "key_concepts": plan.get("key_concepts", []),
+        })
+
         # Stage 1: Discover
         await _emit_event(on_event, {"type": "stage", "stage": 1, "name": "discover"})
-        raw_sources = await self._stage_discover(topic, on_event)
+        raw_sources = await self._stage_discover(topic, plan, on_event)
+
+        # Citation snowballing: follow high-citation references from ArXiv sources
+        extra = await _snowball_citations(raw_sources)
+        if extra:
+            await _emit_event(on_event, {"type": "snowball_done", "added": len(extra)})
+            raw_sources.extend(extra)
+
+        # Dedup by URL before paying validation costs
+        raw_sources = _dedup_by_url(raw_sources)
 
         if not raw_sources:
             raise BuildError("No sources discovered. Check API keys and network access.")
@@ -153,6 +216,13 @@ class ExpertBuilder:
         extractions = await extract_graph_from_chunks(topic, chunks_only, ids_only, on_batch=_on_graph_batch)
         node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(expert.id, extractions)
 
+        # Entity resolution: merge semantically duplicate graph nodes
+        await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "resolve"})
+        merged_count = await _resolve_entities(expert.id, self._graph_repo)
+        if merged_count:
+            await _emit_event(on_event, {"type": "entities_resolved", "merged": merged_count})
+            node_count = max(0, node_count - merged_count)
+
         await self._repo.update_counts(
             expert.id,
             source_count=len(passed),
@@ -185,11 +255,17 @@ class ExpertBuilder:
             persona_name=persona["name"],
         )
 
-    async def _stage_discover(self, topic: str, on_event: EventCallback | None) -> list[RawSource]:
+    async def _stage_discover(
+        self,
+        topic: str,
+        plan: dict,
+        on_event: EventCallback | None,
+    ) -> list[RawSource]:
         all_fetcher_names = [
             "wikipedia", "gutenberg", "arxiv", "pdf",
             "youtube", "exa", "web", "reddit", "thought_leaders",
         ]
+        fetcher_queries = plan.get("fetcher_queries", {})
         active = set(self._fetchers.keys())
 
         # Expand into subtopic queries for broader coverage
@@ -206,18 +282,8 @@ class ExpertBuilder:
         _SINGLE_QUERY_FETCHERS = {"thought_leaders"}
 
         async def _fetch_one(name: str, fetcher, max_results: int) -> list[RawSource]:
-            fetch_queries = [topic] if name in _SINGLE_QUERY_FETCHERS else queries
-            per_q = max(2, max_results // len(fetch_queries))
-
-            seen_urls: set[str] = set()
-            results: list[RawSource] = []
-            for query in fetch_queries:
-                for src in await _safe_fetch(name, fetcher, query, per_q):
-                    key = src.url.rstrip("/").lower()
-                    if key not in seen_urls:
-                        seen_urls.add(key)
-                        results.append(src)
-
+            query = fetcher_queries.get(name) or topic
+            results = await _safe_fetch(name, fetcher, query, max_results)
             skipped, reason = _is_skipped(name, results)
             await _emit_event(on_event, {
                 "type": "fetcher_done",
@@ -286,6 +352,197 @@ class ExpertBuilder:
                 )
 
         return passed_ids
+
+
+async def _plan_research(topic: str) -> dict:
+    """One Haiku call: returns per-fetcher queries + key concepts."""
+    try:
+        client = get_anthropic_client()
+        resp = await client.messages.create(
+            model=settings.FAST_MODEL,
+            max_tokens=400,
+            system=(
+                "Generate targeted search queries for different source types to build a "
+                "comprehensive knowledge base. Each query should be specific to what that "
+                "source type does best — e.g. arxiv gets academic/theoretical angles, "
+                "gutenberg gets classic primary texts, reddit gets practitioner discussion."
+            ),
+            tools=[_PLAN_TOOL],
+            tool_choice={"type": "tool", "name": "create_research_plan"},
+            messages=[{"role": "user", "content": f"Topic: {topic}"}],
+        )
+        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
+        plan = dict(block.input)
+        logger.info(
+            "Research plan for %r: concepts=%s",
+            topic,
+            ", ".join(plan.get("key_concepts", [])),
+        )
+        return plan
+    except Exception as exc:
+        logger.warning("Research planning failed, falling back to raw topic: %s", exc)
+        return {"fetcher_queries": {}, "key_concepts": []}
+
+
+async def _snowball_citations(
+    raw_sources: list[RawSource],
+    max_extra: int = 3,
+) -> list[RawSource]:
+    """Follow high-citation references from discovered ArXiv papers via Semantic Scholar."""
+    import arxiv as arxiv_lib  # type: ignore
+
+    arxiv_ids = [
+        s.metadata["arxiv_id"]
+        for s in raw_sources
+        if s.source_type == SourceType.ARXIV and s.metadata.get("arxiv_id")
+    ]
+    if not arxiv_ids:
+        return []
+
+    seen_ids = set(arxiv_ids)
+    seen_urls = {s.url for s in raw_sources}
+    candidates: list[dict] = []
+
+    _HEADERS = {"User-Agent": "Peritus/2.0 (educational; foxhopper16@gmail.com)"}
+    async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+        for arxiv_id in arxiv_ids[:3]:
+            try:
+                resp = await client.get(
+                    f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{arxiv_id}/references",
+                    params={
+                        "fields": "title,citationCount,openAccessPdf,externalIds",
+                        "limit": 20,
+                    },
+                )
+                if resp.status_code != 200:
+                    continue
+                for ref in resp.json().get("data", []):
+                    cited = ref.get("citedPaper") or {}
+                    ext_ids = cited.get("externalIds") or {}
+                    ref_arxiv_id = ext_ids.get("ArXiv")
+                    citation_count = cited.get("citationCount") or 0
+                    if (
+                        ref_arxiv_id
+                        and ref_arxiv_id not in seen_ids
+                        and citation_count >= 50
+                    ):
+                        candidates.append({
+                            "arxiv_id": ref_arxiv_id,
+                            "title": cited.get("title", ""),
+                            "citations": citation_count,
+                        })
+                        seen_ids.add(ref_arxiv_id)
+            except Exception as exc:
+                logger.debug("Semantic Scholar references failed for %s: %s", arxiv_id, exc)
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda x: x["citations"], reverse=True)
+    extra: list[RawSource] = []
+
+    async with httpx.AsyncClient(
+        timeout=30, headers=_ARXIV_HEADERS, follow_redirects=True
+    ) as http:
+        for cand in candidates[:max_extra]:
+            aid = cand["arxiv_id"]
+            try:
+                lib_client = arxiv_lib.Client()
+                papers = list(lib_client.results(arxiv_lib.Search(id_list=[aid])))
+                if not papers:
+                    continue
+                paper = papers[0]
+                url = paper.entry_id
+                if url in seen_urls:
+                    continue
+                full_text = await _fetch_ar5iv(http, aid)
+                text = full_text[:_MAX_FULL_TEXT] if len(full_text) >= _MIN_FULL_TEXT \
+                    else f"{paper.title}\n\n{paper.summary}"
+                extra.append(RawSource(
+                    source_type=SourceType.ARXIV,
+                    url=url,
+                    title=paper.title,
+                    author=", ".join(str(a) for a in paper.authors[:3]),
+                    text=text,
+                    metadata={
+                        "arxiv_id": aid,
+                        "published": str(paper.published),
+                        "categories": paper.categories,
+                        "full_text": len(full_text) >= _MIN_FULL_TEXT,
+                        "snowballed": True,
+                        "citations": cand["citations"],
+                    },
+                ))
+                seen_urls.add(url)
+                logger.info("Snowballed: %r (%d citations)", paper.title, cand["citations"])
+            except Exception as exc:
+                logger.debug("Snowball fetch failed for arXiv:%s: %s", aid, exc)
+
+    return extra
+
+
+def _dedup_by_url(sources: list[RawSource]) -> list[RawSource]:
+    seen: set[str] = set()
+    out: list[RawSource] = []
+    for s in sources:
+        if not s.url or s.url not in seen:
+            out.append(s)
+            if s.url:
+                seen.add(s.url)
+    return out
+
+
+async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:
+    """Merge semantically near-duplicate graph nodes using embedding cosine similarity."""
+    try:
+        import numpy as np
+    except ImportError:
+        logger.debug("numpy not available — skipping entity resolution")
+        return 0
+
+    nodes = await graph_repo.get_all_nodes(expert_id)
+    if len(nodes) < 2:
+        return 0
+
+    labels = [n["label"] for n in nodes]
+    try:
+        embeddings = await embed_batch(labels)
+    except Exception as exc:
+        logger.warning("Entity resolution embedding failed: %s", exc)
+        return 0
+
+    matrix = np.array(embeddings, dtype=np.float32)
+    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+    norms = np.where(norms == 0, 1.0, norms)
+    normalized = matrix / norms
+    sim = normalized @ normalized.T  # (N, N)
+
+    _THRESHOLD = 0.93
+    merged_away: set[int] = set()
+    merge_count = 0
+
+    for i in range(len(nodes)):
+        if nodes[i]["id"] in merged_away:
+            continue
+        for j in range(i + 1, len(nodes)):
+            if nodes[j]["id"] in merged_away:
+                continue
+            if float(sim[i, j]) >= _THRESHOLD:
+                keep_id, drop_id = nodes[i]["id"], nodes[j]["id"]
+                await graph_repo.merge_nodes(expert_id, keep_id, drop_id)
+                merged_away.add(drop_id)
+                merge_count += 1
+                logger.debug(
+                    "Merged node %r → %r (sim=%.3f)",
+                    labels[j], labels[i], float(sim[i, j]),
+                )
+
+    if merge_count:
+        logger.info(
+            "Entity resolution: merged %d duplicate nodes for expert %d",
+            merge_count, expert_id,
+        )
+    return merge_count
 
 
 def _is_skipped(name: str, results: list) -> tuple[bool, str]:
