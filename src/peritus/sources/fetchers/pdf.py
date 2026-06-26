@@ -12,6 +12,7 @@ from peritus.sources.domain import RawSource, SourceType
 logger = get_logger(__name__)
 
 _SS_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
+_PDF_HEADERS = {"User-Agent": "Peritus/2.0 (educational; foxhopper16@gmail.com)"}
 _SS_FIELDS = "title,authors,year,openAccessPdf,abstract,externalIds"
 _HEADERS = {"User-Agent": "Peritus/2.0 (educational tool; foxhopper16@gmail.com)"}
 _MAX_CHARS = 200_000
@@ -30,6 +31,9 @@ class PdfFetcher:
             pdf_info = paper.get("openAccessPdf") or {}
             pdf_url = pdf_info.get("url")
             if not pdf_url:
+                continue
+            if not await _is_pdf_url(pdf_url):
+                logger.debug("Skipping non-PDF URL: %s", pdf_url)
                 continue
             try:
                 text = await parse_pdf_url(pdf_url)
@@ -54,6 +58,23 @@ class PdfFetcher:
                 logger.warning("PDF fetch/OCR failed for %r: %s", pdf_url, exc)
 
         return sources
+
+
+async def _is_pdf_url(url: str) -> bool:
+    """Return True only if the URL resolves to an actual PDF."""
+    if url.startswith("https://doi.org/") or url.startswith("http://doi.org/"):
+        return False
+    if url.lower().endswith(".pdf"):
+        return True
+    try:
+        async with httpx.AsyncClient(
+            timeout=10, headers=_PDF_HEADERS, follow_redirects=True
+        ) as client:
+            resp = await client.head(url)
+            ct = resp.headers.get("content-type", "")
+            return "pdf" in ct.lower()
+    except Exception:
+        return False
 
 
 async def _search_semantic_scholar(topic: str, limit: int) -> list[dict]:

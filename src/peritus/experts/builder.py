@@ -31,6 +31,8 @@ from peritus.sources.fetchers.arxiv import ArxivFetcher
 from peritus.sources.fetchers.exa import ExaFetcher
 from peritus.sources.fetchers.gutenberg import GutenbergFetcher
 from peritus.sources.fetchers.pdf import PdfFetcher
+from peritus.sources.fetchers.reddit import RedditFetcher
+from peritus.sources.fetchers.thought_leaders import ThoughtLeadersFetcher
 from peritus.sources.fetchers.web import WebFetcher
 from peritus.sources.fetchers.wikipedia import WikipediaFetcher
 from peritus.sources.fetchers.youtube import YoutubeFetcher
@@ -71,13 +73,15 @@ class ExpertBuilder:
 
     def _build_fetchers(self, multiplier: int, source_filter: list[str] | None):
         all_fetchers = {
-            "wikipedia":  (WikipediaFetcher(),  4 * multiplier),
-            "gutenberg":  (GutenbergFetcher(),  3 * multiplier),
-            "arxiv":      (ArxivFetcher(),       3 * multiplier),
-            "pdf":        (PdfFetcher(),          4 * multiplier),
-            "youtube":    (YoutubeFetcher(),      5 * multiplier),
-            "exa":        (ExaFetcher(),          8 * multiplier),
-            "web":        (WebFetcher(),          4 * multiplier),
+            "wikipedia":      (WikipediaFetcher(),      3 * multiplier),
+            "gutenberg":      (GutenbergFetcher(),      2 * multiplier),
+            "arxiv":          (ArxivFetcher(),          2 * multiplier),
+            "pdf":            (PdfFetcher(),            3 * multiplier),
+            "youtube":        (YoutubeFetcher(),        3 * multiplier),
+            "exa":            (ExaFetcher(),            5 * multiplier),
+            "web":            (WebFetcher(),            3 * multiplier),
+            "reddit":         (RedditFetcher(),         5 * multiplier),
+            "thought_leaders": (ThoughtLeadersFetcher(), 3 * multiplier),
         }
         if source_filter:
             return {k: v for k, v in all_fetchers.items() if k in source_filter}
@@ -182,7 +186,10 @@ class ExpertBuilder:
         )
 
     async def _stage_discover(self, topic: str, on_event: EventCallback | None) -> list[RawSource]:
-        all_fetcher_names = ["wikipedia", "arxiv", "youtube", "exa", "web"]
+        all_fetcher_names = [
+            "wikipedia", "gutenberg", "arxiv", "pdf",
+            "youtube", "exa", "web", "reddit", "thought_leaders",
+        ]
         active = set(self._fetchers.keys())
         await _emit_event(on_event, {
             "type": "discovery_started",

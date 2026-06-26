@@ -46,7 +46,7 @@ class Settings:
     VALIDATE_CONCURRENCY: int = int(os.getenv("VALIDATE_CONCURRENCY", "5"))
 
     # Graph extraction batch size (chunks per Claude call)
-    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "20"))
+    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "40"))
 
     # Chunking
     CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))

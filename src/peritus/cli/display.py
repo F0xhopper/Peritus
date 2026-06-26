@@ -146,10 +146,7 @@ def credential_card(expert, passed_sources: list, dropped_sources: list, top_con
 
     avg_q = f"{expert.avg_quality:.1f} / 10" if expert.avg_quality is not None else "—"
     lines.append(f"Built        [cyan]{expert.created_at.strftime('%Y-%m-%d')}[/cyan]")
-    lines.append(
-        f"Sources      [green]{expert.source_count} validated[/green]"
-        + (f"  ([red]{len(dropped_sources)} dropped[/red])" if dropped_sources else "")
-    )
+    lines.append(f"Sources      [green]{expert.source_count} validated[/green]")
     lines.append(
         f"Corpus       [cyan]{expert.chunk_count} chunks · "
         f"{expert.node_count} concepts · {expert.edge_count} edges[/cyan]"
@@ -170,17 +167,6 @@ def credential_card(expert, passed_sources: list, dropped_sources: list, top_con
                 q = f"Q:{s['quality_score']:.1f}" if s["quality_score"] else ""
                 r = f"R:{s['relevance_score']:.1f}" if s["relevance_score"] else ""
                 lines.append(f"  {prefix} {title}  [dim]{q}  {r}[/dim]")
-
-    if dropped_sources:
-        lines.append("")
-        lines.append(f"[bold red]DROPPED ({len(dropped_sources)}) — below threshold (Q<5 or R<5)[/bold red]")
-        for i, s in enumerate(dropped_sources):
-            prefix = "└─" if i == len(dropped_sources) - 1 else "├─"
-            title = s["title"][:40].ljust(40)
-            q = f"Q:{s['quality_score']:.1f}" if s["quality_score"] else ""
-            r = f"R:{s['relevance_score']:.1f}" if s["relevance_score"] else ""
-            reason = s.get("drop_reason") or ""
-            lines.append(f"  {prefix} [dim]{title}  {q}  {r}  {reason}[/dim]")
 
     if top_concepts:
         lines.append("")

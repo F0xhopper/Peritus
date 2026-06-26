@@ -19,13 +19,15 @@ from peritus.infrastructure.database import get_pool, init_pool
 console = Console()
 
 _FETCHER_LABELS = {
-    "wikipedia": "Wikipedia",
-    "gutenberg": "Gutenberg",
-    "arxiv":     "ArXiv",
-    "pdf":       "PDF/Scholar",
-    "youtube":   "YouTube",
-    "exa":       "Exa",
-    "web":       "Web",
+    "wikipedia":      "Wikipedia",
+    "gutenberg":      "Gutenberg",
+    "arxiv":          "ArXiv",
+    "pdf":            "PDF/Scholar",
+    "youtube":        "YouTube",
+    "exa":            "Exa",
+    "web":            "Web",
+    "reddit":         "Reddit",
+    "thought_leaders": "Thought Leaders",
 }
 
 _BAR_WIDTH = 28
@@ -104,27 +106,32 @@ class BuildDisplay:
         if self.stage >= 2:
             lines.append(Text.from_markup(""))
             lines.append(Text.from_markup("  [bold][2/5] Validating sources[/bold]"))
-            for v in self.validated:
-                title = v["title"][:52]
-                scores = f"[dim]Q:{v['q']:.1f}  R:{v['r']:.1f}[/dim]"
+            done = len(self.validated)
+            total = self.validate_total or done
+            passed = sum(1 for v in self.validated if v["passed"])
+            dropped = done - passed
+            bar = _bar(done, total)
+            lines.append(Text.from_markup(
+                f"    [cyan]{bar}[/cyan]  [dim]{done}/{total}[/dim]"
+            ))
+            if done:
+                lines.append(Text.from_markup(
+                    f"    [green]{passed} passed[/green]  [dim]{dropped} dropped[/dim]"
+                ))
+            # Show last 3 items so there's live feedback without growing the display
+            for v in self.validated[-3:]:
+                title = v["title"][:48]
                 if v["passed"]:
                     lines.append(Text.from_markup(
-                        f"    [green]✓[/green]  {title:<52}  {scores}"
+                        f"    [green]✓[/green]  {title}  [dim]Q:{v['q']:.1f}  R:{v['r']:.1f}[/dim]"
                     ))
                 else:
-                    reason = f"  [dim]{v['drop_reason']}[/dim]" if v.get("drop_reason") else ""
                     lines.append(Text.from_markup(
-                        f"    [red]✗[/red]  [dim]{title:<52}  Q:{v['q']:.1f}  R:{v['r']:.1f}{reason}[/dim]"
+                        f"    [red]✗[/red]  [dim]{title}  Q:{v['q']:.1f}  R:{v['r']:.1f}[/dim]"
                     ))
-
-            if len(self.validated) == self.validate_total and self.validate_total:
-                passed = sum(1 for v in self.validated if v["passed"])
-                dropped = len(self.validated) - passed
-                summary = f"[green]{passed} validated[/green]"
-                if dropped:
-                    summary += f"  [dim]({dropped} dropped)[/dim]"
+            if done == total and total:
                 lines.append(Text.from_markup(f"    [dim]{'─' * 32}[/dim]"))
-                lines.append(Text.from_markup(f"    {summary}"))
+                lines.append(Text.from_markup(f"    [green]{passed} validated[/green]  [dim]{dropped} dropped[/dim]"))
 
         if self.stage >= 3:
             lines.append(Text.from_markup(""))

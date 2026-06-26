@@ -10,6 +10,8 @@ class SourceType(str, Enum):
     WEB = "web"
     GUTENBERG = "gutenberg"
     PDF = "pdf"
+    REDDIT = "reddit"
+    THOUGHT_LEADER = "thought_leader"
 
 
 @dataclass
