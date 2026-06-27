@@ -188,14 +188,12 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
     //  [0] name + status        1 line
     //  [1] topic                1 line
     //  [2] separator            1 line
-    //  [3] key concepts         1 line
-    //  [4] sources              1 line
-    //  [5] separator            1 line
-    //  [6] bio                  remaining
+    //  [3] concepts · sources   1 line
+    //  [4] separator            1 line
+    //  [5] bio                  remaining
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
             Constraint::Length(1),
@@ -234,47 +232,25 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
         chunks[2],
     );
 
-    // ── Row 3: key concepts ───────────────────────────────────────────────
-    {
-        let available_w = content.width as usize;
-        let concepts_text = if expert.key_concepts.is_empty() {
-            "—".to_string()
-        } else {
-            let mut line = String::new();
-            for (i, concept) in expert.key_concepts.iter().enumerate() {
-                let sep = if i == 0 { "" } else { "  ·  " };
-                let candidate = format!("{}{}", sep, concept);
-                if line.len() + candidate.len() <= available_w {
-                    line.push_str(&candidate);
-                } else {
-                    line.push('…');
-                    break;
-                }
-            }
-            line
-        };
-        f.render_widget(
-            Paragraph::new(Span::styled(concepts_text, Theme::dim())),
-            chunks[3],
-        );
-    }
-
-    // ── Row 4: sources ────────────────────────────────────────────────────
+    // ── Row 3: concepts · sources ─────────────────────────────────────────
     f.render_widget(
         Paragraph::new(Line::from(vec![
+            Span::styled(fmt_count(expert.node_count), Theme::normal()),
+            Span::styled(" concepts", Theme::dim()),
+            Span::styled("  ·  ", Theme::dim()),
             Span::styled(fmt_count(expert.source_count), Theme::normal()),
             Span::styled(" sources", Theme::dim()),
         ])),
+        chunks[3],
+    );
+
+    // ── Row 4: separator ─────────────────────────────────────────────────
+    f.render_widget(
+        Paragraph::new(Span::styled(sep.as_str(), Theme::dim())),
         chunks[4],
     );
 
-    // ── Row 5: separator ─────────────────────────────────────────────────
-    f.render_widget(
-        Paragraph::new(Span::styled(sep.as_str(), Theme::dim())),
-        chunks[5],
-    );
-
-    // ── Row 6: bio (remaining space) ──────────────────────────────────────
+    // ── Row 5: bio (remaining space) ──────────────────────────────────────
     let bio = expert.persona_bio.as_deref().unwrap_or("");
     let mut bio_lines: Vec<Line> = vec![];
 
@@ -286,7 +262,7 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
 
     f.render_widget(
         Paragraph::new(bio_lines).wrap(Wrap { trim: true }),
-        chunks[6],
+        chunks[5],
     );
 }
 
