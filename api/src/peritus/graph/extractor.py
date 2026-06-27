@@ -117,7 +117,7 @@ async def _extract_batch(
     on_batch: BatchCallback | None = None,
 ) -> dict:
     chunk_block = "\n\n".join(
-        f"[{i}] {c.text[:600]}" for i, c in enumerate(chunks)
+        f"[{i}] {c.text[:400]}" for i, c in enumerate(chunks)
     )
     async with sem:
         resp = await client.messages.create(

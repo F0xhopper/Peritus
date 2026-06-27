@@ -191,10 +191,14 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     if app.home.input_active {
                         app.home.handle_enter();
                     } else if let Some(expert) = app.home.selected_expert() {
-                        if expert.status == "ready" {
-                            let chat = ChatScreen::new(expert.clone(), app.api.clone());
-                            app.chat = Some(chat);
-                            app.screen = Screen::Chat;
+                        match expert.status.as_str() {
+                            "ready" => {
+                                let chat = ChatScreen::new(expert.clone(), app.api.clone());
+                                app.chat = Some(chat);
+                                app.screen = Screen::Chat;
+                            }
+                            "building" => app.set_status("Expert is still building — please wait"),
+                            _          => app.set_status("Expert build failed — try rebuilding with [d] delete then [n] new"),
                         }
                     }
                 }

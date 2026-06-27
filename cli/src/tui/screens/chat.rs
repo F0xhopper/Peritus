@@ -9,6 +9,7 @@ use ratatui::{
         Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
     },
 };
+use crate::tui::markdown;
 use tokio::sync::mpsc;
 use futures_util::StreamExt;
 
@@ -188,10 +189,7 @@ impl ChatScreen {
                     expert_name,
                     Theme::accent2().add_modifier(Modifier::BOLD),
                 )));
-                // Preserve the LLM's paragraph breaks; Paragraph wraps long lines.
-                for para in msg.content.split('\n') {
-                    lines.push(Line::from(Span::styled(para, Theme::normal())));
-                }
+                lines.extend(markdown::render(&msg.content));
                 if !msg.sources.is_empty() {
                     lines.push(Line::from(Span::styled(
                         "Sources",
@@ -216,19 +214,14 @@ impl ChatScreen {
                 expert_name,
                 Theme::accent2().add_modifier(Modifier::BOLD),
             )));
-            let paras: Vec<&str> = buf.split('\n').collect();
-            let last_i = paras.len().saturating_sub(1);
-            for (i, para) in paras.iter().enumerate() {
-                if i == last_i {
-                    // Pulse cursor at the tail of the streaming text.
-                    lines.push(Line::from(vec![
-                        Span::styled(*para, Theme::normal()),
-                        Span::styled(spinner::pulse(tick), Theme::accent()),
-                    ]));
-                } else {
-                    lines.push(Line::from(Span::styled(*para, Theme::normal())));
-                }
+            let mut md_lines = markdown::render(buf);
+            // Attach the pulse cursor to the last rendered line.
+            if let Some(last) = md_lines.last_mut() {
+                last.spans.push(Span::styled(spinner::pulse(tick), Theme::accent()));
+            } else {
+                md_lines.push(Line::from(Span::styled(spinner::pulse(tick), Theme::accent())));
             }
+            lines.extend(md_lines);
         }
 
         // Build Paragraph — this is the single source of truth for wrapping.

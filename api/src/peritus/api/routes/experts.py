@@ -105,6 +105,7 @@ async def build_expert(req: BuildRequest):
         try:
             builder = ExpertBuilder(pool, depth=req.depth)
             result: BuildResult = await builder.build(expert, on_event=on_event)
+            await repo.update_status(expert.id, ExpertStatus.READY)
             await queue.put({
                 "type": "done",
                 "expert_id": result.expert_id,

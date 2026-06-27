@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Modifier,
+    style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
@@ -132,7 +132,7 @@ impl HomeScreen {
         // Footer hints / new-expert input
         let hint_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
         let (footer_text, hint_style) = if self.input_active {
-            (format!("New expert topic: {}▌", self.input_buf), Theme::accent())
+            (String::new(), Theme::dim())
         } else if self.confirm_delete {
             let name = self.selected_expert()
                 .and_then(|e| e.persona_name.as_deref().or(Some(e.name.as_str())))
@@ -184,55 +184,71 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
         inner.height,
     );
 
-    // Layout:
-    //  [0] name + status        1 line
-    //  [1] topic                1 line
-    //  [2] separator            1 line
-    //  [3] concepts · sources   1 line
-    //  [4] separator            1 line
-    //  [5] bio                  remaining
+    let sep: String = "─".repeat(content.width as usize);
+
+    // ── Top section: pixel-art avatar (left 8) + name/topic (right) ──────
+    // Avatar is 8 chars wide; add 1-char gap before text column.
+    const AVATAR_W: u16 = 9;
+    let top_h = 3u16.min(content.height);
+
+    let avatar_lines = pixel_avatar_lines(is_selected);
+    for (i, line) in avatar_lines.into_iter().enumerate() {
+        if (i as u16) < top_h {
+            f.render_widget(
+                Paragraph::new(line),
+                Rect::new(content.x, content.y + i as u16, 8, 1),
+            );
+        }
+    }
+
+    let text_x = content.x + AVATAR_W;
+    let text_w  = content.width.saturating_sub(AVATAR_W);
+    if text_w > 0 {
+        let name_style  = Theme::normal().add_modifier(Modifier::BOLD);
+        let content_w   = text_w as usize;
+        let name_chars   = display_name.chars().count();
+        let status_chars = status_label.chars().count();
+        let gap          = content_w.saturating_sub(name_chars + status_chars);
+
+        // Row 0: name + status
+        f.render_widget(
+            Paragraph::new(Line::from(vec![
+                Span::styled(display_name, name_style),
+                Span::raw(" ".repeat(gap)),
+                Span::styled(status_label, status_style),
+            ])),
+            Rect::new(text_x, content.y, text_w, 1),
+        );
+
+        // Row 1: topic
+        if top_h >= 2 {
+            f.render_widget(
+                Paragraph::new(Span::styled(expert.topic.as_str(), Theme::dim())),
+                Rect::new(text_x, content.y + 1, text_w, 1),
+            );
+        }
+    }
+
+    // ── Rows below avatar ─────────────────────────────────────────────────
+    let bottom_y = content.y + top_h;
+    let bottom_h = content.height.saturating_sub(top_h);
+    if bottom_h == 0 { return; }
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Length(1),
-            Constraint::Min(1),
+            Constraint::Length(1), // separator
+            Constraint::Length(1), // concepts · sources
+            Constraint::Length(1), // separator
+            Constraint::Min(1),    // bio
         ])
-        .split(content);
+        .split(Rect::new(content.x, bottom_y, content.width, bottom_h));
 
-    let sep: String = "─".repeat(content.width as usize);
-
-    // ── Row 0: name + status ──────────────────────────────────────────────
-    let name_style = Theme::normal().add_modifier(Modifier::BOLD);
-    let content_w = content.width as usize;
-    let name_chars = display_name.chars().count();
-    let status_chars = status_label.chars().count();
-    let gap = content_w.saturating_sub(name_chars + status_chars);
     f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(display_name, name_style),
-            Span::raw(" ".repeat(gap)),
-            Span::styled(status_label, status_style),
-        ])),
+        Paragraph::new(Span::styled(sep.as_str(), Theme::dim())),
         chunks[0],
     );
 
-    // ── Row 1: topic ──────────────────────────────────────────────────────
-    f.render_widget(
-        Paragraph::new(Span::styled(expert.topic.as_str(), Theme::dim())),
-        chunks[1],
-    );
-
-    // ── Row 2: separator ─────────────────────────────────────────────────
-    f.render_widget(
-        Paragraph::new(Span::styled(sep.as_str(), Theme::dim())),
-        chunks[2],
-    );
-
-    // ── Row 3: concepts · sources ─────────────────────────────────────────
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(fmt_count(expert.node_count), Theme::normal()),
@@ -241,29 +257,41 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
             Span::styled(fmt_count(expert.source_count), Theme::normal()),
             Span::styled(" sources", Theme::dim()),
         ])),
-        chunks[3],
+        chunks[1],
     );
 
-    // ── Row 4: separator ─────────────────────────────────────────────────
     f.render_widget(
         Paragraph::new(Span::styled(sep.as_str(), Theme::dim())),
-        chunks[4],
+        chunks[2],
     );
 
-    // ── Row 5: bio (remaining space) ──────────────────────────────────────
     let bio = expert.persona_bio.as_deref().unwrap_or("");
-    let mut bio_lines: Vec<Line> = vec![];
-
-    if !bio.is_empty() {
-        for para in bio.split('\n') {
-            bio_lines.push(Line::from(Span::styled(para, Theme::dim())));
-        }
-    }
-
+    let bio_lines: Vec<Line> = if bio.is_empty() {
+        vec![]
+    } else {
+        bio.split('\n')
+            .map(|p| Line::from(Span::styled(p, Theme::dim())))
+            .collect()
+    };
     f.render_widget(
         Paragraph::new(bio_lines).wrap(Wrap { trim: true }),
-        chunks[5],
+        chunks[3],
     );
+}
+
+// ── Pixel-art avatar ─────────────────────────────────────────────────────────
+
+/// 8×3 block-character gem icon, coloured brighter when the card is selected.
+fn pixel_avatar_lines(is_selected: bool) -> Vec<Line<'static>> {
+    let rows  = ["░▒▓██▓▒░", "▒▓████▓▒", "░▒▓██▓▒░"];
+    let colors: [Color; 3] = if is_selected {
+        [Theme::ACCENT, Theme::ACCENT2, Theme::ACCENT]
+    } else {
+        [Theme::DIM, Theme::BORDER_DIM, Theme::DIM]
+    };
+    rows.iter().zip(colors.iter()).map(|(&s, &c)| {
+        Line::from(Span::styled(s, Style::default().fg(c)))
+    }).collect()
 }
 
 /// Format large numbers with K/M suffix so they fit neatly in the card.
