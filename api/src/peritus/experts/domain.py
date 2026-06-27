@@ -9,12 +9,66 @@ class ExpertStatus(str, Enum):
     FAILED = "failed"
 
 
+class ExpertTier(str, Enum):
+    LITE     = "lite"
+    STANDARD = "standard"
+    PRO      = "pro"
+
+
+@dataclass(frozen=True)
+class ExpertConfig:
+    source_multiplier: float
+    retrieval_top_k: int
+    max_subqueries: int
+    graph_hops: int
+    coverage_extra_k: int
+    max_context_passages: int
+    max_response_tokens: int
+
+    @classmethod
+    def from_tier(cls, tier: ExpertTier) -> "ExpertConfig":
+        return _TIER_DEFAULTS[tier]
+
+
+_TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
+    ExpertTier.LITE: ExpertConfig(
+        source_multiplier=0.5,
+        retrieval_top_k=5,
+        max_subqueries=2,
+        graph_hops=1,
+        coverage_extra_k=3,
+        max_context_passages=8,
+        max_response_tokens=1024,
+    ),
+    ExpertTier.STANDARD: ExpertConfig(
+        source_multiplier=1.0,
+        retrieval_top_k=10,
+        max_subqueries=4,
+        graph_hops=1,
+        coverage_extra_k=5,
+        max_context_passages=15,
+        max_response_tokens=2048,
+    ),
+    ExpertTier.PRO: ExpertConfig(
+        source_multiplier=2.0,
+        retrieval_top_k=20,
+        max_subqueries=6,
+        graph_hops=2,
+        coverage_extra_k=10,
+        max_context_passages=25,
+        max_response_tokens=4096,
+    ),
+}
+
+
 @dataclass
 class Expert:
     id: int
     name: str          # user-facing slug, e.g. "stoic-philosophy"
     topic: str         # raw build topic string
     status: ExpertStatus
+    tier: ExpertTier = ExpertTier.STANDARD
+    config: ExpertConfig = field(default_factory=lambda: ExpertConfig.from_tier(ExpertTier.STANDARD))
     persona_name: str | None = None
     persona_bio: str | None = None
     persona_style: str | None = None

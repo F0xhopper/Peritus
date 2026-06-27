@@ -106,29 +106,27 @@ class ExpertBuilder:
     def __init__(
         self,
         pool: asyncpg.Pool,
-        depth: str = "normal",
         source_filter: list[str] | None = None,
     ) -> None:
         self._pool = pool
         self._repo = ExpertRepository(pool)
         self._graph_repo = GraphRepository(pool)
-        self._depth = depth
         self._source_filter = source_filter
 
-        multiplier = 2 if depth == "deep" else 1
-        self._fetchers = self._build_fetchers(multiplier, source_filter)
+    def _build_fetchers(self, multiplier: float, source_filter: list[str] | None):
+        def _n(base: int) -> int:
+            return max(1, round(base * multiplier))
 
-    def _build_fetchers(self, multiplier: int, source_filter: list[str] | None):
         all_fetchers = {
-            "wikipedia":      (WikipediaFetcher(),      3 * multiplier),
-            "gutenberg":      (GutenbergFetcher(),      4 * multiplier),
-            "arxiv":          (ArxivFetcher(),          2 * multiplier),
-            "pdf":            (PdfFetcher(),            3 * multiplier),
-            "youtube":        (YoutubeFetcher(),        3 * multiplier),
-            "exa":            (ExaFetcher(),            5 * multiplier),
-            "web":            (WebFetcher(),            3 * multiplier),
-            "reddit":         (RedditFetcher(),         5 * multiplier),
-            "thought_leaders": (ThoughtLeadersFetcher(), 3 * multiplier),
+            "wikipedia":       (WikipediaFetcher(),       _n(3)),
+            "gutenberg":       (GutenbergFetcher(),       _n(4)),
+            "arxiv":           (ArxivFetcher(),           _n(2)),
+            "pdf":             (PdfFetcher(),             _n(3)),
+            "youtube":         (YoutubeFetcher(),         _n(3)),
+            "exa":             (ExaFetcher(),             _n(5)),
+            "web":             (WebFetcher(),             _n(3)),
+            "reddit":          (RedditFetcher(),          _n(5)),
+            "thought_leaders": (ThoughtLeadersFetcher(),  _n(3)),
         }
         if source_filter:
             return {k: v for k, v in all_fetchers.items() if k in source_filter}
@@ -139,6 +137,7 @@ class ExpertBuilder:
         expert: Expert,
         on_event: EventCallback | None = None,
     ) -> BuildResult:
+        self._fetchers = self._build_fetchers(expert.config.source_multiplier, self._source_filter)
         topic = expert.topic
 
         # Stage 0: Research planning

@@ -23,19 +23,19 @@ async def chat_stream(slug: str, req: ChatRequest):
         raise HTTPException(status_code=409, detail=f"Expert status is {expert.status.value}, not ready")
 
     history = [{"role": m.role, "content": m.content} for m in req.history]
+    cfg = expert.config
 
     def _status(msg: str) -> dict:
         return {"data": json.dumps({"type": "status", "message": msg})}
 
     async def stream_generator():
         try:
-            # Do the non-streaming retrieval pipeline first
             from peritus.chat.agent import ChatAgent, _build_context
             agent = ChatAgent(pool)
 
             # Plan subqueries
             yield _status("Planning search queries…")
-            subqueries = await agent._plan(req.question, expert.topic)
+            subqueries = await agent._plan(req.question, expert.topic, cfg.max_subqueries)
 
             # Parallel hybrid search
             yield _status(f"Searching knowledge base across {len(subqueries)} queries…")
@@ -43,31 +43,31 @@ async def chat_stream(slug: str, req: ChatRequest):
                 expert_id=expert.id,
                 question=req.question,
                 queries=subqueries,
-                top_k=10,
+                top_k=cfg.retrieval_top_k,
             )
 
             # Graph expansion
             yield _status("Expanding knowledge graph…")
-            enriched = await agent._graph.expand(search_resp.results, expert.id)
+            enriched = await agent._graph.expand(search_resp.results, expert.id, hops=cfg.graph_hops)
 
             # Coverage check
             yield _status("Assessing coverage…")
             passages = [{"text": e.text, "citation": e.citation} for e in enriched]
-            coverage = await agent._assess_coverage(req.question, passages)
+            coverage = await agent._assess_coverage(req.question, passages, cfg.max_context_passages)
             if not coverage["satisfied"] and coverage.get("suggested_queries"):
                 yield _status("Retrieving additional context…")
                 extra_resp = await agent._search.batch_search(
                     expert_id=expert.id,
                     question=req.question,
-                    queries=coverage["suggested_queries"][:3],
-                    top_k=5,
+                    queries=coverage["suggested_queries"][:cfg.max_subqueries // 2],
+                    top_k=cfg.coverage_extra_k,
                 )
-                extra_enriched = await agent._graph.expand(extra_resp.results, expert.id)
+                extra_enriched = await agent._graph.expand(extra_resp.results, expert.id, hops=cfg.graph_hops)
                 enriched = enriched + extra_enriched
 
             # Build context block
             yield _status("Composing response…")
-            context_block = _build_context(enriched)
+            context_block = _build_context(enriched, cfg.max_context_passages)
 
             # Stream the Anthropic response token by token
             from peritus.infrastructure.anthropic_client import get_anthropic_client
@@ -85,7 +85,7 @@ async def chat_stream(slug: str, req: ChatRequest):
             client = get_anthropic_client()
             async with client.messages.stream(
                 model=settings.CLAUDE_MODEL,
-                max_tokens=2048,
+                max_tokens=cfg.max_response_tokens,
                 system=expert.persona_style or f"You are a subject-matter expert in {expert.topic}.",
                 messages=messages,
             ) as stream:

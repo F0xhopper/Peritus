@@ -51,8 +51,8 @@ impl ApiClient {
         Ok(())
     }
 
-    pub async fn build_stream(&self, topic: String) -> Result<SseStream<BuildEvent>> {
-        let req = BuildRequest { topic, depth: "normal".into() };
+    pub async fn build_stream(&self, topic: String, tier: String) -> Result<SseStream<BuildEvent>> {
+        let req = BuildRequest { topic, tier };
         let resp = self.auth(self.client.post(format!("{}/experts/build", self.base_url)))
             .json(&req)
             .send().await?

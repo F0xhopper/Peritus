@@ -25,6 +25,7 @@ def _expert_to_summary(e) -> ExpertSummary:
         name=e.name,
         topic=e.topic,
         status=e.status.value if hasattr(e.status, "value") else e.status,
+        tier=e.tier.value if hasattr(e.tier, "value") else e.tier,
         persona_name=e.persona_name,
         persona_bio=e.persona_bio,
         persona_style=e.persona_style,
@@ -45,6 +46,7 @@ def _expert_to_detail(e) -> ExpertDetail:
         name=e.name,
         topic=e.topic,
         status=e.status.value if hasattr(e.status, "value") else e.status,
+        tier=e.tier.value if hasattr(e.tier, "value") else e.tier,
         persona_name=e.persona_name,
         persona_bio=e.persona_bio,
         persona_style=e.persona_style,
@@ -94,7 +96,7 @@ async def build_expert(req: BuildRequest):
     pool = get_pool()
     repo = ExpertRepository(pool)
     slug = _slugify(req.topic)
-    expert = await repo.create(name=slug, topic=req.topic)
+    expert = await repo.create(name=slug, topic=req.topic, tier=req.tier)
 
     queue: asyncio.Queue[dict | None] = asyncio.Queue()
 
@@ -103,7 +105,7 @@ async def build_expert(req: BuildRequest):
 
     async def run_build() -> None:
         try:
-            builder = ExpertBuilder(pool, depth=req.depth)
+            builder = ExpertBuilder(pool)
             result: BuildResult = await builder.build(expert, on_event=on_event)
             await repo.update_status(expert.id, ExpertStatus.READY)
             await queue.put({

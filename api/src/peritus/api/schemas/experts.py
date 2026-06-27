@@ -1,12 +1,15 @@
 from datetime import datetime
 from pydantic import BaseModel
 
+from peritus.experts.domain import ExpertTier
+
 
 class ExpertSummary(BaseModel):
     id: int
     name: str
     topic: str
     status: str
+    tier: str = ExpertTier.STANDARD.value
     persona_name: str | None = None
     persona_bio: str | None = None
     persona_style: str | None = None
@@ -27,4 +30,4 @@ class ExpertDetail(ExpertSummary):
 
 class BuildRequest(BaseModel):
     topic: str
-    depth: str = "normal"
+    tier: ExpertTier = ExpertTier.STANDARD

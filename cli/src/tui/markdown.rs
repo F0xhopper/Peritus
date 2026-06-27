@@ -7,9 +7,6 @@ use ratatui::{
 use crate::tui::theme::Theme;
 
 /// Parse `md` into a list of styled ratatui [`Line`]s.
-///
-/// pulldown-cmark strips all marker characters (`#`, `**`, `` ` ``, etc.)
-/// before emitting `Event::Text`, so this renderer never shows raw syntax.
 pub fn render(md: &str) -> Vec<Line<'static>> {
     let parser = Parser::new_ext(md, Options::all());
 
@@ -19,9 +16,13 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
     let mut bold = false;
     let mut italic = false;
     let mut in_code_block = false;
-    let mut in_table_head = false;
     let mut heading: Option<HeadingLevel> = None;
     let mut list_depth: usize = 0;
+
+    // Tables are buffered so we can compute column widths before rendering.
+    let mut table_rows: Vec<Vec<String>> = Vec::new();
+    let mut current_row: Vec<String> = Vec::new();
+    let mut current_cell: Option<String> = None;
 
     macro_rules! flush {
         () => {
@@ -33,7 +34,6 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
         match event {
             // ── Headings ──────────────────────────────────────────────────
             Event::Start(Tag::Heading { level, .. }) => {
-                // Always start a heading on a fresh line.
                 if !spans.is_empty() {
                     flush!();
                 }
@@ -74,7 +74,11 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
 
             // ── Inline code ───────────────────────────────────────────────
             Event::Code(text) => {
-                spans.push(Span::styled(text.into_string(), Theme::code_inline()));
+                if let Some(cell) = &mut current_cell {
+                    cell.push_str(&text);
+                } else {
+                    spans.push(Span::styled(text.into_string(), Theme::code_inline()));
+                }
             }
 
             // ── Fenced / indented code blocks ─────────────────────────────
@@ -87,29 +91,28 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
                 in_code_block = false;
             }
 
-            // ── Tables ────────────────────────────────────────────────────
+            // ── Tables (buffered for aligned rendering) ───────────────────
             Event::Start(Tag::Table(_)) => {
                 if !spans.is_empty() {
                     flush!();
                 }
+                table_rows.clear();
             }
             Event::End(TagEnd::Table) => {
+                render_table(&mut lines, &table_rows);
+                table_rows.clear();
                 lines.push(Line::from(""));
             }
-            Event::Start(Tag::TableHead) => { in_table_head = true; }
-            Event::End(TagEnd::TableHead) => {
-                in_table_head = false;
-                lines.push(Line::from(Span::styled("─".repeat(48), Theme::dim())));
-            }
-            Event::Start(Tag::TableRow) => {}
+            Event::Start(Tag::TableHead) | Event::End(TagEnd::TableHead) => {}
+            Event::Start(Tag::TableRow) => { current_row.clear(); }
             Event::End(TagEnd::TableRow) => {
-                if !spans.is_empty() {
-                    flush!();
-                }
+                table_rows.push(std::mem::take(&mut current_row));
             }
-            Event::Start(Tag::TableCell) => {}
+            Event::Start(Tag::TableCell) => { current_cell = Some(String::new()); }
             Event::End(TagEnd::TableCell) => {
-                spans.push(Span::styled("  │  ", Theme::dim()));
+                if let Some(cell) = current_cell.take() {
+                    current_row.push(cell);
+                }
             }
 
             // ── Lists ─────────────────────────────────────────────────────
@@ -135,25 +138,11 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
 
             // ── Text ──────────────────────────────────────────────────────
             Event::Text(text) => {
-                let style = if let Some(level) = heading {
-                    match level {
-                        HeadingLevel::H1 => Theme::heading1(),
-                        HeadingLevel::H2 => Theme::heading2(),
-                        _ => Theme::heading3(),
-                    }
+                if let Some(cell) = &mut current_cell {
+                    // Inside a table cell — accumulate plain text for alignment.
+                    cell.push_str(&text);
                 } else if in_code_block {
-                    Theme::code_block()
-                } else if in_table_head {
-                    Theme::normal().add_modifier(Modifier::BOLD)
-                } else {
-                    let mut s = Theme::normal();
-                    if bold { s = s.add_modifier(Modifier::BOLD); }
-                    if italic { s = s.add_modifier(Modifier::ITALIC); }
-                    s
-                };
-
-                if in_code_block {
-                    // Code block text may span multiple internal lines.
+                    let style = Theme::code_block();
                     let owned = text.into_string();
                     let mut iter = owned.lines().peekable();
                     while let Some(line_text) = iter.next() {
@@ -163,6 +152,18 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
                         }
                     }
                 } else {
+                    let style = if let Some(level) = heading {
+                        match level {
+                            HeadingLevel::H1 => Theme::heading1(),
+                            HeadingLevel::H2 => Theme::heading2(),
+                            _ => Theme::heading3(),
+                        }
+                    } else {
+                        let mut s = Theme::normal();
+                        if bold { s = s.add_modifier(Modifier::BOLD); }
+                        if italic { s = s.add_modifier(Modifier::ITALIC); }
+                        s
+                    };
                     spans.push(Span::styled(text.into_string(), style));
                 }
             }
@@ -186,4 +187,47 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
     }
 
     lines
+}
+
+/// Render a buffered table with padded, aligned columns.
+fn render_table(lines: &mut Vec<Line<'static>>, rows: &[Vec<String>]) {
+    if rows.is_empty() { return; }
+
+    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if col_count == 0 { return; }
+
+    // Compute the minimum width needed for each column.
+    let mut col_widths = vec![0usize; col_count];
+    for row in rows {
+        for (i, cell) in row.iter().enumerate() {
+            if i < col_count {
+                col_widths[i] = col_widths[i].max(cell.len());
+            }
+        }
+    }
+
+    for (row_idx, row) in rows.iter().enumerate() {
+        let mut row_spans: Vec<Span<'static>> = Vec::new();
+        let cell_count = row.len().min(col_count);
+        for (i, cell) in row.iter().enumerate().take(cell_count) {
+            let padded = format!("{:<width$}", cell, width = col_widths[i]);
+            let style = if row_idx == 0 {
+                Theme::normal().add_modifier(Modifier::BOLD)
+            } else {
+                Theme::normal()
+            };
+            row_spans.push(Span::styled(padded, style));
+            if i + 1 < cell_count {
+                row_spans.push(Span::styled("  │  ", Theme::dim()));
+            }
+        }
+        lines.push(Line::from(row_spans));
+
+        // Divider between header and body.
+        if row_idx == 0 {
+            let sep_width: usize = col_widths.iter().take(col_count).sum::<usize>()
+                + col_count.saturating_sub(1) * 5;
+            lines.push(Line::from(Span::styled("─".repeat(sep_width), Theme::dim())));
+        }
+    }
 }

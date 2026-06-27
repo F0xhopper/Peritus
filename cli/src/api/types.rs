@@ -7,6 +7,8 @@ pub struct ExpertSummary {
     pub name: String,
     pub topic: String,
     pub status: String,
+    #[serde(default = "default_tier")]
+    pub tier: String,
     pub persona_name: Option<String>,
     pub persona_bio: Option<String>,
     pub persona_style: Option<String>,
@@ -22,6 +24,8 @@ pub struct ExpertSummary {
     pub created_at: String,
 }
 
+fn default_tier() -> String { "standard".to_string() }
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExpertDetail {
     #[serde(flatten)]
@@ -35,7 +39,7 @@ pub struct ExpertDetail {
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildRequest {
     pub topic: String,
-    pub depth: String,
+    pub tier: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

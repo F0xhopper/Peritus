@@ -26,6 +26,13 @@ const STAGES: &[(&str, &str)] = &[
 #[derive(Debug, Clone, PartialEq)]
 pub enum FetcherState { Waiting, Fetching, Done(u64), Skipped }
 
+pub struct BuildCardInfo {
+    pub topic: String,
+    pub stage: u8,
+    pub stage_label: String,
+    pub detail: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 enum LogLevel { Stage, Success, Info, Error }
 
@@ -33,6 +40,8 @@ struct LogEntry { msg: String, level: LogLevel }
 
 pub struct BuildScreen {
     topic: String,
+    tier: String,
+    start_time: std::time::Instant,
     stage: u8,
     stage_name: String,
     // Discovery
@@ -60,17 +69,18 @@ pub struct BuildScreen {
 }
 
 impl BuildScreen {
-    pub fn new(topic: String, api: Arc<ApiClient>) -> Self {
+    pub fn new(topic: String, tier: String, api: Arc<ApiClient>) -> Self {
         let cancel = Arc::new(Notify::new());
         let (tx, rx) = mpsc::channel::<BuildEvent>(256);
         let api_clone = api.clone();
         let topic_clone = topic.clone();
+        let tier_clone = tier.clone();
         let cancel_clone = cancel.clone();
         tokio::spawn(async move {
             tokio::select! {
                 _ = cancel_clone.notified() => {}
                 _ = async {
-                    match api_clone.build_stream(topic_clone).await {
+                    match api_clone.build_stream(topic_clone, tier_clone).await {
                         Ok(mut stream) => {
                             while let Some(result) = stream.next().await {
                                 match result {
@@ -89,6 +99,8 @@ impl BuildScreen {
         });
         Self {
             topic,
+            tier,
+            start_time: std::time::Instant::now(),
             stage: 0,
             stage_name: String::new(),
             fetchers: indexmap::IndexMap::new(),
@@ -110,6 +122,38 @@ impl BuildScreen {
     }
 
     pub fn cancel(&self) { self.cancel.notify_one(); }
+    pub fn topic(&self) -> &str { &self.topic }
+
+    pub fn card_info(&self) -> BuildCardInfo {
+        let detail = match self.stage {
+            0 => "Starting up…".to_string(),
+            1 => if self.key_concepts.is_empty() {
+                "Identifying key concepts…".to_string()
+            } else {
+                format!("{} concepts identified", self.key_concepts.len())
+            },
+            2 => {
+                let done = self.fetchers.values()
+                    .filter(|s| matches!(s, FetcherState::Done(_) | FetcherState::Skipped))
+                    .count();
+                format!("{}/{} fetchers done", done, self.fetchers.len())
+            }
+            3 => {
+                let total = self.validate_passed + self.validate_dropped;
+                if total == 0 { "Scoring sources…".to_string() }
+                else { format!("{} accepted  ·  {} dropped", self.validate_passed, self.validate_dropped) }
+            }
+            4 => format!("{} sources ingested", self.ingest_count),
+            5 => format!("{} concepts  ·  {} edges", self.graph_total_nodes, self.graph_total_edges),
+            _ => "Finalising…".to_string(),
+        };
+        BuildCardInfo {
+            topic: self.topic.clone(),
+            stage: self.stage,
+            stage_label: stage_short_for(self.stage).to_string(),
+            detail,
+        }
+    }
 
     fn log(&mut self, msg: impl Into<String>, level: LogLevel) {
         if self.log_lines.len() >= 500 { self.log_lines.pop_front(); }
@@ -202,7 +246,7 @@ impl BuildScreen {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, tick: u64) {
         let block = Block::default()
-            .title(format!(" ◈ Building: \"{}\" ", self.topic))
+            .title(format!(" ◈ Building: \"{}\"  [{}] ", self.topic, self.tier.to_uppercase()))
             .title_style(Theme::title())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -265,10 +309,17 @@ impl BuildScreen {
 
         if self.key_concepts.is_empty() {
             f.render_widget(
-                Paragraph::new(Line::from(vec![
-                    Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
-                    Span::styled("Analyzing topic and planning sources…", Theme::dim()),
-                ])),
+                Paragraph::new(vec![
+                    Line::from(Span::styled(
+                        "Studying your topic to decide which sources will teach the expert the most.",
+                        Theme::dim().add_modifier(Modifier::ITALIC),
+                    )),
+                    Line::from(""),
+                    Line::from(vec![
+                        Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
+                        Span::styled("Identifying key concepts…", Theme::dim()),
+                    ]),
+                ]),
                 inner,
             );
         } else {
@@ -289,9 +340,32 @@ impl BuildScreen {
     }
 
     fn render_discovery_content(&self, f: &mut Frame, area: Rect, tick: u64) {
-        let block = content_block("Source Discovery");
+        let done_count = self.fetchers.values().filter(|s| matches!(s, FetcherState::Done(_) | FetcherState::Skipped)).count();
+        let total_count = self.fetchers.len();
+        let block = Block::default()
+            .title(format!(" Source Discovery  ·  {}/{} done ", done_count, total_count))
+            .title_style(Theme::dim())
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .border_style(Theme::normal_border());
         let inner = block.inner(area);
         f.render_widget(block, area);
+
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Min(1)])
+            .split(inner);
+
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "Reaching out to encyclopaedias, papers, and the web to gather raw material.",
+                    Theme::dim().add_modifier(Modifier::ITALIC),
+                )),
+                Line::from(""),
+            ]),
+            split[0],
+        );
 
         let items: Vec<ListItem> = self.fetchers.iter().map(|(name, state)| {
             ListItem::new(match state {
@@ -315,7 +389,7 @@ impl BuildScreen {
                 ]),
             })
         }).collect();
-        f.render_widget(List::new(items), inner);
+        f.render_widget(List::new(items), split[1]);
     }
 
     fn render_validate_content(&self, f: &mut Frame, area: Rect, tick: u64) {
@@ -323,12 +397,33 @@ impl BuildScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
+        let total = self.validate_passed + self.validate_dropped;
+        let bar_line = if total > 0 {
+            let bar_w = 24usize;
+            let filled = ((self.validate_passed as f64 / total as f64) * bar_w as f64).round() as usize;
+            let empty  = bar_w.saturating_sub(filled);
+            Line::from(vec![
+                Span::styled("▓".repeat(filled), Theme::success()),
+                Span::styled("░".repeat(empty),  Theme::dim()),
+                Span::styled(format!("  {}/{} kept", self.validate_passed, total), Theme::dim()),
+            ])
+        } else {
+            Line::from(Span::styled("Waiting for sources…", Theme::dim()))
+        };
+
         f.render_widget(
             Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "Reading each source and scoring how well it covers your topic.",
+                    Theme::dim().add_modifier(Modifier::ITALIC),
+                )),
+                Line::from(""),
                 Line::from(vec![
                     Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
-                    Span::styled("Scoring source relevance and quality…", Theme::dim()),
+                    Span::styled("Scoring relevance and quality…", Theme::dim()),
                 ]),
+                Line::from(""),
+                bar_line,
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("✓ ", Theme::success()),
@@ -353,7 +448,23 @@ impl BuildScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let h = inner.height as usize;
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(2), Constraint::Min(1)])
+            .split(inner);
+
+        f.render_widget(
+            Paragraph::new(vec![
+                Line::from(Span::styled(
+                    "Breaking approved sources into chunks and encoding them as embeddings.",
+                    Theme::dim().add_modifier(Modifier::ITALIC),
+                )),
+                Line::from(""),
+            ]),
+            split[0],
+        );
+
+        let h = split[1].height as usize;
         let items: Vec<ListItem> = self.ingest_recent.iter()
             .rev()
             .take(h)
@@ -368,7 +479,7 @@ impl BuildScreen {
                 ]))
             })
             .collect();
-        f.render_widget(List::new(items), inner);
+        f.render_widget(List::new(items), split[1]);
     }
 
     fn render_graph_content(&self, f: &mut Frame, area: Rect, tick: u64) {
@@ -377,9 +488,14 @@ impl BuildScreen {
         f.render_widget(block, area);
 
         let mut lines = vec![
+            Line::from(Span::styled(
+                "Extracting concepts and relationships to wire up your expert's knowledge map.",
+                Theme::dim().add_modifier(Modifier::ITALIC),
+            )),
+            Line::from(""),
             Line::from(vec![
                 Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
-                Span::styled("Extracting concepts and relationships…", Theme::dim()),
+                Span::styled("Building graph…", Theme::dim()),
             ]),
             Line::from(""),
             Line::from(vec![
@@ -394,7 +510,7 @@ impl BuildScreen {
         if let Some(name) = &self.persona_name {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
-                Span::styled("✓  Persona: ", Theme::success()),
+                Span::styled("✓  Persona created: ", Theme::success()),
                 Span::styled(name.as_str(), Theme::normal().add_modifier(Modifier::BOLD)),
             ]));
         }
@@ -430,16 +546,30 @@ impl BuildScreen {
     }
 
     fn render_footer(&self, f: &mut Frame, area: Rect, tick: u64) {
+        let elapsed = fmt_elapsed(self.start_time.elapsed().as_secs());
         let widget = if let Some(err) = &self.error {
-            Paragraph::new(format!("✗  {}", err)).style(Theme::error())
+            Paragraph::new(format!("✗  {}  ·  {}", err, elapsed)).style(Theme::error())
         } else if self.done {
-            Paragraph::new("✓  Build complete!").style(Theme::success())
+            Paragraph::new(format!("✓  Build complete!  ·  {}  ·  [Esc] Home", elapsed)).style(Theme::success())
         } else {
             let spin = spinner::braille(tick);
-            Paragraph::new(format!("{}  {}  ·  [Esc] Cancel", spin, stage_description_for(self.stage)))
-                .style(Theme::dim())
+            Paragraph::new(format!(
+                "{}  {}  ·  {}  ·  [Esc] Back to home — build keeps running",
+                spin, stage_description_for(self.stage), elapsed,
+            )).style(Theme::dim())
         };
         f.render_widget(widget, area);
+    }
+}
+
+fn stage_short_for(stage: u8) -> &'static str {
+    match stage {
+        0 | 1 => "Planning",
+        2      => "Discovering sources",
+        3      => "Validating quality",
+        4      => "Ingesting content",
+        5      => "Building graph",
+        _      => "Finalising",
     }
 }
 
@@ -472,6 +602,11 @@ fn content_block(title: &str) -> Block<'_> {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Theme::normal_border())
+}
+
+fn fmt_elapsed(secs: u64) -> String {
+    if secs < 60 { format!("{}s", secs) }
+    else { format!("{}m {:02}s", secs / 60, secs % 60) }
 }
 
 fn trunc(s: &str, max: usize) -> String {

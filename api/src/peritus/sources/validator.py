@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 
 _PASS_THRESHOLD_Q = 5.0
 _PASS_THRESHOLD_R = 5.0
-_PREVIEW_CHARS = 2_500
+_PREVIEW_CHARS = 1_000
 _VALIDATE_BATCH_SIZE = 5
 
 _SOURCE_TYPE_HINTS: dict[str, str] = {
@@ -95,12 +95,7 @@ _BATCH_TOOL = {
 
 
 def _build_preview(text: str) -> str:
-    """Composite sample: head + tail capped at _PREVIEW_CHARS total."""
-    if len(text) <= _PREVIEW_CHARS:
-        return text
-    head = _PREVIEW_CHARS * 2 // 3
-    tail = _PREVIEW_CHARS - head
-    return text[:head] + "\n\n[...]\n\n" + text[-tail:]
+    return text[:_PREVIEW_CHARS]
 
 
 async def validate_sources(

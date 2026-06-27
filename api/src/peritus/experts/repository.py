@@ -1,23 +1,26 @@
+import dataclasses
 import json
 
 import asyncpg
 
-from peritus.experts.domain import Expert, ExpertStatus
+from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
 
 
 class ExpertRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    async def create(self, name: str, topic: str) -> Expert:
+    async def create(self, name: str, topic: str, tier: ExpertTier = ExpertTier.STANDARD) -> Expert:
+        config = ExpertConfig.from_tier(tier)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO experts (name, topic, status)
-                VALUES ($1, $2, $3)
+                INSERT INTO experts (name, topic, status, tier, config)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
                 RETURNING *
                 """,
                 name, topic, ExpertStatus.BUILDING.value,
+                tier.value, json.dumps(dataclasses.asdict(config)),
             )
         return _row_to_expert(row)
 
@@ -116,6 +119,13 @@ class ExpertRepository:
                 persona_name, persona_bio, persona_style, expert_id,
             )
 
+    async def update_config(self, expert_id: int, config: ExpertConfig) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE experts SET config = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(dataclasses.asdict(config)), expert_id,
+            )
+
     async def delete(self, expert_id: int) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute("DELETE FROM experts WHERE id = $1", expert_id)
@@ -152,11 +162,24 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
         raw = row["source_type_counts"]
         source_type_counts = dict(raw) if isinstance(raw, dict) else json.loads(raw)
 
+    # Tier and config — fall back to STANDARD defaults for rows predating the migration.
+    tier = ExpertTier(row["tier"]) if "tier" in keys and row["tier"] else ExpertTier.STANDARD
+
+    raw_config = row["config"] if "config" in keys else None
+    if isinstance(raw_config, str):
+        raw_config = json.loads(raw_config)
+    if raw_config:
+        config = ExpertConfig(**raw_config)
+    else:
+        config = ExpertConfig.from_tier(tier)
+
     return Expert(
         id=row["id"],
         name=row["name"],
         topic=row["topic"],
         status=ExpertStatus(row["status"]),
+        tier=tier,
+        config=config,
         persona_name=row["persona_name"],
         persona_bio=row["persona_bio"],
         persona_style=row["persona_style"],

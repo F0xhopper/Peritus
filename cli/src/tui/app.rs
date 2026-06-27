@@ -31,6 +31,7 @@ pub struct App {
     pub should_quit: bool,
     pub status_msg: Option<(String, std::time::Instant)>,
     pub tick: u64, // increments every render frame (~60fps)
+    last_expert_poll: std::time::Instant,
 }
 
 impl App {
@@ -48,6 +49,7 @@ impl App {
             should_quit: false,
             status_msg: None,
             tick: 0,
+            last_expert_poll: std::time::Instant::now(),
         }
     }
 
@@ -69,7 +71,10 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
         let tick = app.tick;
         terminal.draw(|f| {
             match app.screen {
-                Screen::Home   => app.home.render(f, f.area(), tick),
+                Screen::Home   => {
+                    let build_info = app.build.as_ref().map(|b| b.card_info());
+                    app.home.render(f, f.area(), tick, build_info.as_ref());
+                }
                 Screen::Build  => {
                     if let Some(build) = &mut app.build { build.render(f, f.area(), tick); }
                 }
@@ -123,7 +128,7 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                     }
                 } else {
                     let in_text_input = match app.screen {
-                        Screen::Home   => app.home.input_active,
+                        Screen::Home   => app.home.input_active && !app.home.tier_select_active,
                         Screen::Config => app.config_screen.editing,
                         _              => false,
                     };
@@ -186,6 +191,27 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 return;
             }
 
+            // Tier picker intercepts navigation before normal home handling.
+            if app.home.tier_select_active {
+                match action {
+                    AppAction::Left  => { app.home.tier_prev(); }
+                    AppAction::Right => { app.home.tier_next(); }
+                    AppAction::Submit => { app.home.tier_confirm(); }
+                    AppAction::Back  => { app.home.tier_cancel(); }
+                    _ => {}
+                }
+                if let Some((topic, tier)) = app.home.take_submitted_build() {
+                    if app.build.is_some() {
+                        app.set_status("A build is already running — press [b] to watch it");
+                    } else {
+                        let build = BuildScreen::new(topic, tier, app.api.clone());
+                        app.build = Some(build);
+                        app.screen = Screen::Build;
+                    }
+                }
+                return;
+            }
+
             match action {
                 AppAction::Quit => app.should_quit = true,
                 AppAction::Up | AppAction::Left  => {
@@ -218,6 +244,9 @@ async fn handle_action(app: &mut App, action: AppAction) {
                         app.home.confirm_delete = true;
                     }
                 }
+                AppAction::Char('b') if !app.home.input_active && app.build.is_some() => {
+                    app.screen = Screen::Build;
+                }
                 AppAction::Char(c) => {
                     if app.home.input_active { app.home.input_push(c); }
                 }
@@ -234,18 +263,20 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 _ => {}
             }
 
-            if let Some(topic) = app.home.take_submitted_topic() {
-                let build = BuildScreen::new(topic, app.api.clone());
-                app.build = Some(build);
-                app.screen = Screen::Build;
+            if let Some((topic, tier)) = app.home.take_submitted_build() {
+                if app.build.is_some() {
+                    app.set_status("A build is already running — press [b] to watch it");
+                } else {
+                    let build = BuildScreen::new(topic, tier, app.api.clone());
+                    app.build = Some(build);
+                    app.screen = Screen::Build;
+                }
             }
         }
 
         Screen::Build => {
             if let AppAction::Back = action {
-                // Cancel the background stream before discarding the screen.
-                if let Some(build) = &app.build { build.cancel(); }
-                app.build = None;
+                // Navigate home without cancelling — the build keeps running in the background.
                 app.screen = Screen::Home;
                 match app.api.list_experts().await {
                     Ok(experts) => { app.experts = experts.clone(); app.home.update_experts(experts); }
@@ -260,17 +291,43 @@ async fn handle_action(app: &mut App, action: AppAction) {
 }
 
 async fn tick_screens(app: &mut App) {
-    if let Some(build) = &mut app.build {
-        let done = build.tick().await;
-        if done {
-            app.screen = Screen::Home;
-            app.build = None;
-            match app.api.list_experts().await {
-                Ok(experts) => { app.experts = experts.clone(); app.home.update_experts(experts); }
-                Err(_) => {}
+    // Tick the build stream; capture done state before dropping the borrow.
+    let build_done = if let Some(build) = &mut app.build {
+        build.tick().await
+    } else {
+        false
+    };
+
+    if build_done {
+        let built_topic = app.build.as_ref().map(|b| b.topic().to_string());
+        app.build = None;
+        app.screen = Screen::Home;
+        match app.api.list_experts().await {
+            Ok(experts) => {
+                app.experts = experts.clone();
+                app.home.update_experts(experts);
+                if let Some(topic) = built_topic {
+                    app.home.select_by_topic(&topic);
+                    app.set_status("Ready to chat — press Enter");
+                }
             }
+            Err(_) => {}
+        }
+        app.last_expert_poll = std::time::Instant::now();
+    }
+
+    // Auto-refresh the expert list while any expert is still building.
+    if app.screen == Screen::Home
+        && app.experts.iter().any(|e| e.status == "building")
+        && app.last_expert_poll.elapsed().as_secs() >= 5
+    {
+        app.last_expert_poll = std::time::Instant::now();
+        if let Ok(experts) = app.api.list_experts().await {
+            app.experts = experts.clone();
+            app.home.update_experts(experts);
         }
     }
+
     if let Some(chat) = &mut app.chat {
         chat.tick().await;
     }

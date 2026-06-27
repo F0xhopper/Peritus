@@ -35,7 +35,7 @@ class Settings:
 
     # Contextual retrieval
     CONTEXT_ENABLED: bool = os.getenv("CONTEXT_ENABLED", "true").lower() == "true"
-    CONTEXT_MAX_CHARS: int = int(os.getenv("CONTEXT_MAX_CHARS", "10000"))
+    CONTEXT_MAX_CHARS: int = int(os.getenv("CONTEXT_MAX_CHARS", "3000"))
     CONTEXT_CONCURRENCY: int = int(os.getenv("CONTEXT_CONCURRENCY", "4"))
 
     # Reranking
