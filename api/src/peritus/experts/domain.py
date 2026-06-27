@@ -12,7 +12,7 @@ class ExpertStatus(str, Enum):
 @dataclass
 class Expert:
     id: int
-    name: str          # user-facing slug, e.g. "stoic philosophy"
+    name: str          # user-facing slug, e.g. "stoic-philosophy"
     topic: str         # raw build topic string
     status: ExpertStatus
     persona_name: str | None = None
@@ -23,6 +23,8 @@ class Expert:
     node_count: int = 0
     edge_count: int = 0
     avg_quality: float | None = None
+    key_concepts: list[str] = field(default_factory=list)
+    source_type_counts: dict[str, int] = field(default_factory=dict)  # computed, not stored
     error: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))

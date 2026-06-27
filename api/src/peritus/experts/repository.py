@@ -1,3 +1,5 @@
+import json
+
 import asyncpg
 
 from peritus.experts.domain import Expert, ExpertStatus
@@ -33,7 +35,23 @@ class ExpertRepository:
 
     async def list_all(self) -> list[Expert]:
         async with self._pool.acquire() as conn:
-            rows = await conn.fetch("SELECT * FROM experts ORDER BY created_at DESC")
+            rows = await conn.fetch(
+                """
+                SELECT e.*,
+                    COALESCE(
+                        (SELECT jsonb_object_agg(source_type, cnt)
+                         FROM (
+                             SELECT source_type, COUNT(*)::int AS cnt
+                             FROM sources
+                             WHERE expert_id = e.id AND passed = true
+                             GROUP BY source_type
+                         ) sc),
+                        '{}'::jsonb
+                    ) AS source_type_counts
+                FROM experts e
+                ORDER BY e.created_at DESC
+                """
+            )
         return [_row_to_expert(r) for r in rows]
 
     async def update_status(
@@ -50,6 +68,13 @@ class ExpertRepository:
                 WHERE id = $3
                 """,
                 status.value, error, expert_id,
+            )
+
+    async def update_key_concepts(self, expert_id: int, key_concepts: list[str]) -> None:
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE experts SET key_concepts = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(key_concepts), expert_id,
             )
 
     async def update_counts(
@@ -113,6 +138,17 @@ class ExpertRepository:
 
 
 def _row_to_expert(row: asyncpg.Record) -> Expert:
+    keys = row.keys()
+
+    # key_concepts stored as JSONB — asyncpg decodes to list automatically.
+    key_concepts: list[str] = list(row["key_concepts"]) if "key_concepts" in keys and row["key_concepts"] else []
+
+    # source_type_counts is a computed column present only in list_all queries.
+    source_type_counts: dict[str, int] = {}
+    if "source_type_counts" in keys and row["source_type_counts"]:
+        raw = row["source_type_counts"]
+        source_type_counts = dict(raw) if isinstance(raw, dict) else json.loads(raw)
+
     return Expert(
         id=row["id"],
         name=row["name"],
@@ -126,6 +162,8 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
         node_count=row["node_count"],
         edge_count=row["edge_count"],
         avg_quality=row["avg_quality"],
+        key_concepts=key_concepts,
+        source_type_counts=source_type_counts,
         error=row["error"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],

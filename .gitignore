@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.pyc
 .venv/
@@ -7,5 +8,10 @@ venv/
 .coverage
 .mypy_cache/
 .ruff_cache/
+
+# Rust
+cli/target/
+
+# Env & logs
 *.log
 .env

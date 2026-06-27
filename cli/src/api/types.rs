@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize)]
@@ -7,10 +8,18 @@ pub struct ExpertSummary {
     pub topic: String,
     pub status: String,
     pub persona_name: Option<String>,
+    pub persona_bio: Option<String>,
+    pub persona_style: Option<String>,
+    pub avg_quality: Option<f64>,
+    #[serde(default)]
+    pub key_concepts: Vec<String>,
     pub source_count: u64,
     pub chunk_count: u64,
     pub node_count: u64,
     pub edge_count: u64,
+    #[serde(default)]
+    pub source_type_counts: HashMap<String, u64>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -144,9 +144,11 @@ class ExpertBuilder:
         # Stage 0: Research planning
         await _emit_event(on_event, {"type": "stage", "stage": 0, "name": "plan"})
         plan = await _plan_research(topic)
+        key_concepts = plan.get("key_concepts", [])
+        await self._repo.update_key_concepts(expert.id, key_concepts)
         await _emit_event(on_event, {
             "type": "plan_ready",
-            "key_concepts": plan.get("key_concepts", []),
+            "key_concepts": key_concepts,
         })
 
         # Stage 1: Discover

@@ -7,7 +7,9 @@ use crate::api::client::ApiClient;
 use crate::api::types::ExpertSummary;
 use crate::config::store::Config;
 use crate::events::{key_to_action, AppAction};
-use crate::tui::screens::{build::BuildScreen, chat::ChatScreen, config::ConfigScreen, home::HomeScreen};
+use crate::tui::screens::{
+    build::BuildScreen, chat::ChatScreen, config::ConfigScreen, home::HomeScreen,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Screen {
@@ -22,13 +24,13 @@ pub struct App {
     pub api: Arc<ApiClient>,
     pub config: Config,
     pub experts: Vec<ExpertSummary>,
-    pub selected_idx: usize,
     pub home: HomeScreen,
     pub build: Option<BuildScreen>,
     pub chat: Option<ChatScreen>,
     pub config_screen: ConfigScreen,
     pub should_quit: bool,
     pub status_msg: Option<(String, std::time::Instant)>,
+    pub tick: u64, // increments every render frame (~60fps)
 }
 
 impl App {
@@ -39,13 +41,13 @@ impl App {
             api: api.clone(),
             config: config.clone(),
             experts: vec![],
-            selected_idx: 0,
             home: HomeScreen::new(),
             build: None,
             chat: None,
             config_screen: ConfigScreen::new(config),
             should_quit: false,
             status_msg: None,
+            tick: 0,
         }
     }
 
@@ -55,7 +57,6 @@ impl App {
 }
 
 pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()> {
-    // Initial expert load
     match app.api.list_experts().await {
         Ok(experts) => {
             app.experts = experts.clone();
@@ -65,18 +66,15 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
     }
 
     loop {
+        let tick = app.tick;
         terminal.draw(|f| {
             match app.screen {
-                Screen::Home => app.home.render(f, f.area()),
-                Screen::Build => {
-                    if let Some(build) = &mut app.build {
-                        build.render(f, f.area());
-                    }
+                Screen::Home   => app.home.render(f, f.area(), tick),
+                Screen::Build  => {
+                    if let Some(build) = &mut app.build { build.render(f, f.area(), tick); }
                 }
-                Screen::Chat => {
-                    if let Some(chat) = &mut app.chat {
-                        chat.render(f, f.area());
-                    }
+                Screen::Chat   => {
+                    if let Some(chat) = &mut app.chat { chat.render(f, f.area(), tick); }
                 }
                 Screen::Config => app.config_screen.render(f, f.area()),
             }
@@ -88,36 +86,47 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                     use crate::tui::theme::Theme;
                     let area = f.area();
                     let w = (msg.len() as u16 + 4).min(area.width);
-                    let toast_area = Rect::new(area.width.saturating_sub(w), area.height.saturating_sub(2), w, 1);
-                    f.render_widget(Paragraph::new(format!(" {} ", msg)).style(Theme::warning()), toast_area);
+                    let toast = Rect::new(
+                        area.width.saturating_sub(w),
+                        area.height.saturating_sub(2),
+                        w, 1,
+                    );
+                    f.render_widget(
+                        Paragraph::new(format!(" {} ", msg)).style(Theme::warning()),
+                        toast,
+                    );
                 }
             }
         })?;
 
-        // Clear stale toast
+        app.tick = app.tick.wrapping_add(1);
+
         if let Some((_, when)) = &app.status_msg {
-            if when.elapsed().as_secs() >= 3 {
-                app.status_msg = None;
-            }
+            if when.elapsed().as_secs() >= 3 { app.status_msg = None; }
         }
 
-        if app.should_quit {
-            break;
-        }
+        if app.should_quit { break; }
 
-        // Poll events with 16ms timeout (≈60fps)
+        // Poll at 16ms (~60fps) — gives the spinner animation a smooth cadence.
         if event::poll(std::time::Duration::from_millis(16))? {
-            match event::read()? {
-                Event::Key(key) if key.kind == KeyEventKind::Press => {
-                    if let Some(action) = key_to_action(key) {
-                        handle_action(app, action).await;
+            if let Event::Key(key) = event::read()? {
+                if key.kind != KeyEventKind::Press { continue; }
+
+                // Chat owns its own key mapping so that j/k/q/n/d reach the input buffer.
+                if app.screen == Screen::Chat {
+                    if let Some(chat) = &mut app.chat {
+                        let done = chat.handle_raw(key).await;
+                        if done {
+                            app.chat = None;
+                            app.screen = Screen::Home;
+                        }
                     }
+                } else if let Some(action) = key_to_action(key) {
+                    handle_action(app, action).await;
                 }
-                _ => {}
             }
         }
 
-        // Tick background tasks
         tick_screens(app).await;
     }
 
@@ -131,7 +140,10 @@ async fn handle_action(app: &mut App, action: AppAction) {
             if app.config_screen.saved {
                 app.config = app.config_screen.config.clone();
                 let _ = app.config.save();
-                app.api = Arc::new(ApiClient::new(app.config.server_url.clone(), app.config.api_key.clone()));
+                app.api = Arc::new(ApiClient::new(
+                    app.config.server_url.clone(),
+                    app.config.api_key.clone(),
+                ));
                 app.screen = Screen::Home;
                 app.config_screen.saved = false;
                 match app.api.list_experts().await {
@@ -140,13 +152,41 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 }
             }
         }
+
         Screen::Home => {
+            // Confirm-delete intercepts D/Esc before normal navigation.
+            if app.home.confirm_delete {
+                match action {
+                    // Capital D (Shift+d) confirms; lowercase d also works for ergonomics.
+                    AppAction::DeleteExpert | AppAction::Char('D') | AppAction::Char('d') => {
+                        app.home.confirm_delete = false;
+                        if let Some(expert) = app.home.selected_expert() {
+                            let slug = expert.name.clone();
+                            match app.api.delete_expert(&slug).await {
+                                Ok(()) => {
+                                    match app.api.list_experts().await {
+                                        Ok(experts) => { app.experts = experts.clone(); app.home.update_experts(experts); }
+                                        Err(e) => app.set_status(format!("Error: {}", e)),
+                                    }
+                                }
+                                Err(e) => app.set_status(format!("Delete failed: {}", e)),
+                            }
+                        }
+                    }
+                    AppAction::Back | AppAction::Quit => { app.home.confirm_delete = false; }
+                    _ => {}
+                }
+                return;
+            }
+
             match action {
                 AppAction::Quit => app.should_quit = true,
-                AppAction::Up => app.home.prev(),
-                AppAction::Down => app.home.next(),
-                AppAction::Left => app.home.prev(),
-                AppAction::Right => app.home.next(),
+                AppAction::Up | AppAction::Left  => {
+                    if app.home.input_active { /* ignore nav in input mode */ } else { app.home.prev(); }
+                }
+                AppAction::Down | AppAction::Right => {
+                    if app.home.input_active { /* ignore nav in input mode */ } else { app.home.next(); }
+                }
                 AppAction::Submit => {
                     if app.home.input_active {
                         app.home.handle_enter();
@@ -159,31 +199,19 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     }
                 }
                 AppAction::NewExpert => {
-                    app.home.start_new_expert_input();
+                    if !app.home.input_active { app.home.start_new_expert_input(); }
                 }
                 AppAction::DeleteExpert => {
-                    if let Some(expert) = app.home.selected_expert() {
-                        let slug = expert.name.clone();
-                        match app.api.delete_expert(&slug).await {
-                            Ok(()) => {
-                                match app.api.list_experts().await {
-                                    Ok(experts) => { app.experts = experts.clone(); app.home.update_experts(experts); }
-                                    Err(e) => app.set_status(format!("Error: {}", e)),
-                                }
-                            }
-                            Err(e) => app.set_status(format!("Delete failed: {}", e)),
-                        }
+                    if !app.home.input_active && app.home.selected_expert().is_some() {
+                        // First press arms the confirmation; second press (handled above) confirms.
+                        app.home.confirm_delete = true;
                     }
                 }
                 AppAction::Char(c) => {
-                    if app.home.input_active {
-                        app.home.input_push(c);
-                    }
+                    if app.home.input_active { app.home.input_push(c); }
                 }
                 AppAction::Backspace => {
-                    if app.home.input_active {
-                        app.home.input_pop();
-                    }
+                    if app.home.input_active { app.home.input_pop(); }
                 }
                 AppAction::Back => {
                     if app.home.input_active {
@@ -195,15 +223,17 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 _ => {}
             }
 
-            // Check if user submitted new expert topic
             if let Some(topic) = app.home.take_submitted_topic() {
-                let build = BuildScreen::new(topic.clone(), app.api.clone());
+                let build = BuildScreen::new(topic, app.api.clone());
                 app.build = Some(build);
                 app.screen = Screen::Build;
             }
         }
+
         Screen::Build => {
             if let AppAction::Back = action {
+                // Cancel the background stream before discarding the screen.
+                if let Some(build) = &app.build { build.cancel(); }
                 app.build = None;
                 app.screen = Screen::Home;
                 match app.api.list_experts().await {
@@ -212,15 +242,9 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 }
             }
         }
-        Screen::Chat => {
-            let done = if let Some(chat) = &mut app.chat {
-                chat.handle(action).await
-            } else { false };
-            if done {
-                app.chat = None;
-                app.screen = Screen::Home;
-            }
-        }
+
+        // Chat is handled via handle_raw in the event loop; nothing reaches here.
+        Screen::Chat => {}
     }
 }
 
