@@ -38,6 +38,11 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "tenacity>=9.0.0",
     "structlog>=24.4.0",
+
+    # API server
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "sse-starlette>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +57,7 @@ dev = [
 
 [project.scripts]
 peritus = "peritus.cli.main:main"
+peritus-server = "peritus.api.app:start"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/peritus"]

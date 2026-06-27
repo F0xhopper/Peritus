@@ -52,6 +52,9 @@ class Settings:
     CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))
     CHUNK_OVERLAP_CHARS: int = int(os.getenv("CHUNK_OVERLAP_CHARS", "200"))
 
+    # API auth
+    PERITUS_API_KEY_HASH: str = os.getenv("PERITUS_API_KEY_HASH", "")
+
     def check_required_vars(self) -> list[str]:
         missing = []
         if not self.DATABASE_URL:
