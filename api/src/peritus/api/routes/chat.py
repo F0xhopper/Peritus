@@ -5,9 +5,12 @@ from sse_starlette.sse import EventSourceResponse
 
 from peritus.api.auth import require_api_key
 from peritus.api.schemas.chat import ChatRequest
+from peritus.core.logging import get_logger
 from peritus.experts.domain import ExpertStatus
 from peritus.experts.repository import ExpertRepository
 from peritus.infrastructure.database import get_pool
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/experts", tags=["chat"], dependencies=[Depends(require_api_key)])
 
@@ -30,7 +33,13 @@ async def chat_stream(slug: str, req: ChatRequest):
 
     async def stream_generator():
         try:
-            from peritus.chat.agent import ChatAgent, _build_context
+            from peritus.chat.agent import ChatAgent
+            from peritus.chat.grounding import (
+                build_grounded_context,
+                build_system_prompt,
+                parse_cited_indices,
+                used_citations,
+            )
             agent = ChatAgent(pool)
 
             # Plan subqueries
@@ -62,41 +71,57 @@ async def chat_stream(slug: str, req: ChatRequest):
                     queries=coverage["suggested_queries"][:cfg.max_subqueries // 2],
                     top_k=cfg.coverage_extra_k,
                 )
-                extra_enriched = await agent._graph.expand(extra_resp.results, expert.id, hops=cfg.graph_hops)
+                extra_enriched = await agent._graph.expand(
+                    extra_resp.results, expert.id, hops=cfg.graph_hops
+                )
                 enriched = enriched + extra_enriched
 
-            # Build context block
+            # Build numbered, deduplicated context block
             yield _status("Composing response…")
-            context_block = _build_context(enriched, cfg.max_context_passages)
+            context_block, passage_index = build_grounded_context(
+                enriched, cfg.max_context_passages
+            )
 
             # Stream the Anthropic response token by token
-            from peritus.infrastructure.anthropic_client import get_anthropic_client
             from peritus.core.config import settings
+            from peritus.infrastructure.anthropic_client import get_anthropic_client
 
             messages = list(history) + [{
                 "role": "user",
                 "content": (
                     f"Question: {req.question}\n\n"
-                    f"Retrieved context (cite inline as [Source — Type · Q:score]):\n\n"
+                    "Numbered passages — answer only from these and cite each claim "
+                    "with its [number]:\n\n"
                     f"{context_block}"
                 ),
             }]
 
             client = get_anthropic_client()
+            answer_parts: list[str] = []
             async with client.messages.stream(
                 model=settings.CLAUDE_MODEL,
                 max_tokens=cfg.max_response_tokens,
-                system=expert.persona_style or f"You are a subject-matter expert in {expert.topic}.",
+                system=build_system_prompt(expert.persona_style, expert.topic),
                 messages=messages,
             ) as stream:
                 async for text in stream.text_stream:
+                    answer_parts.append(text)
                     yield {"data": json.dumps({"type": "token", "text": text})}
 
-            sources = list({e.citation for e in enriched})
+            # Resolve citations: only passages the answer actually cited, with the
+            # passage numbers preserved so inline [n] matches the rendered list.
+            answer_text = "".join(answer_parts)
+            cited = parse_cited_indices(answer_text, len(passage_index))
+            sources = used_citations(passage_index, cited)
             yield {"data": json.dumps({"type": "sources", "citations": sources})}
+
             yield {"data": json.dumps({"type": "done"})}
 
-        except Exception as exc:
-            yield {"data": json.dumps({"type": "error", "message": str(exc)})}
+        except Exception:
+            logger.exception("Chat stream failed for %r", slug)
+            yield {"data": json.dumps({
+                "type": "error",
+                "message": "The expert hit an internal error while answering.",
+            })}
 
     return EventSourceResponse(stream_generator())

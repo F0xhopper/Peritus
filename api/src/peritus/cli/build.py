@@ -249,7 +249,9 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
         elif etype == "persona_ready":
             display.persona_name = event["name"]
 
-    builder = ExpertBuilder(pool, depth=depth, source_filter=source_filter)
+    # NOTE: `depth` is retained as a CLI flag for backwards compatibility but no
+    # longer maps to a builder argument — build breadth is driven by the expert tier.
+    builder = ExpertBuilder(pool, source_filter=source_filter)
 
     try:
         with Live(display, console=console, refresh_per_second=8):

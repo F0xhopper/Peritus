@@ -6,6 +6,11 @@ use std::path::PathBuf;
 pub struct Config {
     pub server_url: String,
     pub api_key: String,
+    // Set true once the user has explicitly completed setup. Defaults false so a
+    // fresh install shows the config screen instead of silently pointing at
+    // localhost with no key.
+    #[serde(default)]
+    pub configured: bool,
 }
 
 impl Default for Config {
@@ -13,6 +18,7 @@ impl Default for Config {
         Self {
             server_url: "http://localhost:8000".into(),
             api_key: String::new(),
+            configured: false,
         }
     }
 }
@@ -44,6 +50,6 @@ impl Config {
     }
 
     pub fn is_configured(&self) -> bool {
-        !self.server_url.is_empty()
+        self.configured && !self.server_url.is_empty()
     }
 }

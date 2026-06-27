@@ -38,15 +38,22 @@ class Settings:
     CONTEXT_MAX_CHARS: int = int(os.getenv("CONTEXT_MAX_CHARS", "3000"))
     CONTEXT_CONCURRENCY: int = int(os.getenv("CONTEXT_CONCURRENCY", "4"))
 
-    # Reranking
+    # Reranking. Prefer a real cross-encoder reranker (Cohere) when a key is set;
+    # otherwise fall back to scoring in small windows rather than one large, unreliable
+    # LLM call over all candidates.
     RERANK_ENABLED: bool = os.getenv("RERANK_ENABLED", "true").lower() == "true"
     RERANK_CANDIDATES: int = int(os.getenv("RERANK_CANDIDATES", "50"))
+    RERANK_WINDOW: int = int(os.getenv("RERANK_WINDOW", "8"))
+    COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
+    COHERE_RERANK_MODEL: str = os.getenv("COHERE_RERANK_MODEL", "rerank-v3.5")
 
     # Source validation concurrency limit
     VALIDATE_CONCURRENCY: int = int(os.getenv("VALIDATE_CONCURRENCY", "5"))
 
-    # Graph extraction batch size (chunks per Claude call)
-    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "40"))
+    # Graph extraction batch size (chunks per Claude call). Kept small because full
+    # chunk text is now sent (not a 400-char preview) — large batches truncate the
+    # tool_use JSON and the whole batch is lost.
+    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "15"))
 
     # Chunking
     CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))

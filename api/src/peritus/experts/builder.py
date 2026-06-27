@@ -47,7 +47,7 @@ from peritus.sources.fetchers.thought_leaders import ThoughtLeadersFetcher
 from peritus.sources.fetchers.web import WebFetcher
 from peritus.sources.fetchers.wikipedia import WikipediaFetcher
 from peritus.sources.fetchers.youtube import YoutubeFetcher
-from peritus.sources.validator import validate_sources
+from peritus.sources.validator import RUBRIC_VERSION, validate_sources
 
 logger = get_logger(__name__)
 
@@ -305,47 +305,55 @@ class ExpertBuilder:
     ) -> list[int]:
         """Write all sources to DB. Returns DB IDs for passed sources only."""
         passed_ids: list[int] = []
+        validator_model = settings.FAST_MODEL
         async with self._pool.acquire() as conn:
-            for vs in passed:
-                row = await conn.fetchrow(
-                    """
-                    INSERT INTO sources
-                        (expert_id, source_type, url, title, author,
-                         quality_score, relevance_score, content_type,
-                         difficulty, key_claims, passed)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true)
-                    RETURNING id
-                    """,
-                    expert_id,
-                    vs.source_type.value,
-                    vs.url,
-                    vs.title,
-                    vs.author,
-                    vs.quality_score,
-                    vs.relevance_score,
-                    vs.content_type,
-                    vs.difficulty,
-                    json.dumps(vs.key_claims),
-                )
-                passed_ids.append(row["id"])
+            async with conn.transaction():
+                for vs in passed:
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO sources
+                            (expert_id, source_type, url, title, author,
+                             quality_score, relevance_score, content_type,
+                             difficulty, key_claims, passed,
+                             validator_model, rubric_version)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12)
+                        RETURNING id
+                        """,
+                        expert_id,
+                        vs.source_type.value,
+                        vs.url,
+                        vs.title,
+                        vs.author,
+                        vs.quality_score,
+                        vs.relevance_score,
+                        vs.content_type,
+                        vs.difficulty,
+                        json.dumps(vs.key_claims),
+                        validator_model,
+                        RUBRIC_VERSION,
+                    )
+                    passed_ids.append(row["id"])
 
-            for ds in dropped:
-                await conn.execute(
-                    """
-                    INSERT INTO sources
-                        (expert_id, source_type, url, title, author,
-                         quality_score, relevance_score, passed, drop_reason)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,false,$8)
-                    """,
-                    expert_id,
-                    ds.raw.source_type.value,
-                    ds.raw.url,
-                    ds.raw.title,
-                    ds.raw.author,
-                    ds.quality_score,
-                    ds.relevance_score,
-                    ds.drop_reason,
-                )
+                for ds in dropped:
+                    await conn.execute(
+                        """
+                        INSERT INTO sources
+                            (expert_id, source_type, url, title, author,
+                             quality_score, relevance_score, passed, drop_reason,
+                             validator_model, rubric_version)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,false,$8,$9,$10)
+                        """,
+                        expert_id,
+                        ds.raw.source_type.value,
+                        ds.raw.url,
+                        ds.raw.title,
+                        ds.raw.author,
+                        ds.quality_score,
+                        ds.relevance_score,
+                        ds.drop_reason,
+                        validator_model,
+                        RUBRIC_VERSION,
+                    )
 
         return passed_ids
 

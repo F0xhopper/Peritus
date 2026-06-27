@@ -2,15 +2,18 @@ import asyncio
 import json
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
 from peritus.api.auth import require_api_key
 from peritus.api.schemas.experts import BuildRequest, ExpertDetail, ExpertSummary
+from peritus.core.logging import get_logger
 from peritus.experts.builder import BuildResult, ExpertBuilder
 from peritus.experts.domain import ExpertStatus
 from peritus.experts.repository import ExpertRepository
 from peritus.infrastructure.database import get_pool
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/experts", tags=["experts"], dependencies=[Depends(require_api_key)])
 
@@ -92,13 +95,14 @@ async def delete_expert(slug: str):
 
 
 @router.post("/build")
-async def build_expert(req: BuildRequest):
+async def build_expert(req: BuildRequest, request: Request):
     pool = get_pool()
     repo = ExpertRepository(pool)
     slug = _slugify(req.topic)
     expert = await repo.create(name=slug, topic=req.topic, tier=req.tier)
 
-    queue: asyncio.Queue[dict | None] = asyncio.Queue()
+    # Bounded so a stalled/disconnected consumer can't grow the queue without limit.
+    queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=1000)
 
     async def on_event(event: dict) -> None:
         await queue.put(event)
@@ -116,19 +120,33 @@ async def build_expert(req: BuildRequest):
                 "node_count": result.node_count,
                 "edge_count": result.edge_count,
             })
+        except asyncio.CancelledError:
+            # Client disconnected — stop spending on an unwatched build.
+            await repo.update_status(expert.id, ExpertStatus.FAILED, "Build cancelled — client disconnected")
+            raise
         except Exception as exc:
             await repo.update_status(expert.id, ExpertStatus.FAILED, str(exc))
             await queue.put({"type": "error", "message": str(exc)})
         finally:
             await queue.put(None)  # sentinel
 
-    asyncio.create_task(run_build())
+    task = asyncio.create_task(run_build())
 
     async def event_generator():
-        while True:
-            event = await queue.get()
-            if event is None:
-                break
-            yield {"data": json.dumps(event)}
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                except TimeoutError:
+                    continue  # re-check disconnect, keep the SSE alive
+                if event is None:
+                    break
+                yield {"data": json.dumps(event)}
+        finally:
+            if not task.done():
+                logger.info("Build SSE closed for %r — cancelling task", slug)
+                task.cancel()
 
     return EventSourceResponse(event_generator())

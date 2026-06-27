@@ -75,11 +75,17 @@ pub enum BuildEvent {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+pub struct SourceCitation {
+    pub n: u32,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEvent {
     Token { text: String },
     Status { message: String },
-    Sources { citations: Vec<String> },
+    Sources { citations: Vec<SourceCitation> },
     Done,
     Error { message: String },
     #[serde(other)]

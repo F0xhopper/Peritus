@@ -18,6 +18,7 @@ pub enum AppAction {
     CtrlW,
     CtrlU,
     Submit,
+    Save,
     Tab,
 }
 
@@ -29,6 +30,7 @@ pub fn key_to_action(key: crossterm::event::KeyEvent, in_text_input: bool) -> Op
     if in_text_input {
         return match (key.code, key.modifiers) {
             (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(AppAction::Quit),
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) => Some(AppAction::Save),
             (KeyCode::Char('w'), KeyModifiers::CONTROL) => Some(AppAction::CtrlW),
             (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(AppAction::CtrlU),
             (KeyCode::Enter, _) => Some(AppAction::Submit),
@@ -48,6 +50,7 @@ pub fn key_to_action(key: crossterm::event::KeyEvent, in_text_input: bool) -> Op
     match (key.code, key.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(AppAction::Quit),
         (KeyCode::Char('q'), KeyModifiers::NONE) => Some(AppAction::Quit),
+        (KeyCode::Char('s'), KeyModifiers::CONTROL) => Some(AppAction::Save),
         (KeyCode::Char('w'), KeyModifiers::CONTROL) => Some(AppAction::CtrlW),
         (KeyCode::Char('u'), KeyModifiers::CONTROL) => Some(AppAction::CtrlU),
         (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => Some(AppAction::Up),

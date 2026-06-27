@@ -1,0 +1,24 @@
+{
+  "expert": "stoic philosophy",
+  "_comment": "Golden set schema. supporting_chunk_ids / supporting_source_ids are the chunk and source ids (from the DB) known to contain the answer. Set must_refuse=true for questions the corpus should NOT be able to answer, to measure hallucination/over-answering.",
+  "questions": [
+    {
+      "question": "What is the Stoic dichotomy of control?",
+      "supporting_chunk_ids": [101, 102],
+      "supporting_source_ids": [12],
+      "must_refuse": false
+    },
+    {
+      "question": "How does Epictetus distinguish what is 'up to us' from what is not?",
+      "supporting_chunk_ids": [103],
+      "supporting_source_ids": [12, 14],
+      "must_refuse": false
+    },
+    {
+      "question": "What did this expert's sources say about quantum chromodynamics?",
+      "supporting_chunk_ids": [],
+      "supporting_source_ids": [],
+      "must_refuse": true
+    }
+  ]
+}

@@ -114,10 +114,6 @@ class SearchService:
                 ),
                 keyword AS (
                     SELECT sc.id,
-                           ts_rank_cd(
-                               to_tsvector('english', sc.text),
-                               plainto_tsquery('english', $4)
-                           ) AS kw_score,
                            ROW_NUMBER() OVER (
                                ORDER BY ts_rank_cd(
                                    to_tsvector('english', sc.text),
@@ -137,9 +133,15 @@ class SearchService:
                     FROM semantic s
                     FULL OUTER JOIN keyword k ON k.id = s.id
                 )
-                SELECT sem.*, fused.rrf_score
+                -- Re-fetch columns for EVERY fused id (semantic OR keyword-only) so
+                -- keyword matches outside the vector top-N still surface as results.
+                SELECT sc.id, sc.expert_id, sc.source_id, sc.text, sc.context_text,
+                       sc.sequence_n, sc.chunk_meta,
+                       s.title AS source_title, s.source_type, s.quality_score,
+                       fused.rrf_score
                 FROM fused
-                JOIN semantic sem ON sem.id = fused.id
+                JOIN source_chunks sc ON sc.id = fused.id
+                JOIN sources s ON s.id = sc.source_id
                 ORDER BY fused.rrf_score DESC
                 LIMIT $5
                 """,

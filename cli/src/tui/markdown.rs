@@ -18,6 +18,7 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
     let mut in_code_block = false;
     let mut heading: Option<HeadingLevel> = None;
     let mut list_depth: usize = 0;
+    let mut link_dest: Option<String> = None;
 
     // Tables are buffered so we can compute column widths before rendering.
     let mut table_rows: Vec<Vec<String>> = Vec::new();
@@ -71,6 +72,20 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             Event::End(TagEnd::Strong) => { bold = false; }
             Event::Start(Tag::Emphasis) => { italic = true; }
             Event::End(TagEnd::Emphasis) => { italic = false; }
+
+            // ── Links ─────────────────────────────────────────────────────
+            // Render the link text underlined, then append the destination so the
+            // URL isn't silently lost in a terminal that can't make text clickable.
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                link_dest = Some(dest_url.into_string());
+            }
+            Event::End(TagEnd::Link) => {
+                if let Some(url) = link_dest.take() {
+                    if !url.is_empty() && !url.starts_with('#') {
+                        spans.push(Span::styled(format!(" ({})", url), Theme::dim()));
+                    }
+                }
+            }
 
             // ── Inline code ───────────────────────────────────────────────
             Event::Code(text) => {
@@ -158,6 +173,8 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
                             HeadingLevel::H2 => Theme::heading2(),
                             _ => Theme::heading3(),
                         }
+                    } else if link_dest.is_some() {
+                        Theme::source().add_modifier(Modifier::UNDERLINED)
                     } else {
                         let mut s = Theme::normal();
                         if bold { s = s.add_modifier(Modifier::BOLD); }

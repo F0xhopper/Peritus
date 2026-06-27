@@ -5,10 +5,16 @@ from dataclasses import dataclass, field
 
 import asyncpg
 
+from peritus.chat.grounding import (
+    build_grounded_context,
+    build_system_prompt,
+    parse_cited_indices,
+    used_citation_labels,
+)
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
-from peritus.graph.retriever import EnrichedResult, GraphRetriever
+from peritus.graph.retriever import GraphRetriever
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.search.service import SearchService
 
@@ -97,8 +103,8 @@ class ChatAgent:
             extra_enriched = await self._graph.expand(extra_resp.results, expert.id, hops=cfg.graph_hops)
             enriched = enriched + extra_enriched
 
-        # 5. Respond in persona
-        context_block = _build_context(enriched, cfg.max_context_passages)
+        # 5. Respond in persona, grounded in numbered passages
+        context_block, passages = build_grounded_context(enriched, cfg.max_context_passages)
         has_contradiction = any(e.has_contradiction for e in enriched)
 
         client = get_anthropic_client()
@@ -106,7 +112,8 @@ class ChatAgent:
             "role": "user",
             "content": (
                 f"Question: {question}\n\n"
-                f"Retrieved context (cite inline as [Source — Type · Q:score]):\n\n"
+                "Numbered passages — answer only from these and cite each claim "
+                "with its [number]:\n\n"
                 f"{context_block}"
             ),
         }]
@@ -114,12 +121,15 @@ class ChatAgent:
         resp = await client.messages.create(
             model=settings.CLAUDE_MODEL,
             max_tokens=cfg.max_response_tokens,
-            system=expert.persona_style or f"You are a subject-matter expert in {expert.topic}.",
+            system=build_system_prompt(expert.persona_style, expert.topic),
             messages=messages,
         )
         answer_text = "".join(b.text for b in resp.content if hasattr(b, "text"))
 
-        sources_used = list({e.citation for e in enriched})
+        # Only the passages the answer actually cited count as sources used.
+        cited = parse_cited_indices(answer_text, len(passages))
+        sources_used = used_citation_labels(passages, cited)
+
         return Answer(
             text=answer_text,
             sources_used=sources_used,
@@ -179,10 +189,3 @@ class ChatAgent:
         except Exception as exc:
             logger.warning("Coverage assessment failed: %s", exc)
             return {"satisfied": True, "suggested_queries": []}
-
-
-def _build_context(enriched: list[EnrichedResult], max_passages: int = 15) -> str:
-    parts = []
-    for i, e in enumerate(enriched[:max_passages], 1):
-        parts.append(f"[{i}] {e.citation}\n{e.context_block()}")
-    return "\n\n".join(parts)

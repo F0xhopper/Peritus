@@ -14,7 +14,7 @@ use tokio::sync::mpsc;
 use futures_util::StreamExt;
 
 use crate::api::client::ApiClient;
-use crate::api::types::{ChatEvent, ChatMessage, ChatRequest, ExpertSummary};
+use crate::api::types::{ChatEvent, ChatMessage, ChatRequest, ExpertSummary, SourceCitation};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::spinner;
 
@@ -22,7 +22,7 @@ use crate::tui::widgets::spinner;
 pub struct Message {
     pub role: String,
     pub content: String,
-    pub sources: Vec<String>,
+    pub sources: Vec<SourceCitation>,
 }
 
 pub struct ChatScreen {
@@ -31,7 +31,7 @@ pub struct ChatScreen {
     pub messages: Vec<Message>,
     current_stream: Option<String>,
     current_status: Option<String>,
-    pending_sources: Vec<String>,
+    pending_sources: Vec<SourceCitation>,
     input_buf: String,
     rx: Option<mpsc::Receiver<ChatEvent>>,
     scroll_offset: usize, // lines scrolled up from the bottom (0 = pinned to bottom)
@@ -50,6 +50,12 @@ impl ChatScreen {
             rx: None,
             scroll_offset: 0,
         }
+    }
+
+    /// Slug of the expert this screen is chatting with — used to decide whether an
+    /// existing chat can be resumed rather than discarded.
+    pub fn expert_slug(&self) -> &str {
+        &self.expert.name
     }
 
     // Chat owns its own key mapping so ALL printable chars reach the input buffer.
@@ -87,7 +93,11 @@ impl ChatScreen {
         let question = self.input_buf.trim().to_string();
         if question.is_empty() || self.rx.is_some() { return; }
 
-        self.messages.push(Message { role: "user".into(), content: question.clone(), sources: vec![] });
+        self.messages.push(Message {
+            role: "user".into(),
+            content: question.clone(),
+            sources: vec![],
+        });
         self.input_buf.clear();
         self.pending_sources.clear();
         self.current_stream = Some(String::new());
@@ -150,12 +160,18 @@ impl ChatScreen {
                     close_rx = true;
                 }
                 ChatEvent::Error { message } => {
-                    self.current_stream.take();
+                    // Preserve any text streamed before the error rather than dropping it.
+                    let partial = self.current_stream.take().unwrap_or_default();
+                    let content = if partial.trim().is_empty() {
+                        format!("Error: {}", message)
+                    } else {
+                        format!("{partial}\n\n_[interrupted: {message}]_")
+                    };
                     self.current_status = None;
                     self.messages.push(Message {
                         role: "assistant".into(),
-                        content: format!("Error: {}", message),
-                        sources: vec![],
+                        content,
+                        sources: std::mem::take(&mut self.pending_sources),
                     });
                     close_rx = true;
                 }
@@ -206,14 +222,14 @@ impl ChatScreen {
                 lines.extend(markdown::render(&msg.content));
                 if !msg.sources.is_empty() {
                     lines.push(Line::from(Span::styled(
-                        "Sources",
+                        "Sources cited",
                         Theme::dim().add_modifier(Modifier::UNDERLINED),
                     )));
-                    for (i, src) in msg.sources.iter().enumerate() {
+                    // Numbers match the inline [n] markers in the answer above.
+                    for src in &msg.sources {
                         lines.push(Line::from(vec![
-                            Span::styled(format!("[{}] ", i + 1), Theme::warning()),
-                            // Long URLs wrap naturally — no manual truncation needed.
-                            Span::styled(src.as_str(), Theme::source()),
+                            Span::styled(format!("[{}] ", src.n), Theme::warning()),
+                            Span::styled(src.label.as_str(), Theme::source()),
                         ]));
                     }
                 }

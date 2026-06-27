@@ -117,12 +117,12 @@ async def _extract_batch(
     on_batch: BatchCallback | None = None,
 ) -> dict:
     chunk_block = "\n\n".join(
-        f"[{i}] {c.text[:400]}" for i, c in enumerate(chunks)
+        f"[{i}] {c.text}" for i, c in enumerate(chunks)
     )
     async with sem:
         resp = await client.messages.create(
             model=settings.GRAPH_MODEL,
-            max_tokens=2048,
+            max_tokens=4096,
             system=_SYSTEM,
             tools=[_TOOL],
             tool_choice={"type": "tool", "name": "extract_graph"},

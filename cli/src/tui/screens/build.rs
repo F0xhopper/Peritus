@@ -15,12 +15,15 @@ use crate::api::types::BuildEvent;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::spinner;
 
+// Index == backend stage number: 0 plan, 1 discover, 2 validate, 3 chunk/ingest,
+// 4 graph, 5 persona. Keep this aligned with builder.py's emitted `stage` values.
 const STAGES: &[(&str, &str)] = &[
     ("plan",      "Plan"),
     ("discovery", "Discover"),
     ("validate",  "Validate"),
     ("ingest",    "Ingest"),
     ("graph",     "Graph"),
+    ("persona",   "Persona"),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,11 +54,14 @@ pub struct BuildScreen {
     // Validation
     validate_passed: u64,
     validate_dropped: u64,
+    validate_total: u64,
     // Ingestion
     ingest_recent: VecDeque<(String, u64)>, // (title, chunks), newest at back
     ingest_count: u64,
+    ingest_total: u64,
     // Graph
     graph_batches: u64,
+    graph_total_batches: u64,
     graph_total_nodes: usize,
     graph_total_edges: u64,
     // Persona
@@ -107,9 +113,12 @@ impl BuildScreen {
             key_concepts: vec![],
             validate_passed: 0,
             validate_dropped: 0,
+            validate_total: 0,
             ingest_recent: VecDeque::with_capacity(20),
             ingest_count: 0,
+            ingest_total: 0,
             graph_batches: 0,
+            graph_total_batches: 0,
             graph_total_nodes: 0,
             graph_total_edges: 0,
             persona_name: None,
@@ -126,25 +135,28 @@ impl BuildScreen {
 
     pub fn card_info(&self) -> BuildCardInfo {
         let detail = match self.stage {
-            0 => "Starting up…".to_string(),
-            1 => if self.key_concepts.is_empty() {
+            0 => if self.key_concepts.is_empty() {
                 "Identifying key concepts…".to_string()
             } else {
                 format!("{} concepts identified", self.key_concepts.len())
             },
-            2 => {
+            1 => {
                 let done = self.fetchers.values()
                     .filter(|s| matches!(s, FetcherState::Done(_) | FetcherState::Skipped))
                     .count();
                 format!("{}/{} fetchers done", done, self.fetchers.len())
             }
-            3 => {
-                let total = self.validate_passed + self.validate_dropped;
-                if total == 0 { "Scoring sources…".to_string() }
+            2 => {
+                let done = self.validate_passed + self.validate_dropped;
+                if done == 0 { "Scoring sources…".to_string() }
                 else { format!("{} accepted  ·  {} dropped", self.validate_passed, self.validate_dropped) }
             }
-            4 => format!("{} sources ingested", self.ingest_count),
-            5 => format!("{} concepts  ·  {} edges", self.graph_total_nodes, self.graph_total_edges),
+            3 => format!("{} sources ingested", self.ingest_count),
+            4 => format!("{} concepts  ·  {} edges", self.graph_total_nodes, self.graph_total_edges),
+            5 => match &self.persona_name {
+                Some(name) => format!("Persona: {}", name),
+                None => "Creating persona…".to_string(),
+            },
             _ => "Finalising…".to_string(),
         };
         BuildCardInfo {
@@ -163,9 +175,15 @@ impl BuildScreen {
     pub async fn tick(&mut self) -> bool {
         while let Ok(event) = self.rx.try_recv() {
             match &event {
-                BuildEvent::Stage { stage, name, .. } => {
+                BuildEvent::Stage { stage, name, total, total_batches } => {
                     self.stage = *stage;
                     self.stage_name = name.clone();
+                    match *stage {
+                        2 => self.validate_total = *total,
+                        3 => self.ingest_total = *total,
+                        4 if *total_batches > 0 => self.graph_total_batches = *total_batches,
+                        _ => {}
+                    }
                     let title = stage_title_for(self.stage);
                     self.log(format!("── {} ──", title), LogLevel::Stage);
                 }
@@ -234,9 +252,11 @@ impl BuildScreen {
                     return true;
                 }
                 BuildEvent::Error { message } => {
+                    // Keep the build screen up so the error is readable. tick() only
+                    // returns true on success (Done), which is what drives the
+                    // "Ready to chat" navigation in the app loop.
                     self.error = Some(message.clone());
                     self.log(format!("Error: {}", message), LogLevel::Error);
-                    return true;
                 }
                 BuildEvent::Unknown => {}
             }
@@ -294,11 +314,12 @@ impl BuildScreen {
 
     fn render_stage_content(&self, f: &mut Frame, area: Rect, tick: u64) {
         match self.stage {
-            0 | 1 => self.render_plan_content(f, area, tick),
-            2      => self.render_discovery_content(f, area, tick),
-            3      => self.render_validate_content(f, area, tick),
-            4      => self.render_ingest_content(f, area),
-            _      => self.render_graph_content(f, area, tick),
+            0 => self.render_plan_content(f, area, tick),
+            1 => self.render_discovery_content(f, area, tick),
+            2 => self.render_validate_content(f, area, tick),
+            3 => self.render_ingest_content(f, area),
+            // 4 graph, 5 persona — the graph panel surfaces the persona once ready.
+            _ => self.render_graph_content(f, area, tick),
         }
     }
 
@@ -439,8 +460,13 @@ impl BuildScreen {
     }
 
     fn render_ingest_content(&self, f: &mut Frame, area: Rect) {
+        let progress = if self.ingest_total > 0 {
+            format!("{}/{} sources", self.ingest_count, self.ingest_total)
+        } else {
+            format!("{} ingested", self.ingest_count)
+        };
         let block = Block::default()
-            .title(format!(" Content Ingestion  ·  {} ingested ", self.ingest_count))
+            .title(format!(" Content Ingestion  ·  {} ", progress))
             .title_style(Theme::dim())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -499,7 +525,14 @@ impl BuildScreen {
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled(format!("{}", self.graph_batches), Theme::accent().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    if self.graph_total_batches > 0 {
+                        format!("{}/{}", self.graph_batches, self.graph_total_batches)
+                    } else {
+                        format!("{}", self.graph_batches)
+                    },
+                    Theme::accent().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" batches  ·  ", Theme::dim()),
                 Span::styled(format!("{}", self.graph_total_nodes), Theme::normal().add_modifier(Modifier::BOLD)),
                 Span::styled(" concepts  ·  ", Theme::dim()),
@@ -564,34 +597,37 @@ impl BuildScreen {
 
 fn stage_short_for(stage: u8) -> &'static str {
     match stage {
-        0 | 1 => "Planning",
-        2      => "Discovering sources",
-        3      => "Validating quality",
-        4      => "Ingesting content",
-        5      => "Building graph",
-        _      => "Finalising",
+        0 => "Planning",
+        1 => "Discovering sources",
+        2 => "Validating quality",
+        3 => "Ingesting content",
+        4 => "Building graph",
+        5 => "Creating persona",
+        _ => "Finalising",
     }
 }
 
 fn stage_title_for(stage: u8) -> &'static str {
     match stage {
-        1 => "Planning",
-        2 => "Source Discovery",
-        3 => "Quality Validation",
-        4 => "Content Ingestion",
-        5 => "Knowledge Graph",
+        0 => "Planning",
+        1 => "Source Discovery",
+        2 => "Quality Validation",
+        3 => "Content Ingestion",
+        4 => "Knowledge Graph",
+        5 => "Persona",
         _ => "Processing",
     }
 }
 
 fn stage_description_for(stage: u8) -> &'static str {
     match stage {
-        0 | 1 => "Analyzing topic and planning sources",
-        2      => "Fetching sources from the web",
-        3      => "Scoring source relevance and quality",
-        4      => "Chunking, embedding, and indexing content",
-        5      => "Extracting concepts and building knowledge graph",
-        _      => "Finalizing",
+        0 => "Analyzing topic and planning sources",
+        1 => "Fetching sources from the web",
+        2 => "Scoring source relevance and quality",
+        3 => "Chunking, embedding, and indexing content",
+        4 => "Extracting concepts and building knowledge graph",
+        5 => "Generating expert persona",
+        _ => "Finalizing",
     }
 }
 

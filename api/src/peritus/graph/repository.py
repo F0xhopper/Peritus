@@ -35,7 +35,7 @@ class GraphRepository:
                     }
                 merged_nodes[key]["chunk_ids"].extend(node.get("chunk_db_ids", []))
 
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
             # Insert nodes, get back label→id mapping
             label_to_id: dict[str, int] = {}
             for key, node in merged_nodes.items():
@@ -108,7 +108,7 @@ class GraphRepository:
 
     async def merge_nodes(self, expert_id: int, keep_id: int, drop_id: int) -> None:
         """Redirect all edges from drop_id to keep_id, merge chunk_ids, delete drop_id."""
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute(
                 """
                 UPDATE expert_nodes

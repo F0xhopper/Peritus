@@ -26,7 +26,7 @@ def render_answer(answer: Answer, persona_name: str | None = None) -> None:
         console.print(
             Panel(
                 sources_text,
-                title="[dim]Sources used this turn[/dim]",
+                title="[dim]Sources cited this turn[/dim]",
                 border_style="dim",
                 padding=(0, 1),
             )

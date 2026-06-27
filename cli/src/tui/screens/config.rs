@@ -20,20 +20,25 @@ impl ConfigScreen {
         Self { config, saved: false, field: 0, editing: false, edit_buf: String::new() }
     }
 
+    fn commit_edit(&mut self) {
+        match self.field {
+            0 => self.config.server_url = self.edit_buf.trim().to_string(),
+            1 => self.config.api_key = self.edit_buf.trim().to_string(),
+            _ => {}
+        }
+        self.editing = false;
+    }
+
     pub fn handle(&mut self, action: AppAction) {
         match action {
             AppAction::Up => { self.field = 0; self.editing = false; }
             AppAction::Down => { self.field = 1; self.editing = false; }
             AppAction::Tab => { self.field = (self.field + 1) % 2; self.editing = false; }
+            // Enter toggles edit on a field and commits it — but does NOT save, so the
+            // user can edit both fields before saving with Ctrl+S.
             AppAction::Submit => {
                 if self.editing {
-                    match self.field {
-                        0 => self.config.server_url = self.edit_buf.trim().to_string(),
-                        1 => self.config.api_key = self.edit_buf.trim().to_string(),
-                        _ => {}
-                    }
-                    self.editing = false;
-                    self.saved = true;
+                    self.commit_edit();
                 } else {
                     self.editing = true;
                     self.edit_buf = match self.field {
@@ -42,6 +47,12 @@ impl ConfigScreen {
                         _ => String::new(),
                     };
                 }
+            }
+            // Ctrl+S persists everything and exits setup.
+            AppAction::Save => {
+                if self.editing { self.commit_edit(); }
+                self.config.configured = true;
+                self.saved = true;
             }
             AppAction::Char(c) if self.editing => { self.edit_buf.push(c); }
             AppAction::Backspace if self.editing => { self.edit_buf.pop(); }
@@ -60,8 +71,12 @@ impl ConfigScreen {
             .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(1), Constraint::Length(1)])
             .split(inner);
 
-        let url_val = if self.editing && self.field == 0 { format!("{}█", self.edit_buf) } else { self.config.server_url.clone() };
-        let key_val = if self.editing && self.field == 1 { format!("{}█", self.edit_buf) } else if self.config.api_key.is_empty() { "(not set)".into() } else { "████████████████".into() };
+        let url_val = if self.editing && self.field == 0 { format!("{}█", self.edit_buf) }
+            else if self.config.server_url.is_empty() { "(e.g. http://localhost:8000)".into() }
+            else { self.config.server_url.clone() };
+        let key_val = if self.editing && self.field == 1 { format!("{}█", self.edit_buf) }
+            else if self.config.api_key.is_empty() { "(optional — leave blank for a local server)".into() }
+            else { "████████████████".into() };
 
         let url_style = if self.field == 0 { Theme::accent() } else { Theme::dim() };
         let key_style = if self.field == 1 { Theme::accent() } else { Theme::dim() };
@@ -77,7 +92,7 @@ impl ConfigScreen {
             chunks[1],
         );
 
-        let hint = if self.editing { "[Enter] Confirm  [Esc] Cancel" } else { "[↑↓/Tab] Navigate  [Enter] Edit & Save  [Esc] Cancel" };
+        let hint = if self.editing { "[Enter] Confirm field  [Esc] Cancel" } else { "[↑↓/Tab] Navigate  [Enter] Edit field  [Ctrl+S] Save & continue  [Esc] Back" };
         f.render_widget(Paragraph::new(hint).style(Theme::dim()), chunks[3]);
     }
 }

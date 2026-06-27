@@ -9,16 +9,21 @@ from peritus.sources.domain import DroppedSource, RawSource, ValidatedSource
 
 logger = get_logger(__name__)
 
+# Quality is a floor (junk filter); relevance is held to a higher bar so the
+# corpus stays on-topic and the credential means something.
 _PASS_THRESHOLD_Q = 5.0
-_PASS_THRESHOLD_R = 5.0
-_PREVIEW_CHARS = 1_000
+_PASS_THRESHOLD_R = 6.0
+# Sample multiple regions instead of judging a source by its opening (often front
+# matter / abstract). Stamped on the credential as the rubric version.
+_PREVIEW_WINDOW_CHARS = 800
+RUBRIC_VERSION = "v2-multiwindow-q5r6"
 _VALIDATE_BATCH_SIZE = 5
 
 _SOURCE_TYPE_HINTS: dict[str, str] = {
     "reddit": (
-        "This source is a Reddit thread. Calibrate quality for informal discussion: "
-        "depth of insight and factual accuracy matter more than formal prose. "
-        "A 6/10 quality score is appropriate for a genuinely informative community discussion."
+        "This source is a Reddit thread. Judge it on the factual accuracy and depth "
+        "of its insight, not its informal prose — but do not inflate the score for "
+        "informality. Discussion without substantive, accurate content scores low."
     ),
     "youtube": (
         "This source is a video transcript. Spoken content naturally contains filler words and "
@@ -79,7 +84,7 @@ _BATCH_TOOL = {
                         },
                         "drop_reason": {
                             "type": ["string", "null"],
-                            "description": "Short phrase if quality_score < 5 OR relevance_score < 5, else null.",
+                            "description": "Short phrase if quality_score < 5 OR relevance_score < 6, else null.",
                         },
                     },
                     "required": [
@@ -95,7 +100,15 @@ _BATCH_TOOL = {
 
 
 def _build_preview(text: str) -> str:
-    return text[:_PREVIEW_CHARS]
+    """Sample head, middle, and tail so a source is judged on more than its opening."""
+    n = len(text)
+    if n <= _PREVIEW_WINDOW_CHARS * 3:
+        return text
+    head = text[:_PREVIEW_WINDOW_CHARS]
+    mid_start = (n // 2) - (_PREVIEW_WINDOW_CHARS // 2)
+    middle = text[mid_start: mid_start + _PREVIEW_WINDOW_CHARS]
+    tail = text[-_PREVIEW_WINDOW_CHARS:]
+    return f"{head}\n\n[…]\n\n{middle}\n\n[…]\n\n{tail}"
 
 
 async def validate_sources(
