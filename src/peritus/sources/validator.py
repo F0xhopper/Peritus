@@ -1,7 +1,6 @@
 """Claude source validator — one call per raw source, concurrency-limited."""
 
 import asyncio
-import json
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -12,7 +11,49 @@ logger = get_logger(__name__)
 
 _PASS_THRESHOLD_Q = 5.0
 _PASS_THRESHOLD_R = 5.0
-_PREVIEW_CHARS = 5000
+_PREVIEW_CHARS = 5_000
+
+_SOURCE_TYPE_HINTS: dict[str, str] = {
+    "reddit": (
+        "This source is a Reddit thread. Calibrate quality for informal discussion: "
+        "depth of insight and factual accuracy matter more than formal prose. "
+        "A 6/10 quality score is appropriate for a genuinely informative community discussion."
+    ),
+    "youtube": (
+        "This source is a video transcript. Spoken content naturally contains filler words and "
+        "repetition — evaluate on information density and accuracy, not writing polish."
+    ),
+    "arxiv": (
+        "This source is an academic paper. Apply rigorous standards: look for clear methodology, "
+        "evidence quality, and citation depth."
+    ),
+    "gutenberg": (
+        "This source is a classic or historical text. Evaluate relevance and historical "
+        "significance rather than expecting modern academic style."
+    ),
+    "thought_leader": (
+        "This source is content by a domain expert or practitioner. Weight depth of their "
+        "specific claims and track record over formal credentials."
+    ),
+}
+
+
+def _build_preview(text: str) -> str:
+    """Composite sample: head + mid + tail capped at _PREVIEW_CHARS total."""
+    if len(text) <= _PREVIEW_CHARS:
+        return text
+    head = _PREVIEW_CHARS // 2
+    mid_size = _PREVIEW_CHARS // 4
+    tail_size = _PREVIEW_CHARS - head - mid_size
+    mid_start = (len(text) - mid_size) // 2
+    return (
+        text[:head]
+        + "\n\n[...]\n\n"
+        + text[mid_start: mid_start + mid_size]
+        + "\n\n[...]\n\n"
+        + text[-tail_size:]
+    )
+
 
 _TOOL = {
     "name": "validate_source",
@@ -106,23 +147,28 @@ async def validate_sources(
 async def _validate_one(topic: str, source: RawSource, sem: asyncio.Semaphore) -> dict:
     async with sem:
         client = get_anthropic_client()
-        preview = source.text[:_PREVIEW_CHARS]
+        preview = _build_preview(source.text)
+        type_hint = _SOURCE_TYPE_HINTS.get(source.source_type.value, "")
+        system_prompt = (
+            "You are a rigorous source quality evaluator. "
+            "Score sources honestly — a score of 5 or above means the source "
+            "genuinely addresses the topic with credible content."
+        )
+        if type_hint:
+            system_prompt += f" {type_hint}"
         resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=512,
-            system=(
-                "You are a rigorous source quality evaluator. "
-                "Score sources honestly — a score of 5 or above means the source "
-                "genuinely addresses the topic with credible content."
-            ),
+            system=system_prompt,
             tools=[_TOOL],
             tool_choice={"type": "tool", "name": "validate_source"},
             messages=[{
                 "role": "user",
                 "content": (
-                    f"Topic: {topic}\n\n"
+                    f"Topic: {topic}\n"
+                    f"Source type: {source.source_type.value}\n"
                     f"Source title: {source.title}\n\n"
-                    f"Source text (first {_PREVIEW_CHARS} chars):\n{preview}"
+                    f"Source text (sampled excerpt):\n{preview}"
                 ),
             }],
         )

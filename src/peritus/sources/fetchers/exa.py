@@ -4,6 +4,8 @@ from peritus.sources.domain import RawSource, SourceType
 
 logger = get_logger(__name__)
 
+_MAX_CHARS = 80_000
+
 
 class ExaFetcher:
     async def fetch(self, topic: str, max_results: int = 8) -> list[RawSource]:
@@ -30,7 +32,7 @@ class ExaFetcher:
                     url=r.url or "",
                     title=r.title or r.url or "Untitled",
                     author=None,
-                    text=text,
+                    text=text[:_MAX_CHARS],
                     metadata={"exa_id": r.id},
                 ))
             return sources

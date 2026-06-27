@@ -159,8 +159,8 @@ class ExpertBuilder:
             await _emit_event(on_event, {"type": "snowball_done", "added": len(extra)})
             raw_sources.extend(extra)
 
-        # Dedup by URL before paying validation costs
-        raw_sources = _dedup_by_url(raw_sources)
+        # Dedup by normalised URL before paying validation costs
+        raw_sources = _deduplicate_sources(raw_sources)
 
         if not raw_sources:
             raise BuildError("No sources discovered. Check API keys and network access.")
@@ -355,7 +355,7 @@ async def _plan_research(topic: str) -> dict:
         client = get_anthropic_client()
         resp = await client.messages.create(
             model=settings.FAST_MODEL,
-            max_tokens=400,
+            max_tokens=800,
             system=(
                 "Generate targeted search queries for different source types to build a "
                 "comprehensive knowledge base. Each query should be specific to what that "
@@ -475,17 +475,6 @@ async def _snowball_citations(
                 logger.debug("Snowball fetch failed for arXiv:%s: %s", aid, exc)
 
     return extra
-
-
-def _dedup_by_url(sources: list[RawSource]) -> list[RawSource]:
-    seen: set[str] = set()
-    out: list[RawSource] = []
-    for s in sources:
-        if not s.url or s.url not in seen:
-            out.append(s)
-            if s.url:
-                seen.add(s.url)
-    return out
 
 
 async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:

@@ -30,39 +30,49 @@ class ArxivFetcher:
             logger.warning("ArXiv search failed for %r: %s", topic, exc)
             return []
 
-        sources: list[RawSource] = []
         async with httpx.AsyncClient(
             timeout=30, headers=_HEADERS, follow_redirects=True
         ) as http:
-            for paper in papers:
-                try:
-                    arxiv_id = _extract_id(paper.entry_id)
-                    full_text = await _fetch_ar5iv(http, arxiv_id)
-                    if len(full_text) >= _MIN_FULL_TEXT:
-                        text = full_text[:_MAX_FULL_TEXT]
-                        has_full = True
-                    else:
-                        text = f"{paper.title}\n\n{paper.summary}"
-                        has_full = False
+            results = await asyncio.gather(
+                *[_process_paper(http, paper) for paper in papers],
+                return_exceptions=True,
+            )
 
-                    sources.append(RawSource(
-                        source_type=SourceType.ARXIV,
-                        url=paper.entry_id,
-                        title=paper.title,
-                        author=", ".join(str(a) for a in paper.authors[:3]),
-                        text=text,
-                        metadata={
-                            "arxiv_id": arxiv_id,
-                            "published": str(paper.published),
-                            "categories": paper.categories,
-                            "full_text": has_full,
-                        },
-                    ))
-                except Exception as exc:
-                    logger.warning(
-                        "ArXiv paper processing failed for %r: %s", paper.entry_id, exc
-                    )
+        sources: list[RawSource] = []
+        for paper, result in zip(papers, results):
+            if isinstance(result, Exception):
+                logger.warning("ArXiv paper processing failed for %r: %s", paper.entry_id, result)
+            elif result is not None:
+                sources.append(result)
         return sources
+
+
+async def _process_paper(http: httpx.AsyncClient, paper) -> RawSource | None:
+    try:
+        arxiv_id = _extract_id(paper.entry_id)
+        full_text = await _fetch_ar5iv(http, arxiv_id)
+        if len(full_text) >= _MIN_FULL_TEXT:
+            text = full_text[:_MAX_FULL_TEXT]
+            has_full = True
+        else:
+            text = f"{paper.title}\n\n{paper.summary}"
+            has_full = False
+        return RawSource(
+            source_type=SourceType.ARXIV,
+            url=paper.entry_id,
+            title=paper.title,
+            author=", ".join(str(a) for a in paper.authors[:3]),
+            text=text,
+            metadata={
+                "arxiv_id": arxiv_id,
+                "published": str(paper.published),
+                "categories": paper.categories,
+                "full_text": has_full,
+            },
+        )
+    except Exception as exc:
+        logger.warning("ArXiv paper processing failed for %r: %s", paper.entry_id, exc)
+        return None
 
 
 def _extract_id(entry_id: str) -> str:

@@ -21,7 +21,7 @@ class YoutubeFetcher:
         for vid_id, title in video_ids:
             try:
                 transcript = await asyncio.to_thread(_fetch_transcript, vid_id)
-                if not transcript:
+                if not transcript or len(transcript) < 500:
                     continue
                 sources.append(RawSource(
                     source_type=SourceType.YOUTUBE,
@@ -74,5 +74,8 @@ def _extract_video_id(url: str) -> str | None:
 
 def _fetch_transcript(video_id: str) -> str:
     api = YouTubeTranscriptApi()
-    fetched = api.fetch(video_id)
+    try:
+        fetched = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
+    except Exception:
+        fetched = api.fetch(video_id)
     return " ".join(entry.text for entry in fetched)

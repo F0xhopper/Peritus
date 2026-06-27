@@ -25,39 +25,45 @@ class PdfFetcher:
             return []
 
         papers = await _search_semantic_scholar(topic, max_results)
+
+        results = await asyncio.gather(
+            *[_process_paper(paper) for paper in papers],
+            return_exceptions=True,
+        )
+
         sources: list[RawSource] = []
-
-        for paper in papers:
-            pdf_info = paper.get("openAccessPdf") or {}
-            pdf_url = pdf_info.get("url")
-            if not pdf_url:
-                continue
-            if not await _is_pdf_url(pdf_url):
-                logger.debug("Skipping non-PDF URL: %s", pdf_url)
-                continue
-            try:
-                text = await parse_pdf_url(pdf_url)
-                if len(text) < 500:
-                    continue
-                authors = ", ".join(
-                    a.get("name", "") for a in paper.get("authors", [])[:3]
-                ) or None
-                sources.append(RawSource(
-                    source_type=SourceType.PDF,
-                    url=pdf_url,
-                    title=paper.get("title") or "Untitled",
-                    author=authors,
-                    text=text[:_MAX_CHARS],
-                    metadata={
-                        "semantic_scholar_id": paper.get("paperId"),
-                        "year": paper.get("year"),
-                    },
-                ))
-                logger.info("PDF ingested: %r (%d chars)", paper.get("title"), len(text))
-            except Exception as exc:
-                logger.warning("PDF fetch/OCR failed for %r: %s", pdf_url, exc)
-
+        for paper, result in zip(papers, results):
+            if isinstance(result, Exception):
+                logger.warning("PDF processing failed for %r: %s", paper.get("title"), result)
+            elif result is not None:
+                sources.append(result)
         return sources
+
+
+async def _process_paper(paper: dict) -> RawSource | None:
+    pdf_info = paper.get("openAccessPdf") or {}
+    pdf_url = pdf_info.get("url")
+    if not pdf_url:
+        return None
+    if not await _is_pdf_url(pdf_url):
+        logger.debug("Skipping non-PDF URL: %s", pdf_url)
+        return None
+    text = await parse_pdf_url(pdf_url)
+    if len(text) < 500:
+        return None
+    authors = ", ".join(a.get("name", "") for a in paper.get("authors", [])[:3]) or None
+    logger.info("PDF ingested: %r (%d chars)", paper.get("title"), len(text))
+    return RawSource(
+        source_type=SourceType.PDF,
+        url=pdf_url,
+        title=paper.get("title") or "Untitled",
+        author=authors,
+        text=text[:_MAX_CHARS],
+        metadata={
+            "semantic_scholar_id": paper.get("paperId"),
+            "year": paper.get("year"),
+        },
+    )
 
 
 async def _is_pdf_url(url: str) -> bool:
