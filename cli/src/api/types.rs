@@ -74,6 +74,7 @@ pub enum BuildEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEvent {
     Token { text: String },
+    Status { message: String },
     Sources { citations: Vec<String> },
     Done,
     Error { message: String },

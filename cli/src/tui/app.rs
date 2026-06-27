@@ -121,8 +121,15 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                             app.screen = Screen::Home;
                         }
                     }
-                } else if let Some(action) = key_to_action(key) {
-                    handle_action(app, action).await;
+                } else {
+                    let in_text_input = match app.screen {
+                        Screen::Home   => app.home.input_active,
+                        Screen::Config => app.config_screen.editing,
+                        _              => false,
+                    };
+                    if let Some(action) = key_to_action(key, in_text_input) {
+                        handle_action(app, action).await;
+                    }
                 }
             }
         }

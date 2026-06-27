@@ -265,16 +265,26 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
         chunks[2],
     );
 
-    let bio = expert.persona_bio.as_deref().unwrap_or("");
-    let bio_lines: Vec<Line> = if bio.is_empty() {
-        vec![]
-    } else {
-        bio.split('\n')
-            .map(|p| Line::from(Span::styled(p, Theme::dim())))
-            .collect()
-    };
+    let mut body_lines: Vec<Line> = Vec::new();
+
+    if let Some(bio) = expert.persona_bio.as_deref().filter(|s| !s.is_empty()) {
+        for para in bio.split('\n') {
+            body_lines.push(Line::from(Span::styled(para.to_string(), Theme::dim())));
+        }
+        if !expert.key_concepts.is_empty() {
+            body_lines.push(Line::from(""));
+        }
+    }
+
+    for concept in &expert.key_concepts {
+        body_lines.push(Line::from(vec![
+            Span::styled("· ", Theme::accent()),
+            Span::styled(concept.clone(), Theme::dim()),
+        ]));
+    }
+
     f.render_widget(
-        Paragraph::new(bio_lines).wrap(Wrap { trim: true }),
+        Paragraph::new(body_lines).wrap(Wrap { trim: true }),
         chunks[3],
     );
 }

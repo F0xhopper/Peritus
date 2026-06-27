@@ -24,6 +24,9 @@ async def chat_stream(slug: str, req: ChatRequest):
 
     history = [{"role": m.role, "content": m.content} for m in req.history]
 
+    def _status(msg: str) -> dict:
+        return {"data": json.dumps({"type": "status", "message": msg})}
+
     async def stream_generator():
         try:
             # Do the non-streaming retrieval pipeline first
@@ -31,9 +34,11 @@ async def chat_stream(slug: str, req: ChatRequest):
             agent = ChatAgent(pool)
 
             # Plan subqueries
+            yield _status("Planning search queries…")
             subqueries = await agent._plan(req.question, expert.topic)
 
             # Parallel hybrid search
+            yield _status(f"Searching knowledge base across {len(subqueries)} queries…")
             search_resp = await agent._search.batch_search(
                 expert_id=expert.id,
                 question=req.question,
@@ -42,12 +47,15 @@ async def chat_stream(slug: str, req: ChatRequest):
             )
 
             # Graph expansion
+            yield _status("Expanding knowledge graph…")
             enriched = await agent._graph.expand(search_resp.results, expert.id)
 
             # Coverage check
+            yield _status("Assessing coverage…")
             passages = [{"text": e.text, "citation": e.citation} for e in enriched]
             coverage = await agent._assess_coverage(req.question, passages)
             if not coverage["satisfied"] and coverage.get("suggested_queries"):
+                yield _status("Retrieving additional context…")
                 extra_resp = await agent._search.batch_search(
                     expert_id=expert.id,
                     question=req.question,
@@ -58,6 +66,7 @@ async def chat_stream(slug: str, req: ChatRequest):
                 enriched = enriched + extra_enriched
 
             # Build context block
+            yield _status("Composing response…")
             context_block = _build_context(enriched)
 
             # Stream the Anthropic response token by token

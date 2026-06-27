@@ -11,7 +11,7 @@ pub struct ConfigScreen {
     pub config: Config,
     pub saved: bool,
     field: usize, // 0 = server_url, 1 = api_key
-    editing: bool,
+    pub editing: bool,
     edit_buf: String,
 }
 

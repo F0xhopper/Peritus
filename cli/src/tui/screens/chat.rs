@@ -30,6 +30,7 @@ pub struct ChatScreen {
     api: Arc<ApiClient>,
     pub messages: Vec<Message>,
     current_stream: Option<String>,
+    current_status: Option<String>,
     pending_sources: Vec<String>,
     input_buf: String,
     rx: Option<mpsc::Receiver<ChatEvent>>,
@@ -43,6 +44,7 @@ impl ChatScreen {
             api,
             messages: vec![],
             current_stream: None,
+            current_status: None,
             pending_sources: vec![],
             input_buf: String::new(),
             rx: None,
@@ -89,6 +91,7 @@ impl ChatScreen {
         self.input_buf.clear();
         self.pending_sources.clear();
         self.current_stream = Some(String::new());
+        self.current_status = None;
         self.scroll_offset = 0; // snap to bottom on send
 
         let history: Vec<ChatMessage> = self.messages.iter()
@@ -124,7 +127,16 @@ impl ChatScreen {
         let mut close_rx = false;
         for event in events {
             match event {
-                ChatEvent::Token { text }    => { if let Some(b) = &mut self.current_stream { b.push_str(&text); } }
+                ChatEvent::Status { message } => {
+                    // Only show status while no tokens have arrived yet.
+                    if self.current_stream.as_deref() == Some("") {
+                        self.current_status = Some(message);
+                    }
+                }
+                ChatEvent::Token { text } => {
+                    self.current_status = None; // status replaced by actual text
+                    if let Some(b) = &mut self.current_stream { b.push_str(&text); }
+                }
                 ChatEvent::Sources { citations } => { self.pending_sources = citations; }
                 ChatEvent::Done => {
                     if let Some(text) = self.current_stream.take() {
@@ -134,10 +146,12 @@ impl ChatScreen {
                             sources: std::mem::take(&mut self.pending_sources),
                         });
                     }
+                    self.current_status = None;
                     close_rx = true;
                 }
                 ChatEvent::Error { message } => {
                     self.current_stream.take();
+                    self.current_status = None;
                     self.messages.push(Message {
                         role: "assistant".into(),
                         content: format!("Error: {}", message),
@@ -207,21 +221,29 @@ impl ChatScreen {
             lines.push(Line::from("")); // spacer between messages
         }
 
-        // In-flight streaming bubble — cursor attached to the last content span so
-        // it appears at the end of the last wrapped sub-line.
+        // In-flight streaming bubble.
         if let Some(buf) = &self.current_stream {
             lines.push(Line::from(Span::styled(
                 expert_name,
                 Theme::accent2().add_modifier(Modifier::BOLD),
             )));
-            let mut md_lines = markdown::render(buf);
-            // Attach the pulse cursor to the last rendered line.
-            if let Some(last) = md_lines.last_mut() {
-                last.spans.push(Span::styled(spinner::pulse(tick), Theme::accent()));
+            if buf.is_empty() {
+                // No tokens yet — show the current pipeline status with a spinner.
+                let label = self.current_status.as_deref().unwrap_or("Thinking…");
+                lines.push(Line::from(vec![
+                    Span::styled(spinner::dots(tick), Theme::accent()),
+                    Span::styled(format!(" {}", label), Theme::dim()),
+                ]));
             } else {
-                md_lines.push(Line::from(Span::styled(spinner::pulse(tick), Theme::accent())));
+                // Tokens arriving — render markdown and attach the pulse cursor.
+                let mut md_lines = markdown::render(buf);
+                if let Some(last) = md_lines.last_mut() {
+                    last.spans.push(Span::styled(spinner::pulse(tick), Theme::accent()));
+                } else {
+                    md_lines.push(Line::from(Span::styled(spinner::pulse(tick), Theme::accent())));
+                }
+                lines.extend(md_lines);
             }
-            lines.extend(md_lines);
         }
 
         // Build Paragraph — this is the single source of truth for wrapping.

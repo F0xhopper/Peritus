@@ -140,8 +140,11 @@ class ExpertRepository:
 def _row_to_expert(row: asyncpg.Record) -> Expert:
     keys = row.keys()
 
-    # key_concepts stored as JSONB — asyncpg decodes to list automatically.
-    key_concepts: list[str] = list(row["key_concepts"]) if "key_concepts" in keys and row["key_concepts"] else []
+    # key_concepts stored as JSONB — decode from string if asyncpg doesn't auto-decode.
+    _raw_concepts = row["key_concepts"] if "key_concepts" in keys else None
+    if isinstance(_raw_concepts, str):
+        _raw_concepts = json.loads(_raw_concepts)
+    key_concepts: list[str] = list(_raw_concepts) if _raw_concepts else []
 
     # source_type_counts is a computed column present only in list_all queries.
     source_type_counts: dict[str, int] = {}
