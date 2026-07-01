@@ -3,12 +3,13 @@ use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::DefaultTerminal;
 
-use crate::api::client::ApiClient;
-use crate::api::types::ExpertSummary;
-use crate::config::store::Config;
+use crate::api::client::{is_unauthorized, ApiClient};
+use crate::api::types::{ExpertSummary, Session};
+use crate::config::store::{now_unix, Config};
 use crate::events::{key_to_action, AppAction};
 use crate::tui::screens::{
     build::BuildScreen, chat::ChatScreen, config::ConfigScreen, home::HomeScreen,
+    login::{LoginPhase, LoginScreen},
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -17,6 +18,7 @@ pub enum Screen {
     Build,
     Chat,
     Config,
+    Login,
 }
 
 pub struct App {
@@ -28,6 +30,7 @@ pub struct App {
     pub build: Option<BuildScreen>,
     pub chat: Option<ChatScreen>,
     pub config_screen: ConfigScreen,
+    pub login: LoginScreen,
     pub should_quit: bool,
     pub show_help: bool,
     pub status_msg: Option<(String, std::time::Instant)>,
@@ -37,7 +40,7 @@ pub struct App {
 
 impl App {
     pub fn new(config: Config) -> Self {
-        let api = Arc::new(ApiClient::new(config.server_url.clone(), config.api_key.clone()));
+        let api = Arc::new(ApiClient::new(config.server_url.clone(), config.bearer()));
         Self {
             screen: if config.is_configured() { Screen::Home } else { Screen::Config },
             api: api.clone(),
@@ -46,6 +49,7 @@ impl App {
             home: HomeScreen::new(),
             build: None,
             chat: None,
+            login: LoginScreen::new(config.email.clone()),
             config_screen: ConfigScreen::new(config),
             should_quit: false,
             show_help: false,
@@ -72,15 +76,11 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
         );
     })?;
 
-    match app.api.list_experts().await {
-        Ok(experts) => {
-            app.experts = experts.clone();
-            app.home.update_experts(experts);
-        }
-        Err(e) => app.set_status(format!(
-            "Cannot reach server at {} — press [c] to change settings ({})",
-            app.config.server_url, e
-        )),
+    // Once a server is configured, refresh an expiring session and load experts.
+    // A 401 means the server requires login and we have no valid session.
+    if app.screen != Screen::Config {
+        ensure_session(app).await;
+        startup_load(app).await;
     }
 
     loop {
@@ -98,6 +98,7 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                     if let Some(chat) = &mut app.chat { chat.render(f, f.area(), tick); }
                 }
                 Screen::Config => app.config_screen.render(f, f.area()),
+                Screen::Login  => app.login.render(f, f.area()),
             }
 
             // Status toast
@@ -151,6 +152,7 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                     let in_text_input = match app.screen {
                         Screen::Home   => app.home.input_active && !app.home.tier_select_active,
                         Screen::Config => app.config_screen.editing,
+                        Screen::Login  => true, // both login fields are always text entry
                         _              => false,
                     };
                     if let Some(action) = key_to_action(key, in_text_input) {
@@ -192,14 +194,30 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 let _ = app.config.save();
                 app.api = Arc::new(ApiClient::new(
                     app.config.server_url.clone(),
-                    app.config.api_key.clone(),
+                    app.config.bearer(),
                 ));
                 app.screen = Screen::Home;
                 app.config_screen.saved = false;
-                match app.api.list_experts().await {
-                    Ok(experts) => { app.experts = experts.clone(); app.home.update_experts(experts); }
-                    Err(e) => app.set_status(format!("Cannot reach server: {}", e)),
+                ensure_session(app).await;
+                startup_load(app).await;
+            }
+        }
+
+        Screen::Login => {
+            match action {
+                AppAction::Back => {
+                    if app.login.phase == LoginPhase::Code {
+                        app.login.back_to_email();
+                    } else {
+                        app.should_quit = true;
+                    }
                 }
+                AppAction::Submit if !app.login.busy => {
+                    handle_login_submit(app).await;
+                }
+                AppAction::Char(c) => app.login.input_push(c),
+                AppAction::Backspace => app.login.input_pop(),
+                _ => {}
             }
         }
 
@@ -293,6 +311,17 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     app.config_screen = ConfigScreen::new(app.config.clone());
                     app.screen = Screen::Config;
                 }
+                AppAction::Char('L') if !app.home.input_active => {
+                    app.config.clear_session();
+                    let _ = app.config.save();
+                    app.api = Arc::new(ApiClient::new(
+                        app.config.server_url.clone(),
+                        app.config.bearer(),
+                    ));
+                    app.login = LoginScreen::new(String::new());
+                    app.screen = Screen::Login;
+                    app.set_status("Signed out");
+                }
                 AppAction::Char(c) => {
                     if app.home.input_active { app.home.input_push(c); }
                 }
@@ -340,6 +369,110 @@ async fn handle_action(app: &mut App, action: AppAction) {
 
         // Chat is handled via handle_raw in the event loop; nothing reaches here.
         Screen::Chat => {}
+    }
+}
+
+/// Refresh a session whose access token is missing or about to expire. On failure
+/// the stored session is cleared so the next API call routes the user to Login.
+async fn ensure_session(app: &mut App) {
+    if app.config.has_session() && app.config.access_expiring(60) {
+        match app.api.refresh(&app.config.refresh_token).await {
+            Ok(session) => apply_session(app, session),
+            Err(_) => {
+                app.config.clear_session();
+                let _ = app.config.save();
+                app.api = Arc::new(ApiClient::new(
+                    app.config.server_url.clone(),
+                    app.config.bearer(),
+                ));
+            }
+        }
+    }
+}
+
+/// Persist a fresh session and rebuild the API client to use the new access token.
+fn apply_session(app: &mut App, session: Session) {
+    let expires_at = session
+        .expires_at
+        .unwrap_or_else(|| now_unix() + session.expires_in);
+    let email = session.user.email.clone().unwrap_or_default();
+    app.config
+        .set_session(session.access_token, session.refresh_token, expires_at, email);
+    let _ = app.config.save();
+    app.api = Arc::new(ApiClient::new(
+        app.config.server_url.clone(),
+        app.config.bearer(),
+    ));
+}
+
+/// Load experts at startup, routing to the Login screen on 401.
+async fn startup_load(app: &mut App) {
+    match app.api.list_experts().await {
+        Ok(experts) => {
+            app.experts = experts.clone();
+            app.home.update_experts(experts);
+        }
+        Err(e) if is_unauthorized(&e) => {
+            app.login = LoginScreen::new(app.config.email.clone());
+            app.screen = Screen::Login;
+        }
+        Err(e) => app.set_status(format!(
+            "Cannot reach server at {} — press [c] to change settings ({})",
+            app.config.server_url, e
+        )),
+    }
+}
+
+/// Drive the email-OTP login flow: request a code, then verify it for a session.
+async fn handle_login_submit(app: &mut App) {
+    match app.login.phase {
+        LoginPhase::Email => {
+            let email = app.login.email.trim().to_string();
+            if !email.contains('@') {
+                app.login.error = Some("Enter a valid email address".into());
+                return;
+            }
+            app.login.busy = true;
+            app.login.error = None;
+            app.login.status = Some("Sending code…".into());
+            match app.api.otp_request(&email).await {
+                Ok(()) => {
+                    app.login.phase = LoginPhase::Code;
+                    app.login.status = Some(format!("Code sent to {email}"));
+                }
+                Err(e) => {
+                    app.login.status = None;
+                    app.login.error = Some(format!("{e}"));
+                }
+            }
+            app.login.busy = false;
+        }
+        LoginPhase::Code => {
+            let email = app.login.email.trim().to_string();
+            let code = app.login.code.trim().to_string();
+            if code.is_empty() {
+                app.login.error = Some("Enter the code from your email".into());
+                return;
+            }
+            app.login.busy = true;
+            app.login.error = None;
+            app.login.status = Some("Verifying…".into());
+            match app.api.otp_verify(&email, &code).await {
+                Ok(session) => {
+                    apply_session(app, session);
+                    app.screen = Screen::Home;
+                    let who = if app.config.email.is_empty() { email } else { app.config.email.clone() };
+                    app.set_status(format!("Signed in as {who}"));
+                    startup_load(app).await;
+                }
+                Err(e) => {
+                    app.login.status = None;
+                    app.login.error = Some(format!("{e}"));
+                    app.login.code.clear();
+                }
+            }
+            app.login.busy = false;
+        }
     }
 }
 
@@ -416,6 +549,7 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
         key("d", "Delete (press again to confirm)"),
         key("b", "Watch the running build"),
         key("c", "Settings"),
+        key("L", "Sign out"),
         key("q / Esc", "Quit"),
         Line::from(""),
         Line::from(Span::styled("Chat", Theme::title())),

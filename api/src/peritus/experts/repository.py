@@ -10,17 +10,23 @@ class ExpertRepository:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
 
-    async def create(self, name: str, topic: str, tier: ExpertTier = ExpertTier.STANDARD) -> Expert:
+    async def create(
+        self,
+        name: str,
+        topic: str,
+        tier: ExpertTier = ExpertTier.STANDARD,
+        owner_id: str | None = None,
+    ) -> Expert:
         config = ExpertConfig.from_tier(tier)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO experts (name, topic, status, tier, config)
-                VALUES ($1, $2, $3, $4, $5::jsonb)
+                INSERT INTO experts (name, topic, status, tier, config, owner_id)
+                VALUES ($1, $2, $3, $4, $5::jsonb, $6::uuid)
                 RETURNING *
                 """,
                 name, topic, ExpertStatus.BUILDING.value,
-                tier.value, json.dumps(dataclasses.asdict(config)),
+                tier.value, json.dumps(dataclasses.asdict(config)), owner_id,
             )
         return _row_to_expert(row)
 
@@ -56,6 +62,56 @@ class ExpertRepository:
                 """
             )
         return [_row_to_expert(r) for r in rows]
+
+    async def list_for_user(self, owner_id: str, include_unowned: bool) -> list[Expert]:
+        """Experts visible to a user: their own, plus legacy NULL-owned for admins."""
+        clause, params = _visibility_clause(owner_id, include_unowned, alias="e", idx=1)
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT e.*,
+                    COALESCE(
+                        (SELECT jsonb_object_agg(source_type, cnt)
+                         FROM (
+                             SELECT source_type, COUNT(*)::int AS cnt
+                             FROM sources
+                             WHERE expert_id = e.id AND passed = true
+                             GROUP BY source_type
+                         ) sc),
+                        '{{}}'::jsonb
+                    ) AS source_type_counts
+                FROM experts e
+                WHERE {clause}
+                ORDER BY e.created_at DESC
+                """,
+                *params,
+            )
+        return [_row_to_expert(r) for r in rows]
+
+    async def get_for_user(
+        self, name: str, owner_id: str, include_unowned: bool
+    ) -> Expert | None:
+        """Get an expert by slug, only if the user is allowed to see it."""
+        clause, params = _visibility_clause(owner_id, include_unowned, alias="experts", idx=2)
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"SELECT * FROM experts WHERE lower(name) = lower($1) AND {clause}",
+                name, *params,
+            )
+        return _row_to_expert(row) if row else None
+
+    async def delete_for_user(
+        self, name: str, owner_id: str, include_unowned: bool
+    ) -> bool:
+        """Delete an expert by slug if the user owns it. Returns True if a row went."""
+        clause, params = _visibility_clause(owner_id, include_unowned, alias="experts", idx=2)
+        async with self._pool.acquire() as conn:
+            result = await conn.execute(
+                f"DELETE FROM experts WHERE lower(name) = lower($1) AND {clause}",
+                name, *params,
+            )
+        # asyncpg returns e.g. "DELETE 1"
+        return result.rsplit(" ", 1)[-1] != "0"
 
     async def update_status(
         self,
@@ -147,6 +203,21 @@ class ExpertRepository:
         return None
 
 
+def _visibility_clause(
+    owner_id: str, include_unowned: bool, alias: str, idx: int
+) -> tuple[str, list]:
+    """Build a WHERE fragment scoping experts to a user.
+
+    Regular users see only their own experts. Admins additionally see legacy
+    experts with no owner (owner_id IS NULL) so nothing predating auth is orphaned.
+    ``idx`` is the 1-based position of the owner_id parameter in the final query.
+    """
+    own = f"{alias}.owner_id = ${idx}::uuid"
+    if include_unowned:
+        return (f"({own} OR {alias}.owner_id IS NULL)", [owner_id])
+    return (own, [owner_id])
+
+
 def _row_to_expert(row: asyncpg.Record) -> Expert:
     keys = row.keys()
 
@@ -173,11 +244,14 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
     else:
         config = ExpertConfig.from_tier(tier)
 
+    owner_id = row["owner_id"] if "owner_id" in keys and row["owner_id"] else None
+
     return Expert(
         id=row["id"],
         name=row["name"],
         topic=row["topic"],
         status=ExpertStatus(row["status"]),
+        owner_id=str(owner_id) if owner_id else None,
         tier=tier,
         config=config,
         persona_name=row["persona_name"],

@@ -88,7 +88,11 @@ Key environment variables (`api/src/peritus/core/config.py`):
 | `EXA_API_KEY`          | Exa + YouTube discovery (optional)                 | —                            |
 | `MISTRAL_API_KEY`      | PDF OCR (optional)                                 | —                            |
 | `COHERE_API_KEY`       | Cross-encoder reranking (optional)                 | —                            |
-| `PERITUS_API_KEY_HASH` | SHA-256 of the API key required by clients; unset = open dev mode | —             |
+| `SUPABASE_URL`         | Supabase project URL; set it to require login      | —                            |
+| `SUPABASE_ANON_KEY`    | Anon/publishable key (server-side only, for OTP proxy) | —                        |
+| `SUPABASE_JWT_SECRET`  | Legacy HS256 secret (only if not on JWKS signing keys) | —                        |
+| `BOOTSTRAP_ADMIN_EMAIL`| Admin email — sees pre-auth (owner-less) experts   | —                            |
+| `PERITUS_API_KEY_HASH` | SHA-256 of a legacy static API key (superseded by Supabase auth) | —              |
 
 ## Running
 
@@ -105,22 +109,45 @@ just docker-up    # docker compose up --build -d
 just docker-down
 ```
 
-Typical flow: start the server (`just dev`), then launch the TUI (`just run-cli`). On first run the TUI shows a config screen — point it at the server URL (default `http://localhost:8000`) and paste the API key if the server has `PERITUS_API_KEY_HASH` set. From the home screen you can create an expert (topic + tier) and watch the build log live, then open it to chat.
+Typical flow: start the server (`just dev`), then launch the TUI (`just run-cli`). On first run the TUI shows a config screen — point it at the server URL (default `http://localhost:8000`). If the server has auth enabled, the TUI then shows a sign-in screen (see below). From the home screen you can create an expert (topic + tier) and watch the build log live, then open it to chat.
 
-Generate an API key and its hash with:
+## Authentication
+
+Peritus uses [Supabase Auth](https://supabase.com/docs/guides/auth). Users sign in with an **email one-time code** — no passwords, no browser, works entirely in the terminal — and every expert is owned by the user who built it. Each user sees and chats with only their own experts.
+
+**How it fits together.** The API is a backend-for-frontend: it holds the Supabase anon key and proxies the sign-in calls, so clients only ever handle the resulting session tokens. Access tokens (JWTs) are verified locally against the project's **JWKS endpoint** (asymmetric ES256/RS256 signing keys, the current Supabase default), falling back to the legacy HS256 shared secret if that's all the project has. See `api/src/peritus/api/auth.py`.
+
+**Enable it** by setting `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `BOOTSTRAP_ADMIN_EMAIL` (plus `SUPABASE_JWT_SECRET` only if the project hasn't migrated to signing keys). With none of these set, the server runs in **open dev mode** — no login required, and requests act as the admin.
+
+**One-time Supabase setup:** in the dashboard, set the *Magic Link* email template to send a code — include `{{ .Token }}` in the template (a 6-digit code) rather than only a magic link, since the TUI verifies the code directly.
+
+**Sign in from the TUI:** enter your email → receive a code by email → enter the code. The session (access + rotating refresh token) is saved to the client config with `0600` permissions and refreshed automatically; press `L` on the home screen to sign out.
+
+**Sign in from the Python CLI:**
 
 ```bash
-python -c "from peritus.api.app import keygen; keygen()"
+peritus login          # prompts for email, then the 6-digit code
+peritus whoami         # show the signed-in user
+peritus logout         # clear the cached session
 ```
+
+Experts built with `peritus build` are owned by the signed-in user; experts that predate auth (owner-less rows) are visible to `BOOTSTRAP_ADMIN_EMAIL`.
+
+> A legacy static key (`PERITUS_API_KEY_HASH` + `Authorization: Bearer <key>`) is still accepted as a fallback credential, but Supabase login is the recommended path.
 
 ## API
 
-All endpoints require the key via `X-API-Key:` or `Authorization: Bearer` when `PERITUS_API_KEY_HASH` is set.
+When auth is enabled, expert endpoints require a Supabase access token via `Authorization: Bearer <token>`; the `/auth/*` endpoints are public (they *are* the login flow).
 
 | Method   | Path                      | Description                                  |
 |----------|---------------------------|----------------------------------------------|
 | `GET`    | `/health`, `/ready`       | Liveness / DB readiness                       |
-| `GET`    | `/experts`                | List experts                                  |
+| `GET`    | `/auth/status`            | Whether this server requires login            |
+| `POST`   | `/auth/otp`               | Send an email one-time code                    |
+| `POST`   | `/auth/verify`            | Exchange a code for a session                  |
+| `POST`   | `/auth/refresh`           | Rotate a refresh token for a new session       |
+| `GET`    | `/auth/me`                | The current authenticated user                 |
+| `GET`    | `/experts`                | List the caller's experts                     |
 | `GET`    | `/experts/{slug}`         | Expert detail (sources, counts, persona)      |
 | `POST`   | `/experts/build`          | Build an expert — **SSE** stream of progress  |
 | `DELETE` | `/experts/{slug}`         | Delete an expert                              |
@@ -131,8 +158,9 @@ All endpoints require the key via `X-API-Key:` or `Authorization: Bearer` when `
 ```
 api/
   src/peritus/
-    api/          FastAPI app, routes, schemas, auth
-    experts/      build pipeline coordinator, tiers, repository
+    api/          FastAPI app, routes (incl. /auth), schemas, JWT verification
+    cli/          Python CLI (build/chat + login/logout/whoami)
+    experts/      build pipeline coordinator, tiers, repository (owner-scoped)
     sources/      fetchers (wikipedia, arxiv, exa, web, …) + Claude validator
     ingestion/    chunking, contextualisation, embed pipeline
     graph/        concept-graph extraction, storage, retrieval
@@ -144,6 +172,6 @@ api/
 cli/
   src/
     api/          HTTP + SSE client
-    tui/          ratatui screens (home, build, chat, config) and widgets
-    config/       on-disk client config (server URL + key)
+    tui/          ratatui screens (home, build, chat, config, login) and widgets
+    config/       on-disk client config (server URL + saved session)
 ```

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from peritus.infrastructure.database import close_pool, init_pool
-from peritus.api.routes import health, experts, chat
+from peritus.api.routes import health, experts, chat, auth
 
 
 @asynccontextmanager
@@ -26,6 +26,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(experts.router)
     app.include_router(chat.router)
     return app

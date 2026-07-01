@@ -4,6 +4,7 @@ import asyncio
 
 import typer
 
+from peritus.cli.auth import login_command, logout_command, whoami_command
 from peritus.cli.build import build_command
 from peritus.cli.chat import chat_command, _chat_async
 from peritus.cli.credentials import credentials_command
@@ -67,6 +68,9 @@ def default(ctx: typer.Context) -> None:
 app.command("build")(build_command)
 app.command("chat")(chat_command)
 app.command("credentials")(credentials_command)
+app.command("login")(login_command)
+app.command("logout")(logout_command)
+app.command("whoami")(whoami_command)
 app.add_typer(experts_app, name="experts")
 
 

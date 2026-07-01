@@ -5,7 +5,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sse_starlette.sse import EventSourceResponse
 
-from peritus.api.auth import require_api_key
+from peritus.api.auth import AuthUser, require_user
 from peritus.api.schemas.experts import BuildRequest, ExpertDetail, ExpertSummary
 from peritus.core.logging import get_logger
 from peritus.experts.builder import BuildResult, ExpertBuilder
@@ -15,7 +15,7 @@ from peritus.infrastructure.database import get_pool
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/experts", tags=["experts"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/experts", tags=["experts"])
 
 
 def _slugify(topic: str) -> str:
@@ -67,39 +67,40 @@ def _expert_to_detail(e) -> ExpertDetail:
 
 
 @router.get("", response_model=list[ExpertSummary])
-async def list_experts():
+async def list_experts(user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
-    experts = await repo.list_all()
+    experts = await repo.list_for_user(user.id, include_unowned=user.is_admin)
     return [_expert_to_summary(e) for e in experts]
 
 
 @router.get("/{slug}", response_model=ExpertDetail)
-async def get_expert(slug: str):
+async def get_expert(slug: str, user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
-    expert = await repo.get_by_name(slug)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     return _expert_to_detail(expert)
 
 
 @router.delete("/{slug}", status_code=204)
-async def delete_expert(slug: str):
+async def delete_expert(slug: str, user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
-    expert = await repo.get_by_name(slug)
-    if not expert:
+    deleted = await repo.delete_for_user(slug, user.id, include_unowned=user.is_admin)
+    if not deleted:
         raise HTTPException(status_code=404, detail="Expert not found")
-    await repo.delete(expert.id)
 
 
 @router.post("/build")
-async def build_expert(req: BuildRequest, request: Request):
+async def build_expert(
+    req: BuildRequest, request: Request, user: AuthUser = Depends(require_user)
+):
     pool = get_pool()
     repo = ExpertRepository(pool)
     slug = _slugify(req.topic)
-    expert = await repo.create(name=slug, topic=req.topic, tier=req.tier)
+    expert = await repo.create(name=slug, topic=req.topic, tier=req.tier, owner_id=user.id)
 
     # Bounded so a stalled/disconnected consumer can't grow the queue without limit.
     queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=1000)

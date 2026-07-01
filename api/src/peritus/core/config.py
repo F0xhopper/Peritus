@@ -59,8 +59,45 @@ class Settings:
     CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))
     CHUNK_OVERLAP_CHARS: int = int(os.getenv("CHUNK_OVERLAP_CHARS", "200"))
 
-    # API auth
+    # API auth (legacy shared key — retained for backwards compatibility)
     PERITUS_API_KEY_HASH: str = os.getenv("PERITUS_API_KEY_HASH", "")
+
+    # ── Supabase Auth ─────────────────────────────────────────────────────────
+    # SUPABASE_URL, e.g. https://<project-ref>.supabase.co. When set, the API
+    # verifies user access tokens (JWTs) and requires login. When unset, auth is
+    # disabled (dev mode) and requests run as the bootstrap admin.
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "").rstrip("/")
+    # Anon / publishable key — used server-side only, to proxy GoTrue auth calls
+    # (OTP request/verify/refresh). Never shipped to clients.
+    SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
+    # Legacy HS256 shared secret. Only used as a fallback when the project has not
+    # migrated to asymmetric JWT signing keys (JWKS). Not recommended for prod.
+    SUPABASE_JWT_SECRET: str = os.getenv("SUPABASE_JWT_SECRET", "")
+    # The audience claim Supabase issues on user access tokens.
+    SUPABASE_JWT_AUD: str = os.getenv("SUPABASE_JWT_AUD", "authenticated")
+    # Email that is treated as the workspace admin: sees experts with no owner
+    # (those created before auth existed) and is the identity used in dev mode.
+    BOOTSTRAP_ADMIN_EMAIL: str = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").lower()
+
+    # Base URL of the Peritus API server, used by the Python CLI's login command.
+    PERITUS_SERVER_URL: str = os.getenv("PERITUS_SERVER_URL", "http://localhost:8000")
+
+    @property
+    def AUTH_ENABLED(self) -> bool:
+        """Auth is enforced when a Supabase project is configured."""
+        return bool(self.SUPABASE_URL or self.SUPABASE_JWT_SECRET)
+
+    @property
+    def SUPABASE_JWKS_URL(self) -> str:
+        return f"{self.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+
+    @property
+    def SUPABASE_ISSUER(self) -> str:
+        return f"{self.SUPABASE_URL}/auth/v1"
+
+    @property
+    def SUPABASE_AUTH_URL(self) -> str:
+        return f"{self.SUPABASE_URL}/auth/v1"
 
     def check_required_vars(self) -> list[str]:
         missing = []
