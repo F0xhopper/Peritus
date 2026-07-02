@@ -1,9 +1,6 @@
 import json
-from collections import defaultdict
 
 import asyncpg
-
-from peritus.graph.domain import Edge, EdgeType, Node, NodeType
 
 
 class GraphRepository:

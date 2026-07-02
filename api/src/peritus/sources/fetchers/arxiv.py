@@ -13,9 +13,11 @@ from peritus.sources.domain import RawSource, SourceType
 logger = get_logger(__name__)
 
 _AR5IV = "https://ar5iv.labs.arxiv.org/html/"
-_HEADERS = {"User-Agent": "Peritus/2.0 (educational tool; foxhopper16@gmail.com)"}
-_MIN_FULL_TEXT = 3_000
-_MAX_FULL_TEXT = 120_000
+
+# Shared with the citation-snowballing step in the builder.
+HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+MIN_FULL_TEXT = 3_000
+MAX_FULL_TEXT = 120_000
 
 
 class ArxivFetcher:
@@ -31,7 +33,7 @@ class ArxivFetcher:
             return []
 
         async with httpx.AsyncClient(
-            timeout=30, headers=_HEADERS, follow_redirects=True
+            timeout=30, headers=HEADERS, follow_redirects=True
         ) as http:
             results = await asyncio.gather(
                 *[_process_paper(http, paper) for paper in papers],
@@ -39,8 +41,8 @@ class ArxivFetcher:
             )
 
         sources: list[RawSource] = []
-        for paper, result in zip(papers, results):
-            if isinstance(result, Exception):
+        for paper, result in zip(papers, results, strict=True):
+            if isinstance(result, BaseException):
                 logger.warning("ArXiv paper processing failed for %r: %s", paper.entry_id, result)
             elif result is not None:
                 sources.append(result)
@@ -50,9 +52,9 @@ class ArxivFetcher:
 async def _process_paper(http: httpx.AsyncClient, paper) -> RawSource | None:
     try:
         arxiv_id = _extract_id(paper.entry_id)
-        full_text = await _fetch_ar5iv(http, arxiv_id)
-        if len(full_text) >= _MIN_FULL_TEXT:
-            text = full_text[:_MAX_FULL_TEXT]
+        full_text = await fetch_ar5iv(http, arxiv_id)
+        if len(full_text) >= MIN_FULL_TEXT:
+            text = full_text[:MAX_FULL_TEXT]
             has_full = True
         else:
             text = f"{paper.title}\n\n{paper.summary}"
@@ -81,7 +83,7 @@ def _extract_id(entry_id: str) -> str:
     return match.group(1) if match else entry_id.split("/")[-1]
 
 
-async def _fetch_ar5iv(client: httpx.AsyncClient, arxiv_id: str) -> str:
+async def fetch_ar5iv(client: httpx.AsyncClient, arxiv_id: str) -> str:
     """Fetch the HTML full-text rendering of a paper from ar5iv."""
     try:
         resp = await client.get(f"{_AR5IV}{arxiv_id}", timeout=20)

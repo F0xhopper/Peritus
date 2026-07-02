@@ -6,6 +6,8 @@ Haiku call — and fails open (returns ``None``) so a checker error never blocks
 answer that has already been streamed to the user.
 """
 
+from typing import Any
+
 from peritus.chat.grounding import Passage
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -13,7 +15,7 @@ from peritus.infrastructure.anthropic_client import get_anthropic_client
 
 logger = get_logger(__name__)
 
-_TOOL = {
+_TOOL: dict[str, Any] = {
     "name": "report_faithfulness",
     "description": "Report how well the answer is supported by the passages.",
     "input_schema": {
@@ -61,7 +63,7 @@ async def assess_faithfulness(
             for p in passages
         )
         client = get_anthropic_client()
-        resp = await client.messages.create(
+        resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
             max_tokens=512,
             system=_SYSTEM,

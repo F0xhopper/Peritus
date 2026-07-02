@@ -14,7 +14,7 @@ import asyncio
 import json
 import math
 from collections.abc import Callable, Coroutine
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
@@ -33,11 +33,13 @@ from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_source
 from peritus.sources.domain import DroppedSource, RawSource, SourceType, ValidatedSource
 from peritus.sources.fetchers.arxiv import (
+    HEADERS as ARXIV_HEADERS,
+)
+from peritus.sources.fetchers.arxiv import (
+    MAX_FULL_TEXT,
+    MIN_FULL_TEXT,
     ArxivFetcher,
-    _HEADERS as _ARXIV_HEADERS,
-    _MAX_FULL_TEXT,
-    _MIN_FULL_TEXT,
-    _fetch_ar5iv,
+    fetch_ar5iv,
 )
 from peritus.sources.fetchers.exa import ExaFetcher
 from peritus.sources.fetchers.gutenberg import GutenbergFetcher
@@ -53,7 +55,7 @@ logger = get_logger(__name__)
 
 EventCallback = Callable[[dict], Coroutine[Any, Any, None]]
 
-_PLAN_TOOL = {
+_PLAN_TOOL: dict[str, Any] = {
     "name": "create_research_plan",
     "description": "Generate targeted search queries for each source fetcher.",
     "input_schema": {
@@ -185,11 +187,11 @@ class ExpertBuilder:
         all_chunk_ids: list[int] = []
         all_chunks_for_graph: list[tuple[TextChunk, int]] = []
 
-        for vsource, src_db_id in zip(passed, source_db_ids):
+        for vsource, src_db_id in zip(passed, source_db_ids, strict=True):
             try:
                 chunk_ids, raw_chunks = await ingest_source(vsource, expert.id, src_db_id, self._pool)
                 all_chunk_ids.extend(chunk_ids)
-                all_chunks_for_graph.extend(zip(raw_chunks, chunk_ids))
+                all_chunks_for_graph.extend(zip(raw_chunks, chunk_ids, strict=True))
                 await _emit_event(on_event, {
                     "type": "source_ingested",
                     "title": vsource.title,
@@ -198,7 +200,12 @@ class ExpertBuilder:
                 })
             except Exception as exc:
                 logger.warning("Ingestion failed for %r: %s", vsource.title, exc)
-                await _emit_event(on_event, {"type": "source_ingested", "title": vsource.title, "chunks": 0, "total_chunks": len(all_chunk_ids)})
+                await _emit_event(on_event, {
+                    "type": "source_ingested",
+                    "title": vsource.title,
+                    "chunks": 0,
+                    "total_chunks": len(all_chunk_ids),
+                })
 
         if not all_chunk_ids:
             raise BuildError("No chunks were embedded — ingestion failed for all sources.")
@@ -306,11 +313,10 @@ class ExpertBuilder:
         """Write all sources to DB. Returns DB IDs for passed sources only."""
         passed_ids: list[int] = []
         validator_model = settings.FAST_MODEL
-        async with self._pool.acquire() as conn:
-            async with conn.transaction():
-                for vs in passed:
-                    row = await conn.fetchrow(
-                        """
+        async with self._pool.acquire() as conn, conn.transaction():
+            for vs in passed:
+                row = await conn.fetchrow(
+                    """
                         INSERT INTO sources
                             (expert_id, source_type, url, title, author,
                              quality_score, relevance_score, content_type,
@@ -319,41 +325,41 @@ class ExpertBuilder:
                         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12)
                         RETURNING id
                         """,
-                        expert_id,
-                        vs.source_type.value,
-                        vs.url,
-                        vs.title,
-                        vs.author,
-                        vs.quality_score,
-                        vs.relevance_score,
-                        vs.content_type,
-                        vs.difficulty,
-                        json.dumps(vs.key_claims),
-                        validator_model,
-                        RUBRIC_VERSION,
-                    )
-                    passed_ids.append(row["id"])
+                    expert_id,
+                    vs.source_type.value,
+                    vs.url,
+                    vs.title,
+                    vs.author,
+                    vs.quality_score,
+                    vs.relevance_score,
+                    vs.content_type,
+                    vs.difficulty,
+                    json.dumps(vs.key_claims),
+                    validator_model,
+                    RUBRIC_VERSION,
+                )
+                passed_ids.append(row["id"])
 
-                for ds in dropped:
-                    await conn.execute(
-                        """
+            for ds in dropped:
+                await conn.execute(
+                    """
                         INSERT INTO sources
                             (expert_id, source_type, url, title, author,
                              quality_score, relevance_score, passed, drop_reason,
                              validator_model, rubric_version)
                         VALUES ($1,$2,$3,$4,$5,$6,$7,false,$8,$9,$10)
                         """,
-                        expert_id,
-                        ds.raw.source_type.value,
-                        ds.raw.url,
-                        ds.raw.title,
-                        ds.raw.author,
-                        ds.quality_score,
-                        ds.relevance_score,
-                        ds.drop_reason,
-                        validator_model,
-                        RUBRIC_VERSION,
-                    )
+                    expert_id,
+                    ds.raw.source_type.value,
+                    ds.raw.url,
+                    ds.raw.title,
+                    ds.raw.author,
+                    ds.quality_score,
+                    ds.relevance_score,
+                    ds.drop_reason,
+                    validator_model,
+                    RUBRIC_VERSION,
+                )
 
         return passed_ids
 
@@ -362,7 +368,7 @@ async def _plan_research(topic: str) -> dict:
     """One Haiku call: returns per-fetcher queries + key concepts."""
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(
+        resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
             max_tokens=800,
             system=(
@@ -407,8 +413,7 @@ async def _snowball_citations(
     seen_urls = {s.url for s in raw_sources}
     candidates: list[dict] = []
 
-    _HEADERS = {"User-Agent": "Peritus/2.0 (educational; foxhopper16@gmail.com)"}
-    async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
+    async with httpx.AsyncClient(timeout=15, headers=ARXIV_HEADERS) as client:
         for arxiv_id in arxiv_ids[:3]:
             try:
                 resp = await client.get(
@@ -446,22 +451,23 @@ async def _snowball_citations(
     extra: list[RawSource] = []
 
     async with httpx.AsyncClient(
-        timeout=30, headers=_ARXIV_HEADERS, follow_redirects=True
+        timeout=30, headers=ARXIV_HEADERS, follow_redirects=True
     ) as http:
         for cand in candidates[:max_extra]:
             aid = cand["arxiv_id"]
             try:
-                papers = await asyncio.to_thread(
-                    lambda a=aid: list(arxiv_lib.Client().results(arxiv_lib.Search(id_list=[a])))
-                )
+                def _lookup(a: str = aid) -> list:
+                    return list(arxiv_lib.Client().results(arxiv_lib.Search(id_list=[a])))
+
+                papers = await asyncio.to_thread(_lookup)
                 if not papers:
                     continue
                 paper = papers[0]
                 url = paper.entry_id
                 if url in seen_urls:
                     continue
-                full_text = await _fetch_ar5iv(http, aid)
-                text = full_text[:_MAX_FULL_TEXT] if len(full_text) >= _MIN_FULL_TEXT \
+                full_text = await fetch_ar5iv(http, aid)
+                text = full_text[:MAX_FULL_TEXT] if len(full_text) >= MIN_FULL_TEXT \
                     else f"{paper.title}\n\n{paper.summary}"
                 extra.append(RawSource(
                     source_type=SourceType.ARXIV,
@@ -473,7 +479,7 @@ async def _snowball_citations(
                         "arxiv_id": aid,
                         "published": str(paper.published),
                         "categories": paper.categories,
-                        "full_text": len(full_text) >= _MIN_FULL_TEXT,
+                        "full_text": len(full_text) >= MIN_FULL_TEXT,
                         "snowballed": True,
                         "citations": cand["citations"],
                     },
@@ -562,7 +568,7 @@ async def _generate_persona(
     passed: list[ValidatedSource],
     top_nodes: list[dict],
 ) -> dict:
-    _TOOL = {
+    _TOOL: dict[str, Any] = {
         "name": "generate_persona",
         "description": "Generate a named expert persona grounded in the corpus.",
         "input_schema": {
@@ -590,7 +596,7 @@ async def _generate_persona(
     concept_list = ", ".join(n["label"] for n in top_nodes[:20])
 
     client = get_anthropic_client()
-    resp = await client.messages.create(
+    resp = await client.messages.create(  # type: ignore[call-overload]
         model=settings.CLAUDE_MODEL,
         max_tokens=1024,
         system=(

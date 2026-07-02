@@ -6,8 +6,10 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 use crate::api::types::ExpertSummary;
+use crate::events::AppAction;
 use crate::tui::theme::Theme;
 use crate::tui::screens::build::BuildCardInfo;
+use crate::tui::widgets::input_box::TextInput;
 use crate::tui::widgets::spinner;
 
 const CARD_WIDTH: u16 = 46;
@@ -26,7 +28,7 @@ pub struct HomeScreen {
     pub tier_select_active: bool,
     tier_selected: usize,   // index into TIERS
     pending_topic: Option<String>,
-    input_buf: String,
+    input: TextInput,
     submitted_build: Option<(String, String)>, // (topic, tier)
     scroll_offset: usize,
 }
@@ -41,7 +43,7 @@ impl HomeScreen {
             tier_select_active: false,
             tier_selected: 1, // default to STANDARD
             pending_topic: None,
-            input_buf: String::new(),
+            input: TextInput::new(),
             submitted_build: None,
             scroll_offset: 0,
         }
@@ -64,28 +66,48 @@ impl HomeScreen {
     }
 
     pub fn prev(&mut self) {
-        if !self.experts.is_empty() { self.selected = self.selected.saturating_sub(1); }
+        if !self.experts.is_empty() {
+            // Wrap around, mirroring next().
+            self.selected = (self.selected + self.experts.len() - 1) % self.experts.len();
+        }
         self.confirm_delete = false;
     }
 
     pub fn start_new_expert_input(&mut self) {
         self.input_active = true;
-        self.input_buf.clear();
+        self.input.clear();
         self.confirm_delete = false;
     }
 
-    pub fn input_push(&mut self, c: char) { self.input_buf.push(c); }
-    pub fn input_pop(&mut self)           { self.input_buf.pop(); }
-    pub fn cancel_input(&mut self)        { self.input_active = false; self.input_buf.clear(); }
+    pub fn cancel_input(&mut self) { self.input_active = false; self.input.clear(); }
+
+    /// Route an editing action to the topic input while it is focused.
+    pub fn input_edit(&mut self, action: &AppAction) {
+        match action {
+            AppAction::Char(c)     => self.input.insert(*c),
+            AppAction::Backspace   => self.input.backspace(),
+            AppAction::Delete      => self.input.delete(),
+            AppAction::CursorLeft  => self.input.left(),
+            AppAction::CursorRight => self.input.right(),
+            AppAction::WordLeft    => self.input.word_left(),
+            AppAction::WordRight   => self.input.word_right(),
+            AppAction::Home        => self.input.home(),
+            AppAction::End         => self.input.end(),
+            AppAction::CtrlW       => self.input.delete_word_back(),
+            AppAction::CtrlU       => self.input.kill_to_start(),
+            AppAction::KillToEnd   => self.input.kill_to_end(),
+            _ => {}
+        }
+    }
 
     pub fn submit_input(&mut self) {
-        if !self.input_buf.trim().is_empty() {
-            self.pending_topic = Some(self.input_buf.trim().to_string());
+        let topic = self.input.take_trimmed();
+        if !topic.is_empty() {
+            self.pending_topic = Some(topic);
             self.tier_selected = 1; // reset to STANDARD each time
             self.tier_select_active = true;
         }
         self.input_active = false;
-        self.input_buf.clear();
     }
 
     pub fn tier_prev(&mut self) {
@@ -169,24 +191,25 @@ impl HomeScreen {
             render_expert_card(f, card_area, expert, idx == self.selected, card_build, tick);
         }
 
-        // Scroll indicator dots
+        // Scroll indicator — dots while they fit, "n/total" once the list grows.
         if self.experts.len() > visible_count {
-            let dots: String = self.experts.iter().enumerate()
-                .map(|(i, _)| if i == self.selected { "●" } else { "○" })
-                .collect::<Vec<_>>().join(" ");
-            let dot_x = inner.x + inner.width.saturating_sub(dots.chars().count() as u16) / 2;
+            let indicator = if self.experts.len() <= 12 {
+                self.experts.iter().enumerate()
+                    .map(|(i, _)| if i == self.selected { "●" } else { "○" })
+                    .collect::<Vec<_>>().join(" ")
+            } else {
+                format!("{} / {}", self.selected + 1, self.experts.len())
+            };
+            let dot_x = inner.x + inner.width.saturating_sub(indicator.chars().count() as u16) / 2;
             f.render_widget(
-                Paragraph::new(dots).style(Theme::dim()),
+                Paragraph::new(indicator).style(Theme::dim()),
                 Rect::new(dot_x, footer_area.y, footer_area.width, 1),
             );
         }
 
         // Footer hints / new-expert input
         let hint_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
-        let selected_is_building = self.selected_expert()
-            .zip(build_info)
-            .map(|(e, b)| e.topic == b.topic)
-            .unwrap_or(false);
+        let selected_status = self.selected_expert().map(|e| e.status.as_str()).unwrap_or("");
 
         let (footer_text, hint_style) = if self.input_active {
             (String::new(), Theme::dim())
@@ -195,8 +218,10 @@ impl HomeScreen {
                 .and_then(|e| e.persona_name.as_deref().or(Some(e.name.as_str())))
                 .unwrap_or("this expert");
             (format!("Delete \"{}\"?  [D] Confirm  [Esc] Cancel", name), Theme::error())
-        } else if selected_is_building {
-            ("[b] Watch Build  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::accent())
+        } else if selected_status == "building" || selected_status == "queued" {
+            ("[Enter/b] Watch Build  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::accent())
+        } else if selected_status == "failed" {
+            ("[Enter] Rebuild  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
         } else {
             ("[n] New  [Enter] Chat  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
         };
@@ -209,7 +234,7 @@ impl HomeScreen {
             }
         }
         if self.input_active {
-            render_input_popup(f, area, &self.input_buf);
+            render_input_popup(f, area, &self.input);
         }
         if self.tier_select_active {
             let topic = self.pending_topic.as_deref().unwrap_or("");
@@ -224,6 +249,7 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
     let (status_label, status_style) = match expert.status.as_str() {
         "ready"    => ("✓ ready",    Theme::success()),
         "building" => ("● building", Theme::warning()),
+        "queued"   => ("◌ queued",   Theme::warning()),
         _          => ("✗ failed",   Theme::error()),
     };
 
@@ -322,16 +348,19 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
         .split(area);
 
     f.render_widget(Paragraph::new(Span::styled(sep, Theme::dim())), chunks[0]);
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(fmt_count(expert.node_count), Theme::normal()),
-            Span::styled(" concepts", Theme::dim()),
-            Span::styled("  ·  ", Theme::dim()),
-            Span::styled(fmt_count(expert.source_count), Theme::normal()),
-            Span::styled(" sources", Theme::dim()),
-        ])),
-        chunks[1],
-    );
+    let mut stats = vec![
+        Span::styled(fmt_count(expert.node_count), Theme::normal()),
+        Span::styled(" concepts", Theme::dim()),
+        Span::styled("  ·  ", Theme::dim()),
+        Span::styled(fmt_count(expert.source_count), Theme::normal()),
+        Span::styled(" sources", Theme::dim()),
+    ];
+    if let Some(q) = expert.avg_quality {
+        stats.push(Span::styled("  ·  ", Theme::dim()));
+        stats.push(Span::styled(format!("Q {:.1}", q), Theme::normal()));
+        stats.push(Span::styled(" avg", Theme::dim()));
+    }
+    f.render_widget(Paragraph::new(Line::from(stats)), chunks[1]);
     f.render_widget(Paragraph::new(Span::styled(sep, Theme::dim())), chunks[2]);
 
     let mut body_lines: Vec<Line> = Vec::new();
@@ -368,8 +397,8 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
 
     f.render_widget(Paragraph::new(Span::styled(sep.as_str(), Theme::dim())), chunks[0]);
 
-    // Stage name line with [N/5] right-aligned
-    let indicator = format!("[{}/5]", info.stage.min(5));
+    // Stage name line with [N/6] right-aligned (stage is 0-based, 6 stages total)
+    let indicator = format!("[{}/6]", info.stage.min(5) + 1);
     let spin = spinner::braille(tick);
     let label_max = (content_w as usize).saturating_sub(3 + indicator.len() + 1);
     let label_trunc: String = info.stage_label.chars().take(label_max).collect();
@@ -393,12 +422,13 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
 
     f.render_widget(Paragraph::new(Span::styled(sep.as_str(), Theme::dim())), chunks[3]);
 
-    // Mini pipeline: ✓ Plan  ✓ Find  ● Score  ○ Read  ○ Graph
-    const MINI: &[&str] = &["Plan", "Find", "Score", "Read", "Graph"];
+    // Mini pipeline: ✓ Plan  ✓ Find  ● Score  ○ Read  ○ Graph  ○ Voice
+    // Indexed by the backend's 0-based stage number (5 = persona/"Voice").
+    const MINI: &[&str] = &["Plan", "Find", "Score", "Read", "Graph", "Voice"];
     let mut spans: Vec<Span> = Vec::new();
     for (i, label) in MINI.iter().enumerate() {
-        let stage_num = (i + 1) as u8;
-        if i > 0 { spans.push(Span::styled("  ", Theme::dim())); }
+        let stage_num = i as u8;
+        if i > 0 { spans.push(Span::styled(" ", Theme::dim())); }
         let (icon, style) = if stage_num < info.stage {
             ("✓", Theme::success())
         } else if stage_num == info.stage {
@@ -468,7 +498,7 @@ fn render_confirm_popup(f: &mut Frame, area: Rect, name: &str) {
     );
 }
 
-fn render_input_popup(f: &mut Frame, area: Rect, input: &str) {
+fn render_input_popup(f: &mut Frame, area: Rect, input: &TextInput) {
     let popup_w = 60u16.min(area.width.saturating_sub(4));
     let popup = centered_rect(popup_w, 4, area);
     f.render_widget(Clear, popup);
@@ -483,14 +513,12 @@ fn render_input_popup(f: &mut Frame, area: Rect, input: &str) {
         popup,
     );
     let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+    let mut line = vec![Span::styled("> ", Theme::accent())];
+    line.extend(input.spans(inner.width.saturating_sub(3) as usize, Theme::normal(), true));
     f.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled("Topic:", Theme::dim())),
-            Line::from(vec![
-                Span::styled("> ", Theme::accent()),
-                Span::styled(input, Theme::normal()),
-                Span::styled("▌", Theme::accent()),
-            ]),
+            Line::from(line),
         ]),
         inner,
     );

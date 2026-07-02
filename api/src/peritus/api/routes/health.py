@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+
 from peritus.infrastructure.database import get_pool
 
 router = APIRouter(tags=["health"])
@@ -16,6 +17,6 @@ async def ready():
         async with pool.acquire() as conn:
             await conn.fetchval("SELECT 1")
         return {"db": True, "status": "ready"}
-    except Exception:
+    except Exception as exc:
         from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail="Database not ready")
+        raise HTTPException(status_code=503, detail="Database not ready") from exc

@@ -44,6 +44,11 @@ struct LogEntry { msg: String, level: LogLevel }
 pub struct BuildScreen {
     topic: String,
     tier: String,
+    slug: String,
+    api: Arc<ApiClient>,
+    /// Armed by the first [x]; the second [x] actually cancels.
+    pub confirm_cancel: bool,
+    cancel_sent: bool,
     start_time: std::time::Instant,
     stage: u8,
     stage_name: String,
@@ -75,37 +80,113 @@ pub struct BuildScreen {
 }
 
 impl BuildScreen {
+    /// Start a new build (POST /experts/build) and stream its progress.
     pub fn new(topic: String, tier: String, api: Arc<ApiClient>) -> Self {
+        Self::spawn(topic, tier, api, true)
+    }
+
+    /// Attach to a build already running on the server (e.g. after the TUI was
+    /// restarted). Replays the durable event log from the start so the screen
+    /// reconstructs full progress state.
+    pub fn attach(topic: String, tier: String, api: Arc<ApiClient>) -> Self {
+        Self::spawn(topic, tier, api, false)
+    }
+
+    fn spawn(topic: String, tier: String, api: Arc<ApiClient>, start_build: bool) -> Self {
         let cancel = Arc::new(Notify::new());
         let (tx, rx) = mpsc::channel::<BuildEvent>(256);
         let api_clone = api.clone();
         let topic_clone = topic.clone();
         let tier_clone = tier.clone();
         let cancel_clone = cancel.clone();
+        let slug = crate::api::client::slugify(&topic);
+        let slug_clone = slug.clone();
+        // The build runs durably in a worker, so a dropped SSE connection no longer
+        // loses progress. Start with POST /build (or attach straight to the event
+        // log), then transparently resume from the durable event log
+        // (GET .../build/events?after=<seq>) after any disconnect, until a terminal
+        // event (Done/Error/Cancelled) or the user cancels.
         tokio::spawn(async move {
-            tokio::select! {
-                _ = cancel_clone.notified() => {}
-                _ = async {
-                    match api_clone.build_stream(topic_clone, tier_clone).await {
-                        Ok(mut stream) => {
-                            while let Some(result) = stream.next().await {
-                                match result {
-                                    Ok(event) => { let _ = tx.send(event).await; }
-                                    Err(e)    => {
-                                        let _ = tx.send(BuildEvent::Error { message: e.to_string() }).await;
-                                        break;
-                                    }
-                                }
-                            }
+            const BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);
+            const MAX_EMPTY_RECONNECTS: u32 = 5;
+            let slug = slug_clone;
+            let mut last_seq: u64 = 0;
+            let mut first = start_build;
+            let mut empty_reconnects: u32 = 0;
+
+            'outer: loop {
+                let stream_res = if first {
+                    api_clone.build_stream(topic_clone.clone(), tier_clone.clone()).await
+                } else {
+                    api_clone.build_events_stream(&slug, last_seq).await
+                };
+                first = false;
+
+                let mut stream = match stream_res {
+                    Ok(s) => s,
+                    Err(e) => {
+                        empty_reconnects += 1;
+                        if empty_reconnects > MAX_EMPTY_RECONNECTS {
+                            let _ = tx.send(BuildEvent::Error {
+                                message: format!("Lost connection to build: {}", e),
+                            }).await;
+                            break 'outer;
                         }
-                        Err(e) => { let _ = tx.send(BuildEvent::Error { message: e.to_string() }).await; }
+                        tokio::select! {
+                            _ = cancel_clone.notified() => break 'outer,
+                            _ = tokio::time::sleep(BACKOFF) => continue 'outer,
+                        }
                     }
-                } => {}
+                };
+
+                let mut got_event = false;
+                let mut terminal = false;
+                loop {
+                    tokio::select! {
+                        _ = cancel_clone.notified() => break 'outer,
+                        item = stream.next() => match item {
+                            Some(Ok(se)) => {
+                                got_event = true;
+                                if let Some(s) = se.seq { last_seq = s; }
+                                let is_terminal = se.event.is_terminal();
+                                let _ = tx.send(se.event).await;
+                                if is_terminal { terminal = true; break; }
+                            }
+                            Some(Err(_)) => break, // transient stream error → reconnect
+                            None => break,         // connection closed → reconnect if not terminal
+                        }
+                    }
+                }
+
+                if terminal { break 'outer; }
+
+                // Guard against spinning forever if the build vanished (deleted) and
+                // reconnects keep yielding nothing.
+                if got_event {
+                    empty_reconnects = 0;
+                } else {
+                    empty_reconnects += 1;
+                    if empty_reconnects > MAX_EMPTY_RECONNECTS {
+                        let _ = tx.send(BuildEvent::Error {
+                            message: "Build stream ended unexpectedly.".to_string(),
+                        }).await;
+                        break 'outer;
+                    }
+                }
+
+                tokio::select! {
+                    _ = cancel_clone.notified() => break 'outer,
+                    _ = tokio::time::sleep(BACKOFF) => {}
+                }
             }
         });
         Self {
             topic,
             tier,
+            slug,
+            api,
+            confirm_cancel: false,
+            cancel_sent: false,
             start_time: std::time::Instant::now(),
             stage: 0,
             stage_name: String::new(),
@@ -130,8 +211,26 @@ impl BuildScreen {
         }
     }
 
+    /// Stop reading the event stream (client-side detach). Does not affect the
+    /// build on the server; use [`request_server_cancel`] for that.
     pub fn cancel(&self) { self.cancel.notify_one(); }
     pub fn topic(&self) -> &str { &self.topic }
+
+    /// Ask the server to cancel the build. The terminal `cancelled` event then
+    /// arrives through the normal event stream and lands in the activity log.
+    pub fn request_server_cancel(&mut self) {
+        if self.cancel_sent { return; }
+        self.cancel_sent = true;
+        self.confirm_cancel = false;
+        self.log("Cancelling build…", LogLevel::Info);
+        let api = self.api.clone();
+        let slug = self.slug.clone();
+        tokio::spawn(async move {
+            if let Err(e) = api.cancel_build(&slug).await {
+                tracing::warn!("Cancel request failed for {}: {}", slug, e);
+            }
+        });
+    }
 
     pub fn card_info(&self) -> BuildCardInfo {
         let detail = match self.stage {
@@ -172,9 +271,46 @@ impl BuildScreen {
         self.log_lines.push_back(LogEntry { msg: msg.into(), level });
     }
 
+    /// Reset per-attempt progress. A retry re-runs the whole pipeline, so stale
+    /// counters from the failed attempt would double-count. The activity log is
+    /// kept — it is the user's record of what happened.
+    fn reset_progress(&mut self) {
+        self.stage = 0;
+        self.stage_name.clear();
+        self.fetchers.clear();
+        self.key_concepts.clear();
+        self.validate_passed = 0;
+        self.validate_dropped = 0;
+        self.validate_total = 0;
+        self.ingest_recent.clear();
+        self.ingest_count = 0;
+        self.ingest_total = 0;
+        self.graph_batches = 0;
+        self.graph_total_batches = 0;
+        self.graph_total_nodes = 0;
+        self.graph_total_edges = 0;
+        self.persona_name = None;
+    }
+
     pub async fn tick(&mut self) -> bool {
         while let Ok(event) = self.rx.try_recv() {
             match &event {
+                BuildEvent::BuildStarted { attempt, max_attempts } => {
+                    if *attempt > 1 {
+                        self.reset_progress();
+                        self.log(
+                            format!("Restarting build — attempt {} of {}", attempt, max_attempts),
+                            LogLevel::Stage,
+                        );
+                    }
+                }
+                BuildEvent::Retry { attempt, max_attempts, message } => {
+                    self.log(
+                        format!("Attempt {}/{} failed: {} — retrying shortly…",
+                                attempt, max_attempts, trunc(message, 60)),
+                        LogLevel::Error,
+                    );
+                }
                 BuildEvent::Stage { stage, name, total, total_batches } => {
                     self.stage = *stage;
                     self.stage_name = name.clone();
@@ -208,14 +344,15 @@ impl BuildScreen {
                 BuildEvent::SnowballDone { added } => {
                     self.log(format!("Snowball: +{} sources", added), LogLevel::Success);
                 }
-                BuildEvent::SourceValidated { title, passed, score } => {
+                BuildEvent::SourceValidated { title, passed, q, r } => {
                     let short = trunc(title, 44);
+                    // q/r are the validator's 0–10 quality/relevance scores.
                     if *passed {
                         self.validate_passed += 1;
-                        self.log(format!("✓ {} ({:.0}%)", short, score * 100.0), LogLevel::Success);
+                        self.log(format!("✓ {} (Q {:.1} · R {:.1})", short, q, r), LogLevel::Success);
                     } else {
                         self.validate_dropped += 1;
-                        self.log(format!("✗ {} ({:.0}%)", short, score * 100.0), LogLevel::Info);
+                        self.log(format!("✗ {} (Q {:.1} · R {:.1})", short, q, r), LogLevel::Info);
                     }
                 }
                 BuildEvent::ValidateDone { passed, dropped } => {
@@ -223,7 +360,7 @@ impl BuildScreen {
                     self.validate_dropped = *dropped;
                     self.log(format!("{} accepted, {} dropped", passed, dropped), LogLevel::Success);
                 }
-                BuildEvent::SourceIngested { title, chunks, .. } => {
+                BuildEvent::SourceIngested { title, chunks } => {
                     let short = trunc(title, 44);
                     self.ingest_count += 1;
                     if self.ingest_recent.len() >= 20 { self.ingest_recent.pop_front(); }
@@ -243,7 +380,7 @@ impl BuildScreen {
                     self.persona_name = Some(name.clone());
                     self.log(format!("Persona: {}", name), LogLevel::Success);
                 }
-                BuildEvent::Done { source_count, chunk_count, node_count, .. } => {
+                BuildEvent::Done { source_count, chunk_count, node_count } => {
                     self.done = true;
                     self.log(
                         format!("Done — {} sources · {} chunks · {} concepts", source_count, chunk_count, node_count),
@@ -258,8 +395,25 @@ impl BuildScreen {
                     self.error = Some(message.clone());
                     self.log(format!("Error: {}", message), LogLevel::Error);
                 }
+                BuildEvent::Cancelled { message } => {
+                    let msg = if message.is_empty() { "Build cancelled" } else { message.as_str() };
+                    self.error = Some(msg.to_string());
+                    self.log(msg.to_string(), LogLevel::Error);
+                }
                 BuildEvent::Unknown => {}
             }
+        }
+        // The event pump exited (it always sends a terminal/Error event first in
+        // normal paths) — if we somehow got neither, surface it rather than
+        // spinning forever.
+        if matches!(self.rx.try_recv(), Err(mpsc::error::TryRecvError::Disconnected))
+            && !self.done
+            && self.error.is_none()
+        {
+            self.error = Some(
+                "Build stream closed — the build may still be running on the server; \
+                 re-open it from Home with [b]".to_string(),
+            );
         }
         false
     }
@@ -294,8 +448,9 @@ impl BuildScreen {
     fn render_pipeline(&self, f: &mut Frame, area: Rect) {
         let mut spans: Vec<Span> = Vec::new();
         for (i, (_, label)) in STAGES.iter().enumerate() {
-            let stage_num = (i + 1) as u8;
-            let (icon, style) = if stage_num < self.stage {
+            // STAGES is indexed by the backend's 0-based stage number.
+            let stage_num = i as u8;
+            let (icon, style) = if stage_num < self.stage || self.done {
                 ("✓", Theme::success().add_modifier(Modifier::BOLD))
             } else if stage_num == self.stage {
                 ("●", Theme::accent().add_modifier(Modifier::BOLD))
@@ -581,13 +736,18 @@ impl BuildScreen {
     fn render_footer(&self, f: &mut Frame, area: Rect, tick: u64) {
         let elapsed = fmt_elapsed(self.start_time.elapsed().as_secs());
         let widget = if let Some(err) = &self.error {
-            Paragraph::new(format!("✗  {}  ·  {}", err, elapsed)).style(Theme::error())
+            Paragraph::new(format!("✗  {}  ·  {}  ·  [Esc] Home", err, elapsed)).style(Theme::error())
         } else if self.done {
             Paragraph::new(format!("✓  Build complete!  ·  {}  ·  [Esc] Home", elapsed)).style(Theme::success())
+        } else if self.confirm_cancel {
+            Paragraph::new("Cancel this build?  ·  [x] Confirm  ·  [Esc] Keep building").style(Theme::warning())
+        } else if self.cancel_sent {
+            let spin = spinner::braille(tick);
+            Paragraph::new(format!("{}  Cancelling…  ·  {}", spin, elapsed)).style(Theme::warning())
         } else {
             let spin = spinner::braille(tick);
             Paragraph::new(format!(
-                "{}  {}  ·  {}  ·  [Esc] Back to home — build keeps running",
+                "{}  {}  ·  {}  ·  [Esc] Home (build keeps running)  ·  [x] Cancel build",
                 spin, stage_description_for(self.stage), elapsed,
             )).style(Theme::dim())
         };

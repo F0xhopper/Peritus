@@ -3,13 +3,13 @@
 No network or DB required — all external calls are mocked.
 """
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
 from peritus.experts.builder import ExpertBuilder
+from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
 
 
 def _make_expert(tier: ExpertTier) -> Expert:
@@ -20,8 +20,8 @@ def _make_expert(tier: ExpertTier) -> Expert:
         status=ExpertStatus.READY,
         tier=tier,
         config=ExpertConfig.from_tier(tier),
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 

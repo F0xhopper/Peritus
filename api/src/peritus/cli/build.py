@@ -1,7 +1,6 @@
 """peritus build — orchestrates the 5-stage pipeline with live rich output."""
 
 import asyncio
-import math
 import traceback
 from collections import OrderedDict
 from typing import Annotated
@@ -206,7 +205,7 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
             f"[yellow]Expert {topic!r} already exists. "
             "Use --rebuild to replace it or peritus chat to use it.[/yellow]"
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     display = BuildDisplay(topic)
 
@@ -242,7 +241,7 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
 
         elif etype == "graph_batch_done":
             display.graph_batches_done += 1
-            new_labels = [l for l in event.get("labels", []) if l not in display.concepts]
+            new_labels = [lbl for lbl in event.get("labels", []) if lbl not in display.concepts]
             display.concepts.extend(new_labels)
             display.node_count = sum(
                 len(e.get("labels", [])) for e in [event]
@@ -264,12 +263,12 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
     except BuildError as exc:
         await svc.mark_failed(expert.id, str(exc))
         console.print(f"\n[bold red]Build failed:[/bold red] {exc}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
     except Exception as exc:
         await svc.mark_failed(expert.id, str(exc))
         console.print(f"\n[bold red]Unexpected error:[/bold red] {exc}")
         traceback.print_exc()
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     await svc.mark_ready(expert.id)
 

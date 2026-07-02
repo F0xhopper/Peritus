@@ -21,8 +21,8 @@ class WebFetcher:
                 *[_fetch_page(client, url) for url in urls],
                 return_exceptions=True,
             )
-        for url, result in zip(urls, results):
-            if isinstance(result, Exception):
+        for url, result in zip(urls, results, strict=True):
+            if isinstance(result, BaseException):
                 logger.warning("Web fetch failed for %r: %s", url, result)
                 continue
             text, title = result
@@ -45,9 +45,11 @@ async def _ddg_search(query: str, limit: int) -> list[str]:
             resp = await client.post(_SEARCH_URL, data={"q": query})
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
-            urls = []
+            urls: list[str] = []
             for a in soup.select("a.result__url"):
                 href = a.get("href", "")
+                if not isinstance(href, str):
+                    continue
                 if href.startswith("http") and "duckduckgo" not in href:
                     urls.append(href)
                     if len(urls) >= limit:

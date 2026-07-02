@@ -11,7 +11,7 @@ _API_URL = "https://en.wikipedia.org/w/api.php"
 _MAX_CHARS = 80_000
 
 _HEADERS = {
-    "User-Agent": "Peritus/2.0 (https://github.com/F0xhopper/cognita-mcp; foxhopper16@gmail.com)"
+    "User-Agent": "Peritus/2.0 (research corpus builder)"
 }
 
 
@@ -24,8 +24,8 @@ class WikipediaFetcher:
                 return_exceptions=True,
             )
         sources = []
-        for title, result in zip(titles, results):
-            if isinstance(result, Exception):
+        for title, result in zip(titles, results, strict=True):
+            if isinstance(result, BaseException):
                 logger.warning("Wikipedia fetch failed for %r: %s", title, result)
                 continue
             if len(result) < 500:

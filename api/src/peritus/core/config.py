@@ -1,4 +1,5 @@
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -81,6 +82,25 @@ class Settings:
 
     # Base URL of the Peritus API server, used by the Python CLI's login command.
     PERITUS_SERVER_URL: str = os.getenv("PERITUS_SERVER_URL", "http://localhost:8000")
+
+    # ── Background build jobs ────────────────────────────────────────────────
+    # Run a build worker inside the API process (convenient for local/single-node
+    # dev). In production, run `peritus-worker` as its own process instead.
+    RUN_WORKER_IN_PROCESS: bool = os.getenv("RUN_WORKER_IN_PROCESS", "false").lower() == "true"
+    # Concurrent builds per worker process. Global concurrency = #workers × this.
+    WORKER_CONCURRENCY: int = int(os.getenv("WORKER_CONCURRENCY", "2"))
+    # How often a running job writes a liveness heartbeat.
+    WORKER_HEARTBEAT_INTERVAL: float = float(os.getenv("WORKER_HEARTBEAT_INTERVAL", "10"))
+    # A running job whose heartbeat is older than this is considered crashed and requeued.
+    WORKER_STALE_TIMEOUT: float = float(os.getenv("WORKER_STALE_TIMEOUT", "90"))
+    # Retry budget for a build before it is marked permanently failed.
+    WORKER_MAX_ATTEMPTS: int = int(os.getenv("WORKER_MAX_ATTEMPTS", "3"))
+    # Idle poll interval when there is no work to claim.
+    WORKER_POLL_INTERVAL: float = float(os.getenv("WORKER_POLL_INTERVAL", "2"))
+    # Base seconds for exponential retry backoff (base × 2^(attempts-1)).
+    WORKER_BACKOFF_BASE: float = float(os.getenv("WORKER_BACKOFF_BASE", "30"))
+    # How often the SSE endpoint polls build_events while tailing a live build.
+    JOB_EVENT_POLL_INTERVAL: float = float(os.getenv("JOB_EVENT_POLL_INTERVAL", "0.4"))
 
     @property
     def AUTH_ENABLED(self) -> bool:

@@ -2,6 +2,7 @@ use std::sync::Arc;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::DefaultTerminal;
+use tokio::sync::oneshot;
 
 use crate::api::client::{is_unauthorized, ApiClient};
 use crate::api::types::{ExpertSummary, Session};
@@ -21,6 +22,9 @@ pub enum Screen {
     Login,
 }
 
+/// Result of a background expert-list refresh (optionally preceded by a delete).
+type RefreshResult = Result<Vec<ExpertSummary>, String>;
+
 pub struct App {
     pub screen: Screen,
     pub api: Arc<ApiClient>,
@@ -36,6 +40,10 @@ pub struct App {
     pub status_msg: Option<(String, std::time::Instant)>,
     pub tick: u64, // increments every render frame (~60fps)
     last_expert_poll: std::time::Instant,
+    // In-flight background refresh; API calls never block the render loop.
+    refresh_rx: Option<oneshot::Receiver<RefreshResult>>,
+    // Topic to select once the next refresh lands (e.g. after a build finishes).
+    pending_select_topic: Option<String>,
 }
 
 impl App {
@@ -56,11 +64,61 @@ impl App {
             status_msg: None,
             tick: 0,
             last_expert_poll: std::time::Instant::now(),
+            refresh_rx: None,
+            pending_select_topic: None,
         }
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         self.status_msg = Some((msg.into(), std::time::Instant::now()));
+    }
+
+    /// Kick off a non-blocking expert-list refresh; the result lands in
+    /// `tick_screens` so the UI keeps rendering while the request is in flight.
+    fn request_refresh(&mut self) {
+        let api = self.api.clone();
+        let (tx, rx) = oneshot::channel();
+        self.refresh_rx = Some(rx);
+        tokio::spawn(async move {
+            let _ = tx.send(api.list_experts().await.map_err(|e| e.to_string()));
+        });
+    }
+
+    /// Delete an expert in the background, then refresh the list.
+    fn request_delete(&mut self, slug: String) {
+        let api = self.api.clone();
+        let (tx, rx) = oneshot::channel();
+        self.refresh_rx = Some(rx);
+        self.set_status("Deleting…");
+        tokio::spawn(async move {
+            let result = match api.delete_expert(&slug).await {
+                Ok(()) => api.list_experts().await.map_err(|e| e.to_string()),
+                Err(e) => Err(format!("Delete failed: {}", e)),
+            };
+            let _ = tx.send(result);
+        });
+    }
+
+    /// Open the build screen for `expert`: reuse the live screen if it's the same
+    /// build, otherwise attach to the server-side build (survives TUI restarts).
+    fn open_build_for(&mut self, topic: String, tier: String) {
+        let same = self.build.as_ref().map(|b| b.topic() == topic).unwrap_or(false);
+        if !same {
+            if self.build.is_some() {
+                self.set_status("Another build is on screen — it keeps running server-side");
+            }
+            self.build = Some(BuildScreen::attach(topic, tier, self.api.clone()));
+        }
+        self.screen = Screen::Build;
+    }
+
+    fn start_build(&mut self, topic: String, tier: String) {
+        if self.build.is_some() {
+            self.set_status("A build is already running — press [b] to watch it");
+            return;
+        }
+        self.build = Some(BuildScreen::new(topic, tier, self.api.clone()));
+        self.screen = Screen::Build;
     }
 }
 
@@ -141,11 +199,12 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                 // Chat owns its own key mapping so that j/k/q/n/d reach the input buffer.
                 if app.screen == Screen::Chat {
                     if let Some(chat) = &mut app.chat {
-                        let done = chat.handle_raw(key).await;
-                        if done {
+                        match chat.handle_raw(key).await {
                             // Return Home but KEEP the conversation so re-entering the
                             // same expert resumes it instead of starting over.
-                            app.screen = Screen::Home;
+                            crate::tui::screens::chat::ChatExit::Back => app.screen = Screen::Home,
+                            crate::tui::screens::chat::ChatExit::Quit => app.should_quit = true,
+                            crate::tui::screens::chat::ChatExit::Stay => {}
                         }
                     }
                 } else {
@@ -181,6 +240,11 @@ async fn handle_action(app: &mut App, action: AppAction) {
 
     match app.screen {
         Screen::Config => {
+            // Ctrl+C (and q outside editing) quits from here too.
+            if let AppAction::Quit = action {
+                app.should_quit = true;
+                return;
+            }
             // Esc leaves config when there's nothing to cancel and setup is done.
             if let AppAction::Back = action {
                 if !app.config_screen.editing && app.config.is_configured() {
@@ -230,15 +294,12 @@ async fn handle_action(app: &mut App, action: AppAction) {
                         app.home.confirm_delete = false;
                         if let Some(expert) = app.home.selected_expert() {
                             let slug = expert.name.clone();
-                            match app.api.delete_expert(&slug).await {
-                                Ok(()) => {
-                                    match app.api.list_experts().await {
-                                        Ok(experts) => { app.experts = experts.clone(); app.home.update_experts(experts); }
-                                        Err(e) => app.set_status(format!("Error: {}", e)),
-                                    }
-                                }
-                                Err(e) => app.set_status(format!("Delete failed: {}", e)),
+                            // Deleting the expert whose build is on screen? Drop the screen.
+                            if app.build.as_ref().map(|b| b.topic() == expert.topic).unwrap_or(false) {
+                                if let Some(b) = &app.build { b.cancel(); }
+                                app.build = None;
                             }
+                            app.request_delete(slug);
                         }
                     }
                     AppAction::Back | AppAction::Quit => { app.home.confirm_delete = false; }
@@ -257,29 +318,32 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     _ => {}
                 }
                 if let Some((topic, tier)) = app.home.take_submitted_build() {
-                    if app.build.is_some() {
-                        app.set_status("A build is already running — press [b] to watch it");
-                    } else {
-                        let build = BuildScreen::new(topic, tier, app.api.clone());
-                        app.build = Some(build);
-                        app.screen = Screen::Build;
-                    }
+                    app.start_build(topic, tier);
+                }
+                return;
+            }
+
+            // While the topic input is focused, every key is either submit/cancel
+            // or an edit routed to the shared TextInput.
+            if app.home.input_active {
+                match action {
+                    AppAction::Quit => app.should_quit = true, // Ctrl+C
+                    AppAction::Submit => app.home.handle_enter(),
+                    AppAction::Back => app.home.cancel_input(),
+                    other => app.home.input_edit(&other),
+                }
+                if let Some((topic, tier)) = app.home.take_submitted_build() {
+                    app.start_build(topic, tier);
                 }
                 return;
             }
 
             match action {
                 AppAction::Quit => app.should_quit = true,
-                AppAction::Up | AppAction::Left  => {
-                    if app.home.input_active { /* ignore nav in input mode */ } else { app.home.prev(); }
-                }
-                AppAction::Down | AppAction::Right => {
-                    if app.home.input_active { /* ignore nav in input mode */ } else { app.home.next(); }
-                }
+                AppAction::Up | AppAction::Left  => app.home.prev(),
+                AppAction::Down | AppAction::Right => app.home.next(),
                 AppAction::Submit => {
-                    if app.home.input_active {
-                        app.home.handle_enter();
-                    } else if let Some(expert) = app.home.selected_expert().cloned() {
+                    if let Some(expert) = app.home.selected_expert().cloned() {
                         match expert.status.as_str() {
                             "ready" => {
                                 let resume = app.chat.as_ref()
@@ -290,24 +354,35 @@ async fn handle_action(app: &mut App, action: AppAction) {
                                 }
                                 app.screen = Screen::Chat;
                             }
-                            "building" => app.set_status("Expert is still building — please wait"),
-                            _          => app.set_status("Expert build failed — try rebuilding with [d] delete then [n] new"),
+                            "building" | "queued" => {
+                                app.open_build_for(expert.topic.clone(), expert.tier.clone());
+                            }
+                            _ => {
+                                // Failed: Enter rebuilds in place (same topic + tier).
+                                app.start_build(expert.topic.clone(), expert.tier.clone());
+                            }
                         }
                     }
                 }
                 AppAction::NewExpert => {
-                    if !app.home.input_active { app.home.start_new_expert_input(); }
+                    app.home.start_new_expert_input();
                 }
                 AppAction::DeleteExpert => {
-                    if !app.home.input_active && app.home.selected_expert().is_some() {
+                    if app.home.selected_expert().is_some() {
                         // First press arms the confirmation; second press (handled above) confirms.
                         app.home.confirm_delete = true;
                     }
                 }
-                AppAction::Char('b') if !app.home.input_active && app.build.is_some() => {
-                    app.screen = Screen::Build;
+                AppAction::Char('b') => {
+                    if app.build.is_some() {
+                        app.screen = Screen::Build;
+                    } else if let Some(expert) = app.home.selected_expert().cloned() {
+                        if expert.status == "building" || expert.status == "queued" {
+                            app.open_build_for(expert.topic, expert.tier);
+                        }
+                    }
                 }
-                AppAction::Char('c') if !app.home.input_active => {
+                AppAction::Char('c') => {
                     app.config_screen = ConfigScreen::new(app.config.clone());
                     app.screen = Screen::Config;
                 }
@@ -322,48 +397,53 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     app.screen = Screen::Login;
                     app.set_status("Signed out");
                 }
-                AppAction::Char(c) => {
-                    if app.home.input_active { app.home.input_push(c); }
-                }
-                AppAction::Backspace => {
-                    if app.home.input_active { app.home.input_pop(); }
-                }
                 AppAction::Back => {
-                    if app.home.input_active {
-                        app.home.cancel_input();
-                    } else {
-                        app.should_quit = true;
-                    }
+                    app.should_quit = true;
                 }
                 _ => {}
             }
 
             if let Some((topic, tier)) = app.home.take_submitted_build() {
-                if app.build.is_some() {
-                    app.set_status("A build is already running — press [b] to watch it");
-                } else {
-                    let build = BuildScreen::new(topic, tier, app.api.clone());
-                    app.build = Some(build);
-                    app.screen = Screen::Build;
-                }
+                app.start_build(topic, tier);
             }
         }
 
         Screen::Build => {
-            if let AppAction::Back = action {
-                // A failed build is cleared on the way out so Home doesn't keep a dead
-                // card; a running build is left alone and keeps streaming in the
-                // background (re-enter with [b]).
-                let errored = app.build.as_ref().map(|b| b.error.is_some()).unwrap_or(false);
-                if errored {
-                    app.build = None;
-                    app.set_status("Build failed — try a different topic or check your keys");
+            match action {
+                // Quitting the TUI never kills the build — it runs server-side.
+                AppAction::Quit => app.should_quit = true,
+                // [x] arms cancel; a second [x] confirms and asks the server to stop.
+                AppAction::Char('x') => {
+                    if let Some(build) = &mut app.build {
+                        if build.done || build.error.is_some() {
+                            // Nothing to cancel.
+                        } else if build.confirm_cancel {
+                            build.request_server_cancel();
+                        } else {
+                            build.confirm_cancel = true;
+                        }
+                    }
                 }
-                app.screen = Screen::Home;
-                if let Ok(experts) = app.api.list_experts().await {
-                    app.experts = experts.clone();
-                    app.home.update_experts(experts);
+                AppAction::Back => {
+                    // Esc first un-arms a pending cancel confirmation.
+                    if let Some(build) = &mut app.build {
+                        if build.confirm_cancel {
+                            build.confirm_cancel = false;
+                            return;
+                        }
+                    }
+                    // A finished (failed/cancelled) build is cleared on the way out so
+                    // Home doesn't keep a dead card; a running build is left alone and
+                    // keeps streaming in the background (re-enter with [b]).
+                    let errored = app.build.as_ref().map(|b| b.error.is_some()).unwrap_or(false);
+                    if errored {
+                        if let Some(b) = &app.build { b.cancel(); }
+                        app.build = None;
+                    }
+                    app.screen = Screen::Home;
+                    app.request_refresh();
                 }
+                _ => {}
             }
         }
 
@@ -477,6 +557,27 @@ async fn handle_login_submit(app: &mut App) {
 }
 
 async fn tick_screens(app: &mut App) {
+    // Collect any finished background refresh (list / delete-then-list).
+    if let Some(rx) = &mut app.refresh_rx {
+        match rx.try_recv() {
+            Ok(Ok(experts)) => {
+                app.refresh_rx = None;
+                app.experts = experts.clone();
+                app.home.update_experts(experts);
+                if let Some(topic) = app.pending_select_topic.take() {
+                    app.home.select_by_topic(&topic);
+                    app.set_status("Ready to chat — press Enter");
+                }
+            }
+            Ok(Err(e)) => {
+                app.refresh_rx = None;
+                app.set_status(e);
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(oneshot::error::TryRecvError::Closed) => { app.refresh_rx = None; }
+        }
+    }
+
     // Tick the build stream; capture done state before dropping the borrow.
     let build_done = if let Some(build) = &mut app.build {
         build.tick().await
@@ -488,30 +589,19 @@ async fn tick_screens(app: &mut App) {
         let built_topic = app.build.as_ref().map(|b| b.topic().to_string());
         app.build = None;
         app.screen = Screen::Home;
-        match app.api.list_experts().await {
-            Ok(experts) => {
-                app.experts = experts.clone();
-                app.home.update_experts(experts);
-                if let Some(topic) = built_topic {
-                    app.home.select_by_topic(&topic);
-                    app.set_status("Ready to chat — press Enter");
-                }
-            }
-            Err(_) => {}
-        }
+        app.pending_select_topic = built_topic;
+        app.request_refresh();
         app.last_expert_poll = std::time::Instant::now();
     }
 
-    // Auto-refresh the expert list while any expert is still building.
+    // Auto-refresh the expert list while any expert is still queued or building.
     if app.screen == Screen::Home
-        && app.experts.iter().any(|e| e.status == "building")
+        && app.refresh_rx.is_none()
+        && app.experts.iter().any(|e| e.status == "building" || e.status == "queued")
         && app.last_expert_poll.elapsed().as_secs() >= 5
     {
         app.last_expert_poll = std::time::Instant::now();
-        if let Ok(experts) = app.api.list_experts().await {
-            app.experts = experts.clone();
-            app.home.update_experts(experts);
-        }
+        app.request_refresh();
     }
 
     if let Some(chat) = &mut app.chat {
@@ -528,23 +618,23 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
     use crate::tui::theme::Theme;
 
     let area = f.area();
-    let w = 58u16.min(area.width.saturating_sub(4));
-    let h = 17u16.min(area.height.saturating_sub(2));
+    let w = 62u16.min(area.width.saturating_sub(4));
+    let h = 24u16.min(area.height.saturating_sub(2));
     let x = area.width.saturating_sub(w) / 2;
     let y = area.height.saturating_sub(h) / 2;
     let rect = Rect::new(x, y, w, h);
 
     let key = |k: &'static str, d: &'static str| {
         Line::from(vec![
-            Span::styled(format!("  {:<11}", k), Theme::accent()),
+            Span::styled(format!("  {:<13}", k), Theme::accent()),
             Span::styled(d, Theme::normal()),
         ])
     };
 
     let lines = vec![
         Line::from(Span::styled("Home", Theme::title())),
-        key("↑↓ / j k", "Navigate experts"),
-        key("Enter", "Chat with the selected expert"),
+        key("↑↓←→ hjkl", "Navigate experts"),
+        key("Enter", "Chat · watch build · rebuild failed"),
         key("n", "Build a new expert"),
         key("d", "Delete (press again to confirm)"),
         key("b", "Watch the running build"),
@@ -552,10 +642,20 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
         key("L", "Sign out"),
         key("q / Esc", "Quit"),
         Line::from(""),
+        Line::from(Span::styled("Build", Theme::title())),
+        key("x", "Cancel build (press again to confirm)"),
+        key("Esc", "Home — build keeps running"),
+        Line::from(""),
         Line::from(Span::styled("Chat", Theme::title())),
         key("Enter", "Send message"),
         key("Esc", "Back (conversation is kept)"),
         key("↑↓ PgUp/Dn", "Scroll · End jumps to bottom"),
+        Line::from(""),
+        Line::from(Span::styled("Text editing (all inputs)", Theme::title())),
+        key("←→ Home/End", "Move cursor (Ctrl+A/E too)"),
+        key("Ctrl/Alt+←→", "Jump by word (Alt+B/F too)"),
+        key("Ctrl+U/K", "Kill to start / end of line"),
+        key("Ctrl+W", "Delete word (Alt+Backspace too)"),
         Line::from(""),
         Line::from(Span::styled("  Press any key to close", Theme::dim())),
     ];

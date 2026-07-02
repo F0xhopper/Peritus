@@ -62,7 +62,7 @@ A tier sets the depth/cost trade-off for both build and chat (`api/.../experts/d
 
 ```bash
 # 1. Configure
-cp .env.example .env        # then fill in DATABASE_URL + API keys
+cp api/.env.example api/.env    # then fill in DATABASE_URL + API keys
 
 # 2. Install the API and apply migrations
 cd api
@@ -99,17 +99,23 @@ Key environment variables (`api/src/peritus/core/config.py`):
 The repo ships a `Justfile` with the common commands:
 
 ```bash
-just dev          # run the API server (uvicorn, :8000, --reload)
+just dev-solo     # API server + in-process build worker (single-process local dev)
+just dev          # API server only (uvicorn, :8000, --reload)
+just worker       # standalone build worker (production shape: run beside `just dev`)
 just migrate      # apply database migrations
 just test         # pytest
 just lint         # ruff + mypy
 just build-cli    # cargo build --release
 just run-cli      # cargo run  (the TUI)
-just docker-up    # docker compose up --build -d
+just docker-up    # docker compose up --build -d  (api + worker services)
 just docker-down
 ```
 
-Typical flow: start the server (`just dev`), then launch the TUI (`just run-cli`). On first run the TUI shows a config screen — point it at the server URL (default `http://localhost:8000`). If the server has auth enabled, the TUI then shows a sign-in screen (see below). From the home screen you can create an expert (topic + tier) and watch the build log live, then open it to chat.
+Builds execute in a durable Postgres-backed job queue, so *something* must run a
+worker: either `just dev-solo` (worker inside the API process) or `just dev` plus
+`just worker` as two processes.
+
+Typical flow: start the server (`just dev-solo`), then launch the TUI (`just run-cli`). On first run the TUI shows a config screen — point it at the server URL (default `http://localhost:8000`). If the server has auth enabled, the TUI then shows a sign-in screen (see below). From the home screen you can create an expert (topic + tier) and watch the build log live, then open it to chat.
 
 ## Authentication
 
@@ -150,7 +156,10 @@ When auth is enabled, expert endpoints require a Supabase access token via `Auth
 | `GET`    | `/experts`                | List the caller's experts                     |
 | `GET`    | `/experts/{slug}`         | Expert detail (sources, counts, persona)      |
 | `POST`   | `/experts/build`          | Build an expert — **SSE** stream of progress  |
-| `DELETE` | `/experts/{slug}`         | Delete an expert                              |
+| `GET`    | `/experts/{slug}/build/events?after=N` | Reconnect to a build's progress from a cursor — **SSE** |
+| `GET`    | `/experts/{slug}/build/status` | Point-in-time build job status            |
+| `POST`   | `/experts/{slug}/build/cancel` | Cancel the active build                   |
+| `DELETE` | `/experts/{slug}`         | Delete an expert (cancels any in-flight build) |
 | `POST`   | `/experts/{slug}/chat`    | Ask a question — **SSE** stream of tokens + citations |
 
 ## Project layout

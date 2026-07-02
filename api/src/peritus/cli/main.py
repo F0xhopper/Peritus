@@ -6,10 +6,11 @@ import typer
 
 from peritus.cli.auth import login_command, logout_command, whoami_command
 from peritus.cli.build import build_command
-from peritus.cli.chat import chat_command, _chat_async
+from peritus.cli.chat import _chat_async, chat_command
 from peritus.cli.credentials import credentials_command
-from peritus.cli.experts import app as experts_app, _experts_with_concepts
 from peritus.cli.display import console, suite_view
+from peritus.cli.experts import _experts_with_concepts
+from peritus.cli.experts import app as experts_app
 from peritus.core.config import settings
 from peritus.core.logging import setup_logging
 
@@ -77,7 +78,6 @@ app.add_typer(experts_app, name="experts")
 @app.command("suite")
 def suite() -> None:
     """Show all experts as a gallery of cards."""
-    from peritus.cli.display import suite_view
     pairs = asyncio.run(_experts_with_concepts())
     suite_view(pairs)
 
@@ -87,7 +87,6 @@ def rebuild(
     name: str = typer.Argument(..., help="Expert name or fuzzy match"),
 ) -> None:
     """Delete an existing expert and rebuild it from scratch."""
-    from peritus.cli.build import build_command as _build
     from peritus.experts.service import ExpertService
     from peritus.infrastructure.database import get_pool, init_pool
 
@@ -107,8 +106,8 @@ def config(
     item: str | None = typer.Argument(None, help="KEY=VALUE for set"),
 ) -> None:
     """Show or update configuration."""
-    from peritus.core.config import settings
     from peritus.cli.display import console
+    from peritus.core.config import settings
 
     if action == "show":
         console.print("[bold]Current configuration:[/bold]")
@@ -120,13 +119,14 @@ def config(
         console.print(f"  DATABASE_URL       {_key(settings.DATABASE_URL)}")
         console.print(f"  OPENAI_API_KEY     {_key(settings.OPENAI_API_KEY)}")
         console.print(f"  ANTHROPIC_API_KEY  {_key(settings.ANTHROPIC_API_KEY)}")
-        console.print(f"  MISTRAL_API_KEY    {_key(settings.MISTRAL_API_KEY, required=False)}  [dim](PDF/OCR fetcher)[/dim]")
-        console.print(f"  EXA_API_KEY        {_key(settings.EXA_API_KEY, required=False)}  [dim](YouTube + Exa fetchers)[/dim]")
+        mistral = _key(settings.MISTRAL_API_KEY, required=False)
+        exa = _key(settings.EXA_API_KEY, required=False)
+        console.print(f"  MISTRAL_API_KEY    {mistral}  [dim](PDF/OCR fetcher)[/dim]")
+        console.print(f"  EXA_API_KEY        {exa}  [dim](YouTube + Exa fetchers)[/dim]")
         console.print(f"  EMBED_MODEL        {settings.EMBED_MODEL}")
         console.print(f"  CLAUDE_MODEL       {settings.CLAUDE_MODEL}")
         console.print(f"  FAST_MODEL         {settings.FAST_MODEL}")
     elif action == "set" and item:
-        import os
         from pathlib import Path
         env_file = Path(".env")
         key, _, value = item.partition("=")

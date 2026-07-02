@@ -1,6 +1,7 @@
 """Claude source validator — validates sources in batches of 5, one API call per batch."""
 
 import asyncio
+from typing import Any
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -49,7 +50,7 @@ _SYSTEM = (
     "genuinely addresses the topic with credible content."
 )
 
-_BATCH_TOOL = {
+_BATCH_TOOL: dict[str, Any] = {
     "name": "validate_sources",
     "description": "Score and classify each source for quality and topic relevance.",
     "input_schema": {
@@ -137,7 +138,7 @@ async def validate_sources(
             ]
 
         pairs: list[tuple[RawSource, dict]] = []
-        for source, raw in zip(batch, raw_validations):
+        for source, raw in zip(batch, raw_validations, strict=True):
             q = float(raw.get("quality_score", 0))
             r = float(raw.get("relevance_score", 0))
             raw["drop"] = q < _PASS_THRESHOLD_Q or r < _PASS_THRESHOLD_R
@@ -198,7 +199,7 @@ async def _validate_batch(topic: str, batch: list[RawSource], sem: asyncio.Semap
             )
             for i, s in enumerate(batch)
         )
-        resp = await client.messages.create(
+        resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
             max_tokens=512 * len(batch),
             system=_SYSTEM,

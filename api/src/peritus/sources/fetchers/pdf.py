@@ -12,9 +12,9 @@ from peritus.sources.domain import RawSource, SourceType
 logger = get_logger(__name__)
 
 _SS_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
-_PDF_HEADERS = {"User-Agent": "Peritus/2.0 (educational; foxhopper16@gmail.com)"}
+_PDF_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 _SS_FIELDS = "title,authors,year,openAccessPdf,abstract,externalIds"
-_HEADERS = {"User-Agent": "Peritus/2.0 (educational tool; foxhopper16@gmail.com)"}
+_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 _MAX_CHARS = 200_000
 
 
@@ -32,8 +32,8 @@ class PdfFetcher:
         )
 
         sources: list[RawSource] = []
-        for paper, result in zip(papers, results):
-            if isinstance(result, Exception):
+        for paper, result in zip(papers, results, strict=True):
+            if isinstance(result, BaseException):
                 logger.warning("PDF processing failed for %r: %s", paper.get("title"), result)
             elif result is not None:
                 sources.append(result)

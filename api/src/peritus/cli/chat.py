@@ -35,14 +35,14 @@ async def _chat_async(name: str) -> None:
         expert = await svc.get(name)
     except NotFoundError:
         print_error(f"No expert found matching {name!r}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     if expert.status != ExpertStatus.READY:
         print_error(
             f"Expert {expert.name!r} is not ready (status: {expert.status.value}). "
             "Run peritus build to complete it."
         )
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # Show credential card on entry
     async with pool.acquire() as conn:

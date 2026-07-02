@@ -1,6 +1,6 @@
 """Unit tests for the pure evaluation metrics and citation parsing."""
 
-from peritus.chat.grounding import parse_cited_indices, used_citation_labels, Passage
+from peritus.chat.grounding import Passage, parse_cited_indices, used_citation_labels
 from peritus.eval import metrics
 
 

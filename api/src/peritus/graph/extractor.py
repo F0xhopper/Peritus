@@ -1,7 +1,6 @@
 """Claude graph extractor — reads batches of chunks and extracts concept nodes + typed edges."""
 
 import asyncio
-import json
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -12,7 +11,7 @@ from peritus.ingestion.chunker import TextChunk
 
 logger = get_logger(__name__)
 
-_TOOL = {
+_TOOL: dict[str, Any] = {
     "name": "extract_graph",
     "description": "Extract concept nodes and typed relationships from source chunks.",
     "input_schema": {
@@ -101,7 +100,7 @@ async def extract_graph_from_chunks(
 
     extractions = []
     for i, result in enumerate(results):
-        if isinstance(result, Exception):
+        if isinstance(result, BaseException):
             logger.warning("Graph extraction failed for batch %d: %s", i, result)
         else:
             extractions.append(result)
