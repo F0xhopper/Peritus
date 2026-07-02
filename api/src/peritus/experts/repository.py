@@ -19,7 +19,7 @@ class ExpertRepository:
                 VALUES ($1, $2, $3, $4, $5::jsonb)
                 RETURNING *
                 """,
-                name, topic, ExpertStatus.BUILDING.value,
+                name, topic, ExpertStatus.QUEUED.value,
                 tier.value, json.dumps(dataclasses.asdict(config)),
             )
         return _row_to_expert(row)
@@ -124,6 +124,30 @@ class ExpertRepository:
             await conn.execute(
                 "UPDATE experts SET config = $1::jsonb, updated_at = NOW() WHERE id = $2",
                 json.dumps(dataclasses.asdict(config)), expert_id,
+            )
+
+    async def reset_build_state(self, expert_id: int) -> None:
+        """Clear all derived corpus state so a (re)build starts from a clean slate.
+
+        Builds are not checkpointed, so a retry re-runs the whole pipeline. Deleting
+        the previous attempt's sources/chunks/graph first keeps a retry from creating
+        duplicate rows. Child tables cascade from `sources`, but we delete each
+        explicitly so this is correct regardless of FK cascade direction.
+        """
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM expert_edges WHERE expert_id = $1", expert_id)
+            await conn.execute("DELETE FROM expert_nodes WHERE expert_id = $1", expert_id)
+            await conn.execute("DELETE FROM source_chunks WHERE expert_id = $1", expert_id)
+            await conn.execute("DELETE FROM sources WHERE expert_id = $1", expert_id)
+            await conn.execute(
+                """
+                    UPDATE experts
+                    SET source_count = 0, chunk_count = 0, node_count = 0,
+                        edge_count = 0, avg_quality = NULL, error = NULL,
+                        updated_at = NOW()
+                    WHERE id = $1
+                    """,
+                expert_id,
             )
 
     async def delete(self, expert_id: int) -> None:

@@ -82,25 +82,87 @@ impl BuildScreen {
         let topic_clone = topic.clone();
         let tier_clone = tier.clone();
         let cancel_clone = cancel.clone();
+        // The build runs durably in a worker, so a dropped SSE connection no longer
+        // loses progress. Start with POST /build, then transparently resume from the
+        // durable event log (GET .../build/events?after=<seq>) after any disconnect,
+        // until a terminal event (Done/Error/Cancelled) or the user cancels.
         tokio::spawn(async move {
-            tokio::select! {
-                _ = cancel_clone.notified() => {}
-                _ = async {
-                    match api_clone.build_stream(topic_clone, tier_clone).await {
-                        Ok(mut stream) => {
-                            while let Some(result) = stream.next().await {
-                                match result {
-                                    Ok(event) => { let _ = tx.send(event).await; }
-                                    Err(e)    => {
-                                        let _ = tx.send(BuildEvent::Error { message: e.to_string() }).await;
-                                        break;
-                                    }
-                                }
-                            }
+            const BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);
+            const MAX_EMPTY_RECONNECTS: u32 = 5;
+            let slug = crate::api::client::slugify(&topic_clone);
+            let mut last_seq: u64 = 0;
+            let mut first = true;
+            let mut empty_reconnects: u32 = 0;
+
+            'outer: loop {
+                let stream_res = if first {
+                    api_clone.build_stream(topic_clone.clone(), tier_clone.clone()).await
+                } else {
+                    api_clone.build_events_stream(&slug, last_seq).await
+                };
+                first = false;
+
+                let mut stream = match stream_res {
+                    Ok(s) => s,
+                    Err(e) => {
+                        empty_reconnects += 1;
+                        if empty_reconnects > MAX_EMPTY_RECONNECTS {
+                            let _ = tx.send(BuildEvent::Error {
+                                message: format!("Lost connection to build: {}", e),
+                            }).await;
+                            break 'outer;
                         }
-                        Err(e) => { let _ = tx.send(BuildEvent::Error { message: e.to_string() }).await; }
+                        tokio::select! {
+                            _ = cancel_clone.notified() => break 'outer,
+                            _ = tokio::time::sleep(BACKOFF) => continue 'outer,
+                        }
                     }
-                } => {}
+                };
+
+                let mut got_event = false;
+                let mut terminal = false;
+                loop {
+                    tokio::select! {
+                        _ = cancel_clone.notified() => break 'outer,
+                        item = stream.next() => match item {
+                            Some(Ok(se)) => {
+                                got_event = true;
+                                if let Some(s) = se.seq { last_seq = s; }
+                                let is_terminal = matches!(
+                                    se.event,
+                                    BuildEvent::Done { .. }
+                                        | BuildEvent::Error { .. }
+                                        | BuildEvent::Cancelled { .. }
+                                );
+                                let _ = tx.send(se.event).await;
+                                if is_terminal { terminal = true; break; }
+                            }
+                            Some(Err(_)) => break, // transient stream error → reconnect
+                            None => break,         // connection closed → reconnect if not terminal
+                        }
+                    }
+                }
+
+                if terminal { break 'outer; }
+
+                // Guard against spinning forever if the build vanished (deleted) and
+                // reconnects keep yielding nothing.
+                if got_event {
+                    empty_reconnects = 0;
+                } else {
+                    empty_reconnects += 1;
+                    if empty_reconnects > MAX_EMPTY_RECONNECTS {
+                        let _ = tx.send(BuildEvent::Error {
+                            message: "Build stream ended unexpectedly.".to_string(),
+                        }).await;
+                        break 'outer;
+                    }
+                }
+
+                tokio::select! {
+                    _ = cancel_clone.notified() => break 'outer,
+                    _ = tokio::time::sleep(BACKOFF) => {}
+                }
             }
         });
         Self {
@@ -257,6 +319,11 @@ impl BuildScreen {
                     // "Ready to chat" navigation in the app loop.
                     self.error = Some(message.clone());
                     self.log(format!("Error: {}", message), LogLevel::Error);
+                }
+                BuildEvent::Cancelled { message } => {
+                    let msg = if message.is_empty() { "Build cancelled" } else { message.as_str() };
+                    self.error = Some(msg.to_string());
+                    self.log(msg.to_string(), LogLevel::Error);
                 }
                 BuildEvent::Unknown => {}
             }

@@ -31,3 +31,5 @@ class ExpertDetail(ExpertSummary):
 class BuildRequest(BaseModel):
     topic: str
     tier: ExpertTier = ExpertTier.STANDARD
+    # Optional fetcher allowlist (e.g. ["wikipedia", "arxiv"]); None = all fetchers.
+    sources: list[str] | None = None

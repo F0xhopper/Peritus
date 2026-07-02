@@ -58,6 +58,7 @@ dev = [
 [project.scripts]
 peritus = "peritus.cli.main:main"
 peritus-server = "peritus.api.app:start"
+peritus-worker = "peritus.jobs.runner:worker_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/peritus"]

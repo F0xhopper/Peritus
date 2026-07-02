@@ -1,9 +1,10 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
 
 
 class ExpertStatus(str, Enum):
+    QUEUED = "queued"
     BUILDING = "building"
     READY = "ready"
     FAILED = "failed"
@@ -80,5 +81,5 @@ class Expert:
     key_concepts: list[str] = field(default_factory=list)
     source_type_counts: dict[str, int] = field(default_factory=dict)  # computed, not stored
     error: str | None = None
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
-    updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))

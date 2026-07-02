@@ -18,3 +18,11 @@ RUN useradd -m cognita && chown -R cognita /app
 USER cognita
 
 EXPOSE 8000 8001
+
+# Run the same image as two process types (recommended for production):
+#   API:    peritus-server
+#   Worker: peritus-worker
+# so an API restart/deploy never kills an in-flight build, and workers scale
+# independently. For a single-process local setup, run only the API with
+# RUN_WORKER_IN_PROCESS=true.
+CMD ["peritus-server"]

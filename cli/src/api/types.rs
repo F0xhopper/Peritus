@@ -70,6 +70,7 @@ pub enum BuildEvent {
     PersonaReady { name: String },
     Done { expert_id: u64, source_count: u64, chunk_count: u64, node_count: u64, edge_count: u64 },
     Error { message: String },
+    Cancelled { #[serde(default)] message: String },
     #[serde(other)]
     Unknown,
 }
