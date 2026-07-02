@@ -68,7 +68,7 @@ class SearchService:
                 candidate_k=candidate_k,
                 top_k=fetch_k,
             )
-            for q, emb in zip(queries, embeddings)
+            for q, emb in zip(queries, embeddings, strict=True)
         ])
 
         merged = _merge_hits([[_row_to_result(r) for r in hits] for hits in all_hits])

@@ -1,16 +1,16 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 
 
-class ExpertStatus(str, Enum):
+class ExpertStatus(StrEnum):
     QUEUED = "queued"
     BUILDING = "building"
     READY = "ready"
     FAILED = "failed"
 
 
-class ExpertTier(str, Enum):
+class ExpertTier(StrEnum):
     LITE     = "lite"
     STANDARD = "standard"
     PRO      = "pro"

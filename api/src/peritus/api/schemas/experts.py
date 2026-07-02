@@ -1,5 +1,6 @@
 from datetime import datetime
-from pydantic import BaseModel
+
+from pydantic import BaseModel, Field
 
 from peritus.experts.domain import ExpertTier
 
@@ -29,7 +30,7 @@ class ExpertDetail(ExpertSummary):
 
 
 class BuildRequest(BaseModel):
-    topic: str
+    topic: str = Field(min_length=1, max_length=300)
     tier: ExpertTier = ExpertTier.STANDARD
     # Optional fetcher allowlist (e.g. ["wikipedia", "arxiv"]); None = all fetchers.
     sources: list[str] | None = None

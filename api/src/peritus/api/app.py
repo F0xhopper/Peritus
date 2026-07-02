@@ -17,6 +17,12 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    missing = settings.check_required_vars()
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing)}. "
+            "Copy api/.env.example to api/.env and fill them in."
+        )
     await init_pool()
 
     worker = None

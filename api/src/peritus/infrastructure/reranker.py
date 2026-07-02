@@ -7,6 +7,7 @@ available, and otherwise scores passages in small windows and merges the results
 """
 
 import asyncio
+from typing import Any
 
 import httpx
 
@@ -18,7 +19,7 @@ logger = get_logger(__name__)
 
 _MAX_DOC_CHARS = 1500
 
-_TOOL = {
+_TOOL: dict[str, Any] = {
     "name": "rank_passages",
     "description": "Score how well each passage answers the query.",
     "input_schema": {
@@ -138,7 +139,7 @@ async def _score_one_window(
         passages = "\n\n".join(
             f"[{local}]\n{documents[g][:_MAX_DOC_CHARS]}" for local, g in enumerate(indices)
         )
-        resp = await client.messages.create(
+        resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
             max_tokens=512,
             system=(

@@ -34,7 +34,7 @@ async def _credentials_async(
         expert = await svc.get(name)
     except NotFoundError:
         print_error(f"No expert found matching {name!r}")
-        raise typer.Exit(1)
+        raise typer.Exit(1) from None
 
     # Fetch sources from DB
     async with pool.acquire() as conn:

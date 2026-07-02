@@ -60,7 +60,7 @@ def show_expert(name: str = typer.Argument(..., help="Expert name or fuzzy match
             expert = await svc.get(name)
         except NotFoundError:
             print_error(f"No expert found matching {name!r}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
         console.print(f"\n[bold]{expert.name}[/bold]  [dim]{expert.status.value}[/dim]")
         if expert.persona_name:
             console.print(f"Persona: [cyan]{expert.persona_name}[/cyan]")
@@ -88,7 +88,7 @@ def delete_expert(
             expert = await svc.get(name)
         except NotFoundError:
             print_error(f"No expert found matching {name!r}")
-            raise typer.Exit(1)
+            raise typer.Exit(1) from None
 
         if not yes:
             confirm = typer.confirm(f"Delete expert {expert.name!r} and all its data?")

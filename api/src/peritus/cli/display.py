@@ -1,11 +1,11 @@
 """Rich terminal primitives shared across all CLI commands."""
 
+from rich import box
 from rich.columns import Columns
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
-from rich import box
 
 console = Console()
 
@@ -140,7 +140,6 @@ def experts_table(experts: list) -> Table:
 
 
 def credential_card(expert, passed_sources: list, dropped_sources: list, top_concepts: list) -> Panel:
-    from rich.columns import Columns
 
     lines: list[str] = []
 

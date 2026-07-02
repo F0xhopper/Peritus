@@ -2,10 +2,11 @@
 
 import dataclasses
 import json
+from datetime import UTC
 
 import pytest
 
-from peritus.experts.domain import ExpertConfig, ExpertTier, _TIER_DEFAULTS
+from peritus.experts.domain import ExpertConfig, ExpertTier
 
 
 def test_tier_defaults_are_correct():
@@ -60,8 +61,9 @@ def test_serialisation_roundtrip():
 
 def test_empty_config_fallback():
     """_row_to_expert must derive config from tier when stored config is empty."""
+    from datetime import datetime
+
     from peritus.experts.repository import _row_to_expert
-    from datetime import datetime, timezone
 
     class _FakeRow:
         def keys(self):
@@ -73,7 +75,7 @@ def test_empty_config_fallback():
             ]
 
         def __getitem__(self, key):
-            _now = datetime.now(timezone.utc)
+            _now = datetime.now(UTC)
             return {
                 "id": 1,
                 "name": "test",

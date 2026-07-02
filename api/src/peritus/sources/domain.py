@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class SourceType(str, Enum):
+class SourceType(StrEnum):
     WIKIPEDIA = "wikipedia"
     ARXIV = "arxiv"
     YOUTUBE = "youtube"

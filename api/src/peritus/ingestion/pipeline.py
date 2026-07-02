@@ -35,12 +35,12 @@ async def ingest_source(
             return [], []
 
         contexts = await contextualize_chunks(chunks, source.title, source.text)
-        for chunk, ctx in zip(chunks, contexts):
+        for chunk, ctx in zip(chunks, contexts, strict=True):
             chunk.chunk_meta["context"] = ctx
 
         embed_inputs = [
             (f"{ctx}\n\n{chunk.text}" if ctx else chunk.text)[:_MAX_EMBED_CHARS]
-            for chunk, ctx in zip(chunks, contexts)
+            for chunk, ctx in zip(chunks, contexts, strict=True)
         ]
         embeddings = await _embed_in_batches(embed_inputs)
 
@@ -80,7 +80,7 @@ async def _bulk_insert(
     ids: list[int] = []
     async with pool.acquire() as conn:
         await register_vector(conn)
-        for chunk, ctx, emb in zip(chunks, contexts, embeddings):
+        for chunk, ctx, emb in zip(chunks, contexts, embeddings, strict=True):
             row = await conn.fetchrow(
                 """
                 INSERT INTO source_chunks

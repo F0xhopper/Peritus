@@ -1,4 +1,5 @@
 import hashlib
+import hmac
 
 from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
@@ -13,7 +14,7 @@ def _check_key(raw_key: str) -> None:
     if not settings.PERITUS_API_KEY_HASH:
         return  # auth disabled (dev mode)
     key_hash = hashlib.sha256(raw_key.encode()).hexdigest()
-    if key_hash != settings.PERITUS_API_KEY_HASH:
+    if not hmac.compare_digest(key_hash, settings.PERITUS_API_KEY_HASH):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 

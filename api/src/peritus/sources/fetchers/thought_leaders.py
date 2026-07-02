@@ -1,6 +1,7 @@
 """Thought-leader fetcher — Claude identifies authoritative voices, then finds their content."""
 
 import asyncio
+from typing import Any
 
 import httpx
 
@@ -11,10 +12,10 @@ from peritus.sources.domain import RawSource, SourceType
 
 logger = get_logger(__name__)
 
-_HEADERS = {"User-Agent": "Peritus/2.0 (educational; foxhopper16@gmail.com)"}
+_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 _MAX_CHARS = 50_000
 
-_IDENTIFY_TOOL = {
+_IDENTIFY_TOOL: dict[str, Any] = {
     "name": "identify_thought_leaders",
     "description": "Identify the top thought leaders, authors, and practitioners for a topic.",
     "input_schema": {
@@ -50,7 +51,7 @@ class ThoughtLeadersFetcher:
 
         sources: list[RawSource] = []
         for batch in results_list:
-            if isinstance(batch, Exception):
+            if isinstance(batch, BaseException):
                 logger.warning("Leader content fetch failed: %s", batch)
                 continue
             sources.extend(batch)
@@ -61,7 +62,7 @@ class ThoughtLeadersFetcher:
 async def _identify_leaders(topic: str) -> list[dict]:
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(
+        resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
             max_tokens=512,
             system=(
@@ -78,7 +79,7 @@ async def _identify_leaders(topic: str) -> list[dict]:
         block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
         leaders = block.input.get("leaders", [])
         logger.info("Identified %d thought leaders for %r: %s", len(leaders), topic,
-                    ", ".join(l["name"] for l in leaders))
+                    ", ".join(ldr["name"] for ldr in leaders))
         return leaders
     except Exception as exc:
         logger.warning("Thought leader identification failed: %s", exc)

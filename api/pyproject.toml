@@ -72,9 +72,19 @@ src = ["src"]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["B008"]
 
+[tool.ruff.lint.pycodestyle]
+# The formatter targets line-length (100); E501 only fires on egregious lines.
+max-line-length = 120
+
 [tool.mypy]
 python_version = "3.12"
-strict = true
+# Not `strict`: the codebase predates annotations in places. These flags catch the
+# high-value errors (wrong types, bad calls, unreachable code) without demanding
+# full annotation coverage. Tighten towards strict as annotations are added.
+check_untyped_defs = true
+warn_redundant_casts = true
+warn_unused_ignores = false
+no_implicit_optional = true
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

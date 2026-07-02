@@ -10,7 +10,7 @@ from peritus.sources.domain import RawSource, SourceType
 logger = get_logger(__name__)
 
 _HEADERS = {
-    "User-Agent": "Peritus/2.0 (educational; foxhopper16@gmail.com)",
+    "User-Agent": "Peritus/2.0 (research corpus builder)",
     "Accept": "application/json",
 }
 _MAX_CHARS = 50_000

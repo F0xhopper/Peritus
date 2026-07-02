@@ -1,13 +1,13 @@
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     CONCEPT = "concept"
     CLAIM = "claim"
 
 
-class EdgeType(str, Enum):
+class EdgeType(StrEnum):
     SUPPORTS = "supports"
     CONTRADICTS = "contradicts"
     BUILDS_ON = "builds_on"

@@ -1,6 +1,7 @@
 """Project Gutenberg fetcher — Claude identifies canonical books first, then fetches via Gutendex."""
 
 import re
+from typing import Any
 
 import httpx
 from bs4 import BeautifulSoup
@@ -13,7 +14,7 @@ from peritus.sources.domain import RawSource, SourceType
 logger = get_logger(__name__)
 
 _GUTENDEX = "https://gutendex.com/books/"
-_HEADERS = {"User-Agent": "Peritus/2.0 (educational tool; foxhopper16@gmail.com)"}
+_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 _MAX_CHARS = 200_000
 
 _START_RE = re.compile(
@@ -23,7 +24,7 @@ _END_RE = re.compile(
     r"\*{3}\s*END OF (THE|THIS) PROJECT GUTENBERG EBOOK.+?\*{3}", re.IGNORECASE
 )
 
-_BOOK_TOOL = {
+_BOOK_TOOL: dict[str, Any] = {
     "name": "identify_canonical_books",
     "description": (
         "Identify canonical books and primary texts for a topic that are available in "
@@ -112,7 +113,7 @@ async def _identify_books(topic: str) -> list[dict]:
     """One Haiku call — returns a list of {title, author, search_query} dicts."""
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(
+        resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
             max_tokens=400,
             system=(

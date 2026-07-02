@@ -192,10 +192,7 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
     raw_config = row["config"] if "config" in keys else None
     if isinstance(raw_config, str):
         raw_config = json.loads(raw_config)
-    if raw_config:
-        config = ExpertConfig(**raw_config)
-    else:
-        config = ExpertConfig.from_tier(tier)
+    config = ExpertConfig(**raw_config) if raw_config else ExpertConfig.from_tier(tier)
 
     return Expert(
         id=row["id"],

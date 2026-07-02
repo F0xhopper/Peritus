@@ -14,10 +14,10 @@ COPY migrations/ migrations/
 
 RUN pip install --no-cache-dir .
 
-RUN useradd -m cognita && chown -R cognita /app
-USER cognita
+RUN useradd -m peritus && chown -R peritus /app
+USER peritus
 
-EXPOSE 8000 8001
+EXPOSE 8000
 
 # Run the same image as two process types (recommended for production):
 #   API:    peritus-server

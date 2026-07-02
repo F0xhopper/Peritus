@@ -1,6 +1,7 @@
 """Contextual retrieval — situate each chunk within its source before indexing."""
 
 import asyncio
+from typing import Any
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -17,7 +18,7 @@ _SYSTEM = (
     "no preamble, no quotation, no commentary."
 )
 
-_BATCH_TOOL = {
+_BATCH_TOOL: dict[str, Any] = {
     "name": "contextualize_chunks",
     "description": "Generate a short retrieval context for each chunk, in order.",
     "input_schema": {
@@ -109,7 +110,7 @@ async def contextualize_chunks(
         )
         try:
             async with sem:
-                resp = await client.messages.create(
+                resp = await client.messages.create(  # type: ignore[call-overload]
                     model=settings.FAST_MODEL,
                     max_tokens=150 * len(batch),
                     system=_SYSTEM,

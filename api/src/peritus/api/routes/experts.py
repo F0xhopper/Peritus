@@ -113,6 +113,11 @@ async def build_expert(req: BuildRequest, request: Request):
     repo = ExpertRepository(pool)
     jobs = JobRepository(pool)
     slug = _slugify(req.topic)
+    if not slug:
+        raise HTTPException(
+            status_code=400,
+            detail="Topic must contain at least one letter or number",
+        )
 
     expert = await repo.get_by_name(slug)
     active = await jobs.get_active_job(expert.id) if expert else None
@@ -153,6 +158,34 @@ async def build_events(slug: str, request: Request, after: int = Query(0, ge=0))
     if not job:
         raise HTTPException(status_code=404, detail="No build job for this expert")
     return EventSourceResponse(_tail_events(jobs, job.id, after=after, request=request))
+
+
+@router.post("/{slug}/build/cancel", status_code=202)
+async def cancel_build(slug: str) -> dict[str, Any]:
+    """Cancel the active (queued or running) build for an expert.
+
+    A running worker notices on its next heartbeat and aborts cooperatively; a
+    queued job simply never starts. The expert is marked failed so the UI doesn't
+    show a build that will never finish.
+    """
+    pool = get_pool()
+    repo = ExpertRepository(pool)
+    expert = await repo.get_by_name(slug)
+    if not expert:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    jobs = JobRepository(pool)
+    job = await jobs.get_active_job(expert.id)
+    if job is None:
+        raise HTTPException(status_code=409, detail="No active build for this expert")
+    await jobs.request_cancel(expert.id)
+    # Terminal event so any client tailing the log stops cleanly, and a status the
+    # worker would otherwise only set once its heartbeat fails.
+    await jobs.append_event(job.id, "cancelled", {
+        "type": "cancelled", "message": "Build cancelled",
+    })
+    await repo.update_status(expert.id, ExpertStatus.FAILED, "Build cancelled")
+    logger.info("Cancelled build job %d for %r", job.id, slug)
+    return {"job_id": job.id, "status": "cancelled"}
 
 
 @router.get("/{slug}/build/status")

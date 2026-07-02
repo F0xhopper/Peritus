@@ -12,6 +12,14 @@ logger = get_logger(__name__)
 
 
 async def _run() -> None:
+    from peritus.core.config import settings
+
+    missing = settings.check_required_vars()
+    if missing:
+        raise RuntimeError(
+            f"Missing required environment variables: {', '.join(missing)}. "
+            "Copy api/.env.example to api/.env and fill them in."
+        )
     await init_pool()
     worker = BuildWorker(get_pool())
 
