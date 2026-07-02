@@ -13,11 +13,25 @@ pub struct ConfigScreen {
     field: usize, // 0 = server_url, 1 = api_key
     pub editing: bool,
     edit_buf: String,
+    // Snapshot at open, so the screen can show an "unsaved changes" indicator.
+    persisted: Config,
 }
 
 impl ConfigScreen {
     pub fn new(config: Config) -> Self {
-        Self { config, saved: false, field: 0, editing: false, edit_buf: String::new() }
+        Self {
+            persisted: config.clone(),
+            config,
+            saved: false,
+            field: 0,
+            editing: false,
+            edit_buf: String::new(),
+        }
+    }
+
+    fn dirty(&self) -> bool {
+        self.config.server_url != self.persisted.server_url
+            || self.config.api_key != self.persisted.api_key
     }
 
     fn commit_edit(&mut self) {
@@ -91,6 +105,14 @@ impl ConfigScreen {
                 .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::dim())),
             chunks[1],
         );
+
+        // Unsaved-changes indicator so Enter (confirm field) isn't mistaken for save.
+        if self.dirty() && !self.editing {
+            f.render_widget(
+                Paragraph::new("● unsaved changes — press Ctrl+S to save").style(Theme::warning()),
+                chunks[2],
+            );
+        }
 
         let hint = if self.editing { "[Enter] Confirm field  [Esc] Cancel" } else { "[↑↓/Tab] Navigate  [Enter] Edit field  [Ctrl+S] Save & continue  [Esc] Back" };
         f.render_widget(Paragraph::new(hint).style(Theme::dim()), chunks[3]);

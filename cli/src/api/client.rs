@@ -66,15 +66,6 @@ impl ApiClient {
         Ok(resp)
     }
 
-    pub async fn get_expert(&self, slug: &str) -> Result<ExpertDetail> {
-        let resp = self.auth(self.client.get(format!("{}/experts/{}", self.base_url, slug)))
-            .timeout(REQUEST_TIMEOUT)
-            .send().await?
-            .error_for_status()?
-            .json().await?;
-        Ok(resp)
-    }
-
     pub async fn delete_expert(&self, slug: &str) -> Result<()> {
         self.auth(self.client.delete(format!("{}/experts/{}", self.base_url, slug)))
             .timeout(REQUEST_TIMEOUT)
@@ -102,6 +93,16 @@ impl ApiClient {
             .send().await?
             .error_for_status()?;
         Ok(parse_sse_stream_with_seq(resp.bytes_stream()))
+    }
+
+    /// Cancel the active build for an expert. The terminal 'cancelled' event
+    /// arrives via the event stream, so callers only need to fire this.
+    pub async fn cancel_build(&self, slug: &str) -> Result<()> {
+        self.auth(self.client.post(format!("{}/experts/{}/build/cancel", self.base_url, slug)))
+            .timeout(REQUEST_TIMEOUT)
+            .send().await?
+            .error_for_status()?;
+        Ok(())
     }
 
     pub async fn chat_stream(&self, slug: &str, req: ChatRequest) -> Result<SseStream<ChatEvent>> {

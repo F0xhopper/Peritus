@@ -4,7 +4,6 @@ pub enum AppAction {
     Down,
     Left,
     Right,
-    Select,
     Back,
     Quit,
     NewExpert,

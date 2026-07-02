@@ -64,7 +64,10 @@ impl HomeScreen {
     }
 
     pub fn prev(&mut self) {
-        if !self.experts.is_empty() { self.selected = self.selected.saturating_sub(1); }
+        if !self.experts.is_empty() {
+            // Wrap around, mirroring next().
+            self.selected = (self.selected + self.experts.len() - 1) % self.experts.len();
+        }
         self.confirm_delete = false;
     }
 
@@ -169,24 +172,25 @@ impl HomeScreen {
             render_expert_card(f, card_area, expert, idx == self.selected, card_build, tick);
         }
 
-        // Scroll indicator dots
+        // Scroll indicator — dots while they fit, "n/total" once the list grows.
         if self.experts.len() > visible_count {
-            let dots: String = self.experts.iter().enumerate()
-                .map(|(i, _)| if i == self.selected { "●" } else { "○" })
-                .collect::<Vec<_>>().join(" ");
-            let dot_x = inner.x + inner.width.saturating_sub(dots.chars().count() as u16) / 2;
+            let indicator = if self.experts.len() <= 12 {
+                self.experts.iter().enumerate()
+                    .map(|(i, _)| if i == self.selected { "●" } else { "○" })
+                    .collect::<Vec<_>>().join(" ")
+            } else {
+                format!("{} / {}", self.selected + 1, self.experts.len())
+            };
+            let dot_x = inner.x + inner.width.saturating_sub(indicator.chars().count() as u16) / 2;
             f.render_widget(
-                Paragraph::new(dots).style(Theme::dim()),
+                Paragraph::new(indicator).style(Theme::dim()),
                 Rect::new(dot_x, footer_area.y, footer_area.width, 1),
             );
         }
 
         // Footer hints / new-expert input
         let hint_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
-        let selected_is_building = self.selected_expert()
-            .zip(build_info)
-            .map(|(e, b)| e.topic == b.topic)
-            .unwrap_or(false);
+        let selected_status = self.selected_expert().map(|e| e.status.as_str()).unwrap_or("");
 
         let (footer_text, hint_style) = if self.input_active {
             (String::new(), Theme::dim())
@@ -195,8 +199,10 @@ impl HomeScreen {
                 .and_then(|e| e.persona_name.as_deref().or(Some(e.name.as_str())))
                 .unwrap_or("this expert");
             (format!("Delete \"{}\"?  [D] Confirm  [Esc] Cancel", name), Theme::error())
-        } else if selected_is_building {
-            ("[b] Watch Build  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::accent())
+        } else if selected_status == "building" || selected_status == "queued" {
+            ("[Enter/b] Watch Build  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::accent())
+        } else if selected_status == "failed" {
+            ("[Enter] Rebuild  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
         } else {
             ("[n] New  [Enter] Chat  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
         };
@@ -224,6 +230,7 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
     let (status_label, status_style) = match expert.status.as_str() {
         "ready"    => ("✓ ready",    Theme::success()),
         "building" => ("● building", Theme::warning()),
+        "queued"   => ("◌ queued",   Theme::warning()),
         _          => ("✗ failed",   Theme::error()),
     };
 
@@ -322,16 +329,19 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
         .split(area);
 
     f.render_widget(Paragraph::new(Span::styled(sep, Theme::dim())), chunks[0]);
-    f.render_widget(
-        Paragraph::new(Line::from(vec![
-            Span::styled(fmt_count(expert.node_count), Theme::normal()),
-            Span::styled(" concepts", Theme::dim()),
-            Span::styled("  ·  ", Theme::dim()),
-            Span::styled(fmt_count(expert.source_count), Theme::normal()),
-            Span::styled(" sources", Theme::dim()),
-        ])),
-        chunks[1],
-    );
+    let mut stats = vec![
+        Span::styled(fmt_count(expert.node_count), Theme::normal()),
+        Span::styled(" concepts", Theme::dim()),
+        Span::styled("  ·  ", Theme::dim()),
+        Span::styled(fmt_count(expert.source_count), Theme::normal()),
+        Span::styled(" sources", Theme::dim()),
+    ];
+    if let Some(q) = expert.avg_quality {
+        stats.push(Span::styled("  ·  ", Theme::dim()));
+        stats.push(Span::styled(format!("Q {:.1}", q), Theme::normal()));
+        stats.push(Span::styled(" avg", Theme::dim()));
+    }
+    f.render_widget(Paragraph::new(Line::from(stats)), chunks[1]);
     f.render_widget(Paragraph::new(Span::styled(sep, Theme::dim())), chunks[2]);
 
     let mut body_lines: Vec<Line> = Vec::new();
@@ -368,8 +378,8 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
 
     f.render_widget(Paragraph::new(Span::styled(sep.as_str(), Theme::dim())), chunks[0]);
 
-    // Stage name line with [N/5] right-aligned
-    let indicator = format!("[{}/5]", info.stage.min(5));
+    // Stage name line with [N/6] right-aligned (stage is 0-based, 6 stages total)
+    let indicator = format!("[{}/6]", info.stage.min(5) + 1);
     let spin = spinner::braille(tick);
     let label_max = (content_w as usize).saturating_sub(3 + indicator.len() + 1);
     let label_trunc: String = info.stage_label.chars().take(label_max).collect();
@@ -393,12 +403,13 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
 
     f.render_widget(Paragraph::new(Span::styled(sep.as_str(), Theme::dim())), chunks[3]);
 
-    // Mini pipeline: ✓ Plan  ✓ Find  ● Score  ○ Read  ○ Graph
-    const MINI: &[&str] = &["Plan", "Find", "Score", "Read", "Graph"];
+    // Mini pipeline: ✓ Plan  ✓ Find  ● Score  ○ Read  ○ Graph  ○ Voice
+    // Indexed by the backend's 0-based stage number (5 = persona/"Voice").
+    const MINI: &[&str] = &["Plan", "Find", "Score", "Read", "Graph", "Voice"];
     let mut spans: Vec<Span> = Vec::new();
     for (i, label) in MINI.iter().enumerate() {
-        let stage_num = (i + 1) as u8;
-        if i > 0 { spans.push(Span::styled("  ", Theme::dim())); }
+        let stage_num = i as u8;
+        if i > 0 { spans.push(Span::styled(" ", Theme::dim())); }
         let (icon, style) = if stage_num < info.stage {
             ("✓", Theme::success())
         } else if stage_num == info.stage {

@@ -5,7 +5,6 @@ pub struct Theme;
 impl Theme {
     // Peritus brand palette — true-color (RGB), works on all modern terminals.
     // Night-blue base keeps brand blues vibrant without eye strain.
-    pub const BG: Color          = Color::Rgb(8,  9,  18);   // deep night blue
     pub const FG: Color          = Color::Rgb(215, 218, 232); // cool white
     pub const ACCENT: Color      = Color::Rgb(90,  170, 255); // Peritus blue
     pub const ACCENT2: Color     = Color::Rgb(160, 110, 255); // Peritus violet
@@ -13,8 +12,6 @@ impl Theme {
     pub const WARNING: Color     = Color::Rgb(255, 185, 55);  // amber
     pub const ERROR: Color       = Color::Rgb(255, 75,  75);  // coral
     pub const DIM: Color         = Color::Rgb(140, 145, 170); // muted blue-grey
-    pub const HIGHLIGHT: Color   = Color::Rgb(25,  35,  65);  // subtle card bg
-    pub const SELECTED_BG: Color = Color::Rgb(20,  30,  60);  // selected card bg
     pub const BORDER_SEL: Color  = Color::Rgb(185, 185, 185); // selected border (near-white)
     pub const BORDER_DIM: Color  = Color::Rgb(55,  55,  55);  // unselected border (dark grey)
     pub const SOURCE: Color      = Color::Rgb(130, 100, 220); // citation violet

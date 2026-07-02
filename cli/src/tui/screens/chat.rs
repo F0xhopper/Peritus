@@ -23,6 +23,8 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub sources: Vec<SourceCitation>,
+    /// The retrieval traversed a `contradicts` edge — sources disagree.
+    pub has_contradiction: bool,
 }
 
 pub struct ChatScreen {
@@ -32,6 +34,7 @@ pub struct ChatScreen {
     current_stream: Option<String>,
     current_status: Option<String>,
     pending_sources: Vec<SourceCitation>,
+    pending_contradiction: bool,
     input_buf: String,
     rx: Option<mpsc::Receiver<ChatEvent>>,
     scroll_offset: usize, // lines scrolled up from the bottom (0 = pinned to bottom)
@@ -46,6 +49,7 @@ impl ChatScreen {
             current_stream: None,
             current_status: None,
             pending_sources: vec![],
+            pending_contradiction: false,
             input_buf: String::new(),
             rx: None,
             scroll_offset: 0,
@@ -93,21 +97,25 @@ impl ChatScreen {
         let question = self.input_buf.trim().to_string();
         if question.is_empty() || self.rx.is_some() { return; }
 
-        self.messages.push(Message {
-            role: "user".into(),
-            content: question.clone(),
-            sources: vec![],
-        });
-        self.input_buf.clear();
-        self.pending_sources.clear();
-        self.current_stream = Some(String::new());
-        self.current_status = None;
-        self.scroll_offset = 0; // snap to bottom on send
-
+        // History is the conversation BEFORE this question — the server appends the
+        // question itself, so including it here would send it twice.
         let history: Vec<ChatMessage> = self.messages.iter()
             .filter(|m| !m.content.is_empty())
             .map(|m| ChatMessage { role: m.role.clone(), content: m.content.clone() })
             .collect();
+
+        self.messages.push(Message {
+            role: "user".into(),
+            content: question.clone(),
+            sources: vec![],
+            has_contradiction: false,
+        });
+        self.input_buf.clear();
+        self.pending_sources.clear();
+        self.pending_contradiction = false;
+        self.current_stream = Some(String::new());
+        self.current_status = None;
+        self.scroll_offset = 0; // snap to bottom on send
 
         let (tx, rx) = mpsc::channel::<ChatEvent>(256);
         self.rx = Some(rx);
@@ -147,13 +155,17 @@ impl ChatScreen {
                     self.current_status = None; // status replaced by actual text
                     if let Some(b) = &mut self.current_stream { b.push_str(&text); }
                 }
-                ChatEvent::Sources { citations } => { self.pending_sources = citations; }
+                ChatEvent::Sources { citations, has_contradiction } => {
+                    self.pending_sources = citations;
+                    self.pending_contradiction = has_contradiction;
+                }
                 ChatEvent::Done => {
                     if let Some(text) = self.current_stream.take() {
                         self.messages.push(Message {
                             role: "assistant".into(),
                             content: text,
                             sources: std::mem::take(&mut self.pending_sources),
+                            has_contradiction: std::mem::take(&mut self.pending_contradiction),
                         });
                     }
                     self.current_status = None;
@@ -172,6 +184,7 @@ impl ChatScreen {
                         role: "assistant".into(),
                         content,
                         sources: std::mem::take(&mut self.pending_sources),
+                        has_contradiction: std::mem::take(&mut self.pending_contradiction),
                     });
                     close_rx = true;
                 }
@@ -220,6 +233,12 @@ impl ChatScreen {
                     Theme::accent2().add_modifier(Modifier::BOLD),
                 )));
                 lines.extend(markdown::render(&msg.content));
+                if msg.has_contradiction {
+                    lines.push(Line::from(Span::styled(
+                        "⚠ The sources disagree on parts of this — note the tensions above",
+                        Theme::warning().add_modifier(Modifier::ITALIC),
+                    )));
+                }
                 if !msg.sources.is_empty() {
                     lines.push(Line::from(Span::styled(
                         "Sources cited",

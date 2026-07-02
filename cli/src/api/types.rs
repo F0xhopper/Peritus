@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
+// Mirrors the API's ExpertSummary schema; some fields are deserialized but not
+// (yet) rendered anywhere.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExpertSummary {
     pub id: u64,
@@ -26,16 +29,6 @@ pub struct ExpertSummary {
 
 fn default_tier() -> String { "standard".to_string() }
 
-#[derive(Debug, Clone, Deserialize)]
-pub struct ExpertDetail {
-    #[serde(flatten)]
-    pub summary: ExpertSummary,
-    pub persona_bio: Option<String>,
-    pub persona_style: Option<String>,
-    pub avg_quality: Option<f64>,
-    pub error: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize)]
 pub struct BuildRequest {
     pub topic: String,
@@ -54,25 +47,37 @@ pub struct ChatRequest {
     pub history: Vec<ChatMessage>,
 }
 
+// Field names/shapes must match the payloads written to build_events by
+// builder.py and worker.py — see api/src/peritus/experts/builder.py.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum BuildEvent {
+    BuildStarted { attempt: u32, max_attempts: u32 },
     Stage { stage: u8, name: String, #[serde(default)] total: u64, #[serde(default)] total_batches: u64 },
     PlanReady { key_concepts: Vec<String> },
     DiscoveryStarted { fetchers: Vec<String>, active: Vec<String> },
     FetcherDone { name: String, count: u64, skipped: bool },
     SnowballDone { added: u64 },
-    SourceValidated { title: String, passed: bool, #[serde(default)] score: f64 },
+    // Validator scores are 0–10 (see validator.py's rubric).
+    SourceValidated { title: String, passed: bool, #[serde(default)] q: f64, #[serde(default)] r: f64 },
     ValidateDone { passed: u64, dropped: u64 },
-    SourceIngested { title: String, chunks: u64, total_chunks: u64 },
+    SourceIngested { title: String, chunks: u64 },
     GraphBatchDone { labels: Vec<String>, edges: u64 },
     EntitiesResolved { merged: u64 },
     PersonaReady { name: String },
-    Done { expert_id: u64, source_count: u64, chunk_count: u64, node_count: u64, edge_count: u64 },
-    Error { message: String },
+    Retry { attempt: u32, max_attempts: u32, message: String },
+    Done { source_count: u64, chunk_count: u64, node_count: u64 },
     Cancelled { #[serde(default)] message: String },
+    Error { message: String },
     #[serde(other)]
     Unknown,
+}
+
+impl BuildEvent {
+    /// Terminal events end the build stream; after one, no reconnect is attempted.
+    pub fn is_terminal(&self) -> bool {
+        matches!(self, BuildEvent::Done { .. } | BuildEvent::Error { .. } | BuildEvent::Cancelled { .. })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -86,7 +91,7 @@ pub struct SourceCitation {
 pub enum ChatEvent {
     Token { text: String },
     Status { message: String },
-    Sources { citations: Vec<SourceCitation> },
+    Sources { citations: Vec<SourceCitation>, #[serde(default)] has_contradiction: bool },
     Done,
     Error { message: String },
     #[serde(other)]
