@@ -47,7 +47,15 @@ def _done_event() -> BuildEventRow:
 @pytest.fixture
 def app():
     from peritus.api.app import create_app
-    return create_app()
+    from peritus.api.auth import AuthUser, require_user
+
+    app = create_app()
+    # Auth is verified elsewhere (test_auth.py); these contract tests run as a
+    # fixed admin user so they don't depend on tokens or Supabase env.
+    app.dependency_overrides[require_user] = lambda: AuthUser(
+        id="00000000-0000-0000-0000-000000000000", email="admin@test", is_admin=True
+    )
+    return app
 
 
 @pytest.fixture
@@ -138,7 +146,8 @@ async def test_delete_cancels_then_deletes(client):
         patch("peritus.api.routes.experts.JobRepository") as MockJobs,
     ):
         mock_repo = AsyncMock()
-        mock_repo.get_by_name = AsyncMock(return_value=expert)
+        # Delete is owner-scoped: the route resolves the expert via get_for_user.
+        mock_repo.get_for_user = AsyncMock(return_value=expert)
         mock_repo.delete = AsyncMock()
         MockRepo.return_value = mock_repo
 
@@ -164,7 +173,7 @@ async def test_tier_in_get_response(client):
         patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
     ):
         mock_repo = AsyncMock()
-        mock_repo.get_by_name = AsyncMock(return_value=expert)
+        mock_repo.get_for_user = AsyncMock(return_value=expert)
         MockRepo.return_value = mock_repo
 
         resp = await client.get("/experts/stoicism")

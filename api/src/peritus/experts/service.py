@@ -9,12 +9,12 @@ class ExpertService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._repo = ExpertRepository(pool)
 
-    async def create(self, topic: str) -> Expert:
+    async def create(self, topic: str, owner_id: str | None = None) -> Expert:
         name = topic.lower().strip()
         existing = await self._repo.get_by_name(name)
         if existing:
             raise ConflictError(f"Expert already exists: {name!r}")
-        return await self._repo.create(name, topic)
+        return await self._repo.create(name, topic, owner_id=owner_id)
 
     async def get(self, name_or_id: str | int) -> Expert:
         if isinstance(name_or_id, int):

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use reqwest::Client;
+use serde::de::DeserializeOwned;
 
 use crate::api::sse::{parse_sse_stream, parse_sse_stream_with_seq, SeqStream, SseStream};
 use crate::api::types::*;
@@ -31,11 +32,12 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 pub struct ApiClient {
     client: Client,
     base_url: String,
-    api_key: String,
+    // Bearer credential: a Supabase access token, or the legacy static key.
+    token: String,
 }
 
 impl ApiClient {
-    pub fn new(base_url: String, api_key: String) -> Self {
+    pub fn new(base_url: String, token: String) -> Self {
         // connect_timeout bounds connection establishment without capping the body
         // read, so an unreachable backend fails fast while SSE streams stay open.
         let client = Client::builder()
@@ -45,33 +47,30 @@ impl ApiClient {
         Self {
             client,
             base_url,
-            api_key,
+            token,
         }
     }
 
     fn auth(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        if self.api_key.is_empty() {
+        if self.token.is_empty() {
             rb
         } else {
-            rb.header("Authorization", format!("Bearer {}", self.api_key))
+            rb.header("Authorization", format!("Bearer {}", self.token))
         }
     }
 
     pub async fn list_experts(&self) -> Result<Vec<ExpertSummary>> {
         let resp = self.auth(self.client.get(format!("{}/experts", self.base_url)))
             .timeout(REQUEST_TIMEOUT)
-            .send().await?
-            .error_for_status()?
-            .json().await?;
-        Ok(resp)
+            .send().await?;
+        json_or_err(resp).await
     }
 
     pub async fn delete_expert(&self, slug: &str) -> Result<()> {
-        self.auth(self.client.delete(format!("{}/experts/{}", self.base_url, slug)))
+        let resp = self.auth(self.client.delete(format!("{}/experts/{}", self.base_url, slug)))
             .timeout(REQUEST_TIMEOUT)
-            .send().await?
-            .error_for_status()?;
-        Ok(())
+            .send().await?;
+        expect_success(resp).await
     }
 
     /// Start a build and stream its progress. Events carry their durable `seq` so a
@@ -112,4 +111,85 @@ impl ApiClient {
             .error_for_status()?;
         Ok(parse_sse_stream(resp.bytes_stream()))
     }
+
+    // ── Auth (public backend-for-frontend endpoints) ─────────────────────────
+
+    pub async fn otp_request(&self, email: &str) -> Result<()> {
+        let resp = self.client.post(format!("{}/auth/otp", self.base_url))
+            .json(&OtpRequestBody { email: email.to_string() })
+            .timeout(REQUEST_TIMEOUT)
+            .send().await?;
+        expect_success(resp).await
+    }
+
+    pub async fn otp_verify(&self, email: &str, code: &str) -> Result<Session> {
+        let resp = self.client.post(format!("{}/auth/verify", self.base_url))
+            .json(&VerifyBody { email: email.to_string(), token: code.to_string() })
+            .timeout(REQUEST_TIMEOUT)
+            .send().await?;
+        json_or_err(resp).await
+    }
+
+    pub async fn refresh(&self, refresh_token: &str) -> Result<Session> {
+        let resp = self.client.post(format!("{}/auth/refresh", self.base_url))
+            .json(&RefreshBody { refresh_token: refresh_token.to_string() })
+            .timeout(REQUEST_TIMEOUT)
+            .send().await?;
+        json_or_err(resp).await
+    }
+}
+
+/// True when an error came from an HTTP 401 (token missing/invalid/expired).
+pub fn is_unauthorized(err: &anyhow::Error) -> bool {
+    if let Some(re) = err.downcast_ref::<reqwest::Error>() {
+        return re.status() == Some(reqwest::StatusCode::UNAUTHORIZED);
+    }
+    err.downcast_ref::<ApiError>()
+        .map(|e| e.status == 401)
+        .unwrap_or(false)
+}
+
+#[derive(Debug)]
+struct ApiError {
+    status: u16,
+    detail: String,
+}
+
+impl std::fmt::Display for ApiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.detail)
+    }
+}
+
+impl std::error::Error for ApiError {}
+
+async fn json_or_err<T: DeserializeOwned>(resp: reqwest::Response) -> Result<T> {
+    let status = resp.status();
+    if status.is_success() {
+        Ok(resp.json().await?)
+    } else {
+        Err(error_from(resp, status).await.into())
+    }
+}
+
+async fn expect_success(resp: reqwest::Response) -> Result<()> {
+    let status = resp.status();
+    if status.is_success() {
+        Ok(())
+    } else {
+        Err(error_from(resp, status).await.into())
+    }
+}
+
+async fn error_from(resp: reqwest::Response, status: reqwest::StatusCode) -> ApiError {
+    let body = resp.text().await.unwrap_or_default();
+    // FastAPI errors are {"detail": "..."}; fall back to the raw body/status.
+    let detail = serde_json::from_str::<serde_json::Value>(&body)
+        .ok()
+        .and_then(|v| v.get("detail").and_then(|d| d.as_str()).map(String::from))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| {
+            if body.is_empty() { status.to_string() } else { body }
+        });
+    ApiError { status: status.as_u16(), detail }
 }

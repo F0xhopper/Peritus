@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sse_starlette.sse import EventSourceResponse
 
-from peritus.api.auth import require_api_key
+from peritus.api.auth import AuthUser, require_user
 from peritus.api.schemas.experts import BuildRequest, ExpertDetail, ExpertSummary
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -19,7 +19,7 @@ from peritus.jobs.repository import JobRepository
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/experts", tags=["experts"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/experts", tags=["experts"])
 
 
 def _slugify(topic: str) -> str:
@@ -71,28 +71,28 @@ def _expert_to_detail(e) -> ExpertDetail:
 
 
 @router.get("", response_model=list[ExpertSummary])
-async def list_experts():
+async def list_experts(user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
-    experts = await repo.list_all()
+    experts = await repo.list_for_user(user.id, include_unowned=user.is_admin)
     return [_expert_to_summary(e) for e in experts]
 
 
 @router.get("/{slug}", response_model=ExpertDetail)
-async def get_expert(slug: str):
+async def get_expert(slug: str, user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
-    expert = await repo.get_by_name(slug)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     return _expert_to_detail(expert)
 
 
 @router.delete("/{slug}", status_code=204)
-async def delete_expert(slug: str):
+async def delete_expert(slug: str, user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
-    expert = await repo.get_by_name(slug)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     # Cancel any in-flight build first so the worker aborts cooperatively instead of
@@ -102,7 +102,9 @@ async def delete_expert(slug: str):
 
 
 @router.post("/build")
-async def build_expert(req: BuildRequest, request: Request):
+async def build_expert(
+    req: BuildRequest, request: Request, user: AuthUser = Depends(require_user)
+):
     """Enqueue a durable build job and stream its progress.
 
     The build runs in a worker (separate process or in-process), not in this request,
@@ -120,6 +122,12 @@ async def build_expert(req: BuildRequest, request: Request):
         )
 
     expert = await repo.get_by_name(slug)
+    if expert is not None and await repo.get_for_user(
+        slug, user.id, include_unowned=user.is_admin
+    ) is None:
+        # Expert slugs are globally unique, but this one belongs to another user.
+        # Hide its existence (404, not 403) rather than let them rebuild it.
+        raise HTTPException(status_code=404, detail="Expert not found")
     active = await jobs.get_active_job(expert.id) if expert else None
 
     if active is not None:
@@ -129,7 +137,9 @@ async def build_expert(req: BuildRequest, request: Request):
         logger.info("Attaching to in-flight build job %d for %r", job.id, slug)
     else:
         if expert is None:
-            expert = await repo.create(name=slug, topic=req.topic, tier=req.tier)
+            expert = await repo.create(
+                name=slug, topic=req.topic, tier=req.tier, owner_id=user.id
+            )
         else:
             # Rebuild of a finished expert — the worker resets prior corpus state first.
             await repo.update_status(expert.id, ExpertStatus.QUEUED)
@@ -145,12 +155,18 @@ async def build_expert(req: BuildRequest, request: Request):
 
 
 @router.get("/{slug}/build/events")
-async def build_events(slug: str, request: Request, after: int = Query(0, ge=0)):
+async def build_events(
+    slug: str,
+    request: Request,
+    after: int = Query(0, ge=0),
+    user: AuthUser = Depends(require_user),
+):
     """Reconnect to (or re-watch) a build's progress from a cursor. Multiple clients
     can tail the same build; pass the last `seq` you saw as `after` to resume.
     """
     pool = get_pool()
-    expert = await ExpertRepository(pool).get_by_name(slug)
+    repo = ExpertRepository(pool)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     jobs = JobRepository(pool)
@@ -161,7 +177,9 @@ async def build_events(slug: str, request: Request, after: int = Query(0, ge=0))
 
 
 @router.post("/{slug}/build/cancel", status_code=202)
-async def cancel_build(slug: str) -> dict[str, Any]:
+async def cancel_build(
+    slug: str, user: AuthUser = Depends(require_user)
+) -> dict[str, Any]:
     """Cancel the active (queued or running) build for an expert.
 
     A running worker notices on its next heartbeat and aborts cooperatively; a
@@ -170,7 +188,7 @@ async def cancel_build(slug: str) -> dict[str, Any]:
     """
     pool = get_pool()
     repo = ExpertRepository(pool)
-    expert = await repo.get_by_name(slug)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     jobs = JobRepository(pool)
@@ -189,10 +207,13 @@ async def cancel_build(slug: str) -> dict[str, Any]:
 
 
 @router.get("/{slug}/build/status")
-async def build_status(slug: str) -> dict[str, Any]:
+async def build_status(
+    slug: str, user: AuthUser = Depends(require_user)
+) -> dict[str, Any]:
     """Point-in-time job status for polling clients."""
     pool = get_pool()
-    expert = await ExpertRepository(pool).get_by_name(slug)
+    repo = ExpertRepository(pool)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     job = await JobRepository(pool).get_latest_job(expert.id)

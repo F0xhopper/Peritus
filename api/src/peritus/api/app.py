@@ -7,7 +7,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from peritus.api.routes import chat, experts, health
+from peritus.api.routes import auth, chat, experts, health
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
@@ -55,6 +55,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     app.include_router(health.router)
+    app.include_router(auth.router)
     app.include_router(experts.router)
     app.include_router(chat.router)
     return app

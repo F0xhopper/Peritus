@@ -193,8 +193,13 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
         except Exception:
             pass
 
+    # Experts built locally are owned by the signed-in user (if any); otherwise
+    # they're left unowned, which the API treats as belonging to the admin.
+    from peritus.cli.session import current_user_id
+    owner_id = current_user_id()
+
     try:
-        expert = await svc.create(topic)
+        expert = await svc.create(topic, owner_id=owner_id)
     except ConflictError:
         console.print(
             f"[yellow]Expert {topic!r} already exists. "

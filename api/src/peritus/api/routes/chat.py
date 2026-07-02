@@ -3,7 +3,7 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from peritus.api.auth import require_api_key
+from peritus.api.auth import AuthUser, require_user
 from peritus.api.schemas.chat import ChatRequest
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -13,14 +13,14 @@ from peritus.infrastructure.database import get_pool
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/experts", tags=["chat"], dependencies=[Depends(require_api_key)])
+router = APIRouter(prefix="/experts", tags=["chat"])
 
 
 @router.post("/{slug}/chat")
-async def chat_stream(slug: str, req: ChatRequest):
+async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
-    expert = await repo.get_by_name(slug)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     if expert.status != ExpertStatus.READY:

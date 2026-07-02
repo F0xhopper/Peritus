@@ -80,6 +80,43 @@ impl BuildEvent {
     }
 }
 
+// ── Auth ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OtpRequestBody {
+    pub email: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VerifyBody {
+    pub email: String,
+    pub token: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RefreshBody {
+    pub refresh_token: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SessionUser {
+    #[allow(dead_code)]
+    pub id: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct Session {
+    pub access_token: String,
+    pub refresh_token: String,
+    #[serde(default)]
+    pub expires_in: i64,
+    #[serde(default)]
+    pub expires_at: Option<i64>,
+    pub user: SessionUser,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct SourceCitation {
     pub n: u32,

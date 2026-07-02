@@ -68,6 +68,7 @@ class Expert:
     name: str          # user-facing slug, e.g. "stoic-philosophy"
     topic: str         # raw build topic string
     status: ExpertStatus
+    owner_id: str | None = None  # Supabase auth.users.id; NULL = legacy/admin-owned
     tier: ExpertTier = ExpertTier.STANDARD
     config: ExpertConfig = field(default_factory=lambda: ExpertConfig.from_tier(ExpertTier.STANDARD))
     persona_name: str | None = None
