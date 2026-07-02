@@ -198,11 +198,12 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                 // Chat owns its own key mapping so that j/k/q/n/d reach the input buffer.
                 if app.screen == Screen::Chat {
                     if let Some(chat) = &mut app.chat {
-                        let done = chat.handle_raw(key).await;
-                        if done {
+                        match chat.handle_raw(key).await {
                             // Return Home but KEEP the conversation so re-entering the
                             // same expert resumes it instead of starting over.
-                            app.screen = Screen::Home;
+                            crate::tui::screens::chat::ChatExit::Back => app.screen = Screen::Home,
+                            crate::tui::screens::chat::ChatExit::Quit => app.should_quit = true,
+                            crate::tui::screens::chat::ChatExit::Stay => {}
                         }
                     }
                 } else {
@@ -237,6 +238,11 @@ async fn handle_action(app: &mut App, action: AppAction) {
 
     match app.screen {
         Screen::Config => {
+            // Ctrl+C (and q outside editing) quits from here too.
+            if let AppAction::Quit = action {
+                app.should_quit = true;
+                return;
+            }
             // Esc leaves config when there's nothing to cancel and setup is done.
             if let AppAction::Back = action {
                 if !app.config_screen.editing && app.config.is_configured() {
@@ -296,18 +302,27 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 return;
             }
 
+            // While the topic input is focused, every key is either submit/cancel
+            // or an edit routed to the shared TextInput.
+            if app.home.input_active {
+                match action {
+                    AppAction::Quit => app.should_quit = true, // Ctrl+C
+                    AppAction::Submit => app.home.handle_enter(),
+                    AppAction::Back => app.home.cancel_input(),
+                    other => app.home.input_edit(&other),
+                }
+                if let Some((topic, tier)) = app.home.take_submitted_build() {
+                    app.start_build(topic, tier);
+                }
+                return;
+            }
+
             match action {
                 AppAction::Quit => app.should_quit = true,
-                AppAction::Up | AppAction::Left  => {
-                    if app.home.input_active { /* ignore nav in input mode */ } else { app.home.prev(); }
-                }
-                AppAction::Down | AppAction::Right => {
-                    if app.home.input_active { /* ignore nav in input mode */ } else { app.home.next(); }
-                }
+                AppAction::Up | AppAction::Left  => app.home.prev(),
+                AppAction::Down | AppAction::Right => app.home.next(),
                 AppAction::Submit => {
-                    if app.home.input_active {
-                        app.home.handle_enter();
-                    } else if let Some(expert) = app.home.selected_expert().cloned() {
+                    if let Some(expert) = app.home.selected_expert().cloned() {
                         match expert.status.as_str() {
                             "ready" => {
                                 let resume = app.chat.as_ref()
@@ -329,15 +344,15 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     }
                 }
                 AppAction::NewExpert => {
-                    if !app.home.input_active { app.home.start_new_expert_input(); }
+                    app.home.start_new_expert_input();
                 }
                 AppAction::DeleteExpert => {
-                    if !app.home.input_active && app.home.selected_expert().is_some() {
+                    if app.home.selected_expert().is_some() {
                         // First press arms the confirmation; second press (handled above) confirms.
                         app.home.confirm_delete = true;
                     }
                 }
-                AppAction::Char('b') if !app.home.input_active => {
+                AppAction::Char('b') => {
                     if app.build.is_some() {
                         app.screen = Screen::Build;
                     } else if let Some(expert) = app.home.selected_expert().cloned() {
@@ -346,22 +361,12 @@ async fn handle_action(app: &mut App, action: AppAction) {
                         }
                     }
                 }
-                AppAction::Char('c') if !app.home.input_active => {
+                AppAction::Char('c') => {
                     app.config_screen = ConfigScreen::new(app.config.clone());
                     app.screen = Screen::Config;
                 }
-                AppAction::Char(c) => {
-                    if app.home.input_active { app.home.input_push(c); }
-                }
-                AppAction::Backspace => {
-                    if app.home.input_active { app.home.input_pop(); }
-                }
                 AppAction::Back => {
-                    if app.home.input_active {
-                        app.home.cancel_input();
-                    } else {
-                        app.should_quit = true;
-                    }
+                    app.should_quit = true;
                 }
                 _ => {}
             }
@@ -373,6 +378,8 @@ async fn handle_action(app: &mut App, action: AppAction) {
 
         Screen::Build => {
             match action {
+                // Quitting the TUI never kills the build — it runs server-side.
+                AppAction::Quit => app.should_quit = true,
                 // [x] arms cancel; a second [x] confirms and asks the server to stop.
                 AppAction::Char('x') => {
                     if let Some(build) = &mut app.build {
@@ -475,22 +482,22 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
     use crate::tui::theme::Theme;
 
     let area = f.area();
-    let w = 58u16.min(area.width.saturating_sub(4));
-    let h = 20u16.min(area.height.saturating_sub(2));
+    let w = 62u16.min(area.width.saturating_sub(4));
+    let h = 24u16.min(area.height.saturating_sub(2));
     let x = area.width.saturating_sub(w) / 2;
     let y = area.height.saturating_sub(h) / 2;
     let rect = Rect::new(x, y, w, h);
 
     let key = |k: &'static str, d: &'static str| {
         Line::from(vec![
-            Span::styled(format!("  {:<11}", k), Theme::accent()),
+            Span::styled(format!("  {:<13}", k), Theme::accent()),
             Span::styled(d, Theme::normal()),
         ])
     };
 
     let lines = vec![
         Line::from(Span::styled("Home", Theme::title())),
-        key("↑↓ / j k", "Navigate experts"),
+        key("↑↓←→ hjkl", "Navigate experts"),
         key("Enter", "Chat · watch build · rebuild failed"),
         key("n", "Build a new expert"),
         key("d", "Delete (press again to confirm)"),
@@ -506,6 +513,12 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
         key("Enter", "Send message"),
         key("Esc", "Back (conversation is kept)"),
         key("↑↓ PgUp/Dn", "Scroll · End jumps to bottom"),
+        Line::from(""),
+        Line::from(Span::styled("Text editing (all inputs)", Theme::title())),
+        key("←→ Home/End", "Move cursor (Ctrl+A/E too)"),
+        key("Ctrl/Alt+←→", "Jump by word (Alt+B/F too)"),
+        key("Ctrl+U/K", "Kill to start / end of line"),
+        key("Ctrl+W", "Delete word (Alt+Backspace too)"),
         Line::from(""),
         Line::from(Span::styled("  Press any key to close", Theme::dim())),
     ];

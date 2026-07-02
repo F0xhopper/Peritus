@@ -6,8 +6,10 @@ use ratatui::{
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
 use crate::api::types::ExpertSummary;
+use crate::events::AppAction;
 use crate::tui::theme::Theme;
 use crate::tui::screens::build::BuildCardInfo;
+use crate::tui::widgets::input_box::TextInput;
 use crate::tui::widgets::spinner;
 
 const CARD_WIDTH: u16 = 46;
@@ -26,7 +28,7 @@ pub struct HomeScreen {
     pub tier_select_active: bool,
     tier_selected: usize,   // index into TIERS
     pending_topic: Option<String>,
-    input_buf: String,
+    input: TextInput,
     submitted_build: Option<(String, String)>, // (topic, tier)
     scroll_offset: usize,
 }
@@ -41,7 +43,7 @@ impl HomeScreen {
             tier_select_active: false,
             tier_selected: 1, // default to STANDARD
             pending_topic: None,
-            input_buf: String::new(),
+            input: TextInput::new(),
             submitted_build: None,
             scroll_offset: 0,
         }
@@ -73,22 +75,39 @@ impl HomeScreen {
 
     pub fn start_new_expert_input(&mut self) {
         self.input_active = true;
-        self.input_buf.clear();
+        self.input.clear();
         self.confirm_delete = false;
     }
 
-    pub fn input_push(&mut self, c: char) { self.input_buf.push(c); }
-    pub fn input_pop(&mut self)           { self.input_buf.pop(); }
-    pub fn cancel_input(&mut self)        { self.input_active = false; self.input_buf.clear(); }
+    pub fn cancel_input(&mut self) { self.input_active = false; self.input.clear(); }
+
+    /// Route an editing action to the topic input while it is focused.
+    pub fn input_edit(&mut self, action: &AppAction) {
+        match action {
+            AppAction::Char(c)     => self.input.insert(*c),
+            AppAction::Backspace   => self.input.backspace(),
+            AppAction::Delete      => self.input.delete(),
+            AppAction::CursorLeft  => self.input.left(),
+            AppAction::CursorRight => self.input.right(),
+            AppAction::WordLeft    => self.input.word_left(),
+            AppAction::WordRight   => self.input.word_right(),
+            AppAction::Home        => self.input.home(),
+            AppAction::End         => self.input.end(),
+            AppAction::CtrlW       => self.input.delete_word_back(),
+            AppAction::CtrlU       => self.input.kill_to_start(),
+            AppAction::KillToEnd   => self.input.kill_to_end(),
+            _ => {}
+        }
+    }
 
     pub fn submit_input(&mut self) {
-        if !self.input_buf.trim().is_empty() {
-            self.pending_topic = Some(self.input_buf.trim().to_string());
+        let topic = self.input.take_trimmed();
+        if !topic.is_empty() {
+            self.pending_topic = Some(topic);
             self.tier_selected = 1; // reset to STANDARD each time
             self.tier_select_active = true;
         }
         self.input_active = false;
-        self.input_buf.clear();
     }
 
     pub fn tier_prev(&mut self) {
@@ -215,7 +234,7 @@ impl HomeScreen {
             }
         }
         if self.input_active {
-            render_input_popup(f, area, &self.input_buf);
+            render_input_popup(f, area, &self.input);
         }
         if self.tier_select_active {
             let topic = self.pending_topic.as_deref().unwrap_or("");
@@ -479,7 +498,7 @@ fn render_confirm_popup(f: &mut Frame, area: Rect, name: &str) {
     );
 }
 
-fn render_input_popup(f: &mut Frame, area: Rect, input: &str) {
+fn render_input_popup(f: &mut Frame, area: Rect, input: &TextInput) {
     let popup_w = 60u16.min(area.width.saturating_sub(4));
     let popup = centered_rect(popup_w, 4, area);
     f.render_widget(Clear, popup);
@@ -494,14 +513,12 @@ fn render_input_popup(f: &mut Frame, area: Rect, input: &str) {
         popup,
     );
     let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+    let mut line = vec![Span::styled("> ", Theme::accent())];
+    line.extend(input.spans(inner.width.saturating_sub(3) as usize, Theme::normal(), true));
     f.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled("Topic:", Theme::dim())),
-            Line::from(vec![
-                Span::styled("> ", Theme::accent()),
-                Span::styled(input, Theme::normal()),
-                Span::styled("▌", Theme::accent()),
-            ]),
+            Line::from(line),
         ]),
         inner,
     );

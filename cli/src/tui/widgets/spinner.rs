@@ -8,9 +8,6 @@ pub const BRAILLE: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", 
 /// High-density braille — 8-frame, slightly faster feel for active streams.
 pub const DOTS: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
-/// Blinking block cursor — 2-frame, used for text input indicators.
-pub const CURSOR: &[&str] = &["▌", " "];
-
 /// Pulsing block — slow breathe for streaming text.
 pub const PULSE: &[&str] = &["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█", "▉", "▊", "▋", "▌", "▍", "▎", "▏"];
 
@@ -26,9 +23,6 @@ pub fn braille(tick: u64) -> &'static str { frame(BRAILLE, 12, tick) }
 
 /// Dense-dot spinner at 10fps (slightly different feel from braille).
 pub fn dots(tick: u64) -> &'static str { frame(DOTS, 10, tick) }
-
-/// Blinking input cursor at 2fps.
-pub fn cursor(tick: u64) -> &'static str { frame(CURSOR, 2, tick) }
 
 /// Pulsing streaming indicator at 8fps.
 pub fn pulse(tick: u64) -> &'static str { frame(PULSE, 8, tick) }

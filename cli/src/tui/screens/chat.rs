@@ -16,7 +16,12 @@ use futures_util::StreamExt;
 use crate::api::client::ApiClient;
 use crate::api::types::{ChatEvent, ChatMessage, ChatRequest, ExpertSummary, SourceCitation};
 use crate::tui::theme::Theme;
+use crate::tui::widgets::input_box::TextInput;
 use crate::tui::widgets::spinner;
+
+/// What the app loop should do after a key reaches the chat screen.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ChatExit { Stay, Back, Quit }
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -35,7 +40,7 @@ pub struct ChatScreen {
     current_status: Option<String>,
     pending_sources: Vec<SourceCitation>,
     pending_contradiction: bool,
-    input_buf: String,
+    input: TextInput,
     rx: Option<mpsc::Receiver<ChatEvent>>,
     scroll_offset: usize, // lines scrolled up from the bottom (0 = pinned to bottom)
 }
@@ -50,7 +55,7 @@ impl ChatScreen {
             current_status: None,
             pending_sources: vec![],
             pending_contradiction: false,
-            input_buf: String::new(),
+            input: TextInput::new(),
             rx: None,
             scroll_offset: 0,
         }
@@ -63,38 +68,56 @@ impl ChatScreen {
     }
 
     // Chat owns its own key mapping so ALL printable chars reach the input buffer.
-    // Returns true when the screen should return to Home.
-    pub async fn handle_raw(&mut self, key: KeyEvent) -> bool {
+    pub async fn handle_raw(&mut self, key: KeyEvent) -> ChatExit {
+        const CTRL: KeyModifiers = KeyModifiers::CONTROL;
+        const ALT: KeyModifiers = KeyModifiers::ALT;
         match (key.code, key.modifiers) {
-            (KeyCode::Esc, _) => return true,
+            (KeyCode::Esc, _) => return ChatExit::Back,
+            (KeyCode::Char('c'), CTRL) => return ChatExit::Quit,
 
             (KeyCode::Enter, _) => self.submit().await,
 
-            (KeyCode::Char('u'), KeyModifiers::CONTROL) => self.input_buf.clear(),
-            (KeyCode::Char('w'), KeyModifiers::CONTROL) => {
-                let trimmed = self.input_buf.trim_end();
-                let cut = trimmed.rfind(char::is_whitespace).map(|i| i + 1).unwrap_or(0);
-                self.input_buf.truncate(cut);
+            // Readline-style editing.
+            (KeyCode::Char('u'), CTRL) => self.input.kill_to_start(),
+            (KeyCode::Char('k'), CTRL) => self.input.kill_to_end(),
+            (KeyCode::Char('w'), CTRL) | (KeyCode::Backspace, ALT) => self.input.delete_word_back(),
+            (KeyCode::Char('a'), CTRL) => self.input.home(),
+            (KeyCode::Char('e'), CTRL) => self.input.end(),
+            (KeyCode::Left, CTRL) | (KeyCode::Left, ALT) | (KeyCode::Char('b'), ALT) => {
+                self.input.word_left()
             }
+            (KeyCode::Right, CTRL) | (KeyCode::Right, ALT) | (KeyCode::Char('f'), ALT) => {
+                self.input.word_right()
+            }
+            (KeyCode::Left, _)  => self.input.left(),
+            (KeyCode::Right, _) => self.input.right(),
+            (KeyCode::Home, _)  => self.input.home(),
 
+            // Scrolling. End moves the cursor while typing, snaps to bottom otherwise.
             (KeyCode::Up, _)     => self.scroll_offset = self.scroll_offset.saturating_add(1),
             (KeyCode::Down, _)   => self.scroll_offset = self.scroll_offset.saturating_sub(1),
             (KeyCode::PageUp, _) => self.scroll_offset = self.scroll_offset.saturating_add(10),
             (KeyCode::PageDown, _) => self.scroll_offset = self.scroll_offset.saturating_sub(10),
-            (KeyCode::End, _)    => self.scroll_offset = 0, // snap to bottom
+            (KeyCode::End, _) => {
+                if self.input.is_empty() { self.scroll_offset = 0; } else { self.input.end(); }
+            }
 
-            (KeyCode::Backspace, _) | (KeyCode::Delete, _) => { self.input_buf.pop(); }
+            (KeyCode::Backspace, _) => self.input.backspace(),
+            (KeyCode::Delete, _)    => self.input.delete(),
 
             // Every printable char — j, k, q, n, d, etc. — goes to the input buffer.
-            (KeyCode::Char(c), _) => self.input_buf.push(c),
+            // Other Ctrl-chords are deliberately ignored rather than inserted.
+            (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+                self.input.insert(c)
+            }
 
             _ => {}
         }
-        false
+        ChatExit::Stay
     }
 
     async fn submit(&mut self) {
-        let question = self.input_buf.trim().to_string();
+        let question = self.input.text().trim().to_string();
         if question.is_empty() || self.rx.is_some() { return; }
 
         // History is the conversation BEFORE this question — the server appends the
@@ -110,7 +133,7 @@ impl ChatScreen {
             sources: vec![],
             has_contradiction: false,
         });
-        self.input_buf.clear();
+        self.input.clear();
         self.pending_sources.clear();
         self.pending_contradiction = false;
         self.current_stream = Some(String::new());
@@ -312,18 +335,22 @@ impl ChatScreen {
             &mut sb_state,
         );
 
-        // Input box — cursor style depends on whether a stream is in-flight.
-        let cursor = if self.rx.is_some() { spinner::dots(tick) } else { spinner::cursor(tick) };
+        // Input box — a real block cursor while idle, a busy spinner while streaming.
+        let mut input_line = vec![Span::styled("> ", Theme::accent())];
+        let input_w = chunks[1].width.saturating_sub(4) as usize;
+        input_line.extend(self.input.spans(input_w, Theme::normal(), self.rx.is_none()));
+        if self.rx.is_some() {
+            input_line.push(Span::styled(format!(" {}", spinner::dots(tick)), Theme::accent()));
+        }
         f.render_widget(
-            Paragraph::new(format!("> {}{}", self.input_buf, cursor))
-                .style(Theme::normal())
+            Paragraph::new(Line::from(input_line))
                 .block(Block::default().borders(Borders::TOP).border_style(Theme::normal_border())),
             chunks[1],
         );
 
         // Footer hints
         f.render_widget(
-            Paragraph::new("[Enter] Send  [Esc] Back  [↑↓/PgUp/PgDn] Scroll  [End] Bottom  [Ctrl+U] Clear  [Ctrl+W] Del word")
+            Paragraph::new("[Enter] Send  [Esc] Back  [↑↓/PgUp/PgDn] Scroll  [←→ Home/Ctrl+A/E] Cursor  [Ctrl+U/K/W] Kill")
                 .style(Theme::dim()),
             chunks[2],
         );
