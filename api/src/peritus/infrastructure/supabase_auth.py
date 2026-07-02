@@ -20,16 +20,27 @@ class SupabaseAuthError(PeritusError):
         self.status = status
 
 
-def _base_headers() -> dict[str, str]:
-    return {
+def _base_headers(access_token: str | None = None) -> dict[str, str]:
+    headers = {
         "apikey": settings.SUPABASE_ANON_KEY,
         "Content-Type": "application/json",
     }
+    if access_token:
+        headers["Authorization"] = f"Bearer {access_token}"
+    return headers
 
 
-async def _post(path: str, json: dict, *, params: dict | None = None) -> dict:
+async def _post(
+    path: str,
+    json: dict,
+    *,
+    params: dict | None = None,
+    access_token: str | None = None,
+) -> dict:
     async with httpx.AsyncClient(base_url=settings.SUPABASE_AUTH_URL, timeout=15.0) as client:
-        resp = await client.post(path, json=json, params=params, headers=_base_headers())
+        resp = await client.post(
+            path, json=json, params=params, headers=_base_headers(access_token)
+        )
     if resp.status_code >= 400:
         detail = _extract_error(resp)
         raise SupabaseAuthError(detail, status=resp.status_code)
@@ -49,7 +60,11 @@ def _extract_error(resp: httpx.Response) -> str:
 
 
 async def request_otp(email: str, *, create_user: bool = True) -> None:
-    """Send a one-time login code to ``email`` (POST /auth/v1/otp)."""
+    """Send a one-time login code to ``email`` (POST /auth/v1/otp).
+
+    ``create_user`` controls whether an unknown email provisions a new account;
+    pass false to keep the workspace invite-only.
+    """
     await _post("/otp", {"email": email, "create_user": create_user})
 
 
@@ -65,3 +80,12 @@ async def refresh_session(refresh_token: str) -> dict:
         {"refresh_token": refresh_token},
         params={"grant_type": "refresh_token"},
     )
+
+
+async def logout(access_token: str, *, scope: str = "global") -> None:
+    """Revoke the session server-side (POST /auth/v1/logout).
+
+    ``scope="global"`` invalidates every refresh token for the user; ``"local"``
+    only the current one. Requires the user's own access token as the bearer.
+    """
+    await _post("/logout", {}, params={"scope": scope}, access_token=access_token)

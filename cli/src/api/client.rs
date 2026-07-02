@@ -137,6 +137,15 @@ impl ApiClient {
             .send().await?;
         json_or_err(resp).await
     }
+
+    /// Revoke the current session server-side. Best-effort: the caller clears the
+    /// local session regardless, so a network error here is not fatal.
+    pub async fn logout(&self) -> Result<()> {
+        let resp = self.auth(self.client.post(format!("{}/auth/logout", self.base_url)))
+            .timeout(REQUEST_TIMEOUT)
+            .send().await?;
+        expect_success(resp).await
+    }
 }
 
 /// True when an error came from an HTTP 401 (token missing/invalid/expired).

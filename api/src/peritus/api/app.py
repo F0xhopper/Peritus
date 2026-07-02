@@ -23,6 +23,26 @@ async def lifespan(app: FastAPI):
             f"Missing required environment variables: {', '.join(missing)}. "
             "Copy api/.env.example to api/.env and fill them in."
         )
+
+    # Fail closed in production: never let a missing SUPABASE_URL silently disable
+    # auth and run every request as the bootstrap admin.
+    if settings.IS_PRODUCTION and not settings.AUTH_ENABLED:
+        raise RuntimeError(
+            "PERITUS_ENV=production but auth is not configured. Set SUPABASE_URL "
+            "(and SUPABASE_ANON_KEY) or unset PERITUS_ENV for local development."
+        )
+    if not settings.AUTH_ENABLED:
+        logger.warning(
+            "AUTH DISABLED (dev mode): every request runs as the bootstrap admin. "
+            "Set SUPABASE_URL to require login."
+        )
+    elif not settings.SUPABASE_ANON_KEY:
+        logger.warning(
+            "SUPABASE_URL is set but SUPABASE_ANON_KEY is not — login (/auth) will "
+            "be unavailable. Also ensure the Supabase Magic Link email template "
+            "includes {{ .Token }} so users receive a 6-digit code."
+        )
+
     await init_pool()
 
     worker = None
@@ -50,7 +70,7 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Peritus API", version="1.0.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=settings.CORS_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
     )

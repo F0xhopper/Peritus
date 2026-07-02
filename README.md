@@ -92,6 +92,10 @@ Key environment variables (`api/src/peritus/core/config.py`):
 | `SUPABASE_ANON_KEY`    | Anon/publishable key (server-side only, for OTP proxy) | —                        |
 | `SUPABASE_JWT_SECRET`  | Legacy HS256 secret (only if not on JWKS signing keys) | —                        |
 | `BOOTSTRAP_ADMIN_EMAIL`| Admin email — sees pre-auth (owner-less) experts   | —                            |
+| `PERITUS_ENV`          | `production` refuses to start with auth disabled (fail-closed) | `development`     |
+| `AUTH_ALLOW_SIGNUP`    | `false` = invite-only (unknown emails can't self-provision) | `true`              |
+| `AUTH_RATE_LIMIT` / `AUTH_RATE_WINDOW` | Per-IP cap on `/auth/otp` + `/auth/verify` (requests / seconds) | `10` / `60` |
+| `CORS_ALLOW_ORIGINS`   | Comma-separated browser origins allowed by CORS    | `http://localhost:3000,http://localhost:8000` |
 | `PERITUS_API_KEY_HASH` | SHA-256 of a legacy static API key (superseded by Supabase auth) | —              |
 
 ## Running
@@ -123,18 +127,20 @@ Peritus uses [Supabase Auth](https://supabase.com/docs/guides/auth). Users sign 
 
 **How it fits together.** The API is a backend-for-frontend: it holds the Supabase anon key and proxies the sign-in calls, so clients only ever handle the resulting session tokens. Access tokens (JWTs) are verified locally against the project's **JWKS endpoint** (asymmetric ES256/RS256 signing keys, the current Supabase default), falling back to the legacy HS256 shared secret if that's all the project has. See `api/src/peritus/api/auth.py`.
 
-**Enable it** by setting `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `BOOTSTRAP_ADMIN_EMAIL` (plus `SUPABASE_JWT_SECRET` only if the project hasn't migrated to signing keys). With none of these set, the server runs in **open dev mode** — no login required, and requests act as the admin.
+**Enable it** by setting `SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `BOOTSTRAP_ADMIN_EMAIL` (plus `SUPABASE_JWT_SECRET` only if the project hasn't migrated to signing keys). With none of these set, the server runs in **open dev mode** — no login required, and requests act as the admin. **In production, set `PERITUS_ENV=production`**: the server then refuses to start with auth disabled, so a missing `SUPABASE_URL` can never silently drop every request into admin mode.
 
 **One-time Supabase setup:** in the dashboard, set the *Magic Link* email template to send a code — include `{{ .Token }}` in the template (a 6-digit code) rather than only a magic link, since the TUI verifies the code directly.
 
-**Sign in from the TUI:** enter your email → receive a code by email → enter the code. The session (access + rotating refresh token) is saved to the client config with `0600` permissions and refreshed automatically; press `L` on the home screen to sign out.
+**Open vs. invite-only.** By default anyone who can reach the server can sign in and gets their own private workspace (`AUTH_ALLOW_SIGNUP=true`). To run Peritus as an invite-only workspace, set `AUTH_ALLOW_SIGNUP=false` and add users from the Supabase dashboard — unknown emails then can't self-provision. The `/auth/otp` and `/auth/verify` endpoints are also per-IP rate-limited (`AUTH_RATE_LIMIT` / `AUTH_RATE_WINDOW`).
+
+**Sign in from the TUI:** enter your email → receive a code by email → enter the code. The session (access + rotating refresh token) is saved to the client config with `0600` permissions and refreshed automatically; press `L` on the home screen to sign out. Signing out (TUI `L` or `peritus logout`) revokes the session server-side, so the refresh token can't be reused.
 
 **Sign in from the Python CLI:**
 
 ```bash
 peritus login          # prompts for email, then the 6-digit code
 peritus whoami         # show the signed-in user
-peritus logout         # clear the cached session
+peritus logout         # revoke the session server-side + clear the local cache
 ```
 
 Experts built with `peritus build` are owned by the signed-in user; experts that predate auth (owner-less rows) are visible to `BOOTSTRAP_ADMIN_EMAIL`.
@@ -152,6 +158,7 @@ When auth is enabled, expert endpoints require a Supabase access token via `Auth
 | `POST`   | `/auth/otp`               | Send an email one-time code                    |
 | `POST`   | `/auth/verify`            | Exchange a code for a session                  |
 | `POST`   | `/auth/refresh`           | Rotate a refresh token for a new session       |
+| `POST`   | `/auth/logout`            | Revoke the caller's session (refresh tokens)   |
 | `GET`    | `/auth/me`                | The current authenticated user                 |
 | `GET`    | `/experts`                | List the caller's experts                     |
 | `GET`    | `/experts/{slug}`         | Expert detail (sources, counts, persona)      |

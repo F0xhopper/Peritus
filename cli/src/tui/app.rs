@@ -387,6 +387,9 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     app.screen = Screen::Config;
                 }
                 AppAction::Char('L') if !app.home.input_active => {
+                    // Revoke the session server-side before dropping it locally, so
+                    // the refresh token can't be reused. Best-effort — clear either way.
+                    let _ = app.api.logout().await;
                     app.config.clear_session();
                     let _ = app.config.save();
                     app.api = Arc::new(ApiClient::new(

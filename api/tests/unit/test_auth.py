@@ -112,3 +112,52 @@ def test_visibility_clause_user_own_only():
     assert clause == "experts.owner_id = $2::uuid"
     assert "IS NULL" not in clause
     assert params == ["uid-b"]
+
+
+# ── Email validation (schemas) ───────────────────────────────────────────────
+
+def test_otp_request_normalises_and_validates_email():
+    from peritus.api.schemas.auth import OtpRequest
+
+    assert OtpRequest(email="  User@Example.COM ").email == "user@example.com"
+
+
+@pytest.mark.parametrize("bad", ["nope", "a@b", "@b.co", "a b@c.co", "x@y."])
+def test_otp_request_rejects_bad_email(bad):
+    from pydantic import ValidationError
+
+    from peritus.api.schemas.auth import OtpRequest
+
+    with pytest.raises(ValidationError):
+        OtpRequest(email=bad)
+
+
+# ── Rate limiter (pure, sliding window) ──────────────────────────────────────
+
+def test_sliding_window_limiter_blocks_over_limit():
+    from peritus.api.ratelimit import SlidingWindowLimiter
+
+    lim = SlidingWindowLimiter(limit=2, window=60)
+    assert lim.check("ip-a") is True
+    assert lim.check("ip-a") is True
+    assert lim.check("ip-a") is False
+    # Independent keys have independent budgets.
+    assert lim.check("ip-b") is True
+
+
+# ── Production fail-closed guard ─────────────────────────────────────────────
+
+def test_is_production_flag(monkeypatch):
+    monkeypatch.setattr(settings, "PERITUS_ENV", "production", raising=False)
+    assert settings.IS_PRODUCTION is True
+    monkeypatch.setattr(settings, "PERITUS_ENV", "development", raising=False)
+    assert settings.IS_PRODUCTION is False
+
+
+def test_cors_origins_parsed():
+    monkeypatch_val = "https://a.com, https://b.com ,"
+    from peritus.core.config import Settings
+
+    s = Settings()
+    s.CORS_ALLOW_ORIGINS = monkeypatch_val
+    assert s.CORS_ORIGINS == ["https://a.com", "https://b.com"]

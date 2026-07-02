@@ -80,6 +80,30 @@ class Settings:
     # (those created before auth existed) and is the identity used in dev mode.
     BOOTSTRAP_ADMIN_EMAIL: str = os.getenv("BOOTSTRAP_ADMIN_EMAIL", "").lower()
 
+    # Deployment environment. When "production", the server refuses to start with
+    # auth disabled (fail-closed) so a missing SUPABASE_URL can never silently turn
+    # every request into the bootstrap admin.
+    PERITUS_ENV: str = os.getenv("PERITUS_ENV", "development").lower()
+
+    # Whether email login may create brand-new accounts. When false, only users
+    # who already exist in Supabase Auth (e.g. invited from the dashboard) can log
+    # in — the sign-in endpoint won't provision unknown emails. Default true keeps
+    # open signup; set false to run Peritus as an invite-only workspace.
+    AUTH_ALLOW_SIGNUP: bool = os.getenv("AUTH_ALLOW_SIGNUP", "true").lower() == "true"
+
+    # Per-IP rate limit for the unauthenticated /auth/otp and /auth/verify
+    # endpoints: at most AUTH_RATE_LIMIT requests per AUTH_RATE_WINDOW seconds.
+    # Supabase enforces its own per-project limits too; this is a first line.
+    AUTH_RATE_LIMIT: int = int(os.getenv("AUTH_RATE_LIMIT", "10"))
+    AUTH_RATE_WINDOW: float = float(os.getenv("AUTH_RATE_WINDOW", "60"))
+
+    # Allowed CORS origins for browser clients, comma-separated. The TUI/CLI are
+    # not browsers and ignore CORS, so this defaults to local dev origins only —
+    # widen it explicitly (e.g. "https://app.example.com") for a web client.
+    CORS_ALLOW_ORIGINS: str = os.getenv(
+        "CORS_ALLOW_ORIGINS", "http://localhost:3000,http://localhost:8000"
+    )
+
     # Base URL of the Peritus API server, used by the Python CLI's login command.
     PERITUS_SERVER_URL: str = os.getenv("PERITUS_SERVER_URL", "http://localhost:8000")
 
@@ -106,6 +130,14 @@ class Settings:
     def AUTH_ENABLED(self) -> bool:
         """Auth is enforced when a Supabase project is configured."""
         return bool(self.SUPABASE_URL or self.SUPABASE_JWT_SECRET)
+
+    @property
+    def IS_PRODUCTION(self) -> bool:
+        return self.PERITUS_ENV in ("production", "prod")
+
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        return [o.strip() for o in self.CORS_ALLOW_ORIGINS.split(",") if o.strip()]
 
     @property
     def SUPABASE_JWKS_URL(self) -> str:

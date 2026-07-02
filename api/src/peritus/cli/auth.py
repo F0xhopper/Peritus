@@ -76,7 +76,19 @@ def login_command(
 
 
 def logout_command() -> None:
-    """Sign out and delete the cached session."""
+    """Sign out: revoke the session server-side, then delete the local cache."""
+    session = load()
+    if session and session.access_token:
+        with httpx.Client(timeout=20.0) as client:
+            try:
+                client.post(
+                    f"{_server_url()}/auth/logout",
+                    headers={"Authorization": f"Bearer {session.access_token}"},
+                )
+            except httpx.HTTPError:
+                # Offline or server unreachable — still clear the local session so
+                # the credential is gone from this machine.
+                console.print("[yellow]Could not reach server to revoke session.[/yellow]")
     clear()
     console.print("[dim]Signed out.[/dim]")
 
