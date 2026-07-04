@@ -81,7 +81,7 @@ Key environment variables (`api/src/peritus/core/config.py`):
 | `DATABASE_URL`         | Postgres connection string                         | —                            |
 | `ANTHROPIC_API_KEY`    | Claude (validation, graph, persona, chat)          | —                            |
 | `OPENAI_API_KEY`       | Embeddings                                         | —                            |
-| `CLAUDE_MODEL`         | Chat + persona model                               | `claude-sonnet-4-6`          |
+| `CLAUDE_MODEL`         | Chat + persona model                               | `claude-sonnet-5`            |
 | `FAST_MODEL`           | Planning, contextualisation, coverage, validation  | `claude-haiku-4-5-20251001`  |
 | `GRAPH_MODEL`          | Graph extraction                                   | `claude-haiku-4-5-20251001`  |
 | `EMBED_MODEL` / `EMBED_DIM` | OpenAI embedding model / dimension            | `text-embedding-3-large` / `3072` |
