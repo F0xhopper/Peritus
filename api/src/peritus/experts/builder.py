@@ -96,8 +96,15 @@ _FETCHER_SOURCE_TYPES: dict[str, SourceType] = {
 }
 
 _FETCHER_NAMES: tuple[str, ...] = (
-    "wikipedia", "gutenberg", "arxiv", "pdf",
-    "youtube", "exa", "web", "reddit", "thought_leaders",
+    "wikipedia",
+    "gutenberg",
+    "arxiv",
+    "pdf",
+    "youtube",
+    "exa",
+    "web",
+    "reddit",
+    "thought_leaders",
 )
 _MAX_QUERIES_PER_FETCHER = 3
 
@@ -216,15 +223,15 @@ class ExpertBuilder:
     ):
         weights = weights or {}
         all_fetchers = {
-            "wikipedia":       (WikipediaFetcher(),       3),
-            "gutenberg":       (GutenbergFetcher(),       4),
-            "arxiv":           (ArxivFetcher(),           2),
-            "pdf":             (PdfFetcher(),             3),
-            "youtube":         (YoutubeFetcher(),         3),
-            "exa":             (ExaFetcher(),             5),
-            "web":             (WebFetcher(),             3),
-            "reddit":          (RedditFetcher(),          5),
-            "thought_leaders": (ThoughtLeadersFetcher(),  3),
+            "wikipedia": (WikipediaFetcher(), 3),
+            "gutenberg": (GutenbergFetcher(), 4),
+            "arxiv": (ArxivFetcher(), 2),
+            "pdf": (PdfFetcher(), 3),
+            "youtube": (YoutubeFetcher(), 3),
+            "exa": (ExaFetcher(), 5),
+            "web": (WebFetcher(), 3),
+            "reddit": (RedditFetcher(), 5),
+            "thought_leaders": (ThoughtLeadersFetcher(), 3),
         }
 
         active: dict[str, tuple[Any, int]] = {}
@@ -254,14 +261,19 @@ class ExpertBuilder:
         _route_must_have_works(plan)
         key_concepts = plan["key_concepts"]
         await self._repo.update_key_concepts(expert.id, key_concepts)
-        await _emit_event(on_event, {
-            "type": "plan_ready",
-            "key_concepts": key_concepts,
-        })
+        await _emit_event(
+            on_event,
+            {
+                "type": "plan_ready",
+                "key_concepts": key_concepts,
+            },
+        )
 
         weights = {name: p["weight"] for name, p in plan["fetcher_plans"].items()}
         self._fetchers = self._build_fetchers(
-            expert.config.source_multiplier, self._source_filter, weights,
+            expert.config.source_multiplier,
+            self._source_filter,
+            weights,
         )
 
         # Stage 1: Discover (search → triage → budgeted fetch)
@@ -282,17 +294,27 @@ class ExpertBuilder:
             raise BuildError("No sources discovered. Check API keys and network access.")
 
         # Stage 2: Validate
-        await _emit_event(on_event, {"type": "stage", "stage": 2, "name": "validate", "total": len(raw_sources)})
+        await _emit_event(
+            on_event, {"type": "stage", "stage": 2, "name": "validate", "total": len(raw_sources)}
+        )
         passed, dropped = await validate_sources(
-            topic, raw_sources, key_concepts,
+            topic,
+            raw_sources,
+            key_concepts,
             on_result=lambda r: _emit_event(on_event, {"type": "source_validated", **r}),
         )
-        await _emit_event(on_event, {"type": "validate_done", "passed": len(passed), "dropped": len(dropped)})
+        await _emit_event(
+            on_event, {"type": "validate_done", "passed": len(passed), "dropped": len(dropped)}
+        )
 
         # Stage 2b: Gap-fill — re-search key concepts no passing source covers
         if passed and key_concepts:
             passed, dropped = await self._fill_coverage_gaps(
-                topic, key_concepts, passed, dropped, on_event,
+                topic,
+                key_concepts,
+                passed,
+                dropped,
+                on_event,
             )
 
         if not passed:
@@ -303,7 +325,9 @@ class ExpertBuilder:
 
         # Stage 3: Chunk + Embed. All sources are chunked up front so their
         # contextualisation runs as one Message Batch (half price) when enabled.
-        await _emit_event(on_event, {"type": "stage", "stage": 3, "name": "chunk", "total": len(passed)})
+        await _emit_event(
+            on_event, {"type": "stage", "stage": 3, "name": "chunk", "total": len(passed)}
+        )
         all_chunk_ids: list[int] = []
         all_chunks_for_graph: list[tuple[TextChunk, int]] = []
         ingested_total = 0
@@ -311,15 +335,22 @@ class ExpertBuilder:
         async def _on_ingested(vsource: ValidatedSource, chunk_ids: list[int]) -> None:
             nonlocal ingested_total
             ingested_total += len(chunk_ids)
-            await _emit_event(on_event, {
-                "type": "source_ingested",
-                "title": vsource.title,
-                "chunks": len(chunk_ids),
-                "total_chunks": ingested_total,
-            })
+            await _emit_event(
+                on_event,
+                {
+                    "type": "source_ingested",
+                    "title": vsource.title,
+                    "chunks": len(chunk_ids),
+                    "total_chunks": ingested_total,
+                },
+            )
 
         ingested = await ingest_sources(
-            passed, expert.id, source_db_ids, self._pool, on_ingested=_on_ingested,
+            passed,
+            expert.id,
+            source_db_ids,
+            self._pool,
+            on_ingested=_on_ingested,
         )
         for chunk_ids, raw_chunks in ingested:
             all_chunk_ids.extend(chunk_ids)
@@ -330,15 +361,21 @@ class ExpertBuilder:
 
         # Stage 4: Graph extraction
         total_batches = math.ceil(len(all_chunks_for_graph) / settings.GRAPH_BATCH_SIZE)
-        await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "graph", "total_batches": total_batches})
+        await _emit_event(
+            on_event, {"type": "stage", "stage": 4, "name": "graph", "total_batches": total_batches}
+        )
 
         chunks_only = [c for c, _ in all_chunks_for_graph]
         ids_only = [i for _, i in all_chunks_for_graph]
 
         async def _on_graph_batch(labels: list[str], edge_count: int) -> None:
-            await _emit_event(on_event, {"type": "graph_batch_done", "labels": labels, "edges": edge_count})
+            await _emit_event(
+                on_event, {"type": "graph_batch_done", "labels": labels, "edges": edge_count}
+            )
 
-        extractions = await extract_graph_from_chunks(topic, chunks_only, ids_only, on_batch=_on_graph_batch)
+        extractions = await extract_graph_from_chunks(
+            topic, chunks_only, ids_only, on_batch=_on_graph_batch
+        )
         node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(
             expert.id, extractions, embedder=embed_batch
         )
@@ -359,7 +396,6 @@ class ExpertBuilder:
             avg_quality=avg_quality,
         )
 
-        # Stage 5: Persona generation
         await _emit_event(on_event, {"type": "stage", "stage": 5, "name": "persona"})
         top_nodes = await self._graph_repo.get_top_nodes(expert.id, 20)
         persona = await _generate_persona(topic, passed, top_nodes)
@@ -392,41 +428,47 @@ class ExpertBuilder:
         fetcher_plans = plan["fetcher_plans"]
         active = set(self._fetchers.keys())
 
-        await _emit_event(on_event, {
-            "type": "discovery_started",
-            "fetchers": list(_FETCHER_NAMES),
-            "active": list(active),
-        })
+        await _emit_event(
+            on_event,
+            {
+                "type": "discovery_started",
+                "fetchers": list(_FETCHER_NAMES),
+                "active": list(active),
+            },
+        )
 
-        # thought_leaders already does its own internal expansion; run it once
         _SINGLE_QUERY_FETCHERS = {"thought_leaders"}
 
-        # Phase 1: cheap search, over-fetching relative to the fetch budget
         async def _search_one(name: str, fetcher, quota: int) -> list[SourceCandidate]:
             queries = fetcher_plans.get(name, {}).get("queries") or [topic]
             if name in _SINGLE_QUERY_FETCHERS:
                 queries = queries[:1]
             search_quota = quota * _SEARCH_OVERFETCH
             per_query = max(1, math.ceil(search_quota / len(queries)))
-            nested = await asyncio.gather(*[
-                _safe_search(name, fetcher, query, per_query) for query in queries
-            ])
+            nested = await asyncio.gather(
+                *[_safe_search(name, fetcher, query, per_query) for query in queries]
+            )
             candidates = _deduplicate_by_url([c for batch in nested for c in batch])
             skipped, reason = _is_skipped(name, candidates)
-            await _emit_event(on_event, {
-                "type": "fetcher_done",
-                "name": name,
-                "count": len(candidates),
-                "skipped": skipped,
-                "reason": reason,
-                "queries": len(queries),
-            })
+            await _emit_event(
+                on_event,
+                {
+                    "type": "fetcher_done",
+                    "name": name,
+                    "count": len(candidates),
+                    "skipped": skipped,
+                    "reason": reason,
+                    "queries": len(queries),
+                },
+            )
             return candidates
 
-        candidate_lists = await asyncio.gather(*[
-            _search_one(name, fetcher, quota)
-            for name, (fetcher, quota) in self._fetchers.items()
-        ])
+        candidate_lists = await asyncio.gather(
+            *[
+                _search_one(name, fetcher, quota)
+                for name, (fetcher, quota) in self._fetchers.items()
+            ]
+        )
         candidates = _deduplicate_by_url([c for batch in candidate_lists for c in batch])
         if not candidates:
             return []
@@ -434,15 +476,21 @@ class ExpertBuilder:
         # Phase 2: triage — rank all candidates against the research brief
         must_have_titles = [w["title"] for w in plan["must_have_works"]]
         triaged = await triage_candidates(
-            topic, plan["key_concepts"], must_have_titles, candidates,
+            topic,
+            plan["key_concepts"],
+            must_have_titles,
+            candidates,
         )
         ranked = rank_candidates(triaged)
-        await _emit_event(on_event, {
-            "type": "triage_done",
-            "candidates": len(candidates),
-            "ranked": len(ranked),
-            "budget": fetch_budget,
-        })
+        await _emit_event(
+            on_event,
+            {
+                "type": "triage_done",
+                "candidates": len(candidates),
+                "ranked": len(ranked),
+                "budget": fetch_budget,
+            },
+        )
 
         # Phase 3: full fetch for the winners, refilling on failure
         caps = {
@@ -450,11 +498,14 @@ class ExpertBuilder:
             for name, (_, quota) in self._fetchers.items()
         }
         sources = await self._fetch_with_refill(ranked, fetch_budget, caps)
-        await _emit_event(on_event, {
-            "type": "fetch_done",
-            "fetched": len(sources),
-            "budget": fetch_budget,
-        })
+        await _emit_event(
+            on_event,
+            {
+                "type": "fetch_done",
+                "fetched": len(sources),
+                "budget": fetch_budget,
+            },
+        )
         return sources
 
     async def _fetch_with_refill(
@@ -470,8 +521,7 @@ class ExpertBuilder:
         enforced on successful fetches.
         """
         fetcher_by_type = {
-            _FETCHER_SOURCE_TYPES[name]: fetcher
-            for name, (fetcher, _) in self._fetchers.items()
+            _FETCHER_SOURCE_TYPES[name]: fetcher for name, (fetcher, _) in self._fetchers.items()
         }
         results: list[RawSource] = []
         counts: dict[SourceType, int] = {}
@@ -488,10 +538,9 @@ class ExpertBuilder:
                 wave.append(candidate)
             if not wave:
                 break
-            fetched = await asyncio.gather(*[
-                _safe_fetch_candidate(fetcher_by_type.get(c.source_type), c)
-                for c in wave
-            ])
+            fetched = await asyncio.gather(
+                *[_safe_fetch_candidate(fetcher_by_type.get(c.source_type), c) for c in wave]
+            )
             for candidate, source in zip(wave, fetched, strict=True):
                 if source is None:
                     counts[candidate.source_type] -= 1
@@ -530,34 +579,44 @@ class ExpertBuilder:
         async def _gap_fetch(name: str, fetcher, concept: str) -> list[RawSource]:
             # Targeted and tiny — search and fetch directly, no triage round-trip.
             candidates = await _safe_search(
-                name, fetcher, f"{topic} {concept}", _GAPFILL_RESULTS_PER_QUERY,
+                name,
+                fetcher,
+                f"{topic} {concept}",
+                _GAPFILL_RESULTS_PER_QUERY,
             )
-            fetched = await asyncio.gather(*[
-                _safe_fetch_candidate(fetcher, c)
-                for c in candidates[:_GAPFILL_RESULTS_PER_QUERY]
-            ])
+            fetched = await asyncio.gather(
+                *[
+                    _safe_fetch_candidate(fetcher, c)
+                    for c in candidates[:_GAPFILL_RESULTS_PER_QUERY]
+                ]
+            )
             results = [src for src in fetched if src is not None]
             for src in results:
                 src.metadata.setdefault("discovered_via", f"gapfill:{concept}")
             return results
 
-        nested = await asyncio.gather(*[
-            _gap_fetch(name, fetcher, concept)
-            for concept in gaps
-            for name, fetcher in gap_fetchers.items()
-        ])
+        nested = await asyncio.gather(
+            *[
+                _gap_fetch(name, fetcher, concept)
+                for concept in gaps
+                for name, fetcher in gap_fetchers.items()
+            ]
+        )
 
         seen_urls = {vs.url.rstrip("/").lower() for vs in passed}
         seen_urls |= {ds.raw.url.rstrip("/").lower() for ds in dropped}
         extra_raw = [
-            src for src in _deduplicate_by_url([s for batch in nested for s in batch])
+            src
+            for src in _deduplicate_by_url([s for batch in nested for s in batch])
             if src.url.rstrip("/").lower() not in seen_urls
         ]
 
         added = 0
         if extra_raw:
             extra_passed, extra_dropped = await validate_sources(
-                topic, extra_raw, key_concepts,
+                topic,
+                extra_raw,
+                key_concepts,
                 on_result=lambda r: _emit_event(on_event, {"type": "source_validated", **r}),
             )
             passed = passed + extra_passed
@@ -566,15 +625,19 @@ class ExpertBuilder:
 
         remaining = _compute_coverage(key_concepts, passed)
         still_uncovered = [c for c in gaps if remaining[c] == 0]
-        await _emit_event(on_event, {
-            "type": "gapfill_done",
-            "added": added,
-            "still_uncovered": still_uncovered,
-        })
+        await _emit_event(
+            on_event,
+            {
+                "type": "gapfill_done",
+                "added": added,
+                "still_uncovered": still_uncovered,
+            },
+        )
         if still_uncovered:
             logger.info(
                 "Coverage gaps remain after gap-fill for %r: %s",
-                topic, ", ".join(still_uncovered),
+                topic,
+                ", ".join(still_uncovered),
             )
         return passed, dropped
 
@@ -683,9 +746,11 @@ def _normalise_plan(raw_plan: dict, topic: str) -> dict:
         raw = raw_fetcher_plans.get(name) or {}
         queries: list[str] = []
         for q in raw.get("queries") or []:
-            if isinstance(q, str) and q.strip() and q.strip().casefold() not in {
-                d.casefold() for d in queries
-            }:
+            if (
+                isinstance(q, str)
+                and q.strip()
+                and q.strip().casefold() not in {d.casefold() for d in queries}
+            ):
                 queries.append(q.strip())
         try:
             weight = float(raw.get("weight", 1.0))
@@ -697,18 +762,19 @@ def _normalise_plan(raw_plan: dict, topic: str) -> dict:
         }
 
     key_concepts = [
-        c.strip() for c in raw_plan.get("key_concepts") or []
-        if isinstance(c, str) and c.strip()
+        c.strip() for c in raw_plan.get("key_concepts") or [] if isinstance(c, str) and c.strip()
     ][:8]
 
     must_have_works = []
     for work in raw_plan.get("must_have_works") or []:
         if isinstance(work, dict) and isinstance(work.get("title"), str) and work["title"].strip():
             author = work.get("author")
-            must_have_works.append({
-                "title": work["title"].strip(),
-                "author": author.strip() if isinstance(author, str) else "",
-            })
+            must_have_works.append(
+                {
+                    "title": work["title"].strip(),
+                    "author": author.strip() if isinstance(author, str) else "",
+                }
+            )
 
     return {
         "fetcher_plans": fetcher_plans,
@@ -723,9 +789,7 @@ def _route_must_have_works(plan: dict) -> None:
     Each extra query gets at least one result slot in the fan-out, so a must-have
     work costs little budget but is actively looked for.
     """
-    work_queries = [
-        f'"{w["title"]}" {w["author"]}'.strip() for w in plan["must_have_works"]
-    ]
+    work_queries = [f'"{w["title"]}" {w["author"]}'.strip() for w in plan["must_have_works"]]
     if not work_queries:
         return
     target = "exa" if settings.EXA_API_KEY else "web"
@@ -771,16 +835,14 @@ async def _snowball_citations(
                     ext_ids = cited.get("externalIds") or {}
                     ref_arxiv_id = ext_ids.get("ArXiv")
                     citation_count = cited.get("citationCount") or 0
-                    if (
-                        ref_arxiv_id
-                        and ref_arxiv_id not in seen_ids
-                        and citation_count >= 50
-                    ):
-                        candidates.append({
-                            "arxiv_id": ref_arxiv_id,
-                            "title": cited.get("title", ""),
-                            "citations": citation_count,
-                        })
+                    if ref_arxiv_id and ref_arxiv_id not in seen_ids and citation_count >= 50:
+                        candidates.append(
+                            {
+                                "arxiv_id": ref_arxiv_id,
+                                "title": cited.get("title", ""),
+                                "citations": citation_count,
+                            }
+                        )
                         seen_ids.add(ref_arxiv_id)
             except Exception as exc:
                 logger.debug("Semantic Scholar references failed for %s: %s", arxiv_id, exc)
@@ -791,12 +853,11 @@ async def _snowball_citations(
     candidates.sort(key=lambda x: x["citations"], reverse=True)
     extra: list[RawSource] = []
 
-    async with httpx.AsyncClient(
-        timeout=30, headers=ARXIV_HEADERS, follow_redirects=True
-    ) as http:
+    async with httpx.AsyncClient(timeout=30, headers=ARXIV_HEADERS, follow_redirects=True) as http:
         for cand in candidates[:max_extra]:
             aid = cand["arxiv_id"]
             try:
+
                 def _lookup(a: str = aid) -> list:
                     return list(arxiv_lib.Client().results(arxiv_lib.Search(id_list=[a])))
 
@@ -808,24 +869,29 @@ async def _snowball_citations(
                 if url in seen_urls:
                     continue
                 full_text = await fetch_ar5iv(http, aid)
-                text = full_text[:MAX_FULL_TEXT] if len(full_text) >= MIN_FULL_TEXT \
+                text = (
+                    full_text[:MAX_FULL_TEXT]
+                    if len(full_text) >= MIN_FULL_TEXT
                     else f"{paper.title}\n\n{paper.summary}"
-                extra.append(RawSource(
-                    source_type=SourceType.ARXIV,
-                    url=url,
-                    title=paper.title,
-                    author=", ".join(str(a) for a in paper.authors[:3]),
-                    text=text,
-                    metadata={
-                        "arxiv_id": aid,
-                        "published": str(paper.published),
-                        "categories": paper.categories,
-                        "full_text": len(full_text) >= MIN_FULL_TEXT,
-                        "snowballed": True,
-                        "discovered_via": "snowball",
-                        "citations": cand["citations"],
-                    },
-                ))
+                )
+                extra.append(
+                    RawSource(
+                        source_type=SourceType.ARXIV,
+                        url=url,
+                        title=paper.title,
+                        author=", ".join(str(a) for a in paper.authors[:3]),
+                        text=text,
+                        metadata={
+                            "arxiv_id": aid,
+                            "published": str(paper.published),
+                            "categories": paper.categories,
+                            "full_text": len(full_text) >= MIN_FULL_TEXT,
+                            "snowballed": True,
+                            "discovered_via": "snowball",
+                            "citations": cand["citations"],
+                        },
+                    )
+                )
                 seen_urls.add(url)
                 logger.info("Snowballed: %r (%d citations)", paper.title, cand["citations"])
             except Exception as exc:
@@ -853,8 +919,7 @@ async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:
     missing = [i for i, n in enumerate(nodes) if n.get("embedding") is None]
     if missing:
         texts = [
-            node_embedding_text(nodes[i]["label"], nodes[i].get("description"))
-            for i in missing
+            node_embedding_text(nodes[i]["label"], nodes[i].get("description")) for i in missing
         ]
         try:
             fresh = await embed_batch(texts)
@@ -887,13 +952,16 @@ async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:
                 merge_count += 1
                 logger.debug(
                     "Merged node %r → %r (sim=%.3f)",
-                    labels[j], labels[i], float(sim[i, j]),
+                    labels[j],
+                    labels[i],
+                    float(sim[i, j]),
                 )
 
     if merge_count:
         logger.info(
             "Entity resolution: merged %d duplicate nodes for expert %d",
-            merge_count, expert_id,
+            merge_count,
+            expert_id,
         )
     return merge_count
 
@@ -970,14 +1038,16 @@ async def _generate_persona(
         ),
         tools=[_TOOL],
         tool_choice={"type": "tool", "name": "generate_persona"},
-        messages=[{
-            "role": "user",
-            "content": (
-                f"Topic: {topic}\n\n"
-                f"Sources ingested:\n{source_digest}\n\n"
-                f"Top concepts extracted: {concept_list}"
-            ),
-        }],
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"Topic: {topic}\n\n"
+                    f"Sources ingested:\n{source_digest}\n\n"
+                    f"Top concepts extracted: {concept_list}"
+                ),
+            }
+        ],
     )
     block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
     return dict(block.input)

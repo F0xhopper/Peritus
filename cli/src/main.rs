@@ -9,7 +9,6 @@ use tracing_subscriber::EnvFilter;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Log to file only — never stdout (ratatui owns the terminal)
     let log_dir = dirs::data_local_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
         .join("peritus");

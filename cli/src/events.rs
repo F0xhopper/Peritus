@@ -14,14 +14,13 @@ pub enum AppAction {
     Delete,
     Home,
     End,
-    // Text-input editing (readline-style)
     CursorLeft,
     CursorRight,
     WordLeft,
     WordRight,
-    KillToEnd,   // Ctrl+K
-    CtrlW,       // delete word before cursor
-    CtrlU,       // kill to line start
+    KillToEnd,
+    CtrlW,
+    CtrlU,
     Submit,
     Save,
     Tab,

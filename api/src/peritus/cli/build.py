@@ -19,14 +19,14 @@ from peritus.infrastructure.database import get_pool, init_pool
 console = Console()
 
 _FETCHER_LABELS = {
-    "wikipedia":      "Wikipedia",
-    "gutenberg":      "Gutenberg",
-    "arxiv":          "ArXiv",
-    "pdf":            "PDF/Scholar",
-    "youtube":        "YouTube",
-    "exa":            "Exa",
-    "web":            "Web",
-    "reddit":         "Reddit",
+    "wikipedia": "Wikipedia",
+    "gutenberg": "Gutenberg",
+    "arxiv": "ArXiv",
+    "pdf": "PDF/Scholar",
+    "youtube": "YouTube",
+    "exa": "Exa",
+    "web": "Web",
+    "reddit": "Reddit",
     "thought_leaders": "Thought Leaders",
 }
 
@@ -72,9 +72,9 @@ class BuildDisplay:
 
     def __rich__(self) -> Group:
         lines: list[Text] = []
-        lines.append(Text.from_markup(
-            f'\n[bold]◆ Building expert:[/bold] [cyan]"{self.topic}"[/cyan]\n'
-        ))
+        lines.append(
+            Text.from_markup(f'\n[bold]◆ Building expert:[/bold] [cyan]"{self.topic}"[/cyan]\n')
+        )
 
         if self.stage >= 1:
             lines.append(Text.from_markup("  [bold][1/5] Discovering sources[/bold]"))
@@ -84,21 +84,24 @@ class BuildDisplay:
                 if info is None:
                     lines.append(Text.from_markup(f"    [dim]{label:<12}  …[/dim]"))
                 elif info.get("skipped"):
-                    lines.append(Text.from_markup(
-                        f"    [dim]{label:<12}  ⊘  skipped ({info.get('reason', '')})[/dim]"
-                    ))
+                    lines.append(
+                        Text.from_markup(
+                            f"    [dim]{label:<12}  ⊘  skipped ({info.get('reason', '')})[/dim]"
+                        )
+                    )
                 else:
                     count = info["count"]
                     noun = "found" if count else "none"
                     colour = "green" if count else "dim"
-                    lines.append(Text.from_markup(
-                        f"    [dim]{label:<12}[/dim]  [{colour}]✓  {count} {noun}[/{colour}]"
-                    ))
+                    lines.append(
+                        Text.from_markup(
+                            f"    [dim]{label:<12}[/dim]  [{colour}]✓  {count} {noun}[/{colour}]"
+                        )
+                    )
 
             if self.fetcher_results:
                 total_found = sum(
-                    v.get("count", 0) for v in self.fetcher_results.values()
-                    if not v.get("skipped")
+                    v.get("count", 0) for v in self.fetcher_results.values() if not v.get("skipped")
                 )
                 lines.append(Text.from_markup(f"    [dim]{'─' * 32}[/dim]"))
                 lines.append(Text.from_markup(f"    [dim]{total_found} sources discovered[/dim]"))
@@ -111,37 +114,47 @@ class BuildDisplay:
             passed = sum(1 for v in self.validated if v["passed"])
             dropped = done - passed
             bar = _bar(done, total)
-            lines.append(Text.from_markup(
-                f"    [cyan]{bar}[/cyan]  [dim]{done}/{total}[/dim]"
-            ))
+            lines.append(Text.from_markup(f"    [cyan]{bar}[/cyan]  [dim]{done}/{total}[/dim]"))
             if done:
-                lines.append(Text.from_markup(
-                    f"    [green]{passed} passed[/green]  [dim]{dropped} dropped[/dim]"
-                ))
+                lines.append(
+                    Text.from_markup(
+                        f"    [green]{passed} passed[/green]  [dim]{dropped} dropped[/dim]"
+                    )
+                )
             # Show last 3 items so there's live feedback without growing the display
             for v in self.validated[-3:]:
                 title = v["title"][:48]
                 if v["passed"]:
-                    lines.append(Text.from_markup(
-                        f"    [green]✓[/green]  {title}  [dim]Q:{v['q']:.1f}  R:{v['r']:.1f}[/dim]"
-                    ))
+                    lines.append(
+                        Text.from_markup(
+                            f"    [green]✓[/green]  {title}  [dim]Q:{v['q']:.1f}  R:{v['r']:.1f}[/dim]"
+                        )
+                    )
                 else:
-                    lines.append(Text.from_markup(
-                        f"    [red]✗[/red]  [dim]{title}  Q:{v['q']:.1f}  R:{v['r']:.1f}[/dim]"
-                    ))
+                    lines.append(
+                        Text.from_markup(
+                            f"    [red]✗[/red]  [dim]{title}  Q:{v['q']:.1f}  R:{v['r']:.1f}[/dim]"
+                        )
+                    )
             if done == total and total:
                 lines.append(Text.from_markup(f"    [dim]{'─' * 32}[/dim]"))
-                lines.append(Text.from_markup(f"    [green]{passed} validated[/green]  [dim]{dropped} dropped[/dim]"))
+                lines.append(
+                    Text.from_markup(
+                        f"    [green]{passed} validated[/green]  [dim]{dropped} dropped[/dim]"
+                    )
+                )
 
         if self.stage >= 3:
             lines.append(Text.from_markup(""))
             lines.append(Text.from_markup("  [bold][3/5] Reading & embedding[/bold]"))
             bar = _bar(self.ingested, self.ingested_total)
-            lines.append(Text.from_markup(
-                f"    [cyan]{bar}[/cyan]  "
-                f"[dim]{self.ingested}/{self.ingested_total} sources  ·  "
-                f"{self.total_chunks} chunks[/dim]"
-            ))
+            lines.append(
+                Text.from_markup(
+                    f"    [cyan]{bar}[/cyan]  "
+                    f"[dim]{self.ingested}/{self.ingested_total} sources  ·  "
+                    f"{self.total_chunks} chunks[/dim]"
+                )
+            )
 
         if self.stage >= 4:
             lines.append(Text.from_markup(""))
@@ -150,18 +163,18 @@ class BuildDisplay:
                 recent = "  ·  ".join(self.concepts[-7:])
                 lines.append(Text.from_markup(f"    [dim]{recent}[/dim]"))
             bar = _bar(self.graph_batches_done, max(self.graph_batches_total, 1))
-            lines.append(Text.from_markup(
-                f"    [cyan]{bar}[/cyan]  "
-                f"[dim]{self.node_count} nodes  ·  {self.edge_count} edges[/dim]"
-            ))
+            lines.append(
+                Text.from_markup(
+                    f"    [cyan]{bar}[/cyan]  "
+                    f"[dim]{self.node_count} nodes  ·  {self.edge_count} edges[/dim]"
+                )
+            )
 
         if self.stage >= 5:
             lines.append(Text.from_markup(""))
             lines.append(Text.from_markup("  [bold][5/5] Generating persona[/bold]"))
             if self.persona_name:
-                lines.append(Text.from_markup(
-                    f"    [bold cyan]→ {self.persona_name}[/bold cyan]"
-                ))
+                lines.append(Text.from_markup(f"    [bold cyan]→ {self.persona_name}[/bold cyan]"))
             else:
                 lines.append(Text.from_markup("    [dim]…[/dim]"))
 
@@ -172,7 +185,9 @@ class BuildDisplay:
 def build_command(
     topic: Annotated[str, typer.Argument(help="Topic to build an expert on")],
     depth: Annotated[str, typer.Option("--depth", help="normal or deep")] = "normal",
-    sources: Annotated[str | None, typer.Option("--sources", help="Comma-separated fetcher names")] = None,
+    sources: Annotated[
+        str | None, typer.Option("--sources", help="Comma-separated fetcher names")
+    ] = None,
     rebuild: bool = typer.Option(False, "--rebuild", help="Delete existing expert and rebuild"),
 ) -> None:
     """Build a grounded expert from multi-source corpus."""
@@ -196,6 +211,7 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
     # Experts built locally are owned by the signed-in user (if any); otherwise
     # they're left unowned, which the API treats as belonging to the admin.
     from peritus.cli.session import current_user_id
+
     owner_id = current_user_id()
 
     try:
@@ -243,9 +259,7 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
             display.graph_batches_done += 1
             new_labels = [lbl for lbl in event.get("labels", []) if lbl not in display.concepts]
             display.concepts.extend(new_labels)
-            display.node_count = sum(
-                len(e.get("labels", [])) for e in [event]
-            )
+            display.node_count = sum(len(e.get("labels", [])) for e in [event])
             display.edge_count += event.get("edges", 0)
             # Accumulate actual totals
             display.node_count = len(display.concepts)
@@ -278,12 +292,12 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
     console.rule(style="bright_blue")
     console.print(
         Panel(
-            f"[bold green]Expert ready:[/bold green] [bold cyan]\"{persona}\"[/bold cyan]\n"
+            f'[bold green]Expert ready:[/bold green] [bold cyan]"{persona}"[/bold cyan]\n'
             f"Trained on [green]{result.source_count}[/green] sources"
             + f" · [green]{result.chunk_count}[/green] chunks"
             + f" · [green]{result.node_count}[/green] concepts\n"
             + f"Avg quality [yellow]{avg_q}[/yellow] / 10\n\n"
-            f"Run: [bold]peritus chat \"{topic}\"[/bold]",
+            f'Run: [bold]peritus chat "{topic}"[/bold]',
             border_style="green",
             padding=(1, 2),
         )
