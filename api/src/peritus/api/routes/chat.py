@@ -30,12 +30,13 @@ async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(requ
 
     async def stream_generator():
         try:
-            from peritus.chat.agent import ChatAgent, RetrievedContext, build_user_message
-            from peritus.chat.grounding import (
-                build_system_prompt,
-                parse_cited_indices,
-                used_citations,
+            from peritus.chat.agent import (
+                ChatAgent,
+                RetrievedContext,
+                build_cached_system,
+                build_composition_messages,
             )
+            from peritus.chat.grounding import parse_cited_indices, used_citations
             from peritus.infrastructure.anthropic_client import get_anthropic_client
 
             # Retrieval pipeline (shared with ChatAgent.respond), statuses streamed.
@@ -48,14 +49,16 @@ async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(requ
                     ctx = payload
             assert ctx is not None
 
-            # Stream the Anthropic response token by token.
-            messages = list(history) + [build_user_message(req.question, ctx.context_block)]
+            # Stream the Anthropic response token by token. System prompt and
+            # history carry prompt-cache breakpoints so follow-up turns read
+            # the shared prefix at ~0.1× input price.
+            messages = build_composition_messages(history, req.question, ctx.context_block)
             client = get_anthropic_client()
             answer_parts: list[str] = []
             async with client.messages.stream(
                 model=settings.CLAUDE_MODEL,
                 max_tokens=expert.config.max_response_tokens,
-                system=build_system_prompt(expert.persona_style, expert.topic),
+                system=build_cached_system(expert.persona_style, expert.topic),
                 messages=messages,
             ) as stream:
                 async for text in stream.text_stream:

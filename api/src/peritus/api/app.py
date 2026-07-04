@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from peritus.api.routes import auth, chat, experts, health
 from peritus.core.config import settings
-from peritus.core.logging import get_logger
+from peritus.core.logging import get_logger, setup_logging
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
 
 logger = get_logger(__name__)
@@ -67,6 +67,11 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    # Uvicorn's own logging config is disabled (log_config=None in start()) so this
+    # is the only place logging gets configured; skipping it left every logger.*
+    # call in this app using Python's default (unformatted, no file handler) setup.
+    setup_logging(settings.LOG_LEVEL, log_file=None)
+
     app = FastAPI(title="Peritus API", version="1.0.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
@@ -85,7 +90,8 @@ app = create_app()
 
 
 def start() -> None:
-    uvicorn.run("peritus.api.app:app", host="0.0.0.0", port=8000, reload=False)
+    # log_config=None keeps uvicorn from installing its own dictConfig over ours.
+    uvicorn.run("peritus.api.app:app", host="0.0.0.0", port=8000, reload=False, log_config=None)
 
 
 def keygen() -> None:

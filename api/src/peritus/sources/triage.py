@@ -6,14 +6,13 @@ winners get fully downloaded/OCR'd, so the pipeline considers far more
 candidates than it fetches.
 """
 
-import asyncio
 import difflib
 from dataclasses import dataclass
 from typing import Any
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_batch import gather_claude_calls
 from peritus.sources.domain import SourceCandidate
 
 logger = get_logger(__name__)
@@ -77,24 +76,36 @@ async def triage_candidates(
     must_have_titles: list[str],
     candidates: list[SourceCandidate],
 ) -> list[TriagedCandidate]:
-    """Score all candidates in concurrent Haiku batches. Order is preserved."""
+    """Score all candidates in batched Haiku calls. Order is preserved.
+
+    Calls run through the Message Batches API (half price) when enabled, else
+    as concurrent live calls.
+    """
     if not candidates:
         return []
 
-    sem = asyncio.Semaphore(settings.VALIDATE_CONCURRENCY)
     batches = [
         candidates[i: i + _TRIAGE_BATCH_SIZE]
         for i in range(0, len(candidates), _TRIAGE_BATCH_SIZE)
     ]
 
-    async def _score_batch(batch: list[SourceCandidate]) -> list[float]:
-        try:
-            return await _triage_batch(topic, key_concepts, batch, sem)
-        except Exception as exc:
-            logger.warning("Triage batch failed (%d candidates): %s", len(batch), exc)
-            return [_FALLBACK_SCORE] * len(batch)
+    responses = await gather_claude_calls(
+        [_triage_params(topic, key_concepts, b) for b in batches],
+        live_concurrency=settings.VALIDATE_CONCURRENCY,
+        description="triage",
+    )
 
-    batch_scores = await asyncio.gather(*[_score_batch(b) for b in batches])
+    batch_scores: list[list[float]] = []
+    for batch, resp in zip(batches, responses, strict=True):
+        if resp is None:
+            logger.warning("Triage batch failed (%d candidates)", len(batch))
+            batch_scores.append([_FALLBACK_SCORE] * len(batch))
+            continue
+        try:
+            batch_scores.append(_parse_triage_response(resp, len(batch)))
+        except Exception as exc:
+            logger.warning("Triage batch unparseable (%d candidates): %s", len(batch), exc)
+            batch_scores.append([_FALLBACK_SCORE] * len(batch))
 
     triaged: list[TriagedCandidate] = []
     for batch, scores in zip(batches, batch_scores, strict=True):
@@ -143,54 +154,55 @@ def _matches_must_have(title: str, must_have_titles: list[str]) -> bool:
     return False
 
 
-async def _triage_batch(
+def _triage_params(
     topic: str,
     key_concepts: list[str],
     batch: list[SourceCandidate],
-    sem: asyncio.Semaphore,
-) -> list[float]:
-    async with sem:
-        client = get_anthropic_client()
-        candidates_block = "\n\n".join(
-            f"<candidate_{i}>\n"
-            f"Type: {c.source_type.value}\n"
-            f"Title: {c.title}\n"
-            + (f"Author: {c.author}\n" if c.author else "")
-            + f"Snippet: {c.snippet[:_SNIPPET_CHARS]}\n"
-            f"</candidate_{i}>"
-            for i, c in enumerate(batch)
-        )
-        concepts_block = (
-            "Key concepts the corpus must cover:\n"
-            + "\n".join(f"- {c}" for c in key_concepts)
-            + "\n\n"
-            if key_concepts else ""
-        )
-        resp = await client.messages.create(  # type: ignore[call-overload]
-            model=settings.FAST_MODEL,
-            max_tokens=64 * len(batch) + 256,
-            system=_SYSTEM,
-            tools=[_TRIAGE_TOOL],
-            tool_choice={"type": "tool", "name": "triage_candidates"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Topic: {topic}\n\n"
-                    f"{concepts_block}"
-                    f"{candidates_block}\n\n"
-                    f"Score all {len(batch)} candidates above."
-                ),
-            }],
-        )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        raw_scores = list(block.input.get("scores", []))
-        scores: list[float] = []
-        for entry in raw_scores[: len(batch)]:
-            try:
-                value = float(entry.get("expected_value", _FALLBACK_SCORE))
-            except (TypeError, ValueError, AttributeError):
-                value = _FALLBACK_SCORE
-            scores.append(min(max(value, 0.0), 10.0))
-        while len(scores) < len(batch):
-            scores.append(_FALLBACK_SCORE)
-        return scores
+) -> dict[str, Any]:
+    """Request params for one triage batch (consumed by gather_claude_calls)."""
+    candidates_block = "\n\n".join(
+        f"<candidate_{i}>\n"
+        f"Type: {c.source_type.value}\n"
+        f"Title: {c.title}\n"
+        + (f"Author: {c.author}\n" if c.author else "")
+        + f"Snippet: {c.snippet[:_SNIPPET_CHARS]}\n"
+        f"</candidate_{i}>"
+        for i, c in enumerate(batch)
+    )
+    concepts_block = (
+        "Key concepts the corpus must cover:\n"
+        + "\n".join(f"- {c}" for c in key_concepts)
+        + "\n\n"
+        if key_concepts else ""
+    )
+    return {
+        "model": settings.FAST_MODEL,
+        "max_tokens": 64 * len(batch) + 256,
+        "system": _SYSTEM,
+        "tools": [_TRIAGE_TOOL],
+        "tool_choice": {"type": "tool", "name": "triage_candidates"},
+        "messages": [{
+            "role": "user",
+            "content": (
+                f"Topic: {topic}\n\n"
+                f"{concepts_block}"
+                f"{candidates_block}\n\n"
+                f"Score all {len(batch)} candidates above."
+            ),
+        }],
+    }
+
+
+def _parse_triage_response(resp: Any, batch_len: int) -> list[float]:
+    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
+    raw_scores = list(block.input.get("scores", []))
+    scores: list[float] = []
+    for entry in raw_scores[:batch_len]:
+        try:
+            value = float(entry.get("expected_value", _FALLBACK_SCORE))
+        except (TypeError, ValueError, AttributeError):
+            value = _FALLBACK_SCORE
+        scores.append(min(max(value, 0.0), 10.0))
+    while len(scores) < batch_len:
+        scores.append(_FALLBACK_SCORE)
+    return scores

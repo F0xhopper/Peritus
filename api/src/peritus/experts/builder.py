@@ -35,7 +35,7 @@ from peritus.graph.repository import GraphRepository, node_embedding_text
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.embeddings import embed_batch
 from peritus.ingestion.chunker import TextChunk
-from peritus.ingestion.pipeline import ingest_source
+from peritus.ingestion.pipeline import ingest_sources
 from peritus.sources.domain import (
     DroppedSource,
     RawSource,
@@ -301,30 +301,29 @@ class ExpertBuilder:
         source_db_ids = await self._persist_sources(expert.id, passed, dropped)
         avg_quality = _avg_quality(passed)
 
-        # Stage 3: Chunk + Embed
+        # Stage 3: Chunk + Embed. All sources are chunked up front so their
+        # contextualisation runs as one Message Batch (half price) when enabled.
         await _emit_event(on_event, {"type": "stage", "stage": 3, "name": "chunk", "total": len(passed)})
         all_chunk_ids: list[int] = []
         all_chunks_for_graph: list[tuple[TextChunk, int]] = []
+        ingested_total = 0
 
-        for vsource, src_db_id in zip(passed, source_db_ids, strict=True):
-            try:
-                chunk_ids, raw_chunks = await ingest_source(vsource, expert.id, src_db_id, self._pool)
-                all_chunk_ids.extend(chunk_ids)
-                all_chunks_for_graph.extend(zip(raw_chunks, chunk_ids, strict=True))
-                await _emit_event(on_event, {
-                    "type": "source_ingested",
-                    "title": vsource.title,
-                    "chunks": len(chunk_ids),
-                    "total_chunks": len(all_chunk_ids),
-                })
-            except Exception as exc:
-                logger.warning("Ingestion failed for %r: %s", vsource.title, exc)
-                await _emit_event(on_event, {
-                    "type": "source_ingested",
-                    "title": vsource.title,
-                    "chunks": 0,
-                    "total_chunks": len(all_chunk_ids),
-                })
+        async def _on_ingested(vsource: ValidatedSource, chunk_ids: list[int]) -> None:
+            nonlocal ingested_total
+            ingested_total += len(chunk_ids)
+            await _emit_event(on_event, {
+                "type": "source_ingested",
+                "title": vsource.title,
+                "chunks": len(chunk_ids),
+                "total_chunks": ingested_total,
+            })
+
+        ingested = await ingest_sources(
+            passed, expert.id, source_db_ids, self._pool, on_ingested=_on_ingested,
+        )
+        for chunk_ids, raw_chunks in ingested:
+            all_chunk_ids.extend(chunk_ids)
+            all_chunks_for_graph.extend(zip(raw_chunks, chunk_ids, strict=True))
 
         if not all_chunk_ids:
             raise BuildError("No chunks were embedded — ingestion failed for all sources.")

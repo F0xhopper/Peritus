@@ -1,12 +1,11 @@
 """Claude graph extractor — reads batches of chunks and extracts concept nodes + typed edges."""
 
-import asyncio
 from collections.abc import Callable, Coroutine
 from typing import Any
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_batch import gather_claude_calls
 from peritus.ingestion.chunker import TextChunk
 
 logger = get_logger(__name__)
@@ -74,8 +73,6 @@ _SYSTEM = (
 
 BatchCallback = Callable[[list[str], int], Coroutine[Any, Any, None]]
 
-_MAX_ATTEMPTS = 3
-
 
 def attach_chunk_db_ids(data: dict, chunk_db_ids: list[int]) -> dict:
     """Map model-reported chunk indices to database ids, dropping out-of-range ones."""
@@ -95,69 +92,63 @@ async def extract_graph_from_chunks(
     batch_size: int | None = None,
     on_batch: BatchCallback | None = None,
 ) -> list[dict]:
-    """Extract graph data from chunks in batches. Returns raw extraction dicts."""
+    """Extract graph data from chunks in batches. Returns raw extraction dicts.
+
+    Calls run through the Message Batches API (half price) when enabled, else
+    as concurrent live calls.
+    """
     size = batch_size or settings.GRAPH_BATCH_SIZE
-    client = get_anthropic_client()
-    sem = asyncio.Semaphore(3)
 
     batches = [
         (chunks[i: i + size], chunk_db_ids[i: i + size])
         for i in range(0, len(chunks), size)
     ]
 
-    results = await asyncio.gather(
-        *[_extract_batch(client, topic, batch_chunks, batch_ids, sem, on_batch)
-          for batch_chunks, batch_ids in batches],
-        return_exceptions=True,
+    responses = await gather_claude_calls(
+        [_extract_params(topic, batch_chunks) for batch_chunks, _ in batches],
+        live_concurrency=3,
+        description="graph-extract",
     )
 
     extractions = []
-    for i, result in enumerate(results):
-        if isinstance(result, BaseException):
-            logger.warning("Graph extraction failed for batch %d: %s", i, result)
-        else:
-            extractions.append(result)
+    for i, ((_, batch_ids), resp) in enumerate(zip(batches, responses, strict=True)):
+        if resp is None:
+            logger.warning("Graph extraction failed for batch %d", i)
+            continue
+        try:
+            data = _parse_extract_response(resp, batch_ids)
+        except Exception as exc:
+            logger.warning("Graph extraction failed for batch %d: %s", i, exc)
+            continue
+        if on_batch:
+            labels = [n["label"] for n in data.get("nodes", []) if n.get("label")]
+            await on_batch(labels, len(data.get("edges", [])))
+        extractions.append(data)
     return extractions
 
 
-async def _extract_batch(
-    client,
-    topic: str,
-    chunks: list[TextChunk],
-    chunk_db_ids: list[int],
-    sem: asyncio.Semaphore,
-    on_batch: BatchCallback | None = None,
-) -> dict:
+def _extract_params(topic: str, chunks: list[TextChunk]) -> dict[str, Any]:
+    """Request params for one extraction batch (consumed by gather_claude_calls)."""
     chunk_block = "\n\n".join(
         f"[{i}] {c.text}" for i, c in enumerate(chunks)
     )
-    async with sem:
-        for attempt in range(_MAX_ATTEMPTS):
-            try:
-                resp = await client.messages.create(
-                    model=settings.GRAPH_MODEL,
-                    max_tokens=4096,
-                    system=_SYSTEM,
-                    tools=[_TOOL],
-                    tool_choice={"type": "tool", "name": "extract_graph"},
-                    messages=[{
-                        "role": "user",
-                        "content": (
-                            f"Topic: {topic}\n\n"
-                            f"Chunks ({len(chunks)} total):\n\n{chunk_block}"
-                        ),
-                    }],
-                )
-                break
-            except Exception as exc:
-                if attempt == _MAX_ATTEMPTS - 1:
-                    raise
-                delay = 2 ** attempt
-                logger.warning(
-                    "Graph extraction attempt %d failed (%s), retrying in %ds",
-                    attempt + 1, exc, delay,
-                )
-                await asyncio.sleep(delay)
+    return {
+        "model": settings.GRAPH_MODEL,
+        "max_tokens": 4096,
+        "system": _SYSTEM,
+        "tools": [_TOOL],
+        "tool_choice": {"type": "tool", "name": "extract_graph"},
+        "messages": [{
+            "role": "user",
+            "content": (
+                f"Topic: {topic}\n\n"
+                f"Chunks ({len(chunks)} total):\n\n{chunk_block}"
+            ),
+        }],
+    }
+
+
+def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
     if resp.stop_reason == "max_tokens":
         logger.warning(
             "Graph extraction batch hit max_tokens — output truncated, some nodes/edges lost"
@@ -165,8 +156,4 @@ async def _extract_batch(
     block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
     if block is None:
         raise ValueError("Graph extraction response contained no tool_use block")
-    data = attach_chunk_db_ids(dict(block.input), chunk_db_ids)
-    if on_batch:
-        labels = [n["label"] for n in data.get("nodes", []) if n.get("label")]
-        await on_batch(labels, len(data.get("edges", [])))
-    return data
+    return attach_chunk_db_ids(dict(block.input), chunk_db_ids)

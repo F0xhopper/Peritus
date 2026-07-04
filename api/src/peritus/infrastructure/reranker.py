@@ -103,12 +103,25 @@ async def _cohere_rerank(
         return None
 
 
+_warned_llm_fallback = False
+
+
 async def _llm_windowed_rerank(
     query: str, documents: list[str], top_n: int
 ) -> list[tuple[int, float]]:
     """Score passages in small windows (concurrently) and merge by score."""
     n = len(documents)
     window = max(2, settings.RERANK_WINDOW)
+
+    global _warned_llm_fallback
+    if not _warned_llm_fallback:
+        _warned_llm_fallback = True
+        logger.warning(
+            "COHERE_API_KEY not set — reranking falls back to ~%d windowed LLM "
+            "calls per query. Cohere rerank is cheaper (~$2 per 1K searches) and "
+            "higher quality; set COHERE_API_KEY to switch.",
+            -(-n // window),
+        )
     sem = asyncio.Semaphore(4)
 
     windows = [list(range(i, min(i + window, n))) for i in range(0, n, window)]

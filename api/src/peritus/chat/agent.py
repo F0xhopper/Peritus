@@ -92,6 +92,48 @@ def build_user_message(question: str, context_block: str) -> dict:
     }
 
 
+def build_cached_system(persona_style: str | None, topic: str) -> list[dict]:
+    """System prompt as a block list with a prompt-cache breakpoint.
+
+    The persona prompt is byte-identical across every turn (and every
+    conversation) with the same expert, so follow-up requests read it from the
+    prompt cache at ~0.1× input price once it clears the model's minimum
+    cacheable prefix.
+    """
+    return [{
+        "type": "text",
+        "text": build_system_prompt(persona_style, topic),
+        "cache_control": {"type": "ephemeral"},
+    }]
+
+
+def build_composition_messages(history: list[dict], question: str, context_block: str) -> list[dict]:
+    """Trim history, mark the cache breakpoint, and append the grounded question.
+
+    History is capped at ``CHAT_HISTORY_MAX_MESSAGES`` (client input is
+    unbounded otherwise) and must start with a user turn. The last history
+    message carries a ``cache_control`` breakpoint so each turn's request
+    reuses the previous turn's cached prefix — the whole prior conversation is
+    then billed at ~0.1× instead of full input price.
+    """
+    trimmed = list(history[-settings.CHAT_HISTORY_MAX_MESSAGES:])
+    while trimmed and trimmed[0].get("role") != "user":
+        trimmed.pop(0)
+
+    messages = [dict(m) for m in trimmed]
+    if messages:
+        last = messages[-1]
+        content = last.get("content")
+        if isinstance(content, str) and content.strip():
+            last["content"] = [{
+                "type": "text",
+                "text": content,
+                "cache_control": {"type": "ephemeral"},
+            }]
+    messages.append(build_user_message(question, context_block))
+    return messages
+
+
 # Yielded items: ("status", str) progress updates, then exactly one
 # ("context", RetrievedContext) as the final item.
 RetrieveEvent = tuple[str, "str | RetrievedContext"]
@@ -175,11 +217,11 @@ class ChatAgent:
         ctx = await self.gather_context(expert, question)
 
         client = get_anthropic_client()
-        messages: list[Any] = list(history) + [build_user_message(question, ctx.context_block)]
+        messages = build_composition_messages(history, question, ctx.context_block)
         resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.CLAUDE_MODEL,
             max_tokens=expert.config.max_response_tokens,
-            system=build_system_prompt(expert.persona_style, expert.topic),
+            system=build_cached_system(expert.persona_style, expert.topic),
             messages=messages,
         )
         answer_text = "".join(b.text for b in resp.content if hasattr(b, "text"))

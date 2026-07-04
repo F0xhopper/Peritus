@@ -1,11 +1,10 @@
 """Claude source validator — validates sources in batches of 5, one API call per batch."""
 
-import asyncio
 from typing import Any
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_batch import gather_claude_calls
 from peritus.sources.domain import DroppedSource, RawSource, ValidatedSource
 
 logger = get_logger(__name__)
@@ -147,27 +146,37 @@ async def validate_sources(
     on_result=None,
 ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
     key_concepts = key_concepts or []
-    sem = asyncio.Semaphore(settings.VALIDATE_CONCURRENCY)
     batches = [
         sources[i: i + _VALIDATE_BATCH_SIZE]
         for i in range(0, len(sources), _VALIDATE_BATCH_SIZE)
     ]
 
-    async def _process_batch(batch: list[RawSource]) -> list[tuple[RawSource, dict]]:
-        try:
-            raw_validations = await _validate_batch(topic, batch, key_concepts, sem)
-        except Exception as exc:
-            logger.warning("Batch validation failed (%d sources): %s", len(batch), exc)
-            raw_validations = [
-                {
-                    "quality_score": 0.0, "relevance_score": 0.0,
-                    "content_type": "other", "difficulty": 1,
-                    "key_claims": [], "drop_reason": "validation error",
-                }
-                for _ in batch
-            ]
+    # One Claude call per batch — routed through the Message Batches API
+    # (half price) when enabled, else concurrent live calls.
+    responses = await gather_claude_calls(
+        [_validate_params(topic, b, key_concepts) for b in batches],
+        live_concurrency=settings.VALIDATE_CONCURRENCY,
+        description="validate",
+    )
 
-        pairs: list[tuple[RawSource, dict]] = []
+    _ERROR_VALIDATION = {
+        "quality_score": 0.0, "relevance_score": 0.0,
+        "content_type": "other", "difficulty": 1,
+        "key_claims": [], "drop_reason": "validation error",
+    }
+
+    all_pairs: list[tuple[RawSource, dict]] = []
+    for batch, resp in zip(batches, responses, strict=True):
+        if resp is None:
+            logger.warning("Batch validation failed (%d sources)", len(batch))
+            raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
+        else:
+            try:
+                raw_validations = _parse_validate_response(resp, len(batch))
+            except Exception as exc:
+                logger.warning("Batch validation unparseable (%d sources): %s", len(batch), exc)
+                raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
+
         for source, raw in zip(batch, raw_validations, strict=True):
             q = float(raw.get("quality_score", 0))
             r = float(raw.get("relevance_score", 0))
@@ -181,34 +190,30 @@ async def validate_sources(
                     "passed": not raw["drop"],
                     "drop_reason": raw.get("drop_reason"),
                 })
-            pairs.append((source, raw))
-        return pairs
-
-    batch_results = await asyncio.gather(*[_process_batch(b) for b in batches])
+            all_pairs.append((source, raw))
 
     passed: list[ValidatedSource] = []
     dropped: list[DroppedSource] = []
-    for pairs in batch_results:
-        for source, result in pairs:
-            if result["drop"]:
-                dropped.append(DroppedSource(
-                    raw=source,
-                    quality_score=result["quality_score"],
-                    relevance_score=result["relevance_score"],
-                    drop_reason=result["drop_reason"] or "below threshold",
-                ))
-            else:
-                passed.append(ValidatedSource(
-                    raw=source,
-                    quality_score=result["quality_score"],
-                    relevance_score=result["relevance_score"],
-                    content_type=result["content_type"],
-                    difficulty=result["difficulty"],
-                    key_claims=result["key_claims"],
-                    covered_concepts=_match_concepts(
-                        result.get("covered_concepts", []), key_concepts,
-                    ),
-                ))
+    for source, result in all_pairs:
+        if result["drop"]:
+            dropped.append(DroppedSource(
+                raw=source,
+                quality_score=result["quality_score"],
+                relevance_score=result["relevance_score"],
+                drop_reason=result["drop_reason"] or "below threshold",
+            ))
+        else:
+            passed.append(ValidatedSource(
+                raw=source,
+                quality_score=result["quality_score"],
+                relevance_score=result["relevance_score"],
+                content_type=result["content_type"],
+                difficulty=result["difficulty"],
+                key_claims=result["key_claims"],
+                covered_concepts=_match_concepts(
+                    result.get("covered_concepts", []), key_concepts,
+                ),
+            ))
     return passed, dropped
 
 
@@ -229,52 +234,52 @@ def _source_context(s: RawSource) -> str:
     return ("\n".join(lines) + "\n") if lines else ""
 
 
-async def _validate_batch(
+def _validate_params(
     topic: str,
     batch: list[RawSource],
     key_concepts: list[str],
-    sem: asyncio.Semaphore,
-) -> list[dict]:
-    """Validate up to _VALIDATE_BATCH_SIZE sources in a single Claude call."""
-    async with sem:
-        client = get_anthropic_client()
-        sources_block = "\n\n".join(
-            f"<source_{i}>\n"
-            f"Type: {s.source_type.value}\n"
-            f"Title: {s.title}\n"
-            f"{_source_context(s)}"
-            f"\n{_build_preview(s.text)}\n"
-            f"</source_{i}>"
-            for i, s in enumerate(batch)
-        )
-        concepts_block = (
-            "Key concepts the corpus must cover:\n"
-            + "\n".join(f"- {c}" for c in key_concepts)
-            + "\n\n"
-            if key_concepts else ""
-        )
-        resp = await client.messages.create(  # type: ignore[call-overload]
-            model=settings.FAST_MODEL,
-            max_tokens=512 * len(batch),
-            system=_SYSTEM,
-            tools=[_BATCH_TOOL],
-            tool_choice={"type": "tool", "name": "validate_sources"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Topic: {topic}\n\n"
-                    f"{concepts_block}"
-                    f"{sources_block}\n\n"
-                    f"Validate all {len(batch)} sources above."
-                ),
-            }],
-        )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        validations = list(block.input.get("validations", []))
-        while len(validations) < len(batch):
-            validations.append({
-                "quality_score": 0.0, "relevance_score": 0.0,
-                "content_type": "other", "difficulty": 1,
-                "key_claims": [], "drop_reason": "missing validation",
-            })
-        return validations[: len(batch)]
+) -> dict[str, Any]:
+    """Request params for one validation batch (consumed by gather_claude_calls)."""
+    sources_block = "\n\n".join(
+        f"<source_{i}>\n"
+        f"Type: {s.source_type.value}\n"
+        f"Title: {s.title}\n"
+        f"{_source_context(s)}"
+        f"\n{_build_preview(s.text)}\n"
+        f"</source_{i}>"
+        for i, s in enumerate(batch)
+    )
+    concepts_block = (
+        "Key concepts the corpus must cover:\n"
+        + "\n".join(f"- {c}" for c in key_concepts)
+        + "\n\n"
+        if key_concepts else ""
+    )
+    return {
+        "model": settings.FAST_MODEL,
+        "max_tokens": 512 * len(batch),
+        "system": _SYSTEM,
+        "tools": [_BATCH_TOOL],
+        "tool_choice": {"type": "tool", "name": "validate_sources"},
+        "messages": [{
+            "role": "user",
+            "content": (
+                f"Topic: {topic}\n\n"
+                f"{concepts_block}"
+                f"{sources_block}\n\n"
+                f"Validate all {len(batch)} sources above."
+            ),
+        }],
+    }
+
+
+def _parse_validate_response(resp: Any, batch_len: int) -> list[dict]:
+    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
+    validations = list(block.input.get("validations", []))
+    while len(validations) < batch_len:
+        validations.append({
+            "quality_score": 0.0, "relevance_score": 0.0,
+            "content_type": "other", "difficulty": 1,
+            "key_claims": [], "drop_reason": "missing validation",
+        })
+    return validations[:batch_len]

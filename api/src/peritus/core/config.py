@@ -31,6 +31,26 @@ class Settings:
     # Graph extraction model — Haiku is sufficient and much cheaper than Sonnet
     GRAPH_MODEL: str = os.getenv("GRAPH_MODEL", "claude-haiku-4-5-20251001")
 
+    # ── Anthropic Message Batches ────────────────────────────────────────────
+    # Build-pipeline stages (triage, validation, contextualisation, graph
+    # extraction) run through the Message Batches API at 50% of standard token
+    # prices. Builds are latency-insensitive background jobs, but note batches
+    # can take up to ~1 hour to process, so builds run longer when enabled.
+    ANTHROPIC_BATCH_ENABLED: bool = os.getenv("ANTHROPIC_BATCH_ENABLED", "true").lower() == "true"
+    # Below this many requests a stage just makes live calls — batch overhead
+    # and queueing latency aren't worth it for a handful of requests.
+    ANTHROPIC_BATCH_MIN_REQUESTS: int = int(os.getenv("ANTHROPIC_BATCH_MIN_REQUESTS", "4"))
+    # How often to poll a submitted batch for completion.
+    ANTHROPIC_BATCH_POLL_INTERVAL: float = float(os.getenv("ANTHROPIC_BATCH_POLL_INTERVAL", "15"))
+    # After this many seconds the batch is cancelled, finished results are
+    # harvested, and the remainder falls back to live calls.
+    ANTHROPIC_BATCH_TIMEOUT: float = float(os.getenv("ANTHROPIC_BATCH_TIMEOUT", "3600"))
+
+    # ── Chat ─────────────────────────────────────────────────────────────────
+    # Cap on client-supplied history messages sent to Claude per turn. Bounds
+    # both cost and abuse; the prompt cache makes retained history cheap.
+    CHAT_HISTORY_MAX_MESSAGES: int = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "20"))
+
     # Source fetchers
     EXA_API_KEY: str = os.getenv("EXA_API_KEY", "")
 
