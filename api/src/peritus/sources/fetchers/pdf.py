@@ -1,4 +1,8 @@
-"""PDF fetcher — finds open-access academic PDFs via Semantic Scholar and OCRs them."""
+"""PDF fetcher — finds open-access academic PDFs via Semantic Scholar and OCRs them.
+
+search() returns paper metadata + abstract only; the expensive Mistral OCR runs
+in fetch(), and only for candidates that survive triage.
+"""
 
 import asyncio
 
@@ -7,7 +11,7 @@ import httpx
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.pdf_parser import parse_pdf_url
-from peritus.sources.domain import RawSource, SourceType
+from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
@@ -19,51 +23,47 @@ _MAX_CHARS = 200_000
 
 
 class PdfFetcher:
-    async def fetch(self, topic: str, max_results: int = 4) -> list[RawSource]:
+    async def search(self, query: str, max_results: int = 4) -> list[SourceCandidate]:
         if not settings.MISTRAL_API_KEY:
             logger.warning("MISTRAL_API_KEY not set — skipping PDF fetcher")
             return []
 
-        papers = await _search_semantic_scholar(topic, max_results)
+        papers = await _search_semantic_scholar(query, max_results)
+        candidates = []
+        for paper in papers:
+            pdf_url = (paper.get("openAccessPdf") or {}).get("url")
+            if not pdf_url:
+                continue
+            authors = ", ".join(a.get("name", "") for a in paper.get("authors", [])[:3]) or None
+            candidates.append(SourceCandidate(
+                source_type=SourceType.PDF,
+                url=pdf_url,
+                title=paper.get("title") or "Untitled",
+                author=authors,
+                snippet=paper.get("abstract") or "",
+                metadata={
+                    "semantic_scholar_id": paper.get("paperId"),
+                    "year": paper.get("year"),
+                },
+            ))
+        return candidates
 
-        results = await asyncio.gather(
-            *[_process_paper(paper) for paper in papers],
-            return_exceptions=True,
+    async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+        if not await _is_pdf_url(candidate.url):
+            logger.debug("Skipping non-PDF URL: %s", candidate.url)
+            return None
+        text = await parse_pdf_url(candidate.url)
+        if len(text) < 500:
+            return None
+        logger.info("PDF ingested: %r (%d chars)", candidate.title, len(text))
+        return RawSource(
+            source_type=SourceType.PDF,
+            url=candidate.url,
+            title=candidate.title,
+            author=candidate.author,
+            text=text[:_MAX_CHARS],
+            metadata=candidate.metadata,
         )
-
-        sources: list[RawSource] = []
-        for paper, result in zip(papers, results, strict=True):
-            if isinstance(result, BaseException):
-                logger.warning("PDF processing failed for %r: %s", paper.get("title"), result)
-            elif result is not None:
-                sources.append(result)
-        return sources
-
-
-async def _process_paper(paper: dict) -> RawSource | None:
-    pdf_info = paper.get("openAccessPdf") or {}
-    pdf_url = pdf_info.get("url")
-    if not pdf_url:
-        return None
-    if not await _is_pdf_url(pdf_url):
-        logger.debug("Skipping non-PDF URL: %s", pdf_url)
-        return None
-    text = await parse_pdf_url(pdf_url)
-    if len(text) < 500:
-        return None
-    authors = ", ".join(a.get("name", "") for a in paper.get("authors", [])[:3]) or None
-    logger.info("PDF ingested: %r (%d chars)", paper.get("title"), len(text))
-    return RawSource(
-        source_type=SourceType.PDF,
-        url=pdf_url,
-        title=paper.get("title") or "Untitled",
-        author=authors,
-        text=text[:_MAX_CHARS],
-        metadata={
-            "semantic_scholar_id": paper.get("paperId"),
-            "year": paper.get("year"),
-        },
-    )
 
 
 async def _is_pdf_url(url: str) -> bool:

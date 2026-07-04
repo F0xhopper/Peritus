@@ -15,6 +15,23 @@ class SourceType(StrEnum):
 
 
 @dataclass
+class SourceCandidate:
+    """A search hit that has not been fully fetched yet.
+
+    Discovery is two-phase: fetchers first return cheap candidates (metadata +
+    snippet), triage ranks them against the research brief, and only the winners
+    pay the full download/OCR cost via the fetcher's fetch(candidate).
+    """
+
+    source_type: SourceType
+    url: str
+    title: str
+    author: str | None
+    snippet: str
+    metadata: dict = field(default_factory=dict)
+
+
+@dataclass
 class RawSource:
     source_type: SourceType
     url: str
@@ -32,6 +49,7 @@ class ValidatedSource:
     content_type: str
     difficulty: int
     key_claims: list[str]
+    covered_concepts: list[str] = field(default_factory=list)
 
     @property
     def source_type(self) -> SourceType:

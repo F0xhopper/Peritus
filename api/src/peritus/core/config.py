@@ -21,8 +21,12 @@ class Settings:
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 
-    # Fast model for contextualisation, reranking, planning, coverage
+    # Fast model for contextualisation, validation, reranking, coverage
     FAST_MODEL: str = os.getenv("FAST_MODEL", "claude-haiku-4-5-20251001")
+
+    # Research planning — one call per build that shapes the whole corpus, so it
+    # defaults to the strong model rather than FAST_MODEL.
+    PLAN_MODEL: str = os.getenv("PLAN_MODEL", "") or CLAUDE_MODEL
 
     # Graph extraction model — Haiku is sufficient and much cheaper than Sonnet
     GRAPH_MODEL: str = os.getenv("GRAPH_MODEL", "claude-haiku-4-5-20251001")

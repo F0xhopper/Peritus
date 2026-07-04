@@ -1,10 +1,8 @@
-import asyncio
-
 import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceType
+from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
@@ -13,48 +11,67 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Peritus/1.0)"}
 
 
 class WebFetcher:
-    async def fetch(self, topic: str, max_results: int = 4) -> list[RawSource]:
-        urls = await _ddg_search(topic, max_results)
-        sources = []
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HEADERS) as client:
-            results = await asyncio.gather(
-                *[_fetch_page(client, url) for url in urls],
-                return_exceptions=True,
-            )
-        for url, result in zip(urls, results, strict=True):
-            if isinstance(result, BaseException):
-                logger.warning("Web fetch failed for %r: %s", url, result)
-                continue
-            text, title = result
-            if len(text) < 500:
-                continue
-            sources.append(RawSource(
+    async def search(self, query: str, max_results: int = 4) -> list[SourceCandidate]:
+        hits = await _ddg_search(query, max_results)
+        return [
+            SourceCandidate(
                 source_type=SourceType.WEB,
-                url=url,
-                title=title,
+                url=hit["url"],
+                title=hit["title"] or hit["url"],
                 author=None,
-                text=text,
+                snippet=hit["snippet"],
                 metadata={},
-            ))
-        return sources
+            )
+            for hit in hits
+        ]
+
+    async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+        async with httpx.AsyncClient(
+            timeout=20, follow_redirects=True, headers=_HEADERS
+        ) as client:
+            try:
+                text, title = await _fetch_page(client, candidate.url)
+            except Exception as exc:
+                logger.warning("Web fetch failed for %r: %s", candidate.url, exc)
+                return None
+        if len(text) < 500:
+            return None
+        return RawSource(
+            source_type=SourceType.WEB,
+            url=candidate.url,
+            title=title or candidate.title,
+            author=None,
+            text=text,
+            metadata=candidate.metadata,
+        )
 
 
-async def _ddg_search(query: str, limit: int) -> list[str]:
+async def _ddg_search(query: str, limit: int) -> list[dict]:
+    """DuckDuckGo HTML search. Returns [{url, title, snippet}] — snippets make
+    candidates triageable without fetching the page."""
     try:
         async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
             resp = await client.post(_SEARCH_URL, data={"q": query})
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "lxml")
-            urls: list[str] = []
-            for a in soup.select("a.result__url"):
-                href = a.get("href", "")
-                if not isinstance(href, str):
+            hits: list[dict] = []
+            for result in soup.select("div.result"):
+                url_a = result.select_one("a.result__url")
+                if url_a is None:
                     continue
-                if href.startswith("http") and "duckduckgo" not in href:
-                    urls.append(href)
-                    if len(urls) >= limit:
-                        break
-            return urls
+                href = url_a.get("href", "")
+                if not isinstance(href, str) or not href.startswith("http") or "duckduckgo" in href:
+                    continue
+                title_a = result.select_one("a.result__a")
+                snippet_el = result.select_one(".result__snippet")
+                hits.append({
+                    "url": href,
+                    "title": title_a.get_text(strip=True) if title_a else "",
+                    "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
+                })
+                if len(hits) >= limit:
+                    break
+            return hits
     except Exception as exc:
         logger.warning("DuckDuckGo search failed: %s", exc)
         return []

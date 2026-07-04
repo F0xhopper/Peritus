@@ -1,11 +1,9 @@
 """Reddit fetcher — discovers via DuckDuckGo, fetches content via Reddit JSON API."""
 
-import asyncio
-
 import httpx
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceType
+from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
@@ -17,28 +15,32 @@ _MAX_CHARS = 50_000
 
 
 class RedditFetcher:
-    async def fetch(self, topic: str, max_results: int = 8) -> list[RawSource]:
+    async def search(self, query: str, max_results: int = 8) -> list[SourceCandidate]:
         from peritus.sources.fetchers.web import _ddg_search
 
         try:
-            urls = await _ddg_search(f"site:reddit.com/r {topic}", max_results)
+            hits = await _ddg_search(f"site:reddit.com/r {query}", max_results)
         except Exception as exc:
-            logger.warning("DDG Reddit search failed for %r: %s", topic, exc)
+            logger.warning("DDG Reddit search failed for %r: %s", query, exc)
             return []
 
-        if not urls:
-            return []
+        return [
+            SourceCandidate(
+                source_type=SourceType.REDDIT,
+                url=hit["url"],
+                title=hit["title"] or hit["url"],
+                author=None,
+                snippet=hit["snippet"],
+                metadata={},
+            )
+            for hit in hits
+        ]
 
+    async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
         async with httpx.AsyncClient(
             timeout=20, headers=_HEADERS, follow_redirects=True
         ) as client:
-            results = await asyncio.gather(
-                *[_fetch_post(client, url) for url in urls],
-                return_exceptions=True,
-            )
-
-        sources = [r for r in results if isinstance(r, RawSource)]
-        return sources[:max_results]
+            return await _fetch_post(client, candidate.url)
 
 
 async def _fetch_post(client: httpx.AsyncClient, url: str) -> RawSource | None:

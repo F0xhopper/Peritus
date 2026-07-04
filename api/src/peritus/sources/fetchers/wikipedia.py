@@ -1,9 +1,9 @@
-import asyncio
+import re
 
 import httpx
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceType
+from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
@@ -14,57 +14,58 @@ _HEADERS = {
     "User-Agent": "Peritus/2.0 (research corpus builder)"
 }
 
+_TAG_RE = re.compile(r"<[^>]+>")
+
 
 class WikipediaFetcher:
-    async def fetch(self, topic: str, max_results: int = 4) -> list[RawSource]:
+    async def search(self, query: str, max_results: int = 4) -> list[SourceCandidate]:
         async with httpx.AsyncClient(timeout=30, headers=_HEADERS) as client:
-            titles = await _search(client, topic, max_results)
-            results = await asyncio.gather(
-                *[_fetch_article(client, title) for title in titles],
-                return_exceptions=True,
-            )
-        sources = []
-        for title, result in zip(titles, results, strict=True):
-            if isinstance(result, BaseException):
-                logger.warning("Wikipedia fetch failed for %r: %s", title, result)
-                continue
-            if len(result) < 500:
-                continue
-            sources.append(RawSource(
+            resp = await client.get(_API_URL, params={
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "srlimit": max_results,
+                "srprop": "snippet",
+                "format": "json",
+            })
+            resp.raise_for_status()
+            data = resp.json()
+        candidates = []
+        for item in data.get("query", {}).get("search", []):
+            title = item["title"]
+            candidates.append(SourceCandidate(
                 source_type=SourceType.WIKIPEDIA,
                 url=f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}",
                 title=title,
                 author=None,
-                text=result[:_MAX_CHARS],
+                snippet=_TAG_RE.sub("", item.get("snippet", "")),
                 metadata={"wiki_title": title},
             ))
-        return sources
+        return candidates
 
-
-async def _search(client: httpx.AsyncClient, topic: str, limit: int) -> list[str]:
-    resp = await client.get(_API_URL, params={
-        "action": "query",
-        "list": "search",
-        "srsearch": topic,
-        "srlimit": limit,
-        "format": "json",
-    })
-    resp.raise_for_status()
-    data = resp.json()
-    return [item["title"] for item in data.get("query", {}).get("search", [])]
-
-
-async def _fetch_article(client: httpx.AsyncClient, title: str) -> str:
-    resp = await client.get(_API_URL, params={
-        "action": "query",
-        "titles": title,
-        "prop": "extracts",
-        "explaintext": True,
-        "exsectionformat": "plain",
-        "format": "json",
-    })
-    resp.raise_for_status()
-    data = resp.json()
-    pages = data.get("query", {}).get("pages", {})
-    page = next(iter(pages.values()))
-    return page.get("extract", "")
+    async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+        title = candidate.metadata["wiki_title"]
+        async with httpx.AsyncClient(timeout=30, headers=_HEADERS) as client:
+            resp = await client.get(_API_URL, params={
+                "action": "query",
+                "titles": title,
+                "prop": "extracts",
+                "explaintext": True,
+                "exsectionformat": "plain",
+                "format": "json",
+            })
+            resp.raise_for_status()
+            data = resp.json()
+        pages = data.get("query", {}).get("pages", {})
+        page = next(iter(pages.values()))
+        text = page.get("extract", "")
+        if len(text) < 500:
+            return None
+        return RawSource(
+            source_type=SourceType.WIKIPEDIA,
+            url=candidate.url,
+            title=title,
+            author=None,
+            text=text[:_MAX_CHARS],
+            metadata=candidate.metadata,
+        )

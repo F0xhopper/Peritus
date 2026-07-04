@@ -1,0 +1,11 @@
+# Local dev process list — run with `hivemind Procfile.dev` (or `just dev`).
+#
+# Both processes MUST run together: the API only enqueues builds, and the worker
+# is what claims and runs them. API alone => builds stall at "Identifying key
+# concepts…". This mirrors the api/worker split in docker-compose.yml.
+#
+# Commands use the project venv explicitly (../.venv/bin/...) so they work even
+# if the venv isn't activated in your shell.
+
+api:    cd api && ../.venv/bin/uvicorn peritus.api.app:app --reload --host 0.0.0.0 --port 8000
+worker: cd api && ../.venv/bin/python -m peritus.jobs.runner

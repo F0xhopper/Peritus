@@ -74,6 +74,19 @@ _SYSTEM = (
 
 BatchCallback = Callable[[list[str], int], Coroutine[Any, Any, None]]
 
+_MAX_ATTEMPTS = 3
+
+
+def attach_chunk_db_ids(data: dict, chunk_db_ids: list[int]) -> dict:
+    """Map model-reported chunk indices to database ids, dropping out-of-range ones."""
+    for node in data.get("nodes", []):
+        node["chunk_db_ids"] = [
+            chunk_db_ids[idx]
+            for idx in node.get("chunk_indices", [])
+            if isinstance(idx, int) and 0 <= idx < len(chunk_db_ids)
+        ]
+    return data
+
 
 async def extract_graph_from_chunks(
     topic: str,
@@ -119,28 +132,40 @@ async def _extract_batch(
         f"[{i}] {c.text}" for i, c in enumerate(chunks)
     )
     async with sem:
-        resp = await client.messages.create(
-            model=settings.GRAPH_MODEL,
-            max_tokens=4096,
-            system=_SYSTEM,
-            tools=[_TOOL],
-            tool_choice={"type": "tool", "name": "extract_graph"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Topic: {topic}\n\n"
-                    f"Chunks ({len(chunks)} total):\n\n{chunk_block}"
-                ),
-            }],
+        for attempt in range(_MAX_ATTEMPTS):
+            try:
+                resp = await client.messages.create(
+                    model=settings.GRAPH_MODEL,
+                    max_tokens=4096,
+                    system=_SYSTEM,
+                    tools=[_TOOL],
+                    tool_choice={"type": "tool", "name": "extract_graph"},
+                    messages=[{
+                        "role": "user",
+                        "content": (
+                            f"Topic: {topic}\n\n"
+                            f"Chunks ({len(chunks)} total):\n\n{chunk_block}"
+                        ),
+                    }],
+                )
+                break
+            except Exception as exc:
+                if attempt == _MAX_ATTEMPTS - 1:
+                    raise
+                delay = 2 ** attempt
+                logger.warning(
+                    "Graph extraction attempt %d failed (%s), retrying in %ds",
+                    attempt + 1, exc, delay,
+                )
+                await asyncio.sleep(delay)
+    if resp.stop_reason == "max_tokens":
+        logger.warning(
+            "Graph extraction batch hit max_tokens — output truncated, some nodes/edges lost"
         )
-    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    data = dict(block.input)
-    for node in data.get("nodes", []):
-        node["chunk_db_ids"] = [
-            chunk_db_ids[idx]
-            for idx in node.get("chunk_indices", [])
-            if idx < len(chunk_db_ids)
-        ]
+    block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
+    if block is None:
+        raise ValueError("Graph extraction response contained no tool_use block")
+    data = attach_chunk_db_ids(dict(block.input), chunk_db_ids)
     if on_batch:
         labels = [n["label"] for n in data.get("nodes", []) if n.get("label")]
         await on_batch(labels, len(data.get("edges", [])))

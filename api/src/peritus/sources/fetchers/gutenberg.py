@@ -1,5 +1,10 @@
-"""Project Gutenberg fetcher — Claude identifies canonical books first, then fetches via Gutendex."""
+"""Project Gutenberg fetcher — Claude identifies canonical books first, then fetches via Gutendex.
 
+search() identifies books and resolves them to Gutendex records (cheap metadata);
+the multi-hundred-KB text download happens in fetch(), only for triage winners.
+"""
+
+import difflib
 import re
 from typing import Any
 
@@ -9,7 +14,7 @@ from bs4 import BeautifulSoup
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_client import get_anthropic_client
-from peritus.sources.domain import RawSource, SourceType
+from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
@@ -59,54 +64,89 @@ _BOOK_TOOL: dict[str, Any] = {
 
 
 class GutenbergFetcher:
-    async def fetch(self, topic: str, max_results: int = 4) -> list[RawSource]:
-        identified = await _identify_books(topic)
+    async def search(self, query: str, max_results: int = 4) -> list[SourceCandidate]:
+        identified = await _identify_books(query)
         if not identified:
-            logger.info("No public-domain books identified for %r — skipping Gutenberg", topic)
+            logger.info("No public-domain books identified for %r — skipping Gutenberg", query)
             return []
 
-        sources: list[RawSource] = []
+        candidates: list[SourceCandidate] = []
+        seen_ids: set[int] = set()
         async with httpx.AsyncClient(
             timeout=30, headers=_HEADERS, follow_redirects=True
         ) as client:
             for book_info in identified:
-                if len(sources) >= max_results:
+                if len(candidates) >= max_results:
                     break
-                query = book_info.get("search_query") or book_info["title"]
-                candidates = await _search(client, query, 3)
-                if not candidates and book_info.get("author"):
-                    candidates = await _search(client, book_info["author"], 3)
+                gutendex_query = book_info.get("search_query") or book_info["title"]
+                results = await _search_gutendex(client, gutendex_query, 5)
+                if not results and book_info.get("author"):
+                    results = await _search_gutendex(client, book_info["author"], 5)
 
-                for candidate in candidates[:2]:
-                    try:
-                        text = await _download_text(client, candidate)
-                        if len(text) < 500:
-                            continue
-                        author = (
-                            ", ".join(a.get("name", "") for a in candidate.get("authors", []))
-                            or book_info.get("author")
-                            or None
-                        )
-                        sources.append(RawSource(
-                            source_type=SourceType.GUTENBERG,
-                            url=f"https://www.gutenberg.org/ebooks/{candidate['id']}",
-                            title=candidate.get("title", book_info["title"]),
-                            author=author,
-                            text=text[:_MAX_CHARS],
-                            metadata={"gutenberg_id": candidate["id"]},
-                        ))
+                # Gutendex search is loose (an author query matches any of their
+                # books) — only accept records whose title matches the book
+                # Claude actually asked for.
+                match = next(
+                    (
+                        r for r in results
+                        if r["id"] not in seen_ids
+                        and _title_matches(book_info["title"], r.get("title", ""))
+                    ),
+                    None,
+                )
+                if match is None:
+                    if results:
                         logger.info(
-                            "Gutenberg: fetched %r by %s",
-                            candidate.get("title"), author,
+                            "Gutenberg: no candidate matched %r — skipping",
+                            book_info["title"],
                         )
-                        break
-                    except Exception as exc:
-                        logger.warning(
-                            "Gutenberg download failed for book %s: %s",
-                            candidate.get("id"), exc,
-                        )
+                    continue
 
-        return sources[:max_results]
+                seen_ids.add(match["id"])
+                author = (
+                    ", ".join(a.get("name", "") for a in match.get("authors", []))
+                    or book_info.get("author")
+                    or None
+                )
+                candidates.append(SourceCandidate(
+                    source_type=SourceType.GUTENBERG,
+                    url=f"https://www.gutenberg.org/ebooks/{match['id']}",
+                    title=match.get("title", book_info["title"]),
+                    author=author,
+                    snippet=(
+                        f"{match.get('title', book_info['title'])} by {author or 'unknown'}. "
+                        f"Subjects: {'; '.join(match.get('subjects', [])[:5])}"
+                    ),
+                    metadata={
+                        "gutenberg_id": match["id"],
+                        "formats": match.get("formats", {}),
+                    },
+                ))
+        return candidates
+
+    async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+        async with httpx.AsyncClient(
+            timeout=30, headers=_HEADERS, follow_redirects=True
+        ) as client:
+            try:
+                text = await _download_text(client, candidate.metadata["formats"])
+            except Exception as exc:
+                logger.warning(
+                    "Gutenberg download failed for book %s: %s",
+                    candidate.metadata.get("gutenberg_id"), exc,
+                )
+                return None
+        if len(text) < 500:
+            return None
+        logger.info("Gutenberg: fetched %r by %s", candidate.title, candidate.author)
+        return RawSource(
+            source_type=SourceType.GUTENBERG,
+            url=candidate.url,
+            title=candidate.title,
+            author=candidate.author,
+            text=text[:_MAX_CHARS],
+            metadata={"gutenberg_id": candidate.metadata["gutenberg_id"]},
+        )
 
 
 async def _identify_books(topic: str) -> list[dict]:
@@ -140,7 +180,7 @@ async def _identify_books(topic: str) -> list[dict]:
         return []
 
 
-async def _search(client: httpx.AsyncClient, query: str, limit: int) -> list[dict]:
+async def _search_gutendex(client: httpx.AsyncClient, query: str, limit: int) -> list[dict]:
     try:
         resp = await client.get(
             _GUTENDEX, params={"search": query, "languages": "en"}
@@ -152,8 +192,7 @@ async def _search(client: httpx.AsyncClient, query: str, limit: int) -> list[dic
         return []
 
 
-async def _download_text(client: httpx.AsyncClient, book: dict) -> str:
-    formats = book.get("formats", {})
+async def _download_text(client: httpx.AsyncClient, formats: dict) -> str:
     url = (
         formats.get("text/plain; charset=utf-8")
         or formats.get("text/plain")
@@ -161,7 +200,7 @@ async def _download_text(client: httpx.AsyncClient, book: dict) -> str:
         or formats.get("text/html")
     )
     if not url:
-        raise ValueError(f"No plain text format for book {book.get('id')}")
+        raise ValueError("No plain text format available")
 
     resp = await client.get(url, timeout=60)
     resp.raise_for_status()
@@ -176,6 +215,26 @@ async def _download_text(client: httpx.AsyncClient, book: dict) -> str:
         text = resp.text
 
     return _strip_gutenberg_boilerplate(text)
+
+
+_TITLE_STOPWORDS = frozenset({"the", "a", "an", "of", "and", "or", "on", "in", "to"})
+
+
+def _title_matches(wanted: str, candidate: str) -> bool:
+    """Fuzzy title comparison — tolerant of subtitles and edition suffixes."""
+    def _norm(s: str) -> str:
+        return re.sub(r"[^a-z0-9 ]", " ", s.lower()).strip()
+
+    w, c = _norm(wanted), _norm(candidate)
+    if not w or not c:
+        return False
+    if w in c or c in w:
+        return True
+    w_tokens = set(w.split()) - _TITLE_STOPWORDS
+    c_tokens = set(c.split())
+    if w_tokens and len(w_tokens & c_tokens) / len(w_tokens) >= 0.6:
+        return True
+    return difflib.SequenceMatcher(None, w, c).ratio() >= 0.6
 
 
 def _strip_gutenberg_boilerplate(text: str) -> str:

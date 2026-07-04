@@ -17,7 +17,7 @@ _PASS_THRESHOLD_R = 6.0
 # Sample multiple regions instead of judging a source by its opening (often front
 # matter / abstract). Stamped on the credential as the rubric version.
 _PREVIEW_WINDOW_CHARS = 800
-RUBRIC_VERSION = "v2-multiwindow-q5r6"
+RUBRIC_VERSION = "v3-concepts-q5r6"
 _VALIDATE_BATCH_SIZE = 5
 
 _SOURCE_TYPE_HINTS: dict[str, str] = {
@@ -47,7 +47,9 @@ _SOURCE_TYPE_HINTS: dict[str, str] = {
 _SYSTEM = (
     "You are a rigorous source quality evaluator. "
     "Score sources honestly — a score of 5 or above means the source "
-    "genuinely addresses the topic with credible content."
+    "genuinely addresses the topic with credible content. "
+    "When a list of key concepts is provided, judge relevance against the topic "
+    "and those concepts, and tag each source with the key concepts it covers."
 )
 
 _BATCH_TOOL: dict[str, Any] = {
@@ -83,6 +85,15 @@ _BATCH_TOOL: dict[str, Any] = {
                             "items": {"type": "string"},
                             "description": "Up to 5 central claims or arguments from this source.",
                         },
+                        "covered_concepts": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Which of the listed key concepts this source substantively "
+                                "covers — copied verbatim from the provided list. Empty if "
+                                "none, or if no key concepts were provided."
+                            ),
+                        },
                         "drop_reason": {
                             "type": ["string", "null"],
                             "description": "Short phrase if quality_score < 5 OR relevance_score < 6, else null.",
@@ -90,7 +101,7 @@ _BATCH_TOOL: dict[str, Any] = {
                     },
                     "required": [
                         "quality_score", "relevance_score", "content_type",
-                        "difficulty", "key_claims", "drop_reason",
+                        "difficulty", "key_claims", "covered_concepts", "drop_reason",
                     ],
                 },
             }
@@ -112,11 +123,30 @@ def _build_preview(text: str) -> str:
     return f"{head}\n\n[…]\n\n{middle}\n\n[…]\n\n{tail}"
 
 
+def _match_concepts(raw: list, key_concepts: list[str]) -> list[str]:
+    """Map model-reported concept tags back onto the canonical concept list.
+
+    Guards against paraphrased or invented tags: only concepts that casefold-match
+    a provided key concept survive, and they come back in canonical spelling.
+    """
+    canonical = {c.casefold().strip(): c for c in key_concepts}
+    matched: list[str] = []
+    for item in raw or []:
+        if not isinstance(item, str):
+            continue
+        hit = canonical.get(item.casefold().strip())
+        if hit and hit not in matched:
+            matched.append(hit)
+    return matched
+
+
 async def validate_sources(
     topic: str,
     sources: list[RawSource],
+    key_concepts: list[str] | None = None,
     on_result=None,
 ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
+    key_concepts = key_concepts or []
     sem = asyncio.Semaphore(settings.VALIDATE_CONCURRENCY)
     batches = [
         sources[i: i + _VALIDATE_BATCH_SIZE]
@@ -125,7 +155,7 @@ async def validate_sources(
 
     async def _process_batch(batch: list[RawSource]) -> list[tuple[RawSource, dict]]:
         try:
-            raw_validations = await _validate_batch(topic, batch, sem)
+            raw_validations = await _validate_batch(topic, batch, key_concepts, sem)
         except Exception as exc:
             logger.warning("Batch validation failed (%d sources): %s", len(batch), exc)
             raw_validations = [
@@ -175,29 +205,53 @@ async def validate_sources(
                     content_type=result["content_type"],
                     difficulty=result["difficulty"],
                     key_claims=result["key_claims"],
+                    covered_concepts=_match_concepts(
+                        result.get("covered_concepts", []), key_concepts,
+                    ),
                 ))
     return passed, dropped
 
 
-async def _validate_batch(topic: str, batch: list[RawSource], sem: asyncio.Semaphore) -> list[dict]:
+def _source_context(s: RawSource) -> str:
+    """Extra per-source lines: author, plus expected-author check for leader content."""
+    lines = []
+    if s.author:
+        lines.append(f"Author: {s.author}")
+    hint = _SOURCE_TYPE_HINTS.get(s.source_type.value)
+    if hint:
+        lines.append(f"Note: {hint}")
+    leader = s.metadata.get("leader")
+    if leader:
+        lines.append(
+            f"Expected author: {leader}. If this content is not by {leader} or does not "
+            "substantively present their work, score relevance low."
+        )
+    return ("\n".join(lines) + "\n") if lines else ""
+
+
+async def _validate_batch(
+    topic: str,
+    batch: list[RawSource],
+    key_concepts: list[str],
+    sem: asyncio.Semaphore,
+) -> list[dict]:
     """Validate up to _VALIDATE_BATCH_SIZE sources in a single Claude call."""
     async with sem:
         client = get_anthropic_client()
         sources_block = "\n\n".join(
-            "<source_{i}>\n"
-            "Type: {stype}\n"
-            "Title: {title}\n"
-            "{hint}"
-            "\n{preview}\n"
-            "</source_{i}>".format(
-                i=i,
-                stype=s.source_type.value,
-                title=s.title,
-                hint=(f"Note: {_SOURCE_TYPE_HINTS[s.source_type.value]}\n"
-                      if s.source_type.value in _SOURCE_TYPE_HINTS else ""),
-                preview=_build_preview(s.text),
-            )
+            f"<source_{i}>\n"
+            f"Type: {s.source_type.value}\n"
+            f"Title: {s.title}\n"
+            f"{_source_context(s)}"
+            f"\n{_build_preview(s.text)}\n"
+            f"</source_{i}>"
             for i, s in enumerate(batch)
+        )
+        concepts_block = (
+            "Key concepts the corpus must cover:\n"
+            + "\n".join(f"- {c}" for c in key_concepts)
+            + "\n\n"
+            if key_concepts else ""
         )
         resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
@@ -209,6 +263,7 @@ async def _validate_batch(topic: str, batch: list[RawSource], sem: asyncio.Semap
                 "role": "user",
                 "content": (
                     f"Topic: {topic}\n\n"
+                    f"{concepts_block}"
                     f"{sources_block}\n\n"
                     f"Validate all {len(batch)} sources above."
                 ),

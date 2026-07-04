@@ -1,9 +1,14 @@
 """Build pipeline coordinator — orchestrates all 5 stages with progress callbacks.
 
 Stages:
-  0. PLAN    — Claude generates per-fetcher search queries and key concepts
-  1. DISCOVER — run all fetchers concurrently using planned queries
-  2. VALIDATE — Claude validates each raw source (concurrency-limited)
+  0. PLAN    — Claude produces a research brief: per-fetcher queries + budget
+               weights, key concepts the corpus must cover, must-have works
+  1. DISCOVER — three phases:
+       search: planned fetchers over-search (~3× budget) for cheap candidates
+       triage: Haiku ranks candidates against the brief; junk and near-dups drop
+       fetch:  top candidates get full content, refilling from lower ranks on failure
+  2. VALIDATE — Claude validates each raw source and tags which key concepts it covers
+  2b. GAP-FILL — key concepts no passing source covers get one targeted re-search
   3. CHUNK + EMBED — chunk, contextualise, embed, store each validated source
   4. GRAPH EXTRACT — Claude reads chunks in batches, extracts concept graph
   4b. RESOLVE — merge semantically duplicate graph nodes via embedding similarity
@@ -26,12 +31,18 @@ from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
-from peritus.graph.repository import GraphRepository
+from peritus.graph.repository import GraphRepository, node_embedding_text
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.embeddings import embed_batch
 from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_source
-from peritus.sources.domain import DroppedSource, RawSource, SourceType, ValidatedSource
+from peritus.sources.domain import (
+    DroppedSource,
+    RawSource,
+    SourceCandidate,
+    SourceType,
+    ValidatedSource,
+)
 from peritus.sources.fetchers.arxiv import (
     HEADERS as ARXIV_HEADERS,
 )
@@ -49,47 +60,129 @@ from peritus.sources.fetchers.thought_leaders import ThoughtLeadersFetcher
 from peritus.sources.fetchers.web import WebFetcher
 from peritus.sources.fetchers.wikipedia import WikipediaFetcher
 from peritus.sources.fetchers.youtube import YoutubeFetcher
+from peritus.sources.triage import TriagedCandidate, rank_candidates, triage_candidates
 from peritus.sources.validator import RUBRIC_VERSION, validate_sources
 
 logger = get_logger(__name__)
 
 EventCallback = Callable[[dict], Coroutine[Any, Any, None]]
 
+# Gap-fill: query-driven fetchers only — the identify-then-fetch fetchers
+# (gutenberg, thought_leaders) and noisy ones (reddit, youtube) don't take
+# well to narrow concept queries.
+_GAPFILL_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf")
+_GAPFILL_MAX_CONCEPTS = 4
+_GAPFILL_RESULTS_PER_QUERY = 2
+
+# Two-phase discovery: the tier multiplier scales the final corpus budget;
+# searching is cheap so candidates are gathered at _SEARCH_OVERFETCH× budget
+# and triage picks which ones are worth full downloads. Per-type caps keep a
+# single source type from flooding the corpus even if it triages well.
+_BASE_FETCH_BUDGET = 30
+_SEARCH_OVERFETCH = 3
+_FETCH_CONCURRENCY = 6
+_TYPE_CAP_FACTOR = 2
+
+_FETCHER_SOURCE_TYPES: dict[str, SourceType] = {
+    "wikipedia": SourceType.WIKIPEDIA,
+    "gutenberg": SourceType.GUTENBERG,
+    "arxiv": SourceType.ARXIV,
+    "pdf": SourceType.PDF,
+    "youtube": SourceType.YOUTUBE,
+    "exa": SourceType.EXA,
+    "web": SourceType.WEB,
+    "reddit": SourceType.REDDIT,
+    "thought_leaders": SourceType.THOUGHT_LEADER,
+}
+
+_FETCHER_NAMES: tuple[str, ...] = (
+    "wikipedia", "gutenberg", "arxiv", "pdf",
+    "youtube", "exa", "web", "reddit", "thought_leaders",
+)
+_MAX_QUERIES_PER_FETCHER = 3
+
+_FETCHER_PLAN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "queries": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": _MAX_QUERIES_PER_FETCHER,
+            "description": "1–3 search queries, together spanning different facets of the topic.",
+        },
+        "weight": {
+            "type": "number",
+            "description": (
+                "Budget weight, 0–2. 0 = this source type would add noise for this "
+                "topic and must be skipped; 1 = normal; 2 = this source type is "
+                "especially valuable here."
+            ),
+        },
+    },
+    "required": ["queries", "weight"],
+}
+
 _PLAN_TOOL: dict[str, Any] = {
     "name": "create_research_plan",
-    "description": "Generate targeted search queries for each source fetcher.",
+    "description": (
+        "Create a research plan: targeted queries and a budget weight per source "
+        "fetcher, the key concepts the corpus must cover, and must-have canonical works."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "fetcher_queries": {
+            "fetcher_plans": {
                 "type": "object",
                 "description": (
-                    "A specific search query for each fetcher, tuned to what that source "
-                    "type does best. If a fetcher is irrelevant for the topic, use the "
-                    "original topic string as the query."
+                    "A plan for each fetcher, with queries tuned to what that source "
+                    "type does best and a weight steering how much of the source budget "
+                    "it deserves for this topic."
                 ),
-                "properties": {
-                    "wikipedia":      {"type": "string"},
-                    "arxiv":          {"type": "string"},
-                    "youtube":        {"type": "string"},
-                    "exa":            {"type": "string"},
-                    "web":            {"type": "string"},
-                    "gutenberg":      {"type": "string"},
-                    "pdf":            {"type": "string"},
-                    "reddit":         {"type": "string"},
-                    "thought_leaders": {"type": "string"},
-                },
+                "properties": {name: _FETCHER_PLAN_SCHEMA for name in _FETCHER_NAMES},
             },
             "key_concepts": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "5–8 core concepts this corpus must cover.",
+                "description": (
+                    "5–8 concepts an expert on this topic must be able to teach. The "
+                    "corpus is checked against these and gaps are re-searched."
+                ),
                 "maxItems": 8,
             },
+            "must_have_works": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "author": {"type": "string"},
+                    },
+                    "required": ["title"],
+                },
+                "maxItems": 4,
+                "description": (
+                    "Named canonical works (books, papers, essays) an expert corpus on "
+                    "this topic should contain, if any exist."
+                ),
+            },
         },
-        "required": ["fetcher_queries", "key_concepts"],
+        "required": ["fetcher_plans", "key_concepts"],
     },
 }
+
+_PLAN_SYSTEM = (
+    "You are planning the research for building a grounded AI expert. The sources this "
+    "plan discovers are the ONLY material the expert will ever know, so plan for breadth "
+    "(every major facet of the topic gets searched) and depth (primary and advanced "
+    "material, not just introductions). Tune queries to each source type: arxiv gets "
+    "academic/theoretical angles, gutenberg gets classic public-domain primary texts, "
+    "pdf gets published papers, reddit gets practitioner discussion, youtube gets "
+    "lectures and talks, wikipedia gets encyclopedic overviews, exa and web get "
+    "high-quality articles and essays. Give weight 0 to source types that would add "
+    "noise for this topic (e.g. gutenberg for modern technology, arxiv for a "
+    "non-academic craft) and weight 2 to the ones that carry it."
+)
 
 
 @dataclass
@@ -115,46 +208,66 @@ class ExpertBuilder:
         self._graph_repo = GraphRepository(pool)
         self._source_filter = source_filter
 
-    def _build_fetchers(self, multiplier: float, source_filter: list[str] | None):
-        def _n(base: int) -> int:
-            return max(1, round(base * multiplier))
-
+    def _build_fetchers(
+        self,
+        multiplier: float,
+        source_filter: list[str] | None,
+        weights: dict[str, float] | None = None,
+    ):
+        weights = weights or {}
         all_fetchers = {
-            "wikipedia":       (WikipediaFetcher(),       _n(3)),
-            "gutenberg":       (GutenbergFetcher(),       _n(4)),
-            "arxiv":           (ArxivFetcher(),           _n(2)),
-            "pdf":             (PdfFetcher(),             _n(3)),
-            "youtube":         (YoutubeFetcher(),         _n(3)),
-            "exa":             (ExaFetcher(),             _n(5)),
-            "web":             (WebFetcher(),             _n(3)),
-            "reddit":          (RedditFetcher(),          _n(5)),
-            "thought_leaders": (ThoughtLeadersFetcher(),  _n(3)),
+            "wikipedia":       (WikipediaFetcher(),       3),
+            "gutenberg":       (GutenbergFetcher(),       4),
+            "arxiv":           (ArxivFetcher(),           2),
+            "pdf":             (PdfFetcher(),             3),
+            "youtube":         (YoutubeFetcher(),         3),
+            "exa":             (ExaFetcher(),             5),
+            "web":             (WebFetcher(),             3),
+            "reddit":          (RedditFetcher(),          5),
+            "thought_leaders": (ThoughtLeadersFetcher(),  3),
         }
-        if source_filter:
-            return {k: v for k, v in all_fetchers.items() if k in source_filter}
-        return all_fetchers
+
+        active: dict[str, tuple[Any, int]] = {}
+        for name, (fetcher, base) in all_fetchers.items():
+            weight = weights.get(name, 1.0)
+            if source_filter:
+                if name not in source_filter:
+                    continue
+                # An explicit source filter is a user decision — the planner may
+                # tune the budget but not zero out a requested fetcher.
+                weight = max(weight, 1.0)
+            elif weight <= 0:
+                continue
+            active[name] = (fetcher, max(1, round(base * multiplier * weight)))
+        return active
 
     async def build(
         self,
         expert: Expert,
         on_event: EventCallback | None = None,
     ) -> BuildResult:
-        self._fetchers = self._build_fetchers(expert.config.source_multiplier, self._source_filter)
         topic = expert.topic
 
         # Stage 0: Research planning
         await _emit_event(on_event, {"type": "stage", "stage": 0, "name": "plan"})
         plan = await _plan_research(topic)
-        key_concepts = plan.get("key_concepts", [])
+        _route_must_have_works(plan)
+        key_concepts = plan["key_concepts"]
         await self._repo.update_key_concepts(expert.id, key_concepts)
         await _emit_event(on_event, {
             "type": "plan_ready",
             "key_concepts": key_concepts,
         })
 
-        # Stage 1: Discover
+        weights = {name: p["weight"] for name, p in plan["fetcher_plans"].items()}
+        self._fetchers = self._build_fetchers(
+            expert.config.source_multiplier, self._source_filter, weights,
+        )
+
+        # Stage 1: Discover (search → triage → budgeted fetch)
+        fetch_budget = max(5, round(_BASE_FETCH_BUDGET * expert.config.source_multiplier))
         await _emit_event(on_event, {"type": "stage", "stage": 1, "name": "discover"})
-        raw_sources = await self._stage_discover(topic, plan, on_event)
+        raw_sources = await self._stage_discover(topic, plan, fetch_budget, on_event)
 
         # Citation snowballing: follow high-citation references from ArXiv sources
         extra = await _snowball_citations(raw_sources)
@@ -163,7 +276,7 @@ class ExpertBuilder:
             raw_sources.extend(extra)
 
         # Dedup by normalised URL before paying validation costs
-        raw_sources = _deduplicate_sources(raw_sources)
+        raw_sources = _deduplicate_by_url(raw_sources)
 
         if not raw_sources:
             raise BuildError("No sources discovered. Check API keys and network access.")
@@ -171,10 +284,16 @@ class ExpertBuilder:
         # Stage 2: Validate
         await _emit_event(on_event, {"type": "stage", "stage": 2, "name": "validate", "total": len(raw_sources)})
         passed, dropped = await validate_sources(
-            topic, raw_sources,
+            topic, raw_sources, key_concepts,
             on_result=lambda r: _emit_event(on_event, {"type": "source_validated", **r}),
         )
         await _emit_event(on_event, {"type": "validate_done", "passed": len(passed), "dropped": len(dropped)})
+
+        # Stage 2b: Gap-fill — re-search key concepts no passing source covers
+        if passed and key_concepts:
+            passed, dropped = await self._fill_coverage_gaps(
+                topic, key_concepts, passed, dropped, on_event,
+            )
 
         if not passed:
             raise BuildError("All sources failed validation. Try a different topic or sources.")
@@ -221,7 +340,9 @@ class ExpertBuilder:
             await _emit_event(on_event, {"type": "graph_batch_done", "labels": labels, "edges": edge_count})
 
         extractions = await extract_graph_from_chunks(topic, chunks_only, ids_only, on_batch=_on_graph_batch)
-        node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(expert.id, extractions)
+        node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(
+            expert.id, extractions, embedder=embed_batch
+        )
 
         # Entity resolution: merge semantically duplicate graph nodes
         await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "resolve"})
@@ -266,43 +387,197 @@ class ExpertBuilder:
         self,
         topic: str,
         plan: dict,
+        fetch_budget: int,
         on_event: EventCallback | None,
     ) -> list[RawSource]:
-        all_fetcher_names = [
-            "wikipedia", "gutenberg", "arxiv", "pdf",
-            "youtube", "exa", "web", "reddit", "thought_leaders",
-        ]
-        fetcher_queries = plan.get("fetcher_queries", {})
+        fetcher_plans = plan["fetcher_plans"]
         active = set(self._fetchers.keys())
 
         await _emit_event(on_event, {
             "type": "discovery_started",
-            "fetchers": all_fetcher_names,
+            "fetchers": list(_FETCHER_NAMES),
             "active": list(active),
         })
 
         # thought_leaders already does its own internal expansion; run it once
         _SINGLE_QUERY_FETCHERS = {"thought_leaders"}
 
-        async def _fetch_one(name: str, fetcher, max_results: int) -> list[RawSource]:
-            query = fetcher_queries.get(name) or topic
-            results = await _safe_fetch(name, fetcher, query, max_results)
-            skipped, reason = _is_skipped(name, results)
+        # Phase 1: cheap search, over-fetching relative to the fetch budget
+        async def _search_one(name: str, fetcher, quota: int) -> list[SourceCandidate]:
+            queries = fetcher_plans.get(name, {}).get("queries") or [topic]
+            if name in _SINGLE_QUERY_FETCHERS:
+                queries = queries[:1]
+            search_quota = quota * _SEARCH_OVERFETCH
+            per_query = max(1, math.ceil(search_quota / len(queries)))
+            nested = await asyncio.gather(*[
+                _safe_search(name, fetcher, query, per_query) for query in queries
+            ])
+            candidates = _deduplicate_by_url([c for batch in nested for c in batch])
+            skipped, reason = _is_skipped(name, candidates)
             await _emit_event(on_event, {
                 "type": "fetcher_done",
                 "name": name,
-                "count": len(results),
+                "count": len(candidates),
                 "skipped": skipped,
                 "reason": reason,
+                "queries": len(queries),
             })
+            return candidates
+
+        candidate_lists = await asyncio.gather(*[
+            _search_one(name, fetcher, quota)
+            for name, (fetcher, quota) in self._fetchers.items()
+        ])
+        candidates = _deduplicate_by_url([c for batch in candidate_lists for c in batch])
+        if not candidates:
+            return []
+
+        # Phase 2: triage — rank all candidates against the research brief
+        must_have_titles = [w["title"] for w in plan["must_have_works"]]
+        triaged = await triage_candidates(
+            topic, plan["key_concepts"], must_have_titles, candidates,
+        )
+        ranked = rank_candidates(triaged)
+        await _emit_event(on_event, {
+            "type": "triage_done",
+            "candidates": len(candidates),
+            "ranked": len(ranked),
+            "budget": fetch_budget,
+        })
+
+        # Phase 3: full fetch for the winners, refilling on failure
+        caps = {
+            _FETCHER_SOURCE_TYPES[name]: quota * _TYPE_CAP_FACTOR
+            for name, (_, quota) in self._fetchers.items()
+        }
+        sources = await self._fetch_with_refill(ranked, fetch_budget, caps)
+        await _emit_event(on_event, {
+            "type": "fetch_done",
+            "fetched": len(sources),
+            "budget": fetch_budget,
+        })
+        return sources
+
+    async def _fetch_with_refill(
+        self,
+        ranked: list[TriagedCandidate],
+        budget: int,
+        caps: dict[SourceType, int],
+    ) -> list[RawSource]:
+        """Fetch full content for ranked candidates until the budget is met.
+
+        Works down the ranked list in concurrent waves; failed fetches free
+        their slot so lower-ranked candidates get a chance. Per-type caps are
+        enforced on successful fetches.
+        """
+        fetcher_by_type = {
+            _FETCHER_SOURCE_TYPES[name]: fetcher
+            for name, (fetcher, _) in self._fetchers.items()
+        }
+        results: list[RawSource] = []
+        counts: dict[SourceType, int] = {}
+        idx = 0
+        while len(results) < budget and idx < len(ranked):
+            wave: list[SourceCandidate] = []
+            while idx < len(ranked) and len(wave) < min(_FETCH_CONCURRENCY, budget - len(results)):
+                candidate = ranked[idx].candidate
+                idx += 1
+                cap = caps.get(candidate.source_type, budget)
+                if counts.get(candidate.source_type, 0) >= cap:
+                    continue
+                counts[candidate.source_type] = counts.get(candidate.source_type, 0) + 1
+                wave.append(candidate)
+            if not wave:
+                break
+            fetched = await asyncio.gather(*[
+                _safe_fetch_candidate(fetcher_by_type.get(c.source_type), c)
+                for c in wave
+            ])
+            for candidate, source in zip(wave, fetched, strict=True):
+                if source is None:
+                    counts[candidate.source_type] -= 1
+                else:
+                    results.append(source)
+        return results
+
+    async def _fill_coverage_gaps(
+        self,
+        topic: str,
+        key_concepts: list[str],
+        passed: list[ValidatedSource],
+        dropped: list[DroppedSource],
+        on_event: EventCallback | None,
+    ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
+        """One targeted re-search for key concepts no passing source covers.
+
+        Without this, a fetcher outage or an aggressive validation round silently
+        produces an expert with blind spots on its own syllabus.
+        """
+        coverage = _compute_coverage(key_concepts, passed)
+        gaps = [c for c in key_concepts if coverage[c] == 0][:_GAPFILL_MAX_CONCEPTS]
+        if not gaps:
+            return passed, dropped
+
+        gap_fetchers = {
+            name: fetcher
+            for name, (fetcher, _) in self._fetchers.items()
+            if name in _GAPFILL_FETCHERS
+        }
+        if not gap_fetchers:
+            return passed, dropped
+
+        await _emit_event(on_event, {"type": "coverage_gaps", "gaps": gaps})
+
+        async def _gap_fetch(name: str, fetcher, concept: str) -> list[RawSource]:
+            # Targeted and tiny — search and fetch directly, no triage round-trip.
+            candidates = await _safe_search(
+                name, fetcher, f"{topic} {concept}", _GAPFILL_RESULTS_PER_QUERY,
+            )
+            fetched = await asyncio.gather(*[
+                _safe_fetch_candidate(fetcher, c)
+                for c in candidates[:_GAPFILL_RESULTS_PER_QUERY]
+            ])
+            results = [src for src in fetched if src is not None]
+            for src in results:
+                src.metadata.setdefault("discovered_via", f"gapfill:{concept}")
             return results
 
-        results_list = await asyncio.gather(*[
-            _fetch_one(name, fetcher, max_results)
-            for name, (fetcher, max_results) in self._fetchers.items()
+        nested = await asyncio.gather(*[
+            _gap_fetch(name, fetcher, concept)
+            for concept in gaps
+            for name, fetcher in gap_fetchers.items()
         ])
-        all_sources = [src for sources in results_list for src in sources]
-        return _deduplicate_sources(all_sources)
+
+        seen_urls = {vs.url.rstrip("/").lower() for vs in passed}
+        seen_urls |= {ds.raw.url.rstrip("/").lower() for ds in dropped}
+        extra_raw = [
+            src for src in _deduplicate_by_url([s for batch in nested for s in batch])
+            if src.url.rstrip("/").lower() not in seen_urls
+        ]
+
+        added = 0
+        if extra_raw:
+            extra_passed, extra_dropped = await validate_sources(
+                topic, extra_raw, key_concepts,
+                on_result=lambda r: _emit_event(on_event, {"type": "source_validated", **r}),
+            )
+            passed = passed + extra_passed
+            dropped = dropped + extra_dropped
+            added = len(extra_passed)
+
+        remaining = _compute_coverage(key_concepts, passed)
+        still_uncovered = [c for c in gaps if remaining[c] == 0]
+        await _emit_event(on_event, {
+            "type": "gapfill_done",
+            "added": added,
+            "still_uncovered": still_uncovered,
+        })
+        if still_uncovered:
+            logger.info(
+                "Coverage gaps remain after gap-fill for %r: %s",
+                topic, ", ".join(still_uncovered),
+            )
+        return passed, dropped
 
     async def _persist_sources(
         self,
@@ -321,8 +596,9 @@ class ExpertBuilder:
                             (expert_id, source_type, url, title, author,
                              quality_score, relevance_score, content_type,
                              difficulty, key_claims, passed,
-                             validator_model, rubric_version)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12)
+                             validator_model, rubric_version,
+                             covered_concepts, discovered_via)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12,$13::jsonb,$14)
                         RETURNING id
                         """,
                     expert_id,
@@ -337,6 +613,8 @@ class ExpertBuilder:
                     json.dumps(vs.key_claims),
                     validator_model,
                     RUBRIC_VERSION,
+                    json.dumps(vs.covered_concepts),
+                    vs.raw.metadata.get("discovered_via", "plan"),
                 )
                 passed_ids.append(row["id"])
 
@@ -346,8 +624,8 @@ class ExpertBuilder:
                         INSERT INTO sources
                             (expert_id, source_type, url, title, author,
                              quality_score, relevance_score, passed, drop_reason,
-                             validator_model, rubric_version)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,false,$8,$9,$10)
+                             validator_model, rubric_version, discovered_via)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,false,$8,$9,$10,$11)
                         """,
                     expert_id,
                     ds.raw.source_type.value,
@@ -359,39 +637,103 @@ class ExpertBuilder:
                     ds.drop_reason,
                     validator_model,
                     RUBRIC_VERSION,
+                    ds.raw.metadata.get("discovered_via", "plan"),
                 )
 
         return passed_ids
 
 
 async def _plan_research(topic: str) -> dict:
-    """One Haiku call: returns per-fetcher queries + key concepts."""
+    """One call on the strong model — the brief shapes the whole corpus.
+
+    Always returns a normalised plan: every fetcher has non-empty queries and a
+    clamped weight, even when the model call fails (fallback = raw topic, weight 1).
+    """
+    raw_plan: dict = {}
     try:
         client = get_anthropic_client()
         resp = await client.messages.create(  # type: ignore[call-overload]
-            model=settings.FAST_MODEL,
-            max_tokens=800,
-            system=(
-                "Generate targeted search queries for different source types to build a "
-                "comprehensive knowledge base. Each query should be specific to what that "
-                "source type does best — e.g. arxiv gets academic/theoretical angles, "
-                "gutenberg gets classic primary texts, reddit gets practitioner discussion."
-            ),
+            model=settings.PLAN_MODEL,
+            max_tokens=1500,
+            system=_PLAN_SYSTEM,
             tools=[_PLAN_TOOL],
             tool_choice={"type": "tool", "name": "create_research_plan"},
             messages=[{"role": "user", "content": f"Topic: {topic}"}],
         )
         block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        plan = dict(block.input)
-        logger.info(
-            "Research plan for %r: concepts=%s",
-            topic,
-            ", ".join(plan.get("key_concepts", [])),
-        )
-        return plan
+        raw_plan = dict(block.input)
     except Exception as exc:
         logger.warning("Research planning failed, falling back to raw topic: %s", exc)
-        return {"fetcher_queries": {}, "key_concepts": []}
+
+    plan = _normalise_plan(raw_plan, topic)
+    logger.info(
+        "Research plan for %r: concepts=[%s] weights={%s} must_have=[%s]",
+        topic,
+        ", ".join(plan["key_concepts"]),
+        ", ".join(f"{n}:{p['weight']:g}" for n, p in plan["fetcher_plans"].items()),
+        "; ".join(w["title"] for w in plan["must_have_works"]),
+    )
+    return plan
+
+
+def _normalise_plan(raw_plan: dict, topic: str) -> dict:
+    """Coerce a model-produced plan into a safe, complete shape."""
+    fetcher_plans: dict[str, dict] = {}
+    raw_fetcher_plans = raw_plan.get("fetcher_plans") or {}
+    for name in _FETCHER_NAMES:
+        raw = raw_fetcher_plans.get(name) or {}
+        queries: list[str] = []
+        for q in raw.get("queries") or []:
+            if isinstance(q, str) and q.strip() and q.strip().casefold() not in {
+                d.casefold() for d in queries
+            }:
+                queries.append(q.strip())
+        try:
+            weight = float(raw.get("weight", 1.0))
+        except (TypeError, ValueError):
+            weight = 1.0
+        fetcher_plans[name] = {
+            "queries": queries[:_MAX_QUERIES_PER_FETCHER] or [topic],
+            "weight": min(max(weight, 0.0), 2.0),
+        }
+
+    key_concepts = [
+        c.strip() for c in raw_plan.get("key_concepts") or []
+        if isinstance(c, str) and c.strip()
+    ][:8]
+
+    must_have_works = []
+    for work in raw_plan.get("must_have_works") or []:
+        if isinstance(work, dict) and isinstance(work.get("title"), str) and work["title"].strip():
+            author = work.get("author")
+            must_have_works.append({
+                "title": work["title"].strip(),
+                "author": author.strip() if isinstance(author, str) else "",
+            })
+
+    return {
+        "fetcher_plans": fetcher_plans,
+        "key_concepts": key_concepts,
+        "must_have_works": must_have_works[:4],
+    }
+
+
+def _route_must_have_works(plan: dict) -> None:
+    """Turn named canonical works into extra exact-title queries on a search fetcher.
+
+    Each extra query gets at least one result slot in the fan-out, so a must-have
+    work costs little budget but is actively looked for.
+    """
+    work_queries = [
+        f'"{w["title"]}" {w["author"]}'.strip() for w in plan["must_have_works"]
+    ]
+    if not work_queries:
+        return
+    target = "exa" if settings.EXA_API_KEY else "web"
+    fetcher_plan = plan["fetcher_plans"][target]
+    existing = {q.casefold() for q in fetcher_plan["queries"]}
+    fetcher_plan["queries"] += [q for q in work_queries if q.casefold() not in existing]
+    fetcher_plan["weight"] = max(fetcher_plan["weight"], 1.0)
 
 
 async def _snowball_citations(
@@ -481,6 +823,7 @@ async def _snowball_citations(
                         "categories": paper.categories,
                         "full_text": len(full_text) >= MIN_FULL_TEXT,
                         "snowballed": True,
+                        "discovered_via": "snowball",
                         "citations": cand["citations"],
                     },
                 ))
@@ -505,13 +848,24 @@ async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:
         return 0
 
     labels = [n["label"] for n in nodes]
-    try:
-        embeddings = await embed_batch(labels)
-    except Exception as exc:
-        logger.warning("Entity resolution embedding failed: %s", exc)
-        return 0
 
-    matrix = np.array(embeddings, dtype=np.float32)
+    # Node embeddings are persisted at insert time; only nodes that missed
+    # embedding (e.g. an API blip during insert) get re-embedded here.
+    missing = [i for i, n in enumerate(nodes) if n.get("embedding") is None]
+    if missing:
+        texts = [
+            node_embedding_text(nodes[i]["label"], nodes[i].get("description"))
+            for i in missing
+        ]
+        try:
+            fresh = await embed_batch(texts)
+        except Exception as exc:
+            logger.warning("Entity resolution embedding failed: %s", exc)
+            return 0
+        for i, emb in zip(missing, fresh, strict=True):
+            nodes[i]["embedding"] = emb
+
+    matrix = np.array([np.asarray(n["embedding"], dtype=np.float32) for n in nodes])
     norms = np.linalg.norm(matrix, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1.0, norms)
     normalized = matrix / norms
@@ -555,12 +909,22 @@ def _is_skipped(name: str, results: list) -> tuple[bool, str]:
     return False, ""
 
 
-async def _safe_fetch(name: str, fetcher, topic: str, max_results: int) -> list[RawSource]:
+async def _safe_search(name: str, fetcher, query: str, max_results: int) -> list[SourceCandidate]:
     try:
-        return await fetcher.fetch(topic, max_results)
+        return await fetcher.search(query, max_results)
     except Exception as exc:
-        logger.warning("Fetcher %r failed: %s", name, exc)
+        logger.warning("Fetcher %r search failed: %s", name, exc)
         return []
+
+
+async def _safe_fetch_candidate(fetcher, candidate: SourceCandidate) -> RawSource | None:
+    if fetcher is None:
+        return None
+    try:
+        return await fetcher.fetch(candidate)
+    except Exception as exc:
+        logger.warning("Full fetch failed for %r: %s", candidate.url, exc)
+        return None
 
 
 async def _generate_persona(
@@ -620,6 +984,19 @@ async def _generate_persona(
     return dict(block.input)
 
 
+def _compute_coverage(
+    key_concepts: list[str],
+    passed: list[ValidatedSource],
+) -> dict[str, int]:
+    """How many passing sources cover each key concept."""
+    coverage = {c: 0 for c in key_concepts}
+    for vs in passed:
+        for concept in vs.covered_concepts:
+            if concept in coverage:
+                coverage[concept] += 1
+    return coverage
+
+
 def _avg_quality(passed: list[ValidatedSource]) -> float | None:
     if not passed:
         return None
@@ -627,15 +1004,15 @@ def _avg_quality(passed: list[ValidatedSource]) -> float | None:
     return round(sum(scores) / len(scores), 2) if scores else None
 
 
-def _deduplicate_sources(sources: list[RawSource]) -> list[RawSource]:
-    """Remove sources with duplicate URLs, keeping the first occurrence."""
+def _deduplicate_by_url[T: (RawSource, SourceCandidate)](items: list[T]) -> list[T]:
+    """Remove items with duplicate URLs, keeping the first occurrence."""
     seen: set[str] = set()
-    unique: list[RawSource] = []
-    for src in sources:
-        key = src.url.rstrip("/").lower()
+    unique: list[T] = []
+    for item in items:
+        key = item.url.rstrip("/").lower()
         if key not in seen:
             seen.add(key)
-            unique.append(src)
+            unique.append(item)
     return unique
 
 

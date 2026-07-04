@@ -1,4 +1,4 @@
-"""ArXiv fetcher — searches papers and fetches full HTML text via ar5iv."""
+"""ArXiv fetcher — searches papers (title + abstract), fetches full HTML text via ar5iv."""
 
 import asyncio
 import re
@@ -8,7 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceType
+from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
@@ -21,60 +21,58 @@ MAX_FULL_TEXT = 120_000
 
 
 class ArxivFetcher:
-    async def fetch(self, topic: str, max_results: int = 3) -> list[RawSource]:
+    async def search(self, query: str, max_results: int = 3) -> list[SourceCandidate]:
         try:
             papers = await asyncio.to_thread(
                 lambda: list(arxiv.Client().results(
-                    arxiv.Search(query=topic, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
+                    arxiv.Search(query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
                 ))
             )
         except Exception as exc:
-            logger.warning("ArXiv search failed for %r: %s", topic, exc)
+            logger.warning("ArXiv search failed for %r: %s", query, exc)
             return []
 
-        async with httpx.AsyncClient(
-            timeout=30, headers=HEADERS, follow_redirects=True
-        ) as http:
-            results = await asyncio.gather(
-                *[_process_paper(http, paper) for paper in papers],
-                return_exceptions=True,
+        return [
+            SourceCandidate(
+                source_type=SourceType.ARXIV,
+                url=paper.entry_id,
+                title=paper.title,
+                author=", ".join(str(a) for a in paper.authors[:3]),
+                snippet=paper.summary,
+                metadata={
+                    "arxiv_id": _extract_id(paper.entry_id),
+                    "published": str(paper.published),
+                    "categories": paper.categories,
+                    "summary": paper.summary,
+                },
             )
+            for paper in papers
+        ]
 
-        sources: list[RawSource] = []
-        for paper, result in zip(papers, results, strict=True):
-            if isinstance(result, BaseException):
-                logger.warning("ArXiv paper processing failed for %r: %s", paper.entry_id, result)
-            elif result is not None:
-                sources.append(result)
-        return sources
+    async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+        arxiv_id = candidate.metadata["arxiv_id"]
+        try:
+            async with httpx.AsyncClient(
+                timeout=30, headers=HEADERS, follow_redirects=True
+            ) as http:
+                full_text = await fetch_ar5iv(http, arxiv_id)
+        except Exception as exc:
+            logger.warning("ar5iv fetch failed for %r: %s", arxiv_id, exc)
+            full_text = ""
 
-
-async def _process_paper(http: httpx.AsyncClient, paper) -> RawSource | None:
-    try:
-        arxiv_id = _extract_id(paper.entry_id)
-        full_text = await fetch_ar5iv(http, arxiv_id)
-        if len(full_text) >= MIN_FULL_TEXT:
-            text = full_text[:MAX_FULL_TEXT]
-            has_full = True
-        else:
-            text = f"{paper.title}\n\n{paper.summary}"
-            has_full = False
+        has_full = len(full_text) >= MIN_FULL_TEXT
+        text = full_text[:MAX_FULL_TEXT] if has_full \
+            else f"{candidate.title}\n\n{candidate.metadata.get('summary', candidate.snippet)}"
+        metadata = {k: v for k, v in candidate.metadata.items() if k != "summary"}
+        metadata["full_text"] = has_full
         return RawSource(
             source_type=SourceType.ARXIV,
-            url=paper.entry_id,
-            title=paper.title,
-            author=", ".join(str(a) for a in paper.authors[:3]),
+            url=candidate.url,
+            title=candidate.title,
+            author=candidate.author,
             text=text,
-            metadata={
-                "arxiv_id": arxiv_id,
-                "published": str(paper.published),
-                "categories": paper.categories,
-                "full_text": has_full,
-            },
+            metadata=metadata,
         )
-    except Exception as exc:
-        logger.warning("ArXiv paper processing failed for %r: %s", paper.entry_id, exc)
-        return None
 
 
 def _extract_id(entry_id: str) -> str:

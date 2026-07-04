@@ -5,57 +5,64 @@ from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceType
+from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
 
 class YoutubeFetcher:
-    async def fetch(self, topic: str, max_results: int = 5) -> list[RawSource]:
+    async def search(self, query: str, max_results: int = 5) -> list[SourceCandidate]:
         if not settings.EXA_API_KEY:
             logger.warning("EXA_API_KEY not set — skipping YouTube fetcher")
             return []
 
-        video_ids = await _discover_video_ids(topic, max_results)
-        sources = []
-        for vid_id, title in video_ids:
-            try:
-                transcript = await asyncio.to_thread(_fetch_transcript, vid_id)
-                if not transcript or len(transcript) < 500:
-                    continue
-                sources.append(RawSource(
-                    source_type=SourceType.YOUTUBE,
-                    url=f"https://www.youtube.com/watch?v={vid_id}",
-                    title=title,
-                    author=None,
-                    text=transcript,
-                    metadata={"video_id": vid_id},
-                ))
-            except Exception as exc:
-                logger.warning("YouTube transcript failed for %r: %s", vid_id, exc)
-        return sources
+        try:
+            from exa_py import Exa  # type: ignore
+            client = Exa(api_key=settings.EXA_API_KEY)
+            results = await asyncio.to_thread(
+                client.search,
+                f"{query} site:youtube.com",
+                num_results=max_results,
+                type="neural",
+            )
+        except Exception as exc:
+            logger.warning("YouTube discovery via Exa failed: %s", exc)
+            return []
 
-
-async def _discover_video_ids(topic: str, limit: int) -> list[tuple[str, str]]:
-    """Use Exa to find YouTube video URLs for the topic."""
-    try:
-        from exa_py import Exa  # type: ignore
-        client = Exa(api_key=settings.EXA_API_KEY)
-        results = client.search(
-            f"{topic} site:youtube.com",
-            num_results=limit,
-            type="neural",
-        )
-        pairs = []
+        candidates = []
         for r in results.results:
             url = r.url or ""
             vid_id = _extract_video_id(url)
-            if vid_id:
-                pairs.append((vid_id, r.title or url))
-        return pairs
-    except Exception as exc:
-        logger.warning("YouTube discovery via Exa failed: %s", exc)
-        return []
+            if not vid_id:
+                continue
+            title = r.title or url
+            candidates.append(SourceCandidate(
+                source_type=SourceType.YOUTUBE,
+                url=f"https://www.youtube.com/watch?v={vid_id}",
+                title=title,
+                author=None,
+                snippet=title,
+                metadata={"video_id": vid_id},
+            ))
+        return candidates
+
+    async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+        vid_id = candidate.metadata["video_id"]
+        try:
+            transcript = await asyncio.to_thread(_fetch_transcript, vid_id)
+        except Exception as exc:
+            logger.warning("YouTube transcript failed for %r: %s", vid_id, exc)
+            return None
+        if not transcript or len(transcript) < 500:
+            return None
+        return RawSource(
+            source_type=SourceType.YOUTUBE,
+            url=candidate.url,
+            title=candidate.title,
+            author=None,
+            text=transcript,
+            metadata=candidate.metadata,
+        )
 
 
 def _extract_video_id(url: str) -> str | None:
