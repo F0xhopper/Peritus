@@ -70,7 +70,7 @@ def create_app() -> FastAPI:
     # Uvicorn's own logging config is disabled (log_config=None in start()) so this
     # is the only place logging gets configured; skipping it left every logger.*
     # call in this app using Python's default (unformatted, no file handler) setup.
-    setup_logging(settings.LOG_LEVEL, log_file=None)
+    setup_logging(settings.LOG_LEVEL, log_file=settings.LOG_FILE or None)
 
     app = FastAPI(title="Peritus API", version="1.0.0", lifespan=lifespan)
     app.add_middleware(

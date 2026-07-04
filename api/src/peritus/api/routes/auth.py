@@ -6,6 +6,8 @@ tokens. When auth is disabled (dev mode) these endpoints return 503 so a client
 knows login isn't required.
 """
 
+import time
+
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -58,17 +60,33 @@ async def send_otp(req: OtpRequest) -> None:
     try:
         await supabase_auth.request_otp(req.email, create_user=settings.AUTH_ALLOW_SIGNUP)
     except SupabaseAuthError as exc:
-        logger.warning("OTP request failed: %s", exc)
+        logger.warning("OTP request failed: email=%s status=%s error=%s", req.email, exc.status, exc)
         raise HTTPException(exc.status, str(exc)) from exc
+    logger.info("OTP sent: email=%s", req.email)
 
 
 @router.post("/verify", response_model=Session, dependencies=[Depends(auth_rate_limit)])
 async def verify_otp(req: VerifyRequest) -> dict:
     _require_auth_configured()
+    started = time.monotonic()
+    logger.info("OTP verify attempt: email=%s", req.email)
     try:
-        return await supabase_auth.verify_otp(req.email, req.token)
+        session = await supabase_auth.verify_otp(req.email, req.token)
     except SupabaseAuthError as exc:
+        logger.warning(
+            "OTP verify failed: email=%s status=%s elapsed=%.2fs error=%s",
+            req.email,
+            exc.status,
+            time.monotonic() - started,
+            exc,
+        )
         raise HTTPException(exc.status, str(exc)) from exc
+    logger.info(
+        "OTP verify succeeded: email=%s elapsed=%.2fs",
+        req.email,
+        time.monotonic() - started,
+    )
+    return session
 
 
 @router.post("/logout", status_code=204)

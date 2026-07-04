@@ -28,6 +28,9 @@ def merge_node_extractions(extractions: list[dict]) -> dict[str, dict]:
     merged: dict[str, dict] = {}
     for ext in extractions:
         for node in ext.get("nodes", []):
+            if not node.get("label"):
+                logger.warning("Skipping node with no label: %r", node)
+                continue
             key = node["label"].lower().strip()
             existing = merged.get(key)
             if existing is None:
@@ -108,6 +111,9 @@ class GraphRepository:
             relations: set[tuple[int, int, str]] = set()
             for ext in extractions:
                 for edge in ext.get("edges", []):
+                    if not edge.get("from_label") or not edge.get("to_label"):
+                        logger.warning("Skipping edge with missing label: %r", edge)
+                        continue
                     from_key = edge["from_label"].lower().strip()
                     to_key = edge["to_label"].lower().strip()
                     if from_key not in label_to_id or to_key not in label_to_id:

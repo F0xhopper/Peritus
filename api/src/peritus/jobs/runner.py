@@ -4,7 +4,7 @@ import asyncio
 import signal
 from contextlib import suppress
 
-from peritus.core.logging import get_logger
+from peritus.core.logging import get_logger, setup_logging
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
 from peritus.jobs.worker import BuildWorker
 
@@ -13,6 +13,11 @@ logger = get_logger(__name__)
 
 async def _run() -> None:
     from peritus.core.config import settings
+
+    # The worker is its own process, so it must configure logging itself —
+    # otherwise its logger.* calls fall back to Python's unconfigured root
+    # (WARNING-only, unformatted) and INFO build progress is lost.
+    setup_logging(settings.LOG_LEVEL, log_file=settings.LOG_FILE or None)
 
     missing = settings.check_required_vars()
     if missing:

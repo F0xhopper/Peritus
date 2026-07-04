@@ -13,14 +13,13 @@ import asyncpg
 
 from peritus.core.exceptions import IngestionError
 from peritus.core.logging import get_logger
-from peritus.infrastructure.embeddings import embed_batch
+from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.chunker import TextChunk, chunk_text
 from peritus.ingestion.contextualizer import ContextJob, contextualize_sources
 from peritus.sources.domain import ValidatedSource
 
 logger = get_logger(__name__)
 
-_EMBED_BATCH_SIZE = 20
 _MAX_EMBED_CHARS = 30_000  # ~8 000 tokens for text-embedding-3-large
 
 # Called after each source is stored: (source, chunk_ids)
@@ -136,20 +135,11 @@ async def _embed_and_store(
         (f"{ctx}\n\n{chunk.text}" if ctx else chunk.text)[:_MAX_EMBED_CHARS]
         for chunk, ctx in zip(chunks, contexts, strict=True)
     ]
-    embeddings = await _embed_in_batches(embed_inputs)
+    embeddings = await embed_in_batches(embed_inputs)
 
     return await _bulk_insert(
         pool, expert_id, source_db_id, chunks, contexts, embeddings
     )
-
-
-async def _embed_in_batches(texts: list[str]) -> list[list[float]]:
-    all_embeddings: list[list[float]] = []
-    for i in range(0, len(texts), _EMBED_BATCH_SIZE):
-        batch = texts[i: i + _EMBED_BATCH_SIZE]
-        batch_embs = await embed_batch(batch)
-        all_embeddings.extend(batch_embs)
-    return all_embeddings
 
 
 async def _bulk_insert(

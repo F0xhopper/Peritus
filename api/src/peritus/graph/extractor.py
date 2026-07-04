@@ -134,7 +134,7 @@ def _extract_params(topic: str, chunks: list[TextChunk]) -> dict[str, Any]:
     )
     return {
         "model": settings.GRAPH_MODEL,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "system": _SYSTEM,
         "tools": [_TOOL],
         "tool_choice": {"type": "tool", "name": "extract_graph"},
@@ -148,6 +148,10 @@ def _extract_params(topic: str, chunks: list[TextChunk]) -> dict[str, Any]:
     }
 
 
+_REQUIRED_NODE_KEYS = ("label", "node_type", "description")
+_REQUIRED_EDGE_KEYS = ("from_label", "to_label", "edge_type")
+
+
 def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
     if resp.stop_reason == "max_tokens":
         logger.warning(
@@ -156,4 +160,24 @@ def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
     block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
     if block is None:
         raise ValueError("Graph extraction response contained no tool_use block")
-    return attach_chunk_db_ids(dict(block.input), chunk_db_ids)
+    data = dict(block.input)
+
+    nodes = data.get("nodes", [])
+    valid_nodes = [n for n in nodes if all(n.get(k) for k in _REQUIRED_NODE_KEYS)]
+    if len(valid_nodes) != len(nodes):
+        logger.warning(
+            "Dropped %d incomplete node(s), likely from truncated JSON",
+            len(nodes) - len(valid_nodes),
+        )
+    data["nodes"] = valid_nodes
+
+    edges = data.get("edges", [])
+    valid_edges = [e for e in edges if all(e.get(k) for k in _REQUIRED_EDGE_KEYS)]
+    if len(valid_edges) != len(edges):
+        logger.warning(
+            "Dropped %d incomplete edge(s), likely from truncated JSON",
+            len(edges) - len(valid_edges),
+        )
+    data["edges"] = valid_edges
+
+    return attach_chunk_db_ids(data, chunk_db_ids)

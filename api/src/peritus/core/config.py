@@ -7,6 +7,10 @@ load_dotenv()
 
 class Settings:
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    # Optional path to also tee backend logs to a file. Empty (default) = stderr
+    # only, which is what `just dev`/hivemind shows in the terminal. Set e.g.
+    # LOG_FILE=peritus.log to keep a persistent copy across restarts.
+    LOG_FILE: str = os.getenv("LOG_FILE", "")
 
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
@@ -78,7 +82,7 @@ class Settings:
     # Graph extraction batch size (chunks per Claude call). Kept small because full
     # chunk text is now sent (not a 400-char preview) — large batches truncate the
     # tool_use JSON and the whole batch is lost.
-    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "15"))
+    GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "10"))
 
     # Chunking
     CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))

@@ -33,7 +33,7 @@ from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
 from peritus.graph.repository import GraphRepository, node_embedding_text
 from peritus.infrastructure.anthropic_client import get_anthropic_client
-from peritus.infrastructure.embeddings import embed_batch
+from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_sources
 from peritus.sources.domain import (
@@ -377,12 +377,12 @@ class ExpertBuilder:
             topic, chunks_only, ids_only, on_batch=_on_graph_batch
         )
         node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(
-            expert.id, extractions, embedder=embed_batch
+            expert.id, extractions, embedder=embed_in_batches
         )
 
         # Entity resolution: merge semantically duplicate graph nodes
         await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "resolve"})
-        merged_count = await _resolve_entities(expert.id, self._graph_repo)
+        merged_count = await _resolve_entities(expert.id, self._graph_repo, on_event)
         if merged_count:
             await _emit_event(on_event, {"type": "entities_resolved", "merged": merged_count})
             node_count = max(0, node_count - merged_count)
@@ -900,7 +900,14 @@ async def _snowball_citations(
     return extra
 
 
-async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:
+_RESOLVE_THRESHOLD = 0.93
+
+
+async def _resolve_entities(
+    expert_id: int,
+    graph_repo: GraphRepository,
+    on_event: EventCallback | None = None,
+) -> int:
     """Merge semantically near-duplicate graph nodes using embedding cosine similarity."""
     try:
         import numpy as np
@@ -915,14 +922,15 @@ async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:
     labels = [n["label"] for n in nodes]
 
     # Node embeddings are persisted at insert time; only nodes that missed
-    # embedding (e.g. an API blip during insert) get re-embedded here.
+    # embedding (e.g. an API blip during insert) get re-embedded here. Batched
+    # so a graph whose embeddings all failed at insert can't overflow one call.
     missing = [i for i, n in enumerate(nodes) if n.get("embedding") is None]
     if missing:
         texts = [
             node_embedding_text(nodes[i]["label"], nodes[i].get("description")) for i in missing
         ]
         try:
-            fresh = await embed_batch(texts)
+            fresh = await embed_in_batches(texts)
         except Exception as exc:
             logger.warning("Entity resolution embedding failed: %s", exc)
             return 0
@@ -935,27 +943,31 @@ async def _resolve_entities(expert_id: int, graph_repo: GraphRepository) -> int:
     normalized = matrix / norms
     sim = normalized @ normalized.T  # (N, N)
 
-    _THRESHOLD = 0.93
+    # Find all above-threshold pairs at C speed (upper triangle, i < j). The old
+    # pure-Python O(N²) double loop had no ``await`` on the common no-merge path,
+    # so on a large graph it blocked the event loop — starving the job heartbeat
+    # and freezing the process — for the whole pass. np.where keeps row-major
+    # order (increasing i, then j), preserving the original merge semantics.
+    rows, cols = np.where(np.triu(sim >= _RESOLVE_THRESHOLD, k=1))
+
     merged_away: set[int] = set()
     merge_count = 0
 
-    for i in range(len(nodes)):
-        if nodes[i]["id"] in merged_away:
+    for i, j in zip(rows.tolist(), cols.tolist(), strict=True):
+        keep_id, drop_id = nodes[i]["id"], nodes[j]["id"]
+        if keep_id in merged_away or drop_id in merged_away:
             continue
-        for j in range(i + 1, len(nodes)):
-            if nodes[j]["id"] in merged_away:
-                continue
-            if float(sim[i, j]) >= _THRESHOLD:
-                keep_id, drop_id = nodes[i]["id"], nodes[j]["id"]
-                await graph_repo.merge_nodes(expert_id, keep_id, drop_id)
-                merged_away.add(drop_id)
-                merge_count += 1
-                logger.debug(
-                    "Merged node %r → %r (sim=%.3f)",
-                    labels[j],
-                    labels[i],
-                    float(sim[i, j]),
-                )
+        await graph_repo.merge_nodes(expert_id, keep_id, drop_id)
+        merged_away.add(drop_id)
+        merge_count += 1
+        logger.debug(
+            "Merged node %r → %r (sim=%.3f)",
+            labels[j],
+            labels[i],
+            float(sim[i, j]),
+        )
+        if on_event and merge_count % 25 == 0:
+            await _emit_event(on_event, {"type": "resolve_progress", "merged": merge_count})
 
     if merge_count:
         logger.info(
