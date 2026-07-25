@@ -1,13 +1,15 @@
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { GoogleSignIn } from "@/components/auth/google-sign-in";
 import { LoginForm } from "@/components/auth/login-form";
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string }>;
+  searchParams: Promise<{ next?: string; error?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next, error } = await searchParams;
+  const safeNext = next && next.startsWith("/") ? next : "/dashboard";
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4">
@@ -21,8 +23,20 @@ export default async function LoginPage({
         <CardHeader>
           <CardTitle className="text-base font-medium">Sign in</CardTitle>
         </CardHeader>
-        <CardContent>
-          <LoginForm next={next && next.startsWith("/") ? next : "/dashboard"} />
+        <CardContent className="flex flex-col gap-4">
+          {error === "google" && (
+            <p className="text-sm text-destructive">
+              Google sign-in didn&apos;t complete. Try again, or use your email
+              below.
+            </p>
+          )}
+          <GoogleSignIn next={safeNext} />
+          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+            <div className="h-px flex-1 bg-border" />
+            or
+            <div className="h-px flex-1 bg-border" />
+          </div>
+          <LoginForm next={safeNext} />
         </CardContent>
       </Card>
     </div>

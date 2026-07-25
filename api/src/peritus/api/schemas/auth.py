@@ -1,6 +1,6 @@
 import re
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 # Pragmatic email shape check. We deliberately avoid the `email-validator`
 # dependency; Supabase does the authoritative validation and only delivers a code
@@ -30,6 +30,11 @@ class VerifyRequest(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str
+
+
+class OAuthExchangeRequest(BaseModel):
+    auth_code: str = Field(min_length=1)
+    code_verifier: str = Field(min_length=43, max_length=128)  # RFC 7636 §4.1
 
 
 class SessionUser(BaseModel):

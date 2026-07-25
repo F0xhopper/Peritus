@@ -3,3 +3,8 @@
 // next/headers' cookies() the way route handlers and session.ts do.
 export const ACCESS_TOKEN_COOKIE = "peritus_access_token";
 export const REFRESH_TOKEN_COOKIE = "peritus_refresh_token";
+
+// Short-lived cookies bridging the OAuth redirect: the PKCE verifier set when
+// we send the browser to Google, read back in /api/auth/callback.
+export const PKCE_VERIFIER_COOKIE = "peritus_pkce_verifier";
+export const LOGIN_NEXT_COOKIE = "peritus_login_next";

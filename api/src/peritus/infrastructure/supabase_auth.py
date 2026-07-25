@@ -6,6 +6,8 @@ which forward to GoTrue with the server-held anon key. This keeps the anon key o
 of shipped binaries and keeps client configuration to just the server URL.
 """
 
+from urllib.parse import urlencode
+
 import httpx
 
 from peritus.core.config import settings
@@ -71,6 +73,34 @@ async def request_otp(email: str, *, create_user: bool = True) -> None:
 async def verify_otp(email: str, token: str) -> dict:
     """Exchange an emailed code for a session (POST /auth/v1/verify)."""
     return await _post("/verify", {"type": "email", "email": email, "token": token})
+
+
+def authorize_url(*, provider: str, redirect_to: str, code_challenge: str) -> str:
+    """Build the GoTrue OAuth authorize URL (GET /auth/v1/authorize).
+
+    The browser must be redirected here directly — OAuth is a redirect dance, so
+    this is the one auth step that can't be proxied. GoTrue validates
+    ``redirect_to`` against the project's redirect allowlist, then sends the
+    user back there with a one-time code for :func:`exchange_code`.
+    """
+    query = urlencode(
+        {
+            "provider": provider,
+            "redirect_to": redirect_to,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "s256",
+        }
+    )
+    return f"{settings.SUPABASE_AUTH_URL}/authorize?{query}"
+
+
+async def exchange_code(auth_code: str, code_verifier: str) -> dict:
+    """Trade a PKCE auth code for a session (grant_type=pkce)."""
+    return await _post(
+        "/token",
+        {"auth_code": auth_code, "code_verifier": code_verifier},
+        params={"grant_type": "pkce"},
+    )
 
 
 async def refresh_session(refresh_token: str) -> dict:

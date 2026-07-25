@@ -15,6 +15,7 @@ from peritus.api.auth import AuthUser, require_user
 from peritus.api.ratelimit import auth_rate_limit
 from peritus.api.schemas.auth import (
     MeResponse,
+    OAuthExchangeRequest,
     OtpRequest,
     RefreshRequest,
     Session,
@@ -84,6 +85,52 @@ async def verify_otp(req: VerifyRequest) -> dict:
     logger.info(
         "OTP verify succeeded: email=%s elapsed=%.2fs",
         req.email,
+        time.monotonic() - started,
+    )
+    return session
+
+
+# Providers we've enabled in the Supabase dashboard. Gate here so the API can't
+# be used to start flows for providers we haven't configured.
+_OAUTH_PROVIDERS = {"google"}
+
+
+@router.get("/oauth/authorize", dependencies=[Depends(auth_rate_limit)])
+async def oauth_authorize(provider: str, code_challenge: str, redirect_to: str) -> dict:
+    """Return the GoTrue authorize URL for the web app to redirect the browser to.
+
+    The web front-end holds the PKCE verifier; we only see its challenge. GoTrue
+    enforces its own redirect_to allowlist, so an attacker-supplied redirect_to
+    can't leak the auth code to a foreign origin.
+    """
+    _require_auth_configured()
+    if provider not in _OAUTH_PROVIDERS:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Unsupported provider: {provider}")
+    return {
+        "url": supabase_auth.authorize_url(
+            provider=provider, redirect_to=redirect_to, code_challenge=code_challenge
+        )
+    }
+
+
+@router.post("/oauth/exchange", response_model=Session, dependencies=[Depends(auth_rate_limit)])
+async def oauth_exchange(req: OAuthExchangeRequest) -> dict:
+    """Trade an OAuth PKCE code for a session after the provider redirect."""
+    _require_auth_configured()
+    started = time.monotonic()
+    try:
+        session = await supabase_auth.exchange_code(req.auth_code, req.code_verifier)
+    except SupabaseAuthError as exc:
+        logger.warning(
+            "OAuth exchange failed: status=%s elapsed=%.2fs error=%s",
+            exc.status,
+            time.monotonic() - started,
+            exc,
+        )
+        raise HTTPException(exc.status, str(exc)) from exc
+    logger.info(
+        "OAuth exchange succeeded: user=%s elapsed=%.2fs",
+        session.get("user", {}).get("id"),
         time.monotonic() - started,
     )
     return session
