@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  api:
+    name: API (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with dev tools
+        run: pip install "./api[dev]"
+
+      - name: Lint
+        working-directory: api
+        run: ruff check src tests
+
+      - name: Test
+        working-directory: api
+        run: python -m pytest
+
+      - name: Smoke-check the installed CLI
+        run: peritus --help
+
+  cli:
+    name: CLI (Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: cli
+
+      - name: Check
+        working-directory: cli
+        run: cargo check --locked
