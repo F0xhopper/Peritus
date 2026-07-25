@@ -23,6 +23,7 @@ import { NavBuildingExpert } from "@/components/sidebar/nav-building-expert";
 import { NavNewChat } from "@/components/sidebar/nav-new-chat";
 import { NavRecentChats } from "@/components/sidebar/nav-recent-chats";
 import { CommandMenu } from "@/components/sidebar/command-menu";
+import { Wordmark } from "@/components/brand/wordmark";
 import type { ConversationSummary, ExpertSummary } from "@/lib/api/types";
 
 const NAV_ITEMS: NavItem[] = [
@@ -52,20 +53,17 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              render={<Link href="/experts" />}
-              className="font-medium"
-            >
-              <span className="text-primary" aria-hidden>
-                {">"}
-              </span>
-              <span className="tracking-tight">peritus</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
+        {/* Not a SidebarMenuButton: the wordmark is an identity, not a nav row,
+            and giving it the hover/active treatment made it read as a fourth
+            destination above the real ones. It links home and gets out of the
+            way. Hidden when the rail collapses — there is no icon form of it
+            now, and a clipped "PER" is worse than nothing. */}
+        <Link
+          href="/experts"
+          className="flex h-8 items-center px-2 group-data-[collapsible=icon]:hidden"
+        >
+          <Wordmark />
+        </Link>
         <SidebarGroup className="p-0">
           <SidebarMenu>
             <SidebarMenuItem>

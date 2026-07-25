@@ -4,7 +4,10 @@ import type { ExpertStatus } from "@/lib/api/types";
 
 export function StatusBadge({ status }: { status: ExpertStatus }) {
   return (
-    <Badge variant="outline" className="gap-1.5 font-mono">
+    <Badge
+      variant="outline"
+      className="gap-1.5 font-display text-[0.6875rem] tracking-[0.16em] uppercase"
+    >
       <StatusDot status={status} />
       {status}
     </Badge>

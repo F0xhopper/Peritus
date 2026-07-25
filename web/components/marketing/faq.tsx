@@ -4,6 +4,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { SectionHeading } from "@/components/marketing/section-heading";
 
 const FAQS = [
   {
@@ -27,12 +28,12 @@ const FAQS = [
 export function Faq() {
   return (
     <section id="faq" className="mx-auto max-w-5xl px-4 py-20">
-      <h2 className="text-lg font-medium">FAQ</h2>
-      <Accordion className="mt-6">
+      <SectionHeading eyebrow="Questions" title="Frequently asked" />
+      <Accordion className="mt-8">
         {FAQS.map((item, i) => (
           <AccordionItem key={item.q} value={`item-${i}`}>
             <AccordionTrigger>{item.q}</AccordionTrigger>
-            <AccordionContent className="text-muted-foreground">
+            <AccordionContent className="max-w-measure leading-relaxed text-muted-foreground">
               {item.a}
             </AccordionContent>
           </AccordionItem>

@@ -27,7 +27,7 @@ export default async function ExpertChatPage({
     <div className="flex min-h-0 flex-1 flex-col gap-6">
       <PageHeader
         icon={MessageSquareIcon}
-        title={`Chat with ${expert.name}`}
+        title={`Chat with ${expert.topic}`}
         action={<StatusBadge status={expert.status} />}
       />
 

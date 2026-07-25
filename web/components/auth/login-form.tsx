@@ -107,7 +107,7 @@ export function LoginForm({ next }: { next: string }) {
           onSubmit={emailForm.handleSubmit(onSubmitEmail)}
           className="flex flex-col gap-4"
         >
-          <span className="text-xs text-muted-foreground">[ step 1/2 ]</span>
+          <span className="text-eyebrow text-muted-foreground">Step one of two</span>
           <FormField
             control={emailForm.control}
             name="email"
@@ -144,7 +144,7 @@ export function LoginForm({ next }: { next: string }) {
         onSubmit={otpForm.handleSubmit(onSubmitOtp)}
         className="flex flex-col gap-4"
       >
-        <span className="text-xs text-muted-foreground">[ step 2/2 ]</span>
+        <span className="text-eyebrow text-muted-foreground">Step two of two</span>
         <p className="text-sm text-muted-foreground">
           We sent a 6-digit code to <span className="text-foreground">{email}</span>.
         </p>

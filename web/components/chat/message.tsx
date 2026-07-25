@@ -36,7 +36,7 @@ export function Message({
   if (role === "user") {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[85%] rounded-lg rounded-br-sm bg-muted px-3 py-2 text-sm whitespace-pre-wrap">
+        <div className="max-w-measure rounded-lg bg-muted px-3.5 py-2.5 font-serif text-[0.9375rem] leading-[1.6] whitespace-pre-wrap">
           {content}
         </div>
       </div>
@@ -57,22 +57,33 @@ export function Message({
     <div className="flex flex-col">
       <div
         className={cn(
-          "max-w-[92%] text-sm",
+          // Measure, not percentage. Line length is a property of the type —
+          // ~70 characters of Literata — so it stays put as the window widens
+          // instead of stretching answers into unreadable full-bleed lines.
+          "max-w-measure font-serif text-[0.9375rem] leading-[1.7]",
           // Prose-ish spacing without a typography plugin dependency.
           "[&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2",
-          "[&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em]",
-          "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3",
+          // Code keeps the mono face and tabular figures — it is the one
+          // place in an answer that is data rather than prose.
+          "[&_code]:rounded-xs [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono [&_code]:text-[0.85em] [&_code]:[font-variant-numeric:lining-nums_tabular-nums]",
+          "[&_pre]:my-3 [&_pre]:overflow-x-auto [&_pre]:rounded-xs [&_pre]:bg-muted [&_pre]:p-3",
           "[&_pre_code]:bg-transparent [&_pre_code]:p-0",
-          "[&_ol]:my-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-2 [&_ul]:list-disc [&_ul]:pl-5",
-          "[&_li]:my-0.5",
-          "[&_p]:my-2 first:[&_p]:mt-0 last:[&_p]:mb-0",
-          "[&_h1]:mt-3 [&_h1]:mb-1.5 [&_h1]:text-base [&_h1]:font-medium",
-          "[&_h2]:mt-3 [&_h2]:mb-1.5 [&_h2]:text-sm [&_h2]:font-medium",
-          "[&_h3]:mt-3 [&_h3]:mb-1.5 [&_h3]:text-sm [&_h3]:font-medium",
-          "[&_blockquote]:my-2 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground",
-          "[&_table]:my-2 [&_table]:w-full [&_table]:text-xs",
-          "[&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1 [&_th]:text-left",
-          "[&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1",
+          "[&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5",
+          "[&_li]:my-1 [&_li]:pl-1",
+          "[&_p]:my-3 first:[&_p]:mt-0 last:[&_p]:mb-0",
+          // Section heads in the display face, sentence case — an answer is
+          // still prose, so its subheads whisper rather than announce.
+          "[&_h1]:mt-5 [&_h1]:mb-2 [&_h1]:font-display [&_h1]:text-[1.0625rem] [&_h1]:font-semibold [&_h1]:tracking-wide",
+          "[&_h2]:mt-5 [&_h2]:mb-2 [&_h2]:font-display [&_h2]:text-[0.9375rem] [&_h2]:font-semibold [&_h2]:tracking-wide",
+          // Third level drops to the reading face in italic, the way a book
+          // runs a minor head into the text rather than adding another size.
+          "[&_h3]:mt-4 [&_h3]:mb-1.5 [&_h3]:font-serif [&_h3]:text-[0.9375rem] [&_h3]:font-semibold [&_h3]:italic",
+          // Quoted source material, set as a book sets an extract: italic,
+          // indented, with a hairline rather than a heavy bar.
+          "[&_blockquote]:my-3 [&_blockquote]:border-l [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:italic [&_blockquote]:text-muted-foreground",
+          "[&_table]:my-3 [&_table]:w-full [&_table]:text-[0.8125rem] [&_table]:[font-variant-numeric:lining-nums_tabular-nums]",
+          "[&_th]:border-b [&_th]:border-border [&_th]:px-2 [&_th]:py-1.5 [&_th]:text-left [&_th]:font-display [&_th]:text-[0.6875rem] [&_th]:tracking-[0.14em] [&_th]:uppercase",
+          "[&_td]:border-b [&_td]:border-border/50 [&_td]:px-2 [&_td]:py-1.5",
         )}
       >
         <Markdown
@@ -96,14 +107,19 @@ export function Message({
         </Markdown>
         {streaming && (
           <span
-            className="ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse bg-primary"
+            // A hairline typesetter's caret, not the fat block a terminal
+            // blinks — same affordance, without the console accent.
+            className="ml-0.5 inline-block h-[1.05em] w-px translate-y-[0.15em] animate-pulse bg-primary"
             aria-hidden
           />
         )}
       </div>
 
       {hasContradiction && (
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-600 dark:text-amber-500">
+        // Amber was the last hue left in the app and broke the monochrome
+        // rule the rest of the theme keeps; the warning now reads through the
+        // icon plus the shift to full foreground weight.
+        <p className="mt-2 flex items-center gap-1.5 text-xs text-foreground">
           <AlertTriangleIcon className="size-3.5" />
           Sources disagree on part of this answer.
         </p>

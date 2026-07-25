@@ -1,5 +1,6 @@
 import { NetworkIcon, QuoteIcon, LayersIcon, TerminalSquareIcon } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { SectionHeading } from "@/components/marketing/section-heading";
 
 const FEATURES = [
   {
@@ -31,14 +32,16 @@ const FEATURES = [
 export function FeatureGrid() {
   return (
     <section id="product" className="mx-auto max-w-5xl px-4 py-20">
-      <h2 className="text-lg font-medium">What you get</h2>
-      <div className="mt-8 grid gap-4 sm:grid-cols-2">
+      <SectionHeading eyebrow="Capabilities" title="What you get" />
+      <div className="mt-10 grid gap-4 sm:grid-cols-2">
         {FEATURES.map((feature) => (
           <Card key={feature.title} className="rounded-lg">
-            <CardContent className="flex flex-col gap-2">
-              <feature.icon className="size-4 text-primary" />
-              <h3 className="font-medium">{feature.title}</h3>
-              <p className="text-sm text-muted-foreground">
+            <CardContent className="flex flex-col gap-2.5">
+              <feature.icon className="size-4 text-muted-foreground" />
+              <h3 className="font-display text-[0.9375rem] font-semibold tracking-wide">
+                {feature.title}
+              </h3>
+              <p className="text-sm leading-relaxed text-muted-foreground">
                 {feature.description}
               </p>
             </CardContent>

@@ -97,8 +97,8 @@ export function Composer({
       </form>
       <div className="flex justify-between px-1 pt-1">
         <p className="text-[0.7rem] text-muted-foreground">
-          <kbd className="font-sans">Enter</kbd> to send,{" "}
-          <kbd className="font-sans">Shift+Enter</kbd> for a new line
+          <kbd className="font-mono">Enter</kbd> to send,{" "}
+          <kbd className="font-mono">Shift+Enter</kbd> for a new line
         </p>
         {overLimit && (
           <p className="text-[0.7rem] text-destructive">

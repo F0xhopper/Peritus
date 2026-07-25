@@ -1,4 +1,5 @@
 import { AppSidebar } from "@/components/sidebar/app-sidebar";
+import { AppBreadcrumbs } from "@/components/breadcrumbs/app-breadcrumbs";
 import { Separator } from "@/components/ui/separator";
 import {
   SidebarInset,
@@ -32,6 +33,9 @@ export default async function DashboardLayout({
             orientation="vertical"
             className="data-vertical:h-4 data-vertical:self-auto"
           />
+          {/* The trail resolves slugs and chat ids to readable names using the
+              lists already fetched above, so it costs no extra request. */}
+          <AppBreadcrumbs experts={experts} conversations={conversations} />
         </header>
         <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-4 md:p-6">
           {children}

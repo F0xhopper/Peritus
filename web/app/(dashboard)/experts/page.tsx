@@ -2,7 +2,6 @@ import Link from "next/link";
 import { UsersIcon, PlusIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { ExpertsGrid, sortExperts } from "@/components/experts/experts-grid";
-import { FailedBuildsAlert } from "@/components/experts/failed-builds-alert";
 import { Button } from "@/components/ui/button";
 import { getExperts } from "@/lib/api/data";
 
@@ -23,7 +22,6 @@ export default async function ExpertsPage() {
           </Button>
         }
       />
-      <FailedBuildsAlert experts={experts} />
       <ExpertsGrid experts={sortExperts(experts)} />
     </>
   );

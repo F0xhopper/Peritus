@@ -7,9 +7,23 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-jetbrains-mono);
+  /*
+   * Three voices (see app/layout.tsx for why each face was chosen):
+   *   sans/serif  — Literata, the reading face. `--font-sans` is aliased to
+   *                 it deliberately: every unmarked `font-sans` in shadcn's
+   *                 primitives should come out as book text, not grotesque.
+   *   display     — Cinzel, inscriptional capitals. Names things (titles,
+   *                 running heads, eyebrow labels); never used for controls,
+   *                 which have no true lowercase to fall back on.
+   *   mono        — JetBrains Mono, demoted from "everything" to data only.
+   *   blackletter — one ornamental initial, never inherited.
+   */
+  --font-sans: var(--font-literata);
+  --font-serif: var(--font-literata);
+  --font-display: var(--font-cinzel);
+  --font-blackletter: var(--font-unifraktur);
   --font-mono: var(--font-jetbrains-mono);
-  --font-heading: var(--font-jetbrains-mono);
+  --font-heading: var(--font-cinzel);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -50,69 +64,186 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* Comfortable book measure. Prose is capped at this, never at a percentage
+     of the viewport — line length is a property of the type, not the window. */
+  --container-measure: 34rem;
 }
 
 /*
- * Dark-only, monospace, fully monochromatic — no hue anywhere, including
- * status and chart colors. Emphasis is carried by lightness/opacity and (for
- * build status) glyph shape, never color. Same token values on :root and
- * .dark since next-themes is forced to dark (see app/layout.tsx) — no light
- * mode exists today, but the shadcn token contract (and a future light mode)
- * stays intact by keeping both blocks in sync.
+ * Dark-only and achromatic — a true neutral grayscale with no hue at all,
+ * including status and chart colors. Emphasis is carried by lightness/opacity
+ * and (for build status) glyph shape, never color.
+ *
+ * A warm parchment tint was tried here and removed: warmth that is subtle
+ * enough to stay "monochrome" is too subtle to read as paper, and warmth
+ * strong enough to read as paper turns the mid-tones yellow-brown. The book
+ * character is carried entirely by the typography and the rules instead,
+ * which is where it survives contrast changes.
+ *
+ * Same token values on :root and .dark since next-themes is forced to dark
+ * (see app/layout.tsx) — no light mode exists today, but the shadcn token
+ * contract (and a future light mode) stays intact by keeping both in sync.
  */
 :root,
 .dark {
   --background: #0a0a0a;
-  --foreground: #f4f4f5;
-  --card: #111113;
-  --card-foreground: #f4f4f5;
-  --popover: #111113;
-  --popover-foreground: #f4f4f5;
-  --primary: #f4f4f5;
+  --foreground: #ededed;
+  --card: #121212;
+  --card-foreground: #ededed;
+  --popover: #121212;
+  --popover-foreground: #ededed;
+  --primary: #ededed;
   --primary-foreground: #0a0a0a;
-  --secondary: #18181b;
-  --secondary-foreground: #f4f4f5;
-  --muted: #18181b;
-  --muted-foreground: #a1a1aa;
-  --accent: #18181b;
-  --accent-foreground: #f4f4f5;
-  --destructive: #f4f4f5;
+  --secondary: #1a1a1a;
+  --secondary-foreground: #ededed;
+  --muted: #1a1a1a;
+  --muted-foreground: #9b9b9b;
+  --accent: #1a1a1a;
+  --accent-foreground: #ededed;
+  --destructive: #ededed;
   --destructive-foreground: #0a0a0a;
-  --border: rgba(39, 39, 42, 0.6);
-  --input: rgba(39, 39, 42, 0.8);
-  --ring: rgba(244, 244, 245, 0.4);
-  /* grayscale lightness ramp for chart series — no hue, ever */
-  --chart-1: #e4e4e7;
-  --chart-2: #a1a1aa;
-  --chart-3: #71717a;
-  --chart-4: #52525b;
-  --chart-5: #3f3f46;
+  --border: rgba(56, 56, 56, 0.6);
+  --input: rgba(56, 56, 56, 0.8);
+  --ring: rgba(237, 237, 237, 0.4);
+  /* neutral lightness ramp for chart series — no hue, ever */
+  --chart-1: #e0e0e0;
+  --chart-2: #9b9b9b;
+  --chart-3: #6f6f6f;
+  --chart-4: #4d4d4d;
+  --chart-5: #343434;
   /* build status is carried by glyph shape (see status-dot.tsx), these are
      grayscale brightness steps only, never hue */
-  --status-queued: #71717a;
-  --status-building: #a1a1aa;
-  --status-ready: #f4f4f5;
-  --status-failed: #f4f4f5;
-  --radius: 0.5rem;
+  --status-queued: #6f6f6f;
+  --status-building: #9b9b9b;
+  --status-ready: #ededed;
+  --status-failed: #ededed;
+  /* Near-rectilinear. A printed page rules straight lines; the soft 8px
+     corners were the strongest "SaaS dashboard" cue left after the type
+     changed. Kept just off zero so edges don't alias harshly. */
+  --radius: 0.125rem;
   --sidebar: #0a0a0a;
-  --sidebar-foreground: #f4f4f5;
-  --sidebar-primary: #f4f4f5;
+  --sidebar-foreground: #ededed;
+  --sidebar-primary: #ededed;
   --sidebar-primary-foreground: #0a0a0a;
-  --sidebar-accent: #18181b;
-  --sidebar-accent-foreground: #f4f4f5;
-  --sidebar-border: rgba(39, 39, 42, 0.6);
-  --sidebar-ring: rgba(244, 244, 245, 0.4);
+  --sidebar-accent: #1a1a1a;
+  --sidebar-accent-foreground: #ededed;
+  --sidebar-border: rgba(56, 56, 56, 0.6);
+  --sidebar-ring: rgba(237, 237, 237, 0.4);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+
   body {
-    @apply bg-background text-foreground;
-    font-variant-numeric: tabular-nums;
+    @apply bg-background text-foreground font-serif;
+    /*
+     * Normalizes x-height across the three faces. Literata sits near 0.49 and
+     * JetBrains Mono near 0.55, so at equal `font-size` the mono still looks a
+     * size larger than the serif beside it — the mismatch that makes mixed-face
+     * UIs look accidental. Adjusting to 0.5 settles both on the same optical
+     * lowercase, so `text-sm` means one size everywhere regardless of which
+     * face renders it. (The gap was far wider under EB Garamond, at ~0.44.)
+     */
+    font-size-adjust: 0.5;
+    /* Book text would ideally take old-style figures, but Literata's Google
+       Fonts build ships no `onum` feature — requesting it here was a silent
+       no-op. So prose and data are separated by spacing alone: proportional
+       here, tabular on anything that has to line up in a column. */
+    font-variant-numeric: proportional-nums;
+    /* Literata's ligatures and contextual alternates are part of the cut. */
+    font-variant-ligatures: common-ligatures contextual;
+    line-height: 1.65;
+    text-rendering: optimizeLegibility;
   }
+
+  /* Older engines without `font-size-adjust` get the serif at a size that
+     lands close to the same optical x-height. */
+  @supports not (font-size-adjust: 0.5) {
+    html {
+      font-size: 106.25%;
+    }
+  }
+
   html {
-    @apply font-sans;
+    @apply font-serif;
+  }
+
+  /*
+   * Headings get tighter leading, but deliberately NOT the display face.
+   * A heading element says "this names the section below it" — it says
+   * nothing about whether the words in it are chrome or content, and plenty
+   * of them hold content: a conversation's <h1> is the question the user
+   * typed. Blanket-setting h1–h3 in inscriptional capitals set that question
+   * in capitals too. The display face is opted into per site instead.
+   */
+  h1,
+  h2,
+  h3 {
+    line-height: 1.25;
+  }
+}
+
+@layer components {
+  /*
+   * Small caps with wide tracking — the running-head/eyebrow voice, used for
+   * section labels, stat captions and table headers. Cinzel has no true
+   * small-cap set, so this is capitals held down in size, which is what
+   * letterpress did for the same job anyway.
+   */
+  .text-eyebrow {
+    @apply font-display text-[0.6875rem] leading-none font-medium uppercase;
+    letter-spacing: 0.18em;
+  }
+
+  /*
+   * Data voice: counts, slugs, IDs, keyboard hints. Switches to tabular
+   * figures so columns of numbers line up, against the proportional default
+   * that running prose wants.
+   */
+  .text-data {
+    @apply font-mono;
+    font-variant-numeric: tabular-nums lining-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* Figures that must align in a column without switching face. */
+  .tabular {
+    font-variant-numeric: tabular-nums lining-nums;
+  }
+
+  /*
+   * Illuminated initial. Two lines tall, sunk into the paragraph the way a
+   * manuscript drops its opening capital. Only ever applied to the first
+   * paragraph of a body of text.
+   */
+  .dropcap::first-letter {
+    /*
+     * Set in blackletter — this is the one place the face earns its download.
+     * An illuminated versal is precisely what blackletter was cut for, and at
+     * ~3.4em it is the largest glyph on the page, so the legibility problem
+     * that rules it out of logotypes and labels simply does not arise.
+     *
+     * Sized against a 1.7 leading: the float box (font-size × line-height)
+     * has to land just under two lines so it displaces exactly two, while the
+     * visible cap fills most of that height.
+     */
+    @apply font-blackletter float-left pr-2.5 text-[3.4em] leading-[0.92] font-normal;
+    padding-top: 0.02em;
+    color: var(--foreground);
+  }
+
+  /*
+   * A ruled line with a centered lozenge — the printer's break between
+   * sections. Replaces the plain <hr> wherever a section boundary wants to be
+   * felt rather than merely obeyed.
+   */
+  .rule-ornament {
+    @apply flex items-center gap-3 text-muted-foreground/50;
+  }
+  .rule-ornament::before,
+  .rule-ornament::after {
+    @apply h-px flex-1 bg-border content-[''];
   }
 }

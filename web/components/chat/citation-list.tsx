@@ -19,7 +19,7 @@ export function CitationList({
 
   return (
     <div className="mt-3 border-t border-border/60 pt-2">
-      <p className="mb-1.5 text-xs font-medium text-muted-foreground">Sources</p>
+      <p className="text-eyebrow mb-2 text-muted-foreground">Sources</p>
       <ol className="flex flex-col gap-1">
         {citations.map((citation) => (
           <li

@@ -25,13 +25,17 @@ export function NavBuildingExpert({ experts }: { experts: ExpertSummary[] }) {
       <SidebarMenu>
         {building.map((expert) => (
           <SidebarMenuItem key={expert.id}>
-            <SidebarMenuButton render={<Link href={`/experts/${expert.name}`} />}>
+            <SidebarMenuButton render={<Link href={`/experts/${expert.name}/build`} />}>
               <span className="relative flex size-2 shrink-0" aria-hidden>
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-amber-500/70" />
-                <span className="relative inline-flex size-2 rounded-full bg-amber-500" />
+                {/* Was amber — the theme carries build state on lightness and
+                    motion, never hue (see globals.css). */}
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-status-building/70" />
+                <span className="relative inline-flex size-2 rounded-full bg-status-building" />
               </span>
-              <span className="truncate">{expert.name}</span>
-              <span className="ml-auto text-xs text-muted-foreground">
+              <span className="truncate font-mono text-[0.8125rem]">
+                {expert.name}
+              </span>
+              <span className="text-eyebrow ml-auto text-muted-foreground">
                 {expert.status === "queued" ? "queued" : "building"}
               </span>
             </SidebarMenuButton>

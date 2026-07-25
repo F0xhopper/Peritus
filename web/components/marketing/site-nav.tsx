@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { Wordmark } from "@/components/brand/wordmark";
 
 const LINKS = [
   { href: "#product", label: "Product" },
@@ -11,13 +12,13 @@ export function SiteNav() {
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-        <Link href="/" className="flex items-center gap-1 font-medium">
-          <span className="text-primary" aria-hidden>
-            {">"}
-          </span>
-          <span className="tracking-tight">peritus</span>
+        <Link href="/">
+          <Wordmark />
         </Link>
-        <nav className="hidden items-center gap-6 text-sm text-muted-foreground sm:flex">
+        {/* Navigation is something you scan and click, so it stays in the
+            reading face alongside the buttons — only the wordmark beside it
+            speaks in the display voice. */}
+        <nav className="hidden items-center gap-7 text-sm text-muted-foreground sm:flex">
           {LINKS.map((link) => (
             <a key={link.href} href={link.href} className="hover:text-foreground">
               {link.label}

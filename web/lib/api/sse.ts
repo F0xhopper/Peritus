@@ -1,9 +1,8 @@
-import type { ChatStreamEvent } from "@/lib/api/types";
+import type { BuildEvent, ChatStreamEvent } from "@/lib/api/types";
 
-// EventSource can only GET and can't send a body, so chat streams are read
-// straight off a fetch ReadableStream instead. No reconnection logic: a broken
-// answer is completed server-side as `interrupted`, and the client just
-// refetches the conversation rather than trying to resume a half-stream.
+// EventSource can only GET and can't send a body, so these streams are read
+// straight off a fetch ReadableStream instead. That also keeps every stream on
+// the same code path — chat POSTs a question, builds GET a resumable log.
 
 /** Non-2xx before the stream opens (409 busy, 404 gone, 401 expired). */
 export class ChatStreamError extends Error {
@@ -15,17 +14,18 @@ export class ChatStreamError extends Error {
   }
 }
 
-/** POST `body` to `path` and yield each SSE `data:` payload as a typed event. */
-export async function* streamChat(
+/** Open `path` and yield each SSE `data:` payload, parsed as `T`.
+ *
+ * Callers own reconnection. Chat doesn't reconnect (a broken answer is
+ * completed server-side as `interrupted`); builds do, because their event log
+ * is durable and replayable from a cursor. */
+export async function* streamSse<T>(
   path: string,
-  body: unknown,
-  signal?: AbortSignal,
-): AsyncGenerator<ChatStreamEvent> {
+  init?: RequestInit,
+): AsyncGenerator<T> {
   const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    signal,
+    ...init,
+    headers: { "Content-Type": "application/json", ...init?.headers },
   });
 
   if (!res.ok || !res.body) {
@@ -53,11 +53,11 @@ export async function* streamChat(
       buffer = frames.pop() ?? "";
 
       for (const frame of frames) {
-        const event = parseFrame(frame);
+        const event = parseFrame<T>(frame);
         if (event) yield event;
       }
     }
-    const last = parseFrame(buffer);
+    const last = parseFrame<T>(buffer);
     if (last) yield last;
   } finally {
     // Abort mid-stream leaves the body undrained; cancelling releases it and
@@ -66,21 +66,60 @@ export async function* streamChat(
   }
 }
 
+/** POST `body` to `path` and yield each SSE payload as a typed chat event. */
+export function streamChat(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+): AsyncGenerator<ChatStreamEvent> {
+  return streamSse<ChatStreamEvent>(path, {
+    method: "POST",
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/** Tail an expert's durable build log from `after` (a `seq` cursor).
+ *
+ * Every event is persisted, so `after=0` replays the whole build from the
+ * start and a reconnect resumes exactly where it stopped — nothing is lost by
+ * dropping the connection, which is what makes retrying safe. */
+export function streamBuildEvents(
+  slug: string,
+  after: number,
+  signal?: AbortSignal,
+): AsyncGenerator<BuildEvent> {
+  const path = `/api/experts/${encodeURIComponent(slug)}/build/events?after=${after}`;
+  return streamSse<BuildEvent>(path, { method: "GET", signal });
+}
+
 const FRAME_SEPARATOR = /\r?\n\r?\n/;
 const LINE_SEPARATOR = /\r?\n/;
 
-function parseFrame(frame: string): ChatStreamEvent | null {
-  // A frame may carry `id:`/`event:` lines too; only `data:` matters here, and
-  // multi-line data payloads concatenate per the SSE spec.
-  const data = frame
-    .split(LINE_SEPARATOR)
+/** SSE `id:` lines carry the build log's `seq`, which is the resume cursor.
+ * Chat ignores it; the build stream needs it, so it is parsed out here and
+ * attached rather than thrown away with the rest of the frame. */
+function parseFrame<T>(frame: string): T | null {
+  const lines = frame.split(LINE_SEPARATOR);
+
+  // A frame may carry `id:`/`event:` lines too; multi-line data payloads
+  // concatenate per the SSE spec.
+  const data = lines
     .filter((line) => line.startsWith("data:"))
     .map((line) => line.slice(5).trim())
     .join("\n");
 
   if (!data) return null;
+
+  const idLine = lines.find((line) => line.startsWith("id:"));
+  const seq = idLine ? Number(idLine.slice(3).trim()) : NaN;
+
   try {
-    return JSON.parse(data) as ChatStreamEvent;
+    const parsed = JSON.parse(data) as T;
+    if (Number.isFinite(seq)) {
+      (parsed as T & { seq?: number }).seq = seq;
+    }
+    return parsed;
   } catch {
     // A frame we can't parse is not worth killing the stream over.
     return null;

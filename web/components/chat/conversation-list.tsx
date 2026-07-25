@@ -13,9 +13,7 @@ export function ConversationList({
 
   return (
     <div className="mx-auto w-full max-w-3xl">
-      <h2 className="mb-2 text-xs font-medium text-muted-foreground">
-        Previous chats
-      </h2>
+      <h2 className="text-eyebrow mb-3 text-muted-foreground">Previous chats</h2>
       <ul className="flex flex-col">
         {conversations.map((conversation) => (
           <li key={conversation.id}>

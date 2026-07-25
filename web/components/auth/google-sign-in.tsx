@@ -7,6 +7,11 @@ export function GoogleSignIn({ next }: { next: string }) {
     <Button
       variant="outline"
       className="w-full"
+      // Required whenever `render` supplies a non-<button> element. Base UI
+      // otherwise keeps native button semantics on an <a>, which is invalid
+      // (it emits `type="button"` and a button role onto a link) and breaks
+      // the anchor's own keyboard and context-menu behaviour.
+      nativeButton={false}
       render={<a href={`/api/auth/google/start?next=${encodeURIComponent(next)}`} />}
     >
       <GoogleMark />

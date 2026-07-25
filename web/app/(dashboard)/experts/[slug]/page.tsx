@@ -4,9 +4,10 @@ import { PageHeader } from "@/components/page-header";
 import { StatTile } from "@/components/experts/stat-tile";
 import { StatusBadge } from "@/components/experts/status-badge";
 import { TierBadge } from "@/components/experts/tier-badge";
+import { ExpertMenu } from "@/components/experts/expert-menu";
 import { ChatButton } from "@/components/chat/chat-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { ConceptList } from "@/components/experts/concept-list";
 import { getExpert } from "@/lib/api/data";
 
 export default async function ExpertDetailPage({
@@ -25,12 +26,19 @@ export default async function ExpertDetailPage({
     <>
       <PageHeader
         icon={BotIcon}
-        title={expert.name}
+        title={expert.topic}
         action={
           <div className="flex items-center gap-2">
             <StatusBadge status={expert.status} />
             <TierBadge tier={expert.tier} />
             <ChatButton slug={expert.name} status={expert.status} />
+            {/* Deleting from here leaves nothing to render, so it hands the
+                menu somewhere to land. */}
+            <ExpertMenu
+              slug={expert.name}
+              topic={expert.topic}
+              redirectTo="/experts"
+            />
           </div>
         }
       />
@@ -60,12 +68,16 @@ export default async function ExpertDetailPage({
               <p className="text-sm text-muted-foreground">
                 {expert.persona_bio}
               </p>
-              <div className="flex flex-wrap gap-1.5">
-                {expert.key_concepts.map((concept) => (
-                  <Badge key={concept} variant="outline" className="font-mono">
-                    {concept}
-                  </Badge>
-                ))}
+              {/* Uncapped and unclipped here: this is the page you open to
+                  read the whole list, so it wraps rather than truncating. */}
+              <div className="mt-1 flex flex-col gap-2">
+                <p className="text-eyebrow text-muted-foreground">
+                  Key concepts
+                </p>
+                <ConceptList
+                  concepts={expert.key_concepts}
+                  className="[&_li]:overflow-visible [&_li]:whitespace-normal"
+                />
               </div>
             </>
           ) : (
