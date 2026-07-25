@@ -1,5 +1,7 @@
 # Peritus
 
+[![CI](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml/badge.svg)](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml)
+
 Build grounded AI subject-matter experts from multi-source corpora.
 
 Give Peritus a topic. It discovers authoritative sources across the web, has Claude validate and score each one, ingests and embeds the survivors, extracts a concept graph over the content, and generates a named expert persona you can converse with — every answer cited back to the passages it came from.
@@ -57,6 +59,22 @@ A tier sets the depth/cost trade-off for both build and chat (`api/.../experts/d
 - `ANTHROPIC_API_KEY` — validation, graph extraction, persona, chat
 - `OPENAI_API_KEY` — embeddings
 - Optional: `EXA_API_KEY` (Exa neural search + YouTube discovery), `MISTRAL_API_KEY` (PDF OCR), `COHERE_API_KEY` (cross-encoder reranking)
+
+## Install
+
+The Python package — the `peritus` CLI plus `peritus-server` and `peritus-worker` — installs with [pipx](https://pipx.pypa.io):
+
+```bash
+pipx install "git+https://github.com/F0xhopper/Peritus.git#subdirectory=api"
+```
+
+To pin a release, install from a tag instead:
+
+```bash
+pipx install "git+https://github.com/F0xhopper/Peritus.git@v2.0.0#subdirectory=api"
+```
+
+Pre-built binaries of the Rust TUI are attached to [releases](https://github.com/F0xhopper/Peritus/releases); to work on Peritus itself, follow the setup below.
 
 ## Setup
 
