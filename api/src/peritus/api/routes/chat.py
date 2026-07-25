@@ -5,7 +5,6 @@ from sse_starlette.sse import EventSourceResponse
 
 from peritus.api.auth import AuthUser, require_user
 from peritus.api.schemas.chat import ChatRequest
-from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import ExpertStatus
 from peritus.experts.repository import ExpertRepository
@@ -18,6 +17,9 @@ router = APIRouter(prefix="/experts", tags=["chat"])
 
 @router.post("/{slug}/chat")
 async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(require_user)):
+    """Stateless chat — the TUI/CLI contract. History arrives in the request
+    body and nothing is persisted; the stateful web flow lives in
+    ``routes/conversations.py``. Both share ``chat.streaming``."""
     pool = get_pool()
     repo = ExpertRepository(pool)
     expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
@@ -30,54 +32,10 @@ async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(requ
 
     async def stream_generator():
         try:
-            from peritus.chat.agent import (
-                ChatAgent,
-                RetrievedContext,
-                build_cached_system,
-                build_composition_messages,
-            )
-            from peritus.chat.grounding import parse_cited_indices, used_citations
-            from peritus.infrastructure.anthropic_client import get_anthropic_client
+            from peritus.chat.streaming import stream_expert_answer
 
-            # Retrieval pipeline (shared with ChatAgent.respond), statuses streamed.
-            agent = ChatAgent(pool)
-            ctx: RetrievedContext | None = None
-            async for kind, payload in agent.retrieve(expert, req.question):
-                if kind == "status":
-                    yield {"data": json.dumps({"type": "status", "message": payload})}
-                elif isinstance(payload, RetrievedContext):
-                    ctx = payload
-            assert ctx is not None
-
-            # Stream the Anthropic response token by token. System prompt and
-            # history carry prompt-cache breakpoints so follow-up turns read
-            # the shared prefix at ~0.1× input price.
-            messages = build_composition_messages(history, req.question, ctx.context_block)
-            client = get_anthropic_client()
-            answer_parts: list[str] = []
-            async with client.messages.stream(
-                model=settings.CLAUDE_MODEL,
-                max_tokens=expert.config.max_response_tokens,
-                system=build_cached_system(expert.persona_style, expert.topic),
-                messages=messages,
-            ) as stream:
-                async for text in stream.text_stream:
-                    answer_parts.append(text)
-                    yield {"data": json.dumps({"type": "token", "text": text})}
-
-            # Resolve citations: only passages the answer actually cited, with the
-            # passage numbers preserved so inline [n] matches the rendered list.
-            answer_text = "".join(answer_parts)
-            cited = parse_cited_indices(answer_text, len(ctx.passages))
-            sources = used_citations(ctx.passages, cited)
-            yield {"data": json.dumps({
-                "type": "sources",
-                "citations": sources,
-                "has_contradiction": ctx.has_contradiction,
-            })}
-
-            yield {"data": json.dumps({"type": "done"})}
-
+            async for event in stream_expert_answer(pool, expert, req.question, history):
+                yield {"data": json.dumps(event)}
         except Exception:
             logger.exception("Chat stream failed for %r", slug)
             yield {"data": json.dumps({

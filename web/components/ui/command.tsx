@@ -60,7 +60,9 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
-        {children}
+        {/* cmdk's Input/List/Item all read the context this root provides —
+            without it they throw on mount and take the page down with them. */}
+        <Command>{children}</Command>
       </DialogContent>
     </Dialog>
   )

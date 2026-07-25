@@ -3,7 +3,6 @@
 import * as React from "react";
 import Link from "next/link";
 import {
-  LayoutDashboardIcon,
   UsersIcon,
   BarChart3Icon,
   SettingsIcon,
@@ -12,7 +11,6 @@ import {
 import {
   Sidebar,
   SidebarContent,
-  SidebarFooter,
   SidebarGroup,
   SidebarHeader,
   SidebarMenu,
@@ -21,13 +19,13 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import { NavMain, type NavItem } from "@/components/nav-main";
-import { NavRecentExperts } from "@/components/sidebar/nav-recent-experts";
-import { SidebarUsageCard } from "@/components/sidebar/sidebar-usage-card";
+import { NavBuildingExpert } from "@/components/sidebar/nav-building-expert";
+import { NavNewChat } from "@/components/sidebar/nav-new-chat";
+import { NavRecentChats } from "@/components/sidebar/nav-recent-chats";
 import { CommandMenu } from "@/components/sidebar/command-menu";
-import type { ExpertSummary } from "@/lib/api/types";
+import type { ConversationSummary, ExpertSummary } from "@/lib/api/types";
 
 const NAV_ITEMS: NavItem[] = [
-  { title: "Dashboard", url: "/dashboard", icon: LayoutDashboardIcon },
   { title: "Experts", url: "/experts", icon: UsersIcon },
   { title: "Analytics", url: "/analytics", icon: BarChart3Icon },
   { title: "Settings", url: "/settings", icon: SettingsIcon },
@@ -35,9 +33,21 @@ const NAV_ITEMS: NavItem[] = [
 
 export function AppSidebar({
   experts,
+  conversations,
   ...props
-}: React.ComponentProps<typeof Sidebar> & { experts: ExpertSummary[] }) {
+}: React.ComponentProps<typeof Sidebar> & {
+  experts: ExpertSummary[];
+  conversations: ConversationSummary[];
+}) {
   const [commandOpen, setCommandOpen] = React.useState(false);
+  // The palette doubles as the expert picker for "New chat"; closing it always
+  // drops back to the full jump-to list so ⌘K is never stuck in chat mode.
+  const [pickingChatExpert, setPickingChatExpert] = React.useState(false);
+
+  const handleCommandOpenChange = React.useCallback((next: boolean) => {
+    setCommandOpen(next);
+    if (!next) setPickingChatExpert(false);
+  }, []);
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -46,7 +56,7 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              render={<Link href="/dashboard" />}
+              render={<Link href="/experts" />}
               className="font-medium"
             >
               <span className="text-primary" aria-hidden>
@@ -70,21 +80,27 @@ export function AppSidebar({
                 </kbd>
               </SidebarMenuButton>
             </SidebarMenuItem>
+            <NavNewChat
+              experts={experts}
+              onPickExpert={() => {
+                setPickingChatExpert(true);
+                setCommandOpen(true);
+              }}
+            />
           </SidebarMenu>
         </SidebarGroup>
       </SidebarHeader>
       <SidebarContent>
         <NavMain items={NAV_ITEMS} />
-        <NavRecentExperts experts={experts} />
+        <NavBuildingExpert experts={experts} />
+        <NavRecentChats conversations={conversations} />
       </SidebarContent>
-      <SidebarFooter>
-        <SidebarUsageCard experts={experts} />
-      </SidebarFooter>
       <SidebarRail />
       <CommandMenu
         experts={experts}
         open={commandOpen}
-        onOpenChange={setCommandOpen}
+        onOpenChange={handleCommandOpenChange}
+        chatOnly={pickingChatExpert}
       />
     </Sidebar>
   );

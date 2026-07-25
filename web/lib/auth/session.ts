@@ -1,39 +1,24 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { apiFetch, ApiError } from "@/lib/api/server";
-import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "@/lib/auth/cookies";
+import {
+  ACCESS_TOKEN_COOKIE,
+  REFRESH_TOKEN_COOKIE,
+  sessionCookies,
+  type Session,
+} from "@/lib/auth/cookies";
+import { isDeadRefreshToken, requestRefresh } from "@/lib/auth/refresh";
 
 // httpOnly cookies, never read from client JS — the browser never sees these
 // tokens directly, only our own /api/auth/* route handlers do (mitigates XSS
 // token theft; see DASHBOARD_PLAN.md section 2).
 
-// Supabase refresh tokens are long-lived and rotate on use; cap the cookie
-// itself at 30 days so an abandoned session still expires eventually.
-const REFRESH_TOKEN_MAX_AGE = 60 * 60 * 24 * 30;
-
-export interface Session {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-}
+export type { Session };
 
 export async function setSessionCookies(session: Session) {
   const store = await cookies();
-  const cookieOpts = {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    path: "/",
-  };
-
-  store.set(ACCESS_TOKEN_COOKIE, session.access_token, {
-    ...cookieOpts,
-    maxAge: session.expires_in,
-  });
-  store.set(REFRESH_TOKEN_COOKIE, session.refresh_token, {
-    ...cookieOpts,
-    maxAge: REFRESH_TOKEN_MAX_AGE,
-  });
+  for (const { name, value, options } of sessionCookies(session)) {
+    store.set(name, value, options);
+  }
 }
 
 export async function clearSessionCookies() {
@@ -53,22 +38,35 @@ export async function getRefreshToken() {
 }
 
 /** Refresh the session in place. Returns the new access token, or null if the
- * refresh token is missing/expired (cookies are cleared in that case). */
+ * refresh token is missing/expired (cookies are cleared in that case).
+ *
+ * Next.js only allows cookie writes from route handlers, server actions and
+ * the proxy — never during a server component render. proxy.ts renews sessions
+ * before the render starts so this normally runs somewhere it can persist, but
+ * a render that lands here anyway still gets a usable token: dropping the write
+ * costs one rotation, whereas failing would bounce the user to /login. */
 export async function refreshSession(): Promise<string | null> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) return null;
 
+  let session: Session;
   try {
-    const session: Session = await apiFetch("/auth/refresh", {
-      method: "POST",
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    await setSessionCookies(session);
-    return session.access_token;
+    session = await requestRefresh(refreshToken);
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      await clearSessionCookies();
+    if (isDeadRefreshToken(err)) {
+      await persistIfWritable(clearSessionCookies);
     }
     return null;
+  }
+
+  await persistIfWritable(() => setSessionCookies(session));
+  return session.access_token;
+}
+
+async function persistIfWritable(write: () => Promise<void>) {
+  try {
+    await write();
+  } catch {
+    // Server component render — cookies are read-only here.
   }
 }

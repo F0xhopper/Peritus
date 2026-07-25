@@ -9,7 +9,7 @@ export default async function LoginPage({
   searchParams: Promise<{ next?: string; error?: string }>;
 }) {
   const { next, error } = await searchParams;
-  const safeNext = next && next.startsWith("/") ? next : "/dashboard";
+  const safeNext = next && next.startsWith("/") ? next : "/experts";
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4">

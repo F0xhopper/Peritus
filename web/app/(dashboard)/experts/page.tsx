@@ -1,12 +1,16 @@
 import Link from "next/link";
 import { UsersIcon, PlusIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { ExpertsTable } from "@/components/experts/experts-table";
-import { Card, CardContent } from "@/components/ui/card";
+import { ExpertsGrid, sortExperts } from "@/components/experts/experts-grid";
+import { FailedBuildsAlert } from "@/components/experts/failed-builds-alert";
 import { Button } from "@/components/ui/button";
-import { MOCK_EXPERTS } from "@/lib/mock-data";
+import { getExperts } from "@/lib/api/data";
 
-export default function ExpertsPage() {
+export default async function ExpertsPage() {
+  // Real data, not MOCK_EXPERTS: these cards carry a Chat action, and a Chat
+  // button on a fictional expert would 404 on click.
+  const experts = await getExperts();
+
   return (
     <>
       <PageHeader
@@ -19,11 +23,8 @@ export default function ExpertsPage() {
           </Button>
         }
       />
-      <Card className="rounded-lg">
-        <CardContent>
-          <ExpertsTable experts={MOCK_EXPERTS} />
-        </CardContent>
-      </Card>
+      <FailedBuildsAlert experts={experts} />
+      <ExpertsGrid experts={sortExperts(experts)} />
     </>
   );
 }

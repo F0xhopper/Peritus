@@ -1,29 +1,12 @@
 import { NextResponse } from "next/server";
-import { apiFetch, ApiError } from "@/lib/api/server";
-import { getAccessToken, refreshSession } from "@/lib/auth/session";
+import { proxyJson, proxyErrorResponse } from "@/lib/api/proxy";
 
 export async function GET() {
-  let accessToken = await getAccessToken();
-  if (!accessToken) {
-    return NextResponse.json({ error: "Not signed in." }, { status: 401 });
-  }
-
   try {
-    const me = await apiFetch("/auth/me", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-    return NextResponse.json(me);
+    // proxyJson refreshes an expired access token before giving up — a missing
+    // access cookie is normal an hour into a session, not a logged-out user.
+    return NextResponse.json(await proxyJson("/auth/me"));
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      accessToken = await refreshSession();
-      if (accessToken) {
-        const me = await apiFetch("/auth/me", {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        return NextResponse.json(me);
-      }
-    }
-    const status = err instanceof ApiError ? err.status : 502;
-    return NextResponse.json({ error: "Not signed in." }, { status });
+    return proxyErrorResponse(err);
   }
 }

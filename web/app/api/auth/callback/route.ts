@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
   const store = await cookies();
   const verifier = store.get(PKCE_VERIFIER_COOKIE)?.value;
   const next = store.get(LOGIN_NEXT_COOKIE)?.value;
-  const safeNext = next && next.startsWith("/") ? next : "/dashboard";
+  const safeNext = next && next.startsWith("/") ? next : "/experts";
   store.delete(PKCE_VERIFIER_COOKIE);
   store.delete(LOGIN_NEXT_COOKIE);
 

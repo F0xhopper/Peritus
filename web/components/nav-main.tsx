@@ -23,10 +23,9 @@ export function NavMain({ items }: { items: NavItem[] }) {
     <SidebarGroup>
       <SidebarMenu>
         {items.map((item) => {
-          const isActive =
-            item.url === "/dashboard"
-              ? pathname === item.url
-              : pathname.startsWith(item.url);
+          // Prefix match so a nested route (/experts/stoic-philosophy) keeps
+          // its section lit. No item is a prefix of another.
+          const isActive = pathname.startsWith(item.url);
 
           return (
             <SidebarMenuItem key={item.title}>

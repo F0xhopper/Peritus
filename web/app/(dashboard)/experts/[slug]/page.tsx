@@ -1,14 +1,13 @@
 import { notFound } from "next/navigation";
-import { BotIcon } from "lucide-react";
+import { BotIcon, LayersIcon, NetworkIcon, FileTextIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { StatTile } from "@/components/experts/stat-tile";
 import { StatusBadge } from "@/components/experts/status-badge";
 import { TierBadge } from "@/components/experts/tier-badge";
-import { ComingSoon } from "@/components/coming-soon";
+import { ChatButton } from "@/components/chat/chat-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { LayersIcon, NetworkIcon, FileTextIcon } from "lucide-react";
-import { MOCK_EXPERTS } from "@/lib/mock-data";
+import { getExpert } from "@/lib/api/data";
 
 export default async function ExpertDetailPage({
   params,
@@ -16,7 +15,7 @@ export default async function ExpertDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const expert = MOCK_EXPERTS.find((e) => e.name === slug);
+  const expert = await getExpert(slug);
 
   if (!expert) {
     notFound();
@@ -31,6 +30,7 @@ export default async function ExpertDetailPage({
           <div className="flex items-center gap-2">
             <StatusBadge status={expert.status} />
             <TierBadge tier={expert.tier} />
+            <ChatButton slug={expert.name} status={expert.status} />
           </div>
         }
       />
@@ -76,11 +76,6 @@ export default async function ExpertDetailPage({
           )}
         </CardContent>
       </Card>
-
-      <ComingSoon
-        phase="phase 5"
-        description="Chat, Sources, and Build log tabs land here once the dashboard shell and auth wiring are reviewed."
-      />
     </>
   );
 }

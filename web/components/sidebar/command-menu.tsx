@@ -3,10 +3,10 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
-  LayoutDashboardIcon,
   UsersIcon,
   SettingsIcon,
   BarChart3Icon,
+  MessageSquareIcon,
 } from "lucide-react";
 import {
   CommandDialog,
@@ -24,12 +24,18 @@ export function CommandMenu({
   experts,
   open,
   onOpenChange,
+  /** Chat mode: the sidebar's "New chat" opens this as an expert picker, so
+   * pages and plain expert links would only be noise. */
+  chatOnly = false,
 }: {
   experts: ExpertSummary[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  chatOnly?: boolean;
 }) {
   const router = useRouter();
+  // Only ready experts can be chatted with, so an unbuilt one is not offered.
+  const readyExperts = experts.filter((expert) => expert.status === "ready");
 
   React.useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -57,43 +63,66 @@ export function CommandMenu({
     <CommandDialog
       open={open}
       onOpenChange={onOpenChange}
-      title="Jump to"
-      description="Jump to a page or expert"
+      title={chatOnly ? "New chat" : "Jump to"}
+      description={
+        chatOnly ? "Pick an expert to chat with" : "Jump to a page or expert"
+      }
     >
-      <CommandInput placeholder="Jump to a page or expert…" />
+      <CommandInput
+        placeholder={
+          chatOnly ? "Chat with which expert?" : "Jump to a page or expert…"
+        }
+      />
       <CommandList>
         <CommandEmpty>No results.</CommandEmpty>
-        <CommandGroup heading="Pages">
-          <CommandItem onSelect={() => go("/dashboard")}>
-            <LayoutDashboardIcon />
-            Dashboard
-          </CommandItem>
-          <CommandItem onSelect={() => go("/experts")}>
-            <UsersIcon />
-            Experts
-          </CommandItem>
-          <CommandItem onSelect={() => go("/analytics")}>
-            <BarChart3Icon />
-            Analytics
-          </CommandItem>
-          <CommandItem onSelect={() => go("/settings")}>
-            <SettingsIcon />
-            Settings
-          </CommandItem>
-        </CommandGroup>
-        <CommandSeparator />
-        <CommandGroup heading="Experts">
-          {experts.map((expert) => (
-            <CommandItem
-              key={expert.id}
-              value={`${expert.name} ${expert.topic}`}
-              onSelect={() => go(`/experts/${expert.name}`)}
-            >
-              <StatusDot status={expert.status} />
-              {expert.name}
-            </CommandItem>
-          ))}
-        </CommandGroup>
+        {!chatOnly && (
+          <>
+            <CommandGroup heading="Pages">
+              <CommandItem onSelect={() => go("/experts")}>
+                <UsersIcon />
+                Experts
+              </CommandItem>
+              <CommandItem onSelect={() => go("/analytics")}>
+                <BarChart3Icon />
+                Analytics
+              </CommandItem>
+              <CommandItem onSelect={() => go("/settings")}>
+                <SettingsIcon />
+                Settings
+              </CommandItem>
+            </CommandGroup>
+            <CommandSeparator />
+            <CommandGroup heading="Experts">
+              {experts.map((expert) => (
+                <CommandItem
+                  key={expert.id}
+                  value={`${expert.name} ${expert.topic}`}
+                  onSelect={() => go(`/experts/${expert.name}`)}
+                >
+                  <StatusDot status={expert.status} />
+                  {expert.name}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
+        {readyExperts.length > 0 && (
+          <>
+            {!chatOnly && <CommandSeparator />}
+            <CommandGroup heading="Chat">
+              {readyExperts.map((expert) => (
+                <CommandItem
+                  key={`chat-${expert.id}`}
+                  value={`chat ${expert.name} ${expert.topic}`}
+                  onSelect={() => go(`/experts/${expert.name}/chat`)}
+                >
+                  <MessageSquareIcon />
+                  {chatOnly ? expert.name : `Chat with ${expert.name}`}
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </>
+        )}
       </CommandList>
     </CommandDialog>
   );

@@ -14,7 +14,7 @@ const PKCE_COOKIE_MAX_AGE = 60 * 10; // the round-trip through Google is quick
 
 export async function GET(request: NextRequest) {
   const next = request.nextUrl.searchParams.get("next");
-  const safeNext = next && next.startsWith("/") ? next : "/dashboard";
+  const safeNext = next && next.startsWith("/") ? next : "/experts";
 
   const verifier = randomBytes(32).toString("base64url");
   const challenge = createHash("sha256").update(verifier).digest("base64url");
