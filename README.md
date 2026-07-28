@@ -2,9 +2,15 @@
 
 [![CI](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml/badge.svg)](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml)
 
-Build grounded AI subject-matter experts from multi-source corpora.
+Search the literature a database export misses — and keep a record you can defend.
 
-Give Peritus a topic. It discovers authoritative sources across the web, has Claude validate and score each one, ingests and embeds the survivors, extracts a concept graph over the content, and generates a named expert persona you can converse with. Every answer is cited back to the passages it came from.
+Give Peritus a topic. It plans a search strategy, runs it across nine kinds of source, scores every candidate for quality and relevance against a versioned rubric, and keeps the whole ledger: what was found, what was kept, what was dropped and why, which search turned each source up, and where the surviving sources contradict each other. The survivors are embedded into a concept graph you can then question, with a citation on every claim.
+
+The point is not the answer. The point is being able to show how the body of evidence behind it was assembled.
+
+**Who it's for.** Researchers and analysts doing scoping reviews, rapid reviews and evidence maps, where a real part of the evidence — reports, preprints, standards, conference talks, practitioner writing — never had a bibliographic record and so never had a search anyone could document.
+
+**What it is not.** Not a systematic-review screening platform: a build handles dozens of sources, not thousands, so keep screening your database export in Covidence or Rayyan. Not a substitute for two independent human reviewers — screening is a single model pass against a rubric, with no calibration set and therefore no published accuracy figures. Not PRISMA compliance, which is a property of your write-up and not of any tool; Peritus just happens to record the data those reports ask for. Treat its decisions as auditable triage that a human checks.
 
 Peritus is two components:
 
@@ -18,17 +24,33 @@ Storage is PostgreSQL + [pgvector](https://github.com/pgvector/pgvector). There 
 ### Build
 
 ```
-build "stoic philosophy"   (tier: lite · standard · pro)
+build "intermittent fasting and cardiometabolic risk"   (tier: lite · standard · pro)
 ```
 
 1. **Plan**: Claude turns the topic into a tailored search query for each source fetcher and names the 5–8 core concepts the corpus must cover.
-2. **Discover**: every fetcher runs concurrently: Wikipedia, Project Gutenberg, ArXiv, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. High-citation references from discovered ArXiv papers are snowballed in via Semantic Scholar.
-3. **Validate**: Claude scores each source for quality and relevance against a versioned rubric; sources below threshold are dropped, with the reason recorded.
-4. **Chunk & embed**: survivors are chunked, given Anthropic-style contextual prefixes, and embedded with OpenAI `text-embedding-3-large` (3072-dim).
-5. **Graph extract**: Claude reads the chunks in batches and extracts typed concept nodes and relationships (including `contradicts` edges). Semantically duplicate nodes are then merged via embedding similarity.
-6. **Persona**: Claude reads a digest of the accepted sources and the top concepts and writes a named expert persona: name, bio, and a concrete speaking/citation style.
+2. **Discover**: every fetcher runs concurrently — Wikipedia, Project Gutenberg, ArXiv, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. Discovery deliberately over-searches (~3× the fetch budget) and a fast triage pass ranks candidates on title and snippet, so far more sources are considered than are ever downloaded. High-citation references from accepted ArXiv papers are snowballed in via Semantic Scholar.
+3. **Validate**: Claude scores each source for quality and relevance against a versioned rubric (currently `v3-concepts-q5r6`, thresholds q≥5 and r≥6) and tags it with the key concepts it substantively covers. Sources below threshold are dropped, with the reason recorded.
+4. **Cover the gaps**: accepted sources are counted against the planned key concepts. Any concept with no coverage triggers a second, targeted round of searching and validation — so the corpus carries an argument for its own sufficiency rather than stopping when the budget runs out.
+5. **Chunk & embed**: survivors are chunked, given Anthropic-style contextual prefixes, and embedded with OpenAI `text-embedding-3-large` (3072-dim).
+6. **Graph extract**: Claude reads the chunks in batches and extracts typed concept nodes and relationships (including `contradicts` edges, which mark where the corpus disagrees with itself). Semantically duplicate nodes are then merged via embedding similarity.
+7. **Persona**: Claude reads a digest of the accepted sources and the top concepts and writes a named expert persona: name, bio, and a concrete speaking/citation style.
 
-Every passed and dropped source is persisted with its quality/relevance scores, validator model, and rubric version, so each expert carries a verifiable record of what it was built from.
+### The ledger
+
+Every source the build considered is persisted in the `sources` table, kept or dropped, with:
+
+| Column | What it records |
+|--------|-----------------|
+| `quality_score`, `relevance_score` | 0–10 each, from the validation pass |
+| `passed`, `drop_reason` | The decision, and the stated reason when it was a rejection |
+| `validator_model`, `rubric_version` | Which model judged it, under which rubric — so a decision can be re-read in context |
+| `discovered_via` | How it entered the corpus: `plan`, `snowball`, or `gapfill:<concept>` |
+| `covered_concepts` | Which of the planned key concepts it substantively covers |
+| `content_type`, `difficulty`, `key_claims` | Classification and up to five central claims |
+
+This is the part that matters: `discovered_via` records *which search produced this source*, including whether it exists only because a named concept was still uncovered. That is the search-strategy half of an evidence report — the half grey literature has no tooling for.
+
+**Today the ledger is written on every build and streamed live as the build runs** (each keep/drop appears in the build log with its scores and reason), **but it is not yet readable back through the API.** `GET /experts/{slug}` returns counts and average quality, not the per-source rows. Exposing the ledger, plus CSV and RIS export, is the next thing being built; see [POSITIONING.md](POSITIONING.md).
 
 ### Chat
 
@@ -50,6 +72,8 @@ A tier sets the depth/cost trade-off for both build and chat (`api/.../experts/d
 | lite     | ~10     | 2         | 1         | 8                | 1024            |
 | standard | ~20     | 4         | 1         | 15               | 2048            |
 | pro      | ~40     | 6         | 2         | 25               | 4096            |
+
+Note the scale: dozens of sources, not thousands. Peritus is a discovery-and-appraisal tool for material that has no bibliographic record, not a screening tool for a large database export. A build also costs real money — hundreds of LLM calls, roughly a couple of dollars at pro tier — which is what the tier dial is really for. Builds route through the Anthropic Message Batches API by default (`ANTHROPIC_BATCH_ENABLED`), halving cost at the price of wall-clock time.
 
 ## Requirements
 
@@ -100,7 +124,8 @@ Key environment variables (`api/src/peritus/core/config.py`):
 | `ANTHROPIC_API_KEY`    | Claude (validation, graph, persona, chat)          | -                            |
 | `OPENAI_API_KEY`       | Embeddings                                         | -                            |
 | `CLAUDE_MODEL`         | Chat + persona model                               | `claude-sonnet-5`            |
-| `FAST_MODEL`           | Planning, contextualisation, coverage, validation  | `claude-haiku-4-5-20251001`  |
+| `PLAN_MODEL`           | Search planning (falls back to `CLAUDE_MODEL`)     | `CLAUDE_MODEL`               |
+| `FAST_MODEL`           | Triage, validation, contextualisation, coverage    | `claude-haiku-4-5-20251001`  |
 | `GRAPH_MODEL`          | Graph extraction                                   | `claude-haiku-4-5-20251001`  |
 | `EMBED_MODEL` / `EMBED_DIM` | OpenAI embedding model / dimension            | `text-embedding-3-large` / `3072` |
 | `EXA_API_KEY`          | Exa + YouTube discovery (optional)                 | -                            |
@@ -179,7 +204,7 @@ When auth is enabled, expert endpoints require a Supabase access token via `Auth
 | `POST`   | `/auth/logout`            | Revoke the caller's session (refresh tokens)   |
 | `GET`    | `/auth/me`                | The current authenticated user                 |
 | `GET`    | `/experts`                | List the caller's experts                     |
-| `GET`    | `/experts/{slug}`         | Expert detail (sources, counts, persona)      |
+| `GET`    | `/experts/{slug}`         | Expert detail (persona, key concepts, counts, source-type breakdown) |
 | `POST`   | `/experts/build`          | Build an expert (**SSE** stream of progress)  |
 | `GET`    | `/experts/{slug}/build/events?after=N` | Reconnect to a build's progress from a cursor (**SSE**) |
 | `GET`    | `/experts/{slug}/build/status` | Point-in-time build job status            |
@@ -195,7 +220,7 @@ api/
     api/          FastAPI app, routes (incl. /auth), schemas, JWT verification
     cli/          Python CLI (build/chat + login/logout/whoami)
     experts/      build pipeline coordinator, tiers, repository (owner-scoped)
-    sources/      fetchers (wikipedia, arxiv, exa, web, …) + Claude validator
+    sources/      fetchers (wikipedia, arxiv, exa, web, …) + candidate triage + Claude validator
     ingestion/    chunking, contextualisation, embed pipeline
     graph/        concept-graph extraction, storage, retrieval
     search/       hybrid semantic + keyword search service

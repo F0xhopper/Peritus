@@ -1,11 +1,11 @@
 """Run all .sql migration files in order against DATABASE_URL."""
 
 import asyncio
+import os
 from pathlib import Path
 
 import asyncpg
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 

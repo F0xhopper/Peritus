@@ -3,10 +3,20 @@ import { redirect } from "next/navigation";
 import { ApiError } from "@/lib/api/server";
 import { proxyJson, NotAuthenticatedError } from "@/lib/api/proxy";
 import type {
+  CatalogCategory,
+  CatalogEntry,
+  ContradictionsReport,
   ConversationDetail,
   ConversationSummary,
+  CorpusReport,
+  CoverageReport,
+  CreditState,
+  LedgerEntry,
   ExpertDetail,
   ExpertSummary,
+  ScreeningFlow,
+  SourceDecision,
+  SourceSort,
 } from "@/lib/api/types";
 
 // Fetchers for server components. These call FastAPI directly through the
@@ -98,4 +108,109 @@ export async function safely<T>(
 function isNextControlFlow(err: unknown): boolean {
   const digest = (err as { digest?: unknown } | null)?.digest;
   return typeof digest === "string" && digest.startsWith("NEXT_");
+}
+
+// ── audit surface ───────────────────────────────────────────────────────────
+// See docs/audit-api.md. Every fetcher here is read-only; nothing under
+// /audit mutates a corpus.
+
+export async function getCorpusReport(
+  slug: string,
+  opts: {
+    decision?: SourceDecision;
+    sort?: SourceSort;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<CorpusReport | null> {
+  const query = new URLSearchParams();
+  if (opts.decision) query.set("decision", opts.decision);
+  if (opts.sort) query.set("sort", opts.sort);
+  if (opts.limit != null) query.set("limit", String(opts.limit));
+  if (opts.offset != null) query.set("offset", String(opts.offset));
+  const qs = query.toString();
+
+  return fetchOrLogin(async () => {
+    try {
+      return await proxyJson<CorpusReport>(
+        `/experts/${encodeURIComponent(slug)}/corpus-report${qs ? `?${qs}` : ""}`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  });
+}
+
+export async function getScreeningFlow(slug: string): Promise<ScreeningFlow | null> {
+  return fetchOrLogin(async () => {
+    try {
+      return await proxyJson<ScreeningFlow>(
+        `/experts/${encodeURIComponent(slug)}/screening-flow`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  });
+}
+
+export async function getCoverage(slug: string): Promise<CoverageReport | null> {
+  return fetchOrLogin(async () => {
+    try {
+      return await proxyJson<CoverageReport>(
+        `/experts/${encodeURIComponent(slug)}/coverage`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  });
+}
+
+export async function getContradictions(
+  slug: string,
+  opts: { limit?: number; offset?: number } = {},
+): Promise<ContradictionsReport | null> {
+  const query = new URLSearchParams();
+  if (opts.limit != null) query.set("limit", String(opts.limit));
+  if (opts.offset != null) query.set("offset", String(opts.offset));
+  const qs = query.toString();
+
+  return fetchOrLogin(async () => {
+    try {
+      return await proxyJson<ContradictionsReport>(
+        `/experts/${encodeURIComponent(slug)}/contradictions${qs ? `?${qs}` : ""}`,
+      );
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  });
+}
+
+// ── catalog & credits ───────────────────────────────────────────────────────
+
+export async function getCatalog(
+  opts: { category?: string; featured?: boolean } = {},
+): Promise<CatalogEntry[]> {
+  const query = new URLSearchParams();
+  if (opts.category) query.set("category", opts.category);
+  if (opts.featured) query.set("featured", "true");
+  const qs = query.toString();
+  // Catalog is readable without a session, so a dead session must not bounce a
+  // visitor to /login from the one page built to work before signing in.
+  return proxyJson<CatalogEntry[]>(`/experts/catalog${qs ? `?${qs}` : ""}`);
+}
+
+export async function getCatalogCategories(): Promise<CatalogCategory[]> {
+  return proxyJson<CatalogCategory[]>("/experts/catalog/categories");
+}
+
+export async function getCreditState(): Promise<CreditState> {
+  return fetchOrLogin(() => proxyJson<CreditState>("/experts/billing/me"));
+}
+
+export async function getCreditLedger(): Promise<LedgerEntry[]> {
+  return fetchOrLogin(() => proxyJson<LedgerEntry[]>("/experts/billing/ledger"));
 }

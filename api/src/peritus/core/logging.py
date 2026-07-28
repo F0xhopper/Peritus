@@ -1,3 +1,4 @@
+import contextvars
 import logging
 import sys
 
@@ -13,8 +14,34 @@ _NOISY_LOGGERS = (
     "python_multipart",
 )
 
-_LOG_FORMAT = "%(asctime)s %(levelname)-8s %(name)s: %(message)s"
+_LOG_FORMAT = "%(asctime)s %(levelname)-8s [%(request_id)s] %(name)s: %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+# The correlation id for whatever is currently being handled. Lives here, in the
+# logging module, because that is what makes the layering work: everything logs,
+# and nothing below the API layer should have to import from it. The API's
+# RequestContextMiddleware sets it; the worker leaves it at the default, where
+# records simply read "-".
+request_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "peritus_request_id", default="-"
+)
+
+
+def current_request_id() -> str:
+    return request_id_var.get()
+
+
+class RequestIdFilter(logging.Filter):
+    """Stamp the current request id on every record.
+
+    A filter rather than a LoggerAdapter so third-party records (uvicorn,
+    anthropic, asyncpg) get the field too — without it, the format string above
+    would raise on the first log line any library emits.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        record.request_id = request_id_var.get()
+        return True
 
 
 def setup_logging(log_level: str = "INFO", log_file: str | None = "peritus.log") -> None:
@@ -29,12 +56,17 @@ def setup_logging(log_level: str = "INFO", log_file: str | None = "peritus.log")
         raise ValueError(f"Invalid log level: {log_level}")
 
     formatter = logging.Formatter(_LOG_FORMAT, datefmt=_DATE_FORMAT)
+    request_id_filter = RequestIdFilter()
 
     handlers: list[logging.Handler] = [logging.StreamHandler(sys.stderr)]
     if log_file:
         handlers.append(logging.FileHandler(log_file))
     for handler in handlers:
         handler.setFormatter(formatter)
+        # On the handler, not the logger: filters on a logger do not apply to
+        # records that propagate up from its children, and most records here
+        # come from child loggers.
+        handler.addFilter(request_id_filter)
 
     logging.basicConfig(
         level=numeric_level,

@@ -81,11 +81,9 @@ class GraphRepository:
             except Exception as exc:
                 logger.warning("Node embedding failed, inserting without vectors: %s", exc)
 
+        # Vector codecs are installed once per connection by the pool's init
+        # callback (infrastructure.database), not per call.
         async with self._pool.acquire() as conn, conn.transaction():
-            from pgvector.asyncpg import register_vector  # type: ignore
-
-            await register_vector(conn)
-
             # Insert nodes, get back label→id mapping
             label_to_id: dict[str, int] = {}
             for i, (key, node) in enumerate(merged_nodes.items()):
@@ -157,9 +155,6 @@ class GraphRepository:
 
     async def get_all_nodes(self, expert_id: int) -> list[dict]:
         async with self._pool.acquire() as conn:
-            from pgvector.asyncpg import register_vector  # type: ignore
-
-            await register_vector(conn)
             rows = await conn.fetch(
                 """
                 SELECT id, label, description, chunk_ids, embedding

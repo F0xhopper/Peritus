@@ -17,11 +17,23 @@ from typing import Any
 
 import asyncpg
 
+from peritus.billing.domain import SpendCapExceeded
+from peritus.billing.metering import (
+    BuildMeter,
+    flush_once,
+    flush_periodically,
+    install_instrumentation,
+    reset_meter,
+    set_meter,
+)
+from peritus.billing.repository import BillingRepository
+from peritus.billing.service import EntitlementService
+from peritus.billing.settings import settings as billing_settings
 from peritus.core.config import settings
 from peritus.core.exceptions import BuildError
 from peritus.core.logging import get_logger
 from peritus.experts.builder import BuildResult, ExpertBuilder
-from peritus.experts.domain import ExpertStatus
+from peritus.experts.domain import ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
 from peritus.jobs.domain import BuildJob
 from peritus.jobs.repository import JobRepository
@@ -43,6 +55,7 @@ class BuildWorker:
     ) -> None:
         self._pool = pool
         self._jobs = JobRepository(pool)
+        self._entitlements = EntitlementService(pool)
         self._concurrency = concurrency or settings.WORKER_CONCURRENCY
         # Injectable so tests can substitute a fake ExpertBuilder.
         self._builder_factory: Callable[[list[str] | None], Any] = builder_factory or (
@@ -121,12 +134,28 @@ class BuildWorker:
             return
 
         cancelled = False
+        cap_exceeded = False
         build_task: asyncio.Task[Any] | None = None
 
+        # Metering context for this job. Bound here, before the build task is
+        # created, so every task the pipeline spawns inherits it — and so two
+        # concurrent builds in this worker meter independently.
+        meter = await self._start_meter(job, expert)
+        meter_token = set_meter(meter) if meter is not None else None
+
         async def heartbeat_loop() -> None:
-            nonlocal cancelled
+            nonlocal cancelled, cap_exceeded
             while True:
                 await asyncio.sleep(settings.WORKER_HEARTBEAT_INTERVAL)
+                # The cap check rides the heartbeat: it is the one place that
+                # already runs on a fixed cadence regardless of what stage the
+                # build is in, so a runaway is stopped mid-stage rather than at
+                # the next stage boundary.
+                if meter is not None and meter.over_cap and not cap_exceeded:
+                    cap_exceeded = True
+                    if build_task is not None:
+                        build_task.cancel()
+                    return
                 alive = await self._jobs.heartbeat(job.id, self.worker_id)
                 if not alive:
                     cancelled = True
@@ -135,6 +164,11 @@ class BuildWorker:
                     return
 
         hb_task = asyncio.create_task(heartbeat_loop())
+        flush_task = (
+            asyncio.create_task(flush_periodically(meter, self._persist_usage(meter)))
+            if meter is not None
+            else None
+        )
         try:
             await expert_repo.update_status(expert.id, ExpertStatus.BUILDING)
             await expert_repo.reset_build_state(expert.id)
@@ -145,6 +179,10 @@ class BuildWorker:
             })
 
             async def on_event(event: dict[str, Any]) -> None:
+                # Stage attribution for spend piggybacks on the progress events
+                # the builder already emits, so no builder change is needed.
+                if meter is not None:
+                    meter.observe_event(event)
                 await self._jobs.append_event(job.id, event["type"], event)
 
             builder = self._builder_factory(job.source_filter)
@@ -152,6 +190,11 @@ class BuildWorker:
             try:
                 result: BuildResult = await build_task
             except asyncio.CancelledError:
+                if cap_exceeded:
+                    raise SpendCapExceeded(
+                        meter.spent_usd if meter else 0.0,
+                        float(meter.cap_usd) if meter and meter.cap_usd else 0.0,
+                    ) from None
                 if cancelled:
                     raise _JobCancelled from None
                 raise  # worker shutdown — propagate so _drain requeues it
@@ -168,12 +211,23 @@ class BuildWorker:
                 "avg_quality": result.avg_quality,
             })
             await self._jobs.mark_succeeded(job.id, self.worker_id)
-            logger.info("Job %d succeeded (expert=%d)", job.id, job.expert_id)
+            # The build produced a usable expert, so the hold stands. Record what
+            # it actually cost against the ledger entry for reporting.
+            if meter is not None:
+                with suppress(Exception):
+                    await self._entitlements.settle_job(job.id, meter.spent_usd)
+            logger.info(
+                "Job %d succeeded (expert=%d, cost=$%.4f)",
+                job.id, job.expert_id, meter.spent_usd if meter else 0.0,
+            )
 
+        except SpendCapExceeded as exc:
+            await self._on_cap_exceeded(job, expert_repo, exc)
         except _JobCancelled:
             await self._on_cancelled(job, expert_repo)
         except asyncio.CancelledError:
             # Graceful shutdown: return the job to the queue for another worker.
+            # The hold stays — the job is still going to run.
             await self._jobs.release_for_shutdown(job.id, self.worker_id)
             logger.info("Job %d released back to queue (shutdown)", job.id)
             raise
@@ -188,6 +242,51 @@ class BuildWorker:
             hb_task.cancel()
             with suppress(asyncio.CancelledError):
                 await hb_task
+            if flush_task is not None:
+                flush_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await flush_task
+            # Final flush: whatever the build spent in its last few seconds must
+            # still be recorded, including on the failure and cancellation paths.
+            if meter is not None:
+                with suppress(Exception):
+                    await flush_once(meter, self._persist_usage(meter))
+            if meter_token is not None:
+                reset_meter(meter_token)
+
+    async def _start_meter(self, job: BuildJob, expert) -> "BuildMeter | None":
+        """Build the cost meter for a job, or None if metering can't be set up.
+
+        Metering is observability plus a safety valve — never a reason a build
+        fails to start. Any problem here degrades to an unmetered build.
+        """
+        try:
+            install_instrumentation()
+            tier = ExpertTier(job.tier) if job.tier else expert.tier
+            cap = await self._entitlements.cap_for_build(expert.owner_id or "", tier)
+            if not billing_settings.SPEND_CAP_ENFORCED:
+                # Observe-only mode: record the cap on the job, but don't arm it.
+                await self._entitlements.record_job_cap(job.id, cap)
+                cap = None
+            else:
+                await self._entitlements.record_job_cap(job.id, cap)
+            return BuildMeter(
+                job_id=job.id,
+                expert_id=expert.id,
+                owner_id=expert.owner_id,
+                cap_usd=cap,
+            )
+        except Exception as exc:
+            logger.warning("Could not start cost metering for job %d: %s", job.id, exc)
+            return None
+
+    def _persist_usage(self, meter: "BuildMeter"):
+        repo = BillingRepository(self._pool)
+
+        async def persist(rows) -> None:
+            await repo.record_usage(meter.job_id, meter.expert_id, meter.owner_id, rows)
+
+        return persist
 
     async def _on_cancelled(self, job: BuildJob, expert_repo: ExpertRepository) -> None:
         logger.info("Job %d cancelled", job.id)
@@ -200,6 +299,37 @@ class BuildWorker:
             await expert_repo.update_status(
                 job.expert_id, ExpertStatus.FAILED, "Build cancelled"
             )
+        # A cancelled build leaves nothing usable behind, so it is not charged.
+        with suppress(Exception):
+            await self._entitlements.refund_job(job.id, "Build cancelled")
+
+    async def _on_cap_exceeded(
+        self, job: BuildJob, expert_repo: ExpertRepository, exc: SpendCapExceeded
+    ) -> None:
+        """Terminal: stop, keep the evidence, refund the credit.
+
+        Deliberately *not* retryable. A retry would re-spend the same money on
+        the same corpus and hit the same ceiling, so the job is failed outright
+        even with attempts remaining. The user is refunded in full — they have no
+        usable expert — and the overspend stays visible in build_usage_events.
+        """
+        message = str(exc)
+        logger.error("Job %d aborted on spend cap: %s", job.id, message)
+        with suppress(Exception):
+            await BillingRepository(self._pool).mark_cap_exceeded(job.id)
+        with suppress(Exception):
+            await expert_repo.update_status(job.expert_id, ExpertStatus.FAILED, message)
+        with suppress(Exception):
+            await self._jobs.append_event(job.id, "error", {
+                "type": "error",
+                "message": message,
+                "code": "spend_cap_exceeded",
+                "spent_usd": round(exc.spent_usd, 4),
+                "cap_usd": exc.cap_usd,
+            })
+        await self._jobs.mark_failed(job.id, self.worker_id, message)
+        with suppress(Exception):
+            await self._entitlements.refund_job(job.id, "Build exceeded its spend cap")
 
     async def _on_failure(
         self, job: BuildJob, expert_repo: ExpertRepository, exc: Exception
@@ -220,6 +350,11 @@ class BuildWorker:
             await self._jobs.requeue(job.id, self.worker_id, message, backoff)
         else:
             logger.error("Job %d failed permanently: %s", job.id, message)
+            # No usable expert was produced, so the hold is returned. A retry
+            # inside the same job keeps its hold, so a build that eventually
+            # succeeds is charged exactly once.
+            with suppress(Exception):
+                await self._entitlements.refund_job(job.id, f"Build failed: {message[:200]}")
             await expert_repo.update_status(job.expert_id, ExpertStatus.FAILED, message)
             await self._jobs.append_event(job.id, "error", {
                 "type": "error", "message": message,

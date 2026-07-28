@@ -15,15 +15,39 @@ class Settings:
     # Database
     DATABASE_URL: str = os.getenv("DATABASE_URL", "")
     DATABASE_SSL: bool = os.getenv("DATABASE_SSL", "false").lower() == "true"
+    # Pool sizing. One process may serve API traffic *and* run builds
+    # (RUN_WORKER_IN_PROCESS), so the ceiling has to cover both; raise it
+    # alongside WORKER_CONCURRENCY rather than leaving builds to starve chat.
+    DB_POOL_MIN_SIZE: int = int(os.getenv("DB_POOL_MIN_SIZE", "2"))
+    DB_POOL_MAX_SIZE: int = int(os.getenv("DB_POOL_MAX_SIZE", "10"))
+    # Server-side statement timeout. Without one a pathological query pins a
+    # pooled connection forever, and DB_POOL_MAX_SIZE of those is an outage.
+    DB_COMMAND_TIMEOUT: float = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))
+    # How long a caller waits for a free connection before giving up. Bounded so
+    # an exhausted pool surfaces as a fast 503 instead of an indefinite hang.
+    DB_ACQUIRE_TIMEOUT: float = float(os.getenv("DB_ACQUIRE_TIMEOUT", "10"))
 
     # Embeddings
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
     EMBED_MODEL: str = os.getenv("EMBED_MODEL", "text-embedding-3-large")
     EMBED_DIM: int = int(os.getenv("EMBED_DIM", "3072"))
+    OPENAI_TIMEOUT: float = float(os.getenv("OPENAI_TIMEOUT", "60"))
+    OPENAI_MAX_RETRIES: int = int(os.getenv("OPENAI_MAX_RETRIES", "3"))
+    # Two separate concurrency budgets, deliberately. A chat turn embeds a
+    # handful of subqueries and a user is waiting; a build embeds hundreds of
+    # chunk batches and nobody is. Sharing one semaphore lets a build queue
+    # ahead of every interactive request in the same process.
+    EMBED_QUERY_CONCURRENCY: int = int(os.getenv("EMBED_QUERY_CONCURRENCY", "8"))
+    EMBED_BATCH_CONCURRENCY: int = int(os.getenv("EMBED_BATCH_CONCURRENCY", "2"))
 
     # Anthropic — validation, graph extraction, persona, chat
     ANTHROPIC_API_KEY: str = os.getenv("ANTHROPIC_API_KEY", "")
     CLAUDE_MODEL: str = os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
+    # The SDK defaults to a 600s timeout. A composition call that hangs that long
+    # holds an SSE connection, a DB connection and the conversation's stream
+    # claim with it, so cap it far lower and let the SDK's retries do the work.
+    ANTHROPIC_TIMEOUT: float = float(os.getenv("ANTHROPIC_TIMEOUT", "120"))
+    ANTHROPIC_MAX_RETRIES: int = int(os.getenv("ANTHROPIC_MAX_RETRIES", "3"))
 
     # Fast model for contextualisation, validation, reranking, coverage
     FAST_MODEL: str = os.getenv("FAST_MODEL", "claude-haiku-4-5-20251001")
@@ -37,10 +61,20 @@ class Settings:
 
     # ── Anthropic Message Batches ────────────────────────────────────────────
     # Build-pipeline stages (triage, validation, contextualisation, graph
-    # extraction) run through the Message Batches API at 50% of standard token
-    # prices. Builds are latency-insensitive background jobs, but note batches
-    # can take up to ~1 hour to process, so builds run longer when enabled.
+    # extraction) can run through the Message Batches API at 50% of standard
+    # token prices, at the cost of up to ~1h of queueing per stage.
+    #
+    # Whether a *given build* batches is decided per build (see
+    # BUILD_EXECUTION_DEFAULT and peritus.infrastructure.anthropic_batch); this
+    # flag is the deployment-level kill switch above it. False = this deployment
+    # never touches the Batch API, whatever a build asks for.
     ANTHROPIC_BATCH_ENABLED: bool = os.getenv("ANTHROPIC_BATCH_ENABLED", "true").lower() == "true"
+    # Policy for builds that don't state their own execution mode:
+    #   auto        — first build of an expert runs live (a user is watching it);
+    #                 rebuilds and scheduled refreshes batch at half price
+    #   interactive — every build runs live: fastest, full price
+    #   background  — every build batches: cheapest, hours of wall clock
+    BUILD_EXECUTION_DEFAULT: str = os.getenv("BUILD_EXECUTION_DEFAULT", "auto").strip().lower()
     # Below this many requests a stage just makes live calls — batch overhead
     # and queueing latency aren't worth it for a handful of requests.
     ANTHROPIC_BATCH_MIN_REQUESTS: int = int(os.getenv("ANTHROPIC_BATCH_MIN_REQUESTS", "4"))
@@ -54,6 +88,13 @@ class Settings:
     # Cap on client-supplied history messages sent to Claude per turn. Bounds
     # both cost and abuse; the prompt cache makes retained history cheap.
     CHAT_HISTORY_MAX_MESSAGES: int = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "20"))
+
+    # Per-user throttle on the two chat endpoints. Builds are gated by credits;
+    # chat is free to the user but not to us — every message is a planning call,
+    # a rerank, a coverage call and a composition. This is the only ceiling on
+    # what one authenticated account can spend, so it is on by default.
+    CHAT_RATE_LIMIT: int = int(os.getenv("CHAT_RATE_LIMIT", "20"))
+    CHAT_RATE_WINDOW: float = float(os.getenv("CHAT_RATE_WINDOW", "60"))
 
     # Source fetchers
     EXA_API_KEY: str = os.getenv("EXA_API_KEY", "")

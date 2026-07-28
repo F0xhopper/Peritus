@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import {
   UsersIcon,
+  LibraryIcon,
   BarChart3Icon,
   SettingsIcon,
   SearchIcon,
@@ -27,6 +28,7 @@ import { Wordmark } from "@/components/brand/wordmark";
 import type { ConversationSummary, ExpertSummary } from "@/lib/api/types";
 
 const NAV_ITEMS: NavItem[] = [
+  { title: "Catalog", url: "/catalog", icon: LibraryIcon },
   { title: "Experts", url: "/experts", icon: UsersIcon },
   { title: "Analytics", url: "/analytics", icon: BarChart3Icon },
   { title: "Settings", url: "/settings", icon: SettingsIcon },

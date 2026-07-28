@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "peritus"
 version = "2.0.0"
-description = "Build grounded AI subject-matter experts from multi-source corpora."
+description = "Search beyond the database export, and keep a defensible record of every source considered."
 requires-python = ">=3.12"
 dependencies = [
     # CLI

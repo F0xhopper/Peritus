@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { BotIcon, LayersIcon, NetworkIcon, FileTextIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
+import { AuditNav } from "@/components/audit/audit-nav";
 import { StatTile } from "@/components/experts/stat-tile";
 import { StatusBadge } from "@/components/experts/status-badge";
 import { TierBadge } from "@/components/experts/tier-badge";
@@ -42,6 +43,8 @@ export default async function ExpertDetailPage({
           </div>
         }
       />
+
+      <AuditNav slug={expert.name} active="" />
 
       <div className="grid gap-4 sm:grid-cols-3">
         <StatTile icon={FileTextIcon} label="Sources" value={expert.source_count} />

@@ -74,6 +74,25 @@ export type ChatStreamEvent =
   | { type: "status"; message: string }
   | { type: "token"; text: string }
   | { type: "sources"; citations: Citation[]; has_contradiction: boolean }
+  // The answer's retrieval trail: how many passages were retrieved, how many
+  // reached the prompt, and how many the answer actually cited. A trail, never
+  // a score — do not render it as a percentage.
+  | {
+      type: "retrieval_audit";
+      audit_id: string | null;
+      persisted: boolean;
+      passages: {
+        retrieved: number;
+        duplicate_hits: number;
+        unique: number;
+        in_context: number;
+        cited: number;
+        not_in_context: number;
+        context_cap: number | null;
+      };
+      sources: { in_context: number; cited: number };
+      [key: string]: unknown;
+    }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -156,4 +175,424 @@ export interface BuildStatus {
   max_attempts: number;
   last_error: string | null;
   updated_at: string;
+}
+
+// ── audit surface ───────────────────────────────────────────────────────────
+// Shapes documented in docs/audit-api.md and assembled by
+// api/src/peritus/audit/service.py. The service returns plain dicts, so these
+// are hand-maintained against that document.
+
+/** A count the system does not persist, with the reason it is absent.
+ *
+ * The whole point of this shape is that it is NOT zero: rendering an
+ * unrecorded count as 0 would fabricate a number in an evidence record. Every
+ * consumer must branch on `count === null`. */
+export interface AuditCount {
+  count: number | null;
+  unavailable_reason?: string;
+  source?: string;
+  note?: string;
+  [key: string]: unknown;
+}
+
+export type SourceDecision = "all" | "accepted" | "rejected";
+
+export type SourceSort =
+  | "decision"
+  | "quality"
+  | "relevance"
+  | "title"
+  | "type"
+  | "discovered_via"
+  | "added";
+
+/** `plan` = planned first pass, `snowball` = followed citations out of a
+ * discovered preprint, `gapfill` = a search that ran only because a named
+ * concept had no accepted source. The last is the differentiating one. */
+export type DiscoveryMethod = "plan" | "snowball" | "gapfill" | null;
+
+export interface LedgerSource {
+  id: number;
+  decision: "accepted" | "rejected";
+  title: string | null;
+  url: string | null;
+  author: string | null;
+  source_type: string | null;
+  content_type: string | null;
+  difficulty: number | null;
+  quality_score: number | null;
+  relevance_score: number | null;
+  /** Populated on rejected rows only. */
+  drop_reason: string | null;
+  validator_model: string | null;
+  rubric_version: string | null;
+  discovered_via: string | null;
+  discovery_method: DiscoveryMethod;
+  gap_filled_for_concept: string | null;
+  covered_concepts: string[];
+  key_claims: string[];
+  passage_count: number;
+  created_at: string;
+}
+
+export interface SearchProvenanceRow {
+  discovered_via: string;
+  method: DiscoveryMethod;
+  concept: string | null;
+  considered: number;
+  accepted: number;
+  rejected: number;
+  accepted_mean_quality: number | null;
+  accepted_mean_relevance: number | null;
+  source_types: string[];
+}
+
+export interface CorpusReport {
+  expert: { name: string; topic: string; tier: string; [k: string]: unknown };
+  method_statement: string;
+  totals: {
+    considered: number;
+    accepted: number;
+    rejected: number;
+    acceptance_rate: number | null;
+    accepted_with_passages: number | null;
+    accepted_without_passages: number | null;
+    passages_total: number | null;
+  };
+  scores: {
+    accepted: Record<string, number | null>;
+    rejected: { mean_quality: number | null; mean_relevance: number | null };
+    distribution: Record<string, { accepted: number[]; rejected: number[] }>;
+    bin_edges: [number, number][];
+  };
+  thresholds: {
+    quality_min: number;
+    relevance_min: number;
+    current_rubric_version: string;
+    note: string;
+  };
+  rubric_versions: {
+    rubric_version: string | null;
+    validator_model: string | null;
+    sources: number;
+    accepted: number;
+    first_seen: string | null;
+    last_seen: string | null;
+  }[];
+  provenance: {
+    sources: number;
+    complete: boolean;
+    missing: Record<string, number>;
+    note: string;
+  };
+  by_source_type: {
+    source_type: string;
+    considered: number;
+    accepted: number;
+    rejected: number;
+    accepted_mean_quality: number | null;
+    accepted_mean_relevance: number | null;
+  }[];
+  by_discovery_method: {
+    method: string;
+    considered: number;
+    accepted: number;
+    rejected: number;
+    accepted_mean_quality: number | null;
+  }[];
+  by_search: {
+    searches: SearchProvenanceRow[];
+    distinct_searches: number;
+    note: string;
+  };
+  exclusions: {
+    by_reason: {
+      reason: string | null;
+      count: number;
+      mean_quality: number | null;
+      mean_relevance: number | null;
+    }[];
+    by_threshold: Record<string, number>;
+    by_threshold_meanings: Record<string, string>;
+  };
+  page: {
+    decision: SourceDecision;
+    sort: SourceSort;
+    limit: number;
+    offset: number;
+    returned: number;
+    total_matching: number;
+    has_more: boolean;
+  };
+  sources: LedgerSource[];
+}
+
+export type CoverageStrength = "absent" | "thin" | "adequate" | "strong";
+
+export interface CoverageConcept {
+  concept: string;
+  strength: CoverageStrength;
+  needed_gap_fill: boolean;
+  on_plan?: boolean;
+  [key: string]: unknown;
+}
+
+export interface CoverageReport {
+  expert: { name: string; topic: string; [k: string]: unknown };
+  method_statement: string;
+  key_concepts_planned: string[];
+  key_concepts_unavailable_reason: string | null;
+  classification_rule: string;
+  summary: {
+    concepts: number;
+    absent: number;
+    thin: number;
+    adequate: number;
+    strong: number;
+    concepts_needing_gap_fill: number;
+    off_plan_concepts: number;
+  };
+  tagging: {
+    accepted_tagged_with_concepts: number;
+    accepted_tagged_no_concepts: number;
+    accepted_untagged_legacy: number;
+    note: string;
+  };
+  concepts: CoverageConcept[];
+}
+
+/** `computed: false` means the concept graph has not been extracted yet.
+ *
+ * An empty `contradictions` list in that state means "not analysed yet", NOT
+ * "none found" — see the note in docs/audit-api.md. Never collapse the two. */
+export interface ContradictionsReport {
+  expert: { name: string; topic: string; [k: string]: unknown };
+  method_statement?: string;
+  computed: boolean;
+  readiness: string;
+  summary?: {
+    contradictions: number;
+    concepts_involved: number;
+    relationships_total: number;
+    share_of_relationships: number | null;
+    cross_source_on_page: number;
+    within_source_on_page: number;
+    undetermined_on_page: number;
+  };
+  relationship_mix?: { edge_type: string; count: number; mean_weight: number | null }[];
+  note?: string;
+  unavailable_reason?: string;
+  page: {
+    limit: number;
+    offset: number;
+    returned: number;
+    total_matching: number | null;
+    has_more: boolean;
+    passages_per_side?: number;
+    excerpt_chars?: number;
+  };
+  contradictions: ContradictionItem[];
+}
+
+export interface ContradictionPassage {
+  chunk_id: number;
+  sequence_n: number | null;
+  excerpt: string | null;
+  truncated: boolean;
+  context: string | null;
+  source_id: number;
+  source_title: string | null;
+  source_type: string | null;
+  source_url: string | null;
+  source_author: string | null;
+  quality_score: number | null;
+  relevance_score: number | null;
+  citation: string;
+}
+
+export interface ContradictionSide {
+  node: {
+    id: number;
+    label: string | null;
+    node_type: string | null;
+    description: string | null;
+  };
+  passage_count: number;
+  passages: ContradictionPassage[];
+  passages_truncated: boolean;
+  missing_passages: number;
+}
+
+export interface ContradictionItem {
+  edge_id: number;
+  weight: number | null;
+  properties: Record<string, unknown> | null;
+  /** `cross_source` is two different sources disagreeing — the only kind that
+   * is a disagreement *between* sources. `within_source` is one source in
+   * tension with itself; `undetermined` means one side had no resolvable
+   * passage. Label them differently. */
+  kind: "cross_source" | "within_source" | "undetermined";
+  shared_source_ids: number[];
+  side_a: ContradictionSide;
+  side_b: ContradictionSide;
+}
+
+export interface AnswerAuditHeader {
+  audit_id: string;
+  conversation_id: string | null;
+  question: string;
+  subqueries: string[];
+  followup_queries: string[];
+  coverage_satisfied: boolean | null;
+  second_pass: boolean | null;
+  passages: {
+    retrieved: number;
+    duplicate_hits: number;
+    unique: number;
+    in_context: number;
+    cited: number;
+    not_in_context: number;
+    context_cap: number | null;
+  };
+  sources: { in_context: number; cited: number };
+  contradiction_traversed: boolean | null;
+  answer_chars: number;
+  created_at: string;
+}
+
+export interface AnswerAuditPassage {
+  n: number;
+  chunk_id: number;
+  source_id: number;
+  source_title: string | null;
+  source_type: string | null;
+  quality_score: number | null;
+  retrieval_rank: number | null;
+  retrieval_score: number | null;
+  retrieved_via: string | null;
+  disposition: string;
+}
+
+export interface AnswerAuditList {
+  expert: { name: string; topic: string; [k: string]: unknown };
+  disposition_meanings: Record<string, string>;
+  page: {
+    limit: number;
+    offset: number;
+    returned: number;
+    total_matching: number;
+    has_more: boolean;
+  };
+  audits: AnswerAuditHeader[];
+}
+
+export type AnswerAuditDetail = AnswerAuditHeader & {
+  expert: { name: string; topic: string; [k: string]: unknown };
+  disposition_meanings: Record<string, string>;
+  passages: AnswerAuditPassage[];
+};
+
+export interface ScreeningFlow {
+  expert: { name: string; topic: string; [k: string]: unknown };
+  method_statement: string;
+  build: {
+    job_id: number | null;
+    status: string | null;
+    tier?: string;
+    attempts?: number;
+    max_attempts?: number;
+    last_error?: string | null;
+    started_at?: string;
+    finished_at?: string;
+    event_log_retained?: boolean;
+    unavailable_reason?: string;
+    note?: string;
+  };
+  search_strategy: {
+    fetchers: {
+      fetcher: string;
+      queries_run: number | null;
+      candidates_identified: number | null;
+      skipped: boolean;
+      skip_reason: string | null;
+    }[];
+    fetchers_available: string[];
+    fetchers_run: string[];
+    queries_issued: number | null;
+    /** Permanently null — the planning stage never persists query strings. */
+    query_text: null;
+    query_text_unavailable_reason: string;
+    searches_recorded_on_sources: number;
+    note: string;
+  };
+  stages: {
+    identified: AuditCount;
+    screened_at_triage: AuditCount;
+    retrieved_full_text: AuditCount;
+    assessed_at_validation: AuditCount;
+  };
+}
+
+// ── catalog & credits ───────────────────────────────────────────────────────
+// See docs/catalog-and-credits.md.
+
+export interface CatalogEntry {
+  name: string;
+  topic: string;
+  tier: string;
+  readiness: string;
+  graph_expanded: boolean;
+  persona_name: string | null;
+  persona_bio: string | null;
+  blurb: string | null;
+  category: string | null;
+  tags: string[];
+  is_featured: boolean;
+  key_concepts: string[];
+  source_count: number;
+  chunk_count: number;
+  node_count: number;
+  avg_quality: number | null;
+  source_type_counts: Record<string, number>;
+  published_at: string | null;
+  created_at: string;
+}
+
+export interface CatalogCategory {
+  name: string;
+  count: number;
+}
+
+export interface CreditState {
+  plan: {
+    name: string;
+    display_name: string;
+    included_credits: number;
+    allowed_tiers: string[];
+    description: string;
+  };
+  balance: number;
+  granted: number;
+  consumed: number;
+  /** Credits reserved by an in-flight build. Already excluded from `balance`. */
+  held: number;
+  credits_enforced: boolean;
+  tiers: {
+    tier: string;
+    credit_cost: number;
+    spend_cap_usd: number;
+    included_in_plan: boolean;
+  }[];
+}
+
+export interface LedgerEntry {
+  id: number;
+  entry_type: string;
+  delta: number;
+  job_id: number | null;
+  tier: string | null;
+  reason: string | null;
+  source: string;
+  cost_usd: number | null;
+  created_at: string;
 }

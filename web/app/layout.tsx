@@ -55,7 +55,8 @@ const jetBrainsMono = JetBrains_Mono({
 
 export const metadata: Metadata = {
   title: "Peritus",
-  description: "Graph-grounded expert agents, built from your sources.",
+  description:
+    "Search the literature a database export misses — and keep a record you can defend.",
 };
 
 export default function RootLayout({

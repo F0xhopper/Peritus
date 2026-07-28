@@ -16,6 +16,7 @@ from httpx import ASGITransport, AsyncClient
 from peritus.api.routes.conversations import _title_from_question
 from peritus.chat.conversation_repository import Conversation
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
+from peritus.search.readiness import Readiness
 
 ADMIN_ID = "00000000-0000-0000-0000-000000000000"
 CONV_ID = "11111111-1111-1111-1111-111111111111"
@@ -71,6 +72,24 @@ def app():
 async def client(app):
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
+
+
+@pytest.fixture(autouse=True)
+def readiness():
+    """The route's retrieval-readiness gate.
+
+    Chat availability is gated on ``experts.readiness`` rather than build-job
+    status (an expert answers as soon as its corpus is embedded, a stage before
+    the job finishes), and that is a DB read these mocked tests have no database
+    for. Defaults to a fully built expert; the not-ready cases dial it back.
+    """
+    state = {"value": Readiness.GRAPH_READY}
+
+    async def _get_readiness(_pool, _expert_id):
+        return state["value"]
+
+    with patch("peritus.api.routes.conversations.get_readiness", new=_get_readiness):
+        yield state
 
 
 def _patched(mock_convs=None, mock_experts=None):
@@ -142,7 +161,8 @@ async def test_create_conversation_unknown_expert_404(client):
 
 
 @pytest.mark.asyncio
-async def test_create_conversation_not_ready_409(client):
+async def test_create_conversation_not_ready_409(client, readiness):
+    readiness["value"] = Readiness.PENDING
     mock_experts = AsyncMock()
     mock_experts.get_for_user = AsyncMock(return_value=_make_expert(ExpertStatus.BUILDING))
     p1, p2, p3 = _patched(mock_experts=mock_experts)
@@ -280,7 +300,7 @@ async def test_expert_conversations_list(client):
 
 def _fake_stream(events):
     """An async generator factory matching stream_expert_answer's signature."""
-    async def gen(pool, expert, question, history):
+    async def gen(pool, expert, question, history, conversation_id=None):
         for ev in events:
             if isinstance(ev, Exception):
                 raise ev
@@ -350,7 +370,8 @@ async def test_send_message_busy_claim_409(client):
 
 
 @pytest.mark.asyncio
-async def test_send_message_expert_not_ready_409(client):
+async def test_send_message_expert_not_ready_409(client, readiness):
+    readiness["value"] = Readiness.PENDING
     mock_convs, mock_experts = _stream_mocks(
         _make_conversation(), expert=_make_expert(ExpertStatus.BUILDING)
     )
@@ -399,8 +420,9 @@ async def test_send_message_retry_reuses_orphaned_question(client):
 
     captured: dict = {}
 
-    async def gen(pool, expert, question, hist):
+    async def gen(pool, expert, question, hist, conversation_id=None):
         captured["history"] = hist
+        captured["conversation_id"] = conversation_id
         for ev in events:
             yield ev
 

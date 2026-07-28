@@ -9,6 +9,16 @@ to inputs by position. This module runs such a set either:
 - as **live concurrent calls** when batching is disabled, the set is too small
   to be worth queueing, or a batch times out / individual items fail.
 
+Which of the two a stage uses is **per build**, not process-wide. A build
+declares its policy once, up front, via :func:`build_execution`; every stage it
+runs inherits it through a :class:`~contextvars.ContextVar`, so the four call
+sites and the four functions between them keep their existing signatures and
+two builds running concurrently in the same worker cannot affect each other
+(``asyncio`` tasks each get their own copy of the context).
+
+    with build_execution(BuildExecution.INTERACTIVE):
+        await builder.build(expert)      # every stage now makes live calls
+
 Failure semantics: the returned list is positionally aligned with the input;
 an entry is the Anthropic ``Message`` on success or ``None`` when that request
 failed after retries. Callers map ``None`` to their stage-specific fallback.
@@ -16,6 +26,10 @@ failed after retries. Callers map ``None`` to their stage-specific fallback.
 
 import asyncio
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
+from enum import StrEnum
 from typing import Any
 
 from peritus.core.config import settings
@@ -26,6 +40,63 @@ logger = get_logger(__name__)
 
 _LIVE_ATTEMPTS = 3
 _TERMINAL_BATCH_ERRORS = ("invalid_request",)
+
+
+class BuildExecution(StrEnum):
+    """The cost/latency trade-off a single build has chosen.
+
+    ``INTERACTIVE`` — live concurrent calls. Stages finish in seconds to a few
+    minutes and the user gets an expert while they are still watching, at full
+    token price. This is what a first build wants.
+
+    ``BACKGROUND`` — Message Batches API. Half the token price, but each of the
+    four batched stages can sit in the Anthropic queue for up to an hour, so a
+    build can take hours end to end. This is what a rebuild or a scheduled
+    refresh wants: nobody is blocked on it.
+    """
+
+    INTERACTIVE = "interactive"
+    BACKGROUND = "background"
+
+
+# Default for callers that never declared a policy (e.g. a one-off script
+# calling ``contextualize_chunks``): the historical, env-driven behaviour.
+_execution: ContextVar[BuildExecution] = ContextVar(
+    "peritus_build_execution", default=BuildExecution.BACKGROUND
+)
+
+
+def current_execution() -> BuildExecution:
+    """The execution policy in force for the current build/task."""
+    return _execution.get()
+
+
+@contextmanager
+def build_execution(mode: BuildExecution) -> Iterator[None]:
+    """Declare the execution policy for everything run inside the block."""
+    token = _execution.set(mode)
+    try:
+        yield
+    finally:
+        _execution.reset(token)
+
+
+def should_batch(request_count: int) -> bool:
+    """Whether a stage of ``request_count`` calls should go through Message Batches.
+
+    Three gates, in order of authority:
+
+    1. ``ANTHROPIC_BATCH_ENABLED`` — deployment-level kill switch. False means
+       this deployment never touches the Batch API, whatever a build asks for.
+    2. The build's own policy (see :class:`BuildExecution`).
+    3. ``ANTHROPIC_BATCH_MIN_REQUESTS`` — batch overhead isn't worth it for a
+       handful of requests.
+    """
+    return (
+        settings.ANTHROPIC_BATCH_ENABLED
+        and current_execution() is BuildExecution.BACKGROUND
+        and request_count >= settings.ANTHROPIC_BATCH_MIN_REQUESTS
+    )
 
 
 async def gather_claude_calls(
@@ -41,11 +112,7 @@ async def gather_claude_calls(
     if not params_list:
         return []
 
-    use_batch = (
-        settings.ANTHROPIC_BATCH_ENABLED
-        and len(params_list) >= settings.ANTHROPIC_BATCH_MIN_REQUESTS
-    )
-    if not use_batch:
+    if not should_batch(len(params_list)):
         return await _run_live(params_list, live_concurrency)
 
     try:

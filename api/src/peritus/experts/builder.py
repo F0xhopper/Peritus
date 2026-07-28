@@ -10,9 +10,21 @@ Stages:
   2. VALIDATE — Claude validates each raw source and tags which key concepts it covers
   2b. GAP-FILL — key concepts no passing source covers get one targeted re-search
   3. CHUNK + EMBED — chunk, contextualise, embed, store each validated source
+                     ── the expert becomes chat-ready here ──
   4. GRAPH EXTRACT — Claude reads chunks in batches, extracts concept graph
   4b. RESOLVE — merge semantically duplicate graph nodes via embedding similarity
   5. PERSONA — Claude generates expert persona from corpus digest
+
+Two cross-cutting decisions live here rather than in the stages:
+
+**Execution policy.** A build declares once, up front, whether its Claude calls
+run live (fast, full price) or through the Message Batches API (half price, up
+to ~1h of queueing per batched stage). Every stage inherits it — see
+:mod:`peritus.infrastructure.anthropic_batch`.
+
+**Readiness.** Retrieval needs chunks, not the concept graph, so the expert is
+published as chat-ready at the end of stage 3 and upgraded to graph-ready after
+stage 4b — see :mod:`peritus.search.readiness`.
 """
 
 import asyncio
@@ -32,10 +44,12 @@ from peritus.experts.domain import Expert
 from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
 from peritus.graph.repository import GraphRepository, node_embedding_text
+from peritus.infrastructure.anthropic_batch import BuildExecution, build_execution
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_sources
+from peritus.search.readiness import Readiness, set_readiness
 from peritus.sources.domain import (
     DroppedSource,
     RawSource,
@@ -55,6 +69,7 @@ from peritus.sources.fetchers.arxiv import (
 from peritus.sources.fetchers.exa import ExaFetcher
 from peritus.sources.fetchers.gutenberg import GutenbergFetcher
 from peritus.sources.fetchers.pdf import PdfFetcher
+from peritus.sources.fetchers.pubmed import PubmedFetcher
 from peritus.sources.fetchers.reddit import RedditFetcher
 from peritus.sources.fetchers.thought_leaders import ThoughtLeadersFetcher
 from peritus.sources.fetchers.web import WebFetcher
@@ -70,7 +85,7 @@ EventCallback = Callable[[dict], Coroutine[Any, Any, None]]
 # Gap-fill: query-driven fetchers only — the identify-then-fetch fetchers
 # (gutenberg, thought_leaders) and noisy ones (reddit, youtube) don't take
 # well to narrow concept queries.
-_GAPFILL_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf")
+_GAPFILL_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf", "pubmed")
 _GAPFILL_MAX_CONCEPTS = 4
 _GAPFILL_RESULTS_PER_QUERY = 2
 
@@ -93,6 +108,7 @@ _FETCHER_SOURCE_TYPES: dict[str, SourceType] = {
     "web": SourceType.WEB,
     "reddit": SourceType.REDDIT,
     "thought_leaders": SourceType.THOUGHT_LEADER,
+    "pubmed": SourceType.PUBMED,
 }
 
 _FETCHER_NAMES: tuple[str, ...] = (
@@ -105,6 +121,7 @@ _FETCHER_NAMES: tuple[str, ...] = (
     "web",
     "reddit",
     "thought_leaders",
+    "pubmed",
 )
 _MAX_QUERIES_PER_FETCHER = 3
 
@@ -209,11 +226,16 @@ class ExpertBuilder:
         self,
         pool: asyncpg.Pool,
         source_filter: list[str] | None = None,
+        execution: BuildExecution | None = None,
     ) -> None:
+        """``execution=None`` resolves per build (see :func:`resolve_execution`);
+        pass a mode explicitly to force one — e.g. a scheduled refresh that should
+        always take the half-price path regardless of what the expert looks like."""
         self._pool = pool
         self._repo = ExpertRepository(pool)
         self._graph_repo = GraphRepository(pool)
         self._source_filter = source_filter
+        self._execution = execution
 
     def _build_fetchers(
         self,
@@ -232,6 +254,7 @@ class ExpertBuilder:
             "web": (WebFetcher(), 3),
             "reddit": (RedditFetcher(), 5),
             "thought_leaders": (ThoughtLeadersFetcher(), 3),
+            "pubmed": (PubmedFetcher(), 2),
         }
 
         active: dict[str, tuple[Any, int]] = {}
@@ -249,6 +272,35 @@ class ExpertBuilder:
         return active
 
     async def build(
+        self,
+        expert: Expert,
+        on_event: EventCallback | None = None,
+    ) -> BuildResult:
+        """Run the pipeline under this build's execution policy.
+
+        The policy is fixed here, for the whole build, and every stage inherits
+        it — a build cannot half-batch. Readiness is also reset here: the worker
+        has just deleted the previous corpus, so an expert being rebuilt must
+        stop advertising itself as chattable until its new chunks land.
+        """
+        execution = self._execution or resolve_execution(expert)
+        await set_readiness(self._pool, expert.id, Readiness.PENDING)
+        await _emit_event(
+            on_event,
+            {
+                "type": "execution_mode",
+                "mode": execution.value,
+                "batched": execution is BuildExecution.BACKGROUND
+                and settings.ANTHROPIC_BATCH_ENABLED,
+            },
+        )
+        logger.info(
+            "Building expert %d (%r) with execution=%s", expert.id, expert.name, execution.value
+        )
+        with build_execution(execution):
+            return await self._build(expert, on_event)
+
+    async def _build(
         self,
         expert: Expert,
         on_event: EventCallback | None = None,
@@ -359,6 +411,31 @@ class ExpertBuilder:
         if not all_chunk_ids:
             raise BuildError("No chunks were embedded — ingestion failed for all sources.")
 
+        # ── Chat-ready ───────────────────────────────────────────────────────
+        # Everything retrieval needs now exists. Hybrid search reads only
+        # source_chunks + sources, and graph expansion is a no-op while the
+        # graph is empty, so the expert can already give a grounded, cited
+        # answer. Publish it now instead of after the graph and persona stages,
+        # and write the counts so the expert doesn't read as empty in the UI.
+        await self._repo.update_counts(
+            expert.id,
+            source_count=len(passed),
+            chunk_count=len(all_chunk_ids),
+            node_count=0,
+            edge_count=0,
+            avg_quality=avg_quality,
+        )
+        await set_readiness(self._pool, expert.id, Readiness.CHAT_READY)
+        await _emit_event(
+            on_event,
+            {
+                "type": "chat_ready",
+                "sources": len(passed),
+                "chunks": len(all_chunk_ids),
+                "graph_expanded": False,
+            },
+        )
+
         # Stage 4: Graph extraction
         total_batches = math.ceil(len(all_chunks_for_graph) / settings.GRAPH_BATCH_SIZE)
         await _emit_event(
@@ -394,6 +471,21 @@ class ExpertBuilder:
             node_count=node_count,
             edge_count=edge_count,
             avg_quality=avg_quality,
+        )
+
+        # ── Graph-ready ──────────────────────────────────────────────────────
+        # Retrieval transparently upgrades from here: the same chat request now
+        # finds anchor nodes for its hits, so passages arrive with neighbouring
+        # concepts, relationships, and contradiction flags. No client action.
+        await set_readiness(self._pool, expert.id, Readiness.GRAPH_READY)
+        await _emit_event(
+            on_event,
+            {
+                "type": "graph_ready",
+                "nodes": node_count,
+                "edges": edge_count,
+                "graph_expanded": True,
+            },
         )
 
         await _emit_event(on_event, {"type": "stage", "stage": 5, "name": "persona"})
@@ -703,6 +795,31 @@ class ExpertBuilder:
                 )
 
         return passed_ids
+
+
+def resolve_execution(expert: Expert) -> BuildExecution:
+    """Pick the cost/latency policy for a build that didn't state one.
+
+    ``BUILD_EXECUTION_DEFAULT=auto`` (the default) reads it off the expert: an
+    expert that has never produced a persona has never finished a build, so
+    somebody is sitting in front of the progress log waiting for their first
+    expert — that build runs live. Anything else is a rebuild or a refresh of an
+    expert that already works, which nobody is blocked on, so it takes the
+    half-price batched path.
+
+    ``reset_build_state`` deletes sources, chunks and the graph but leaves the
+    persona, so this signal survives the reset the worker does immediately
+    before calling us. A retry of a *failed* first build still reads as a first
+    build, which is what we want: the user is still waiting.
+    """
+    configured = settings.BUILD_EXECUTION_DEFAULT
+    if configured in (BuildExecution.INTERACTIVE, BuildExecution.BACKGROUND):
+        return BuildExecution(configured)
+    if configured != "auto":
+        logger.warning(
+            "Unknown BUILD_EXECUTION_DEFAULT=%r — falling back to 'auto'", configured
+        )
+    return BuildExecution.BACKGROUND if expert.persona_name else BuildExecution.INTERACTIVE
 
 
 async def _plan_research(topic: str) -> dict:

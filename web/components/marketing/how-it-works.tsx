@@ -3,28 +3,32 @@ import { SectionHeading } from "@/components/marketing/section-heading";
 const STEPS = [
   {
     n: "01",
-    title: "Plan",
+    title: "Plan the search",
     description:
-      "Claude drafts a research brief — per-source search queries and the key concepts the corpus must cover.",
+      "Claude turns your topic into a tailored query for each source type, and names the five to eight concepts the corpus has to cover. That concept list is what the finished corpus gets checked against.",
   },
   {
     n: "02",
-    title: "Discover, validate, graph",
+    title: "Search wide, screen with reasons",
     description:
-      "Sources are fetched, scored against the brief, chunked and embedded, then read again to extract a concept graph.",
+      "Fetchers over-search in parallel, a triage pass ranks candidates before anything is downloaded, and the survivors are scored for quality and relevance. Each keep or drop is recorded with its score and, when dropped, its reason.",
   },
   {
     n: "03",
-    title: "Chat with citations",
+    title: "Close the gaps",
     description:
-      "A named persona answers from the graph and its sources, with a numbered citation on every claim.",
+      "Accepted sources are tagged against the target concepts. Any concept still uncovered triggers another round of searching — so what you end up with is a corpus and an argument for why it is sufficient.",
   },
 ];
 
 export function HowItWorks() {
   return (
     <section id="how-it-works" className="mx-auto max-w-5xl px-4 py-20">
-      <SectionHeading eyebrow="The build" title="How it works" />
+      <SectionHeading eyebrow="The build" title="How it works">
+        Afterwards the corpus is chunked, embedded and read again into a concept
+        graph, so you can question it and get numbered citations back to the
+        passages the answer actually came from.
+      </SectionHeading>
       <div className="mt-10 grid gap-8 sm:grid-cols-3">
         {STEPS.map((step) => (
           // Each step is numbered like a folio: the figure large and quiet in

@@ -1,38 +1,52 @@
-import { NetworkIcon, QuoteIcon, LayersIcon, TerminalSquareIcon } from "lucide-react";
+import {
+  TelescopeIcon,
+  ClipboardCheckIcon,
+  RouteIcon,
+  SplitIcon,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionHeading } from "@/components/marketing/section-heading";
 
+// Every claim below is a description of something the build pipeline actually
+// records. Nothing here describes a planned feature: the fetcher list is the
+// one in sources/fetchers, the scores and drop reasons are columns on the
+// `sources` table, and `discovered_via` is the provenance stamp written in
+// experts/builder.py. If a claim can't be pointed at a column, it doesn't ship.
+
 const FEATURES = [
   {
-    icon: NetworkIcon,
-    title: "Graph-grounded, not chunk retrieval",
+    icon: TelescopeIcon,
+    title: "The sources an export misses",
     description:
-      "Every expert builds a property graph of concepts and relationships from its sources, so answers draw on structure — not just nearest-neighbor chunks.",
+      "Nine fetchers run in parallel: the open web, PDFs read by OCR, preprints, public-domain books, conference talks by transcript, and practitioner discussion. The grey literature that never had a database record.",
   },
   {
-    icon: QuoteIcon,
-    title: "Every answer is cited",
+    icon: ClipboardCheckIcon,
+    title: "Every source scored, every rejection reasoned",
     description:
-      "Chat responses carry numbered citations back to the exact source, every time — no unverifiable claims.",
+      "Claude scores each source for quality and relevance against a versioned rubric. Anything below threshold is dropped with its reason recorded — alongside the model that judged it and the rubric version it was judged under.",
   },
   {
-    icon: LayersIcon,
-    title: "Lite, standard, and pro tiers",
+    icon: RouteIcon,
+    title: "A record of which search found what",
     description:
-      "Pick the build depth per expert: fewer sources for a fast lite build, or a wider, deeper corpus for pro.",
+      "Each source is stamped with how it entered the corpus: the planned search, a citation snowball from a paper already accepted, or a gap-fill round aimed at a concept the corpus was still missing.",
   },
   {
-    icon: TerminalSquareIcon,
-    title: "CLI, TUI, and web — one session",
+    icon: SplitIcon,
+    title: "Gaps and disagreements, surfaced",
     description:
-      "Build and chat from the terminal or the browser. Signing in once carries the same session everywhere.",
+      "The plan names the concepts the corpus has to cover, and uncovered ones trigger another round of searching. Where sources contradict each other, the concept graph records the edge and answers are asked to surface the tension.",
   },
 ];
 
 export function FeatureGrid() {
   return (
     <section id="product" className="mx-auto max-w-5xl px-4 py-20">
-      <SectionHeading eyebrow="Capabilities" title="What you get" />
+      <SectionHeading eyebrow="Capabilities" title="What gets recorded">
+        A reviewer who asks how you assembled this evidence should get an answer
+        with a shape to it — not a sentence saying you also searched the web.
+      </SectionHeading>
       <div className="mt-10 grid gap-4 sm:grid-cols-2">
         {FEATURES.map((feature) => (
           <Card key={feature.title} className="rounded-lg">

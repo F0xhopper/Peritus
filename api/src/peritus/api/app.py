@@ -7,7 +7,8 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from peritus.api.routes import auth, chat, conversations, experts, health
+from peritus.api.middleware import RequestContextMiddleware, install_error_handlers
+from peritus.api.routes import audit, auth, chat, conversations, experts, health
 from peritus.core.config import settings
 from peritus.core.logging import get_logger, setup_logging
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
@@ -73,17 +74,25 @@ def create_app() -> FastAPI:
     setup_logging(settings.LOG_LEVEL, log_file=settings.LOG_FILE or None)
 
     app = FastAPI(title="Peritus API", version="1.0.0", lifespan=lifespan)
+    # Order matters: middleware added last runs first, so the request id is bound
+    # before CORS and is therefore available on every log line and error body,
+    # including the ones CORS itself produces.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Browser clients read the id off a failed response to report it.
+        expose_headers=["X-Request-ID"],
     )
+    app.add_middleware(RequestContextMiddleware)
+    install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(experts.router)
     app.include_router(chat.router)
     app.include_router(conversations.router)
+    app.include_router(audit.router)
     return app
 
 

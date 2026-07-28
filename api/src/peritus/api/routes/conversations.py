@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
 from peritus.api.auth import AuthUser, require_user
+from peritus.api.ratelimit import chat_rate_limit
 from peritus.api.schemas.conversations import (
     ConversationDetail,
     ConversationMessageOut,
@@ -29,9 +30,10 @@ from peritus.api.schemas.conversations import (
 from peritus.chat.conversation_repository import Conversation, ConversationRepository
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.experts.domain import Expert, ExpertStatus
+from peritus.experts.domain import Expert
 from peritus.experts.repository import ExpertRepository
 from peritus.infrastructure.database import get_pool
+from peritus.search.readiness import get_readiness
 
 logger = get_logger(__name__)
 
@@ -97,11 +99,10 @@ async def create_conversation(slug: str, user: AuthUser = Depends(require_user))
     """Create an empty conversation. The web client calls this on the first
     send, so empties are transient; recents filter them out regardless."""
     expert = await _get_owned_expert(slug, user)
-    if expert.status != ExpertStatus.READY:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Expert status is {expert.status.value}, not ready",
-        )
+    # Retrieval readiness, not job status — see routes/chat.py.
+    readiness = await get_readiness(get_pool(), expert.id)
+    if not readiness.can_chat:
+        raise HTTPException(status_code=409, detail=f"Expert is {readiness.label}")
     conv = await ConversationRepository(get_pool()).create(expert.id, user.id)
     logger.info("Created conversation %s for expert %d", conv.id, expert.id)
     return _summary_from_expert(conv, expert)
@@ -184,24 +185,31 @@ async def delete_conversation(
 async def send_message(
     conversation_id: uuid.UUID,
     req: SendMessageRequest,
-    user: AuthUser = Depends(require_user),
+    user: AuthUser = Depends(chat_rate_limit),
 ):
     """Send a question and stream the answer (SSE), persisting both turns.
 
     Event protocol is the stateless endpoint's plus a leading ``meta`` event
     (``conversation_id`` + ``title``) so the client can update sidebar/URL
     without a second fetch.
+
+    Throttled per user on the same budget as the stateless endpoint: the two
+    surfaces cost the same to serve, so one must not be a way around the other.
     """
     pool = get_pool()
     convs = ConversationRepository(pool)
     conv = await _get_owned_conversation(conversation_id, user)
 
     expert = await ExpertRepository(pool).get_by_id(conv.expert_id)
-    if not expert or expert.status != ExpertStatus.READY:
-        # An expert can regress to building/queued on rebuild; deletion cascades
-        # the conversation away, so a missing expert can only be a race.
-        status = expert.status.value if expert else "deleted"
-        raise HTTPException(status_code=409, detail=f"Expert status is {status}, not ready")
+    if not expert:
+        # Deletion cascades the conversation away, so a missing expert here can
+        # only be a race with an in-flight delete.
+        raise HTTPException(status_code=409, detail="Expert is deleted")
+    # A rebuild resets readiness to pending before it wipes the corpus, so this
+    # also catches an expert whose sources are being replaced underneath us.
+    readiness = await get_readiness(pool, expert.id)
+    if not readiness.can_chat:
+        raise HTTPException(status_code=409, detail=f"Expert is {readiness.label}")
 
     if not await convs.claim_stream(conv.id):
         raise HTTPException(status_code=409, detail="An answer is already streaming")
@@ -278,7 +286,11 @@ async def _stream_and_persist(
 
         from peritus.chat.streaming import stream_expert_answer
 
-        async for event in stream_expert_answer(pool, expert, question, history):
+        # conversation_id ties this answer's retrieval audit to the transcript,
+        # so a persisted answer can be accounted for long after its stream ends.
+        async for event in stream_expert_answer(
+            pool, expert, question, history, conversation_id=conv.id
+        ):
             if event["type"] == "token":
                 answer_parts.append(event["text"])
             elif event["type"] == "sources":

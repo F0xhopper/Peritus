@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Wordmark } from "@/components/brand/wordmark";
 
 const LINKS = [
-  { href: "#product", label: "Product" },
+  { href: "#product", label: "Capabilities" },
   { href: "#how-it-works", label: "How it works" },
   { href: "#faq", label: "FAQ" },
 ];

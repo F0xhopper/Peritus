@@ -12,6 +12,7 @@ class SourceType(StrEnum):
     PDF = "pdf"
     REDDIT = "reddit"
     THOUGHT_LEADER = "thought_leader"
+    PUBMED = "pubmed"
 
 
 @dataclass

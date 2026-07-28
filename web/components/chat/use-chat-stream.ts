@@ -16,11 +16,21 @@ export type ChatStatus = "idle" | "streaming" | "error";
 
 /** The answer streaming right now. It has no id — the server assigns one only
  * once the message is persisted, which is after the stream ends. */
+export interface RetrievalTrail {
+  retrieved: number;
+  unique: number;
+  in_context: number;
+  cited: number;
+}
+
 export interface PendingAnswer {
   content: string;
   citations: Citation[] | null;
   has_contradiction: boolean;
   interrupted: boolean;
+  /** Populated by the `retrieval_audit` event, which arrives after the answer
+   * has finished streaming. Null until then. */
+  trail: RetrievalTrail | null;
 }
 
 export interface ChatStreamState {
@@ -117,6 +127,7 @@ export function useChatStream({
         content: "",
         citations: null,
         has_contradiction: false,
+        trail: null,
         interrupted: false,
       });
 
@@ -167,6 +178,21 @@ export function useChatStream({
                       ...p,
                       citations: event.citations,
                       has_contradiction: event.has_contradiction,
+                    }
+                  : p,
+              );
+              break;
+            case "retrieval_audit":
+              setPending((p) =>
+                p
+                  ? {
+                      ...p,
+                      trail: {
+                        retrieved: event.passages.retrieved,
+                        unique: event.passages.unique,
+                        in_context: event.passages.in_context,
+                        cited: event.passages.cited,
+                      },
                     }
                   : p,
               );

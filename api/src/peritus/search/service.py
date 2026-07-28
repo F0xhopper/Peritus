@@ -4,9 +4,32 @@ import json
 import asyncpg
 
 from peritus.core.config import settings
-from peritus.infrastructure.embeddings import embed_text
+from peritus.infrastructure.database import halfvec_supported
+from peritus.infrastructure.embeddings import embed_query
 from peritus.infrastructure.reranker import rerank
 from peritus.search.domain import SearchResponse, SearchResult, SourceRef
+
+
+def _distance_expr() -> tuple[str, str]:
+    """The cosine-distance expression for ORDER BY, as ``(column, parameter)``.
+
+    pgvector cannot build an HNSW or IVFFlat index on a ``vector`` wider than
+    2000 dimensions, and the corpus is embedded at 3072. ``halfvec`` (pgvector
+    ≥ 0.7) raises that ceiling to 4000, so migration 019 indexes the *expression*
+    ``embedding::halfvec(n)`` — and the query has to order by the identical
+    expression or the planner will not use it.
+
+    Half precision costs nothing that matters here: it is a candidate-generation
+    ranking that a cross-encoder reranks afterwards, and both the indexed and
+    unindexed paths use the same expression, so results do not shift depending on
+    whether the index happens to exist.
+    """
+    dim = settings.EMBED_DIM
+    if halfvec_supported():
+        # The parameter stays a `vector` — that is the codec registered on the
+        # connection — and Postgres narrows it once, not per row.
+        return f"sc.embedding::halfvec({dim})", f"$1::vector({dim})::halfvec({dim})"
+    return "sc.embedding", "$1"
 
 
 class SearchService:
@@ -19,7 +42,7 @@ class SearchService:
         query: str,
         top_k: int = 10,
     ) -> SearchResponse:
-        query_embedding = await embed_text(query)
+        query_embedding = await embed_query(query)
 
         rerank_on = settings.RERANK_ENABLED and bool(settings.ANTHROPIC_API_KEY)
         fetch_k = max(settings.RERANK_CANDIDATES, top_k) if rerank_on else top_k
@@ -58,7 +81,7 @@ class SearchService:
         fetch_k = max(settings.RERANK_CANDIDATES, top_k) if rerank_on else top_k
         candidate_k = max(fetch_k * 4, 100)
 
-        embeddings = await asyncio.gather(*[embed_text(q) for q in queries])
+        embeddings = await asyncio.gather(*[embed_query(q) for q in queries])
 
         all_hits = await asyncio.gather(*[
             self._hybrid_search(
@@ -95,57 +118,72 @@ class SearchService:
         candidate_k: int,
         top_k: int,
     ):
-        from pgvector.asyncpg import register_vector  # type: ignore
-        async with self._pool.acquire() as conn:
-            await register_vector(conn)
-            rows = await conn.fetch(
-                """
-                WITH semantic AS (
-                    SELECT sc.id, sc.expert_id, sc.source_id, sc.text, sc.context_text,
-                           sc.sequence_n, sc.chunk_meta,
-                           s.title AS source_title, s.source_type, s.quality_score,
-                           1 - (sc.embedding <=> $1) AS sem_score,
-                           ROW_NUMBER() OVER (ORDER BY sc.embedding <=> $1) AS sem_rank
+        """Semantic ⊕ keyword candidates, fused by reciprocal rank.
+
+        Both arms rank in a wrapper over an already-limited subquery rather than
+        ranking and limiting in one level. That is not cosmetic: a window
+        function is evaluated *before* ``LIMIT``, so in ``ROW_NUMBER() OVER
+        (ORDER BY <distance>) … LIMIT k`` the ``WindowAgg`` sits between the
+        limit and the scan and has to consume every chunk the expert owns.
+        The index is still used, but it cannot stop at k — which is most of what
+        an ANN index is for. Ranking outside the limit makes ``Limit`` the direct
+        parent of the index scan, so it terminates after k rows (verified on
+        Postgres 17 / pgvector 0.8).
+
+        The candidate arms select ``id`` only. Chunk text is fetched once, at the
+        end, for the fused set — the previous shape hauled full text for every
+        semantic candidate and then discarded it to re-fetch the same columns.
+        """
+        dist_col, dist_param = _distance_expr()
+        sql = f"""
+            WITH semantic AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY distance) AS sem_rank
+                FROM (
+                    SELECT sc.id, {dist_col} <=> {dist_param} AS distance
                     FROM source_chunks sc
-                    JOIN sources s ON s.id = sc.source_id
-                    WHERE sc.expert_id = $2
-                    ORDER BY sc.embedding <=> $1
+                    WHERE sc.expert_id = $2 AND sc.embedding IS NOT NULL
+                    ORDER BY {dist_col} <=> {dist_param}
                     LIMIT $3
-                ),
-                keyword AS (
+                ) ranked
+            ),
+            keyword AS (
+                SELECT id, ROW_NUMBER() OVER (ORDER BY rank DESC) AS kw_rank
+                FROM (
                     SELECT sc.id,
-                           ROW_NUMBER() OVER (
-                               ORDER BY ts_rank_cd(
-                                   to_tsvector('english', sc.text),
-                                   plainto_tsquery('english', $4)
-                               ) DESC
-                           ) AS kw_rank
+                           ts_rank_cd(
+                               to_tsvector('english', sc.text),
+                               plainto_tsquery('english', $4)
+                           ) AS rank
                     FROM source_chunks sc
                     WHERE sc.expert_id = $2
                       AND to_tsvector('english', sc.text) @@ plainto_tsquery('english', $4)
+                    ORDER BY rank DESC
                     LIMIT $3
-                ),
-                fused AS (
-                    SELECT
-                        COALESCE(s.id, k.id) AS id,
-                        COALESCE(1.0 / (60 + s.sem_rank), 0) +
-                        COALESCE(1.0 / (60 + k.kw_rank), 0) AS rrf_score
-                    FROM semantic s
-                    FULL OUTER JOIN keyword k ON k.id = s.id
-                )
-                -- Re-fetch columns for EVERY fused id (semantic OR keyword-only) so
-                -- keyword matches outside the vector top-N still surface as results.
-                SELECT sc.id, sc.expert_id, sc.source_id, sc.text, sc.context_text,
-                       sc.sequence_n, sc.chunk_meta,
-                       s.title AS source_title, s.source_type, s.quality_score,
-                       fused.rrf_score
-                FROM fused
-                JOIN source_chunks sc ON sc.id = fused.id
-                JOIN sources s ON s.id = sc.source_id
-                ORDER BY fused.rrf_score DESC
-                LIMIT $5
-                """,
-                query_embedding, expert_id, candidate_k, query_text, top_k,
+                ) matched
+            ),
+            fused AS (
+                SELECT
+                    COALESCE(s.id, k.id) AS id,
+                    COALESCE(1.0 / (60 + s.sem_rank), 0) +
+                    COALESCE(1.0 / (60 + k.kw_rank), 0) AS rrf_score
+                FROM semantic s
+                FULL OUTER JOIN keyword k ON k.id = s.id
+            )
+            -- Fetch columns for EVERY fused id (semantic OR keyword-only) so
+            -- keyword matches outside the vector top-N still surface as results.
+            SELECT sc.id, sc.expert_id, sc.source_id, sc.text, sc.context_text,
+                   sc.sequence_n, sc.chunk_meta,
+                   s.title AS source_title, s.source_type, s.quality_score,
+                   fused.rrf_score
+            FROM fused
+            JOIN source_chunks sc ON sc.id = fused.id
+            JOIN sources s ON s.id = sc.source_id
+            ORDER BY fused.rrf_score DESC
+            LIMIT $5
+        """
+        async with self._pool.acquire(timeout=settings.DB_ACQUIRE_TIMEOUT) as conn:
+            rows = await conn.fetch(
+                sql, query_embedding, expert_id, candidate_k, query_text, top_k
             )
         return rows
 

@@ -85,6 +85,7 @@ export function MessageList({
             citations={pending.citations}
             hasContradiction={pending.has_contradiction}
             interrupted={pending.interrupted}
+            trail={pending.trail}
             messageKey="pending"
             streaming={streaming}
           />

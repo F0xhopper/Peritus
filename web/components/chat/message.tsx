@@ -6,6 +6,8 @@ import remarkGfm from "remark-gfm";
 import { AlertTriangleIcon, UnplugIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CitationList } from "@/components/chat/citation-list";
+import { RetrievalTrail } from "@/components/chat/retrieval-trail";
+import type { RetrievalTrail as RetrievalTrailData } from "@/components/chat/use-chat-stream";
 import type { Citation } from "@/lib/api/types";
 
 // Assistant output is rendered through react-markdown with GFM only —
@@ -20,6 +22,7 @@ export function Message({
   citations,
   hasContradiction,
   interrupted,
+  trail,
   messageKey,
   streaming,
 }: {
@@ -28,6 +31,7 @@ export function Message({
   citations: Citation[] | null;
   hasContradiction: boolean;
   interrupted: boolean;
+  trail?: RetrievalTrailData | null;
   messageKey: string;
   streaming?: boolean;
 }) {
@@ -138,6 +142,12 @@ export function Message({
           messageKey={messageKey}
           highlighted={highlighted}
         />
+      )}
+
+      {trail && (
+        <div className="mt-2">
+          <RetrievalTrail trail={trail} />
+        </div>
       )}
     </div>
   );

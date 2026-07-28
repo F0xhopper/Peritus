@@ -65,11 +65,54 @@ _COVERAGE_TOOL: dict[str, Any] = {
 
 
 @dataclass
+class RetrievalStep:
+    """One passage the retrieval pipeline surfaced, before context assembly.
+
+    Retained so an answer can account for every passage that was considered —
+    including the ones that ranked below the tier's context cap and were never
+    shown to the model. Those are invisible in the answer itself and are exactly
+    what a reader asking "what else did it look at?" wants.
+    """
+
+    chunk_id: int
+    source_id: int
+    source_title: str
+    source_type: str
+    quality_score: float | None
+    rank: int          # 1-based, in the order retrieval produced it
+    score: float       # fused RRF score, or the reranker's score when reranking ran
+    via: str           # "primary" | "coverage_followup"
+
+
+@dataclass
+class RetrievalTrail:
+    """The audit trail for one retrieval pass.
+
+    A record of the path evidence took, not an assessment of the answer. It
+    contains no score, grade or judgement of the response, deliberately: the
+    product's claim is that the work is inspectable, and a confidence number
+    invites readers to skip the inspection.
+    """
+
+    subqueries: list[str] = field(default_factory=list)
+    followup_queries: list[str] = field(default_factory=list)
+    coverage_satisfied: bool | None = None
+    second_pass: bool = False
+    context_cap: int = 0
+    duplicate_hits: int = 0
+    graph_expanded: bool = False
+    steps: list[RetrievalStep] = field(default_factory=list)
+
+
+@dataclass
 class RetrievedContext:
     """Everything the composition step needs, produced by the retrieval pipeline."""
     context_block: str
     passages: list[Passage]
     has_contradiction: bool
+    # Optional so every existing constructor call stays valid; the streaming
+    # path always populates it.
+    trail: RetrievalTrail | None = None
 
 
 @dataclass
@@ -134,6 +177,61 @@ def build_composition_messages(history: list[dict], question: str, context_block
     return messages
 
 
+def _build_trail(
+    enriched: list,
+    primary_count: int,
+    subqueries: list[str],
+    followup_queries: list[str],
+    coverage: dict,
+    context_cap: int,
+) -> RetrievalTrail:
+    """Record every retrieved passage once, in retrieval order.
+
+    A chunk can be returned by both retrieval passes; ``build_grounded_context``
+    de-duplicates it down to a single numbered passage, so the trail keeps the
+    first occurrence and counts the rest as duplicate hits. That keeps the
+    trail's passage list and the model's numbering in one-to-one correspondence.
+    """
+    steps: list[RetrievalStep] = []
+    seen: set[int] = set()
+    duplicates = 0
+    graph_expanded = False
+
+    for i, e in enumerate(enriched):
+        if e.related_concepts or e.relationships:
+            graph_expanded = True
+        chunk_id = e.result.chunk_id
+        if chunk_id in seen:
+            duplicates += 1
+            continue
+        seen.add(chunk_id)
+        ref = e.result.source_ref
+        steps.append(
+            RetrievalStep(
+                chunk_id=chunk_id,
+                source_id=e.result.source_id,
+                source_title=ref.title,
+                source_type=ref.source_type,
+                quality_score=ref.quality_score,
+                rank=len(steps) + 1,
+                score=e.result.score,
+                via="primary" if i < primary_count else "coverage_followup",
+            )
+        )
+
+    satisfied = coverage.get("satisfied")
+    return RetrievalTrail(
+        subqueries=list(subqueries),
+        followup_queries=list(followup_queries),
+        coverage_satisfied=satisfied if isinstance(satisfied, bool) else None,
+        second_pass=bool(followup_queries),
+        context_cap=context_cap,
+        duplicate_hits=duplicates,
+        graph_expanded=graph_expanded,
+        steps=steps,
+    )
+
+
 # Yielded items: ("status", str) progress updates, then exactly one
 # ("context", RetrievedContext) as the final item.
 RetrieveEvent = tuple[str, "str | RetrievedContext"]
@@ -177,12 +275,19 @@ class ChatAgent:
         passages = [{"text": e.text, "citation": e.citation} for e in enriched]
         coverage = await self._assess_coverage(question, passages, cfg.max_context_passages)
 
+        # Everything retrieved so far came from the planned subqueries; anything
+        # appended below came from the coverage follow-up. Tracking the boundary
+        # here is what lets the trail say which pass produced each passage.
+        primary_count = len(enriched)
+        followup_queries: list[str] = []
+
         if not coverage["satisfied"] and coverage.get("suggested_queries"):
             yield ("status", "Retrieving additional context…")
+            followup_queries = coverage["suggested_queries"][:cfg.max_subqueries // 2]
             extra_resp = await self._search.batch_search(
                 expert_id=expert.id,
                 question=question,
-                queries=coverage["suggested_queries"][:cfg.max_subqueries // 2],
+                queries=followup_queries,
                 top_k=cfg.coverage_extra_k,
             )
             extra_enriched = await self._graph.expand(
@@ -193,10 +298,19 @@ class ChatAgent:
         # 5. Numbered, deduplicated context block
         yield ("status", "Composing response…")
         context_block, indexed = build_grounded_context(enriched, cfg.max_context_passages)
+        trail = _build_trail(
+            enriched=enriched,
+            primary_count=primary_count,
+            subqueries=subqueries,
+            followup_queries=followup_queries,
+            coverage=coverage,
+            context_cap=cfg.max_context_passages,
+        )
         yield ("context", RetrievedContext(
             context_block=context_block,
             passages=indexed,
             has_contradiction=any(e.has_contradiction for e in enriched),
+            trail=trail,
         ))
 
     async def gather_context(self, expert: Expert, question: str) -> RetrievedContext:

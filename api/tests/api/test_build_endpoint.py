@@ -89,6 +89,7 @@ async def test_build_enqueues_and_streams(client):
         patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
         patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
         patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
@@ -101,11 +102,55 @@ async def test_build_enqueues_and_streams(client):
         mock_jobs.read_events = AsyncMock(return_value=[_done_event()])
         MockJobs.return_value = mock_jobs
 
+        # Builds are credit-gated at enqueue; an entitled caller passes both the
+        # pre-check and the hold.
+        mock_entitlements = AsyncMock()
+        MockEntitlements.return_value = mock_entitlements
+
         resp = await client.post("/experts/build", json={"topic": "stoicism", "tier": "lite"})
 
     assert resp.status_code == 200
     assert "done" in resp.text
     mock_jobs.enqueue.assert_awaited_once()
+    # Authorised before anything was created, then charged once the job existed.
+    mock_entitlements.authorize_build.assert_awaited_once()
+    mock_entitlements.hold_for_job.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_build_denied_without_credits(client):
+    """A denial is a structured 402 the client can render, not prose."""
+    from peritus.billing.domain import FREE, InsufficientCredits
+
+    with (
+        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+    ):
+        mock_repo = AsyncMock()
+        mock_repo.get_by_name = AsyncMock(return_value=None)
+        MockRepo.return_value = mock_repo
+        MockJobs.return_value = AsyncMock()
+
+        mock_entitlements = AsyncMock()
+        mock_entitlements.authorize_build = AsyncMock(
+            side_effect=InsufficientCredits(
+                required=1, available=0, tier=ExpertTier.LITE, plan=FREE
+            )
+        )
+        MockEntitlements.return_value = mock_entitlements
+
+        resp = await client.post("/experts/build", json={"topic": "stoicism", "tier": "lite"})
+
+    assert resp.status_code == 402
+    body = resp.json()["detail"]
+    assert body["code"] == "insufficient_credits"
+    assert body["required_credits"] == 1
+    assert body["available_credits"] == 0
+    assert body["remedy"]["kind"] == "request_credits"
+    # Nothing was created for a build that was never authorised.
+    mock_repo.create.assert_not_awaited()
 
 
 # ── reconnect endpoint replays from a cursor ──
@@ -146,8 +191,10 @@ async def test_delete_cancels_then_deletes(client):
         patch("peritus.api.routes.experts.JobRepository") as MockJobs,
     ):
         mock_repo = AsyncMock()
-        # Delete is owner-scoped: the route resolves the expert via get_for_user.
-        mock_repo.get_for_user = AsyncMock(return_value=expert)
+        # Delete is a mutation, so it resolves the expert via get_owned_for_user
+        # (owner-only) rather than the wider read-visibility lookup — a public
+        # catalog expert must not be deletable by everyone who can read it.
+        mock_repo.get_owned_for_user = AsyncMock(return_value=expert)
         mock_repo.delete = AsyncMock()
         MockRepo.return_value = mock_repo
 

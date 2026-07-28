@@ -1,3 +1,18 @@
+"""OpenAI embeddings, with the interactive and bulk paths kept apart.
+
+**Two semaphores, deliberately.** A chat turn embeds four to six subqueries and
+a user is watching the spinner; a build embeds hundreds of chunk batches and
+nobody is. When the API runs a build worker in-process
+(``RUN_WORKER_IN_PROCESS``, which is what ``just dev-solo`` and any single-node
+deployment does) a single shared semaphore lets the build's backlog queue ahead
+of every interactive request — chat latency then tracks the build's remaining
+work, unbounded and invisible in any per-request timing.
+
+:func:`embed_query` and :func:`embed_batch` therefore draw on separate budgets.
+Nothing else changes: both still bound how many requests are in flight so a
+large corpus cannot open hundreds of concurrent connections to OpenAI.
+"""
+
 import asyncio
 
 from openai import AsyncOpenAI
@@ -9,19 +24,45 @@ from peritus.core.logging import get_logger
 logger = get_logger(__name__)
 
 _client: AsyncOpenAI | None = None
-_embed_sem = asyncio.Semaphore(2)
+
+# Created lazily so the configured sizes are read at first use, and so importing
+# this module never binds a semaphore to whichever event loop happened to exist.
+_query_sem: asyncio.Semaphore | None = None
+_batch_sem: asyncio.Semaphore | None = None
+
+
+def _get_query_sem() -> asyncio.Semaphore:
+    global _query_sem
+    if _query_sem is None:
+        _query_sem = asyncio.Semaphore(max(1, settings.EMBED_QUERY_CONCURRENCY))
+    return _query_sem
+
+
+def _get_batch_sem() -> asyncio.Semaphore:
+    global _batch_sem
+    if _batch_sem is None:
+        _batch_sem = asyncio.Semaphore(max(1, settings.EMBED_BATCH_CONCURRENCY))
+    return _batch_sem
 
 
 def get_embeddings_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        _client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        _client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            # The SDK's default timeout is minutes long. A query embedding sits
+            # in front of a user waiting on a chat answer, so bound it and let
+            # the SDK retry transient failures rather than hanging on one.
+            timeout=settings.OPENAI_TIMEOUT,
+            max_retries=settings.OPENAI_MAX_RETRIES,
+        )
     return _client
 
 
-async def embed_text(text: str) -> list[float]:
+async def embed_query(text: str) -> list[float]:
+    """Embed one text on the interactive budget. Use this on the request path."""
     client = get_embeddings_client()
-    async with _embed_sem:
+    async with _get_query_sem():
         try:
             resp = await client.embeddings.create(
                 model=settings.EMBED_MODEL,
@@ -33,10 +74,17 @@ async def embed_text(text: str) -> list[float]:
             raise EmbeddingError(str(exc)) from exc
 
 
+# Historical name for the single-text call. Kept so build-side callers and the
+# CLI keep working; it draws on the same interactive budget, which is correct —
+# the bulk path is embed_batch, and that is where a build's volume actually is.
+embed_text = embed_query
+
+
 async def embed_batch(texts: list[str]) -> list[list[float]]:
+    """Embed many texts in one request, on the bulk budget."""
     client = get_embeddings_client()
     cleaned = [t.replace("\n", " ") for t in texts]
-    async with _embed_sem:
+    async with _get_batch_sem():
         try:
             resp = await client.embeddings.create(
                 model=settings.EMBED_MODEL,

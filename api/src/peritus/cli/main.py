@@ -6,8 +6,10 @@ import typer
 
 from peritus.cli.auth import login_command, logout_command, whoami_command
 from peritus.cli.build import build_command
+from peritus.cli.catalog import app as catalog_app
 from peritus.cli.chat import _chat_async, chat_command
 from peritus.cli.credentials import credentials_command
+from peritus.cli.credits import app as credits_app
 from peritus.cli.display import console, suite_view
 from peritus.cli.experts import _experts_with_concepts
 from peritus.cli.experts import app as experts_app
@@ -73,6 +75,8 @@ app.command("login")(login_command)
 app.command("logout")(logout_command)
 app.command("whoami")(whoami_command)
 app.add_typer(experts_app, name="experts")
+app.add_typer(catalog_app, name="catalog")
+app.add_typer(credits_app, name="credits")
 
 
 @app.command("suite")
