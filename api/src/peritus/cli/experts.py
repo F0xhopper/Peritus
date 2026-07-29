@@ -76,6 +76,41 @@ def show_expert(name: str = typer.Argument(..., help="Expert name or fuzzy match
     _run(_inner())
 
 
+@app.command("refresh-persona")
+def refresh_persona(name: str = typer.Argument(..., help="Expert name or fuzzy match")) -> None:
+    """Regenerate an expert's persona from its existing corpus.
+
+    For experts built before a change to the persona prompt: the corpus is
+    already right, only the voice is stale. One model call, no rebuild.
+    """
+    async def _inner():
+        svc = await _service()
+        try:
+            expert = await svc.get(name)
+        except NotFoundError:
+            print_error(f"No expert found matching {name!r}")
+            raise typer.Exit(1) from None
+
+        console.print(
+            f"Regenerating persona for [bold]{expert.name}[/bold] "
+            f"[dim](currently {expert.persona_name or 'unnamed'})[/dim]…"
+        )
+        try:
+            updated = await svc.regenerate_persona(expert.id)
+        except NotFoundError:
+            print_error(
+                f"{expert.name!r} has no validated sources — build it before "
+                "regenerating its persona."
+            )
+            raise typer.Exit(1) from None
+
+        print_success(f"Persona regenerated: {updated.persona_name}")
+        if updated.persona_bio:
+            console.print(f"\n{updated.persona_bio}")
+
+    _run(_inner())
+
+
 @app.command("delete")
 def delete_expert(
     name: str = typer.Argument(..., help="Expert name or fuzzy match"),

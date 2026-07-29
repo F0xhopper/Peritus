@@ -13,6 +13,10 @@ class SourceType(StrEnum):
     REDDIT = "reddit"
     THOUGHT_LEADER = "thought_leader"
     PUBMED = "pubmed"
+    # Supplied by the expert's owner rather than found by discovery. Kept as its
+    # own type so per-type fetch caps, source-type counts, and the catalog can
+    # tell hand-picked material from what the pipeline went looking for.
+    UPLOAD = "upload"
 
 
 @dataclass
@@ -51,6 +55,10 @@ class ValidatedSource:
     difficulty: int
     key_claims: list[str]
     covered_concepts: list[str] = field(default_factory=list)
+    # primary | secondary | tertiary — how close this source sits to the subject
+    # itself, orthogonal to how good it is. ``None`` when the validator failed or
+    # returned something outside the rubric; never silently treated as a tier.
+    source_tier: str | None = None
 
     @property
     def source_type(self) -> SourceType:

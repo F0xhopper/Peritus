@@ -16,8 +16,25 @@ _PASS_THRESHOLD_R = 6.0
 # Sample multiple regions instead of judging a source by its opening (often front
 # matter / abstract). Stamped on the credential as the rubric version.
 _PREVIEW_WINDOW_CHARS = 800
-RUBRIC_VERSION = "v3-concepts-q5r6"
+# Bumped from v3-concepts-q5r6 when source_tier joined the rubric. The version is
+# stamped on every validated source, so changing what the rubric asks for without
+# bumping it would silently mix two rubrics under one label and corrupt the
+# provenance record.
+RUBRIC_VERSION = "v4-tiered-q5r6"
 _VALIDATE_BATCH_SIZE = 5
+
+# What a tier means, in the validator's words and the build's. A corpus can score
+# well on quality and relevance while consisting entirely of material *about* the
+# subject rather than *of* it, and nothing in the old rubric could see that.
+SOURCE_TIERS: tuple[str, ...] = ("primary", "secondary", "tertiary")
+_TIER_DESCRIPTION = (
+    "primary = the work, text, dataset, standard, or original research itself, "
+    "or a practitioner writing first-hand; "
+    "secondary = substantive scholarly or expert analysis that makes its own "
+    "argument about primary material; "
+    "tertiary = summaries, reviews, study guides, listicles, encyclopedia-style "
+    "overviews, and other material that mainly restates what others have said."
+)
 
 _SOURCE_TYPE_HINTS: dict[str, str] = {
     "reddit": (
@@ -48,7 +65,11 @@ _SYSTEM = (
     "Score sources honestly — a score of 5 or above means the source "
     "genuinely addresses the topic with credible content. "
     "When a list of key concepts is provided, judge relevance against the topic "
-    "and those concepts, and tag each source with the key concepts it covers."
+    "and those concepts, and tag each source with the key concepts it covers. "
+    "Also classify how close each source sits to the subject itself: "
+    f"{_TIER_DESCRIPTION} "
+    "Tier is a description, not a score — a first-rate literature review is "
+    "still secondary, and a mediocre original paper is still primary."
 )
 
 _BATCH_TOOL: dict[str, Any] = {
@@ -75,6 +96,14 @@ _BATCH_TOOL: dict[str, Any] = {
                             "type": "string",
                             "enum": ["textbook", "paper", "tutorial", "reference", "opinion", "transcript", "other"],
                         },
+                        "source_tier": {
+                            "type": "string",
+                            "enum": list(SOURCE_TIERS),
+                            "description": (
+                                "How close this source sits to the subject "
+                                f"itself. {_TIER_DESCRIPTION}"
+                            ),
+                        },
                         "difficulty": {
                             "type": "integer",
                             "description": "1 (introductory) to 5 (expert).",
@@ -100,7 +129,8 @@ _BATCH_TOOL: dict[str, Any] = {
                     },
                     "required": [
                         "quality_score", "relevance_score", "content_type",
-                        "difficulty", "key_claims", "covered_concepts", "drop_reason",
+                        "source_tier", "difficulty", "key_claims",
+                        "covered_concepts", "drop_reason",
                     ],
                 },
             }
@@ -139,6 +169,17 @@ def _match_concepts(raw: list, key_concepts: list[str]) -> list[str]:
     return matched
 
 
+def _normalise_tier(raw) -> str | None:
+    """Keep only the three rubric tiers; anything else is *unknown*, not a tier.
+
+    ``None`` is meaningful downstream — a corpus-composition warning must not
+    count a source it could not classify as if it were good news or bad.
+    """
+    if isinstance(raw, str) and raw.strip().casefold() in SOURCE_TIERS:
+        return raw.strip().casefold()
+    return None
+
+
 async def validate_sources(
     topic: str,
     sources: list[RawSource],
@@ -161,7 +202,7 @@ async def validate_sources(
 
     _ERROR_VALIDATION = {
         "quality_score": 0.0, "relevance_score": 0.0,
-        "content_type": "other", "difficulty": 1,
+        "content_type": "other", "source_tier": None, "difficulty": 1,
         "key_claims": [], "drop_reason": "validation error",
     }
 
@@ -213,6 +254,7 @@ async def validate_sources(
                 covered_concepts=_match_concepts(
                     result.get("covered_concepts", []), key_concepts,
                 ),
+                source_tier=_normalise_tier(result.get("source_tier")),
             ))
     return passed, dropped
 
@@ -279,7 +321,7 @@ def _parse_validate_response(resp: Any, batch_len: int) -> list[dict]:
     while len(validations) < batch_len:
         validations.append({
             "quality_score": 0.0, "relevance_score": 0.0,
-            "content_type": "other", "difficulty": 1,
+            "content_type": "other", "source_tier": None, "difficulty": 1,
             "key_claims": [], "drop_reason": "missing validation",
         })
     return validations[:batch_len]

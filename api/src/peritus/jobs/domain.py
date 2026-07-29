@@ -12,6 +12,21 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class JobType(StrEnum):
+    """What a queued job actually does.
+
+    The queue was built for builds and everything about it generalises — claim,
+    heartbeat, retry, reap, and the persisted event tail are all indifferent to
+    what the job body is. Only :meth:`JobWorker._run_job` cares, and it branches
+    here.
+    """
+
+    BUILD = "build"
+    # Ingest one user-supplied document (see ``peritus.uploads``). Its target is
+    # in ``BuildJob.payload`` as ``{"upload_id": int}``.
+    INGEST_SOURCE = "ingest_source"
+
+
 # Terminal event types written to build_events that end an SSE tail.
 TERMINAL_EVENT_TYPES = frozenset({"done", "error", "cancelled"})
 
@@ -31,6 +46,14 @@ class BuildJob:
     last_error: str | None
     created_at: datetime
     updated_at: datetime
+    # Defaulted so every existing constructor call and test fixture stays valid;
+    # rows written before migration 021 read back as builds, which they were.
+    job_type: JobType = JobType.BUILD
+    payload: dict[str, Any] | None = None
+
+    @property
+    def is_build(self) -> bool:
+        return self.job_type is JobType.BUILD
 
 
 @dataclass

@@ -2,13 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import {
-  UsersIcon,
-  LibraryIcon,
-  BarChart3Icon,
-  SettingsIcon,
-  SearchIcon,
-} from "lucide-react";
+import { UsersIcon, SettingsIcon, SearchIcon } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -23,24 +17,25 @@ import { NavMain, type NavItem } from "@/components/nav-main";
 import { NavBuildingExpert } from "@/components/sidebar/nav-building-expert";
 import { NavNewChat } from "@/components/sidebar/nav-new-chat";
 import { NavRecentChats } from "@/components/sidebar/nav-recent-chats";
+import { NavUser } from "@/components/sidebar/nav-user";
 import { CommandMenu } from "@/components/sidebar/command-menu";
 import { Wordmark } from "@/components/brand/wordmark";
-import type { ConversationSummary, ExpertSummary } from "@/lib/api/types";
+import type { ConversationSummary, ExpertSummary, User } from "@/lib/api/types";
 
 const NAV_ITEMS: NavItem[] = [
-  { title: "Catalog", url: "/catalog", icon: LibraryIcon },
   { title: "Experts", url: "/experts", icon: UsersIcon },
-  { title: "Analytics", url: "/analytics", icon: BarChart3Icon },
   { title: "Settings", url: "/settings", icon: SettingsIcon },
 ];
 
 export function AppSidebar({
   experts,
   conversations,
+  user,
   ...props
 }: React.ComponentProps<typeof Sidebar> & {
   experts: ExpertSummary[];
   conversations: ConversationSummary[];
+  user: User | null;
 }) {
   const [commandOpen, setCommandOpen] = React.useState(false);
   // The palette doubles as the expert picker for "New chat"; closing it always
@@ -95,6 +90,7 @@ export function AppSidebar({
         <NavBuildingExpert experts={experts} />
         <NavRecentChats conversations={conversations} />
       </SidebarContent>
+      {user ? <NavUser user={user} /> : null}
       <SidebarRail />
       <CommandMenu
         experts={experts}

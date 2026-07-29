@@ -1,3 +1,10 @@
+// Mirrors api/src/peritus/api/schemas/auth.py::MeResponse.
+export interface User {
+  id: string;
+  email: string | null;
+  is_admin: boolean;
+}
+
 // Mirrors api/src/peritus/api/schemas/experts.py + domain.py.
 // `name` is the URL-safe slug (e.g. "stoic-philosophy"), not a display title —
 // `topic` is the human-readable topic the expert was built from.
@@ -157,6 +164,22 @@ export type BuildEvent = { seq?: number } & (
   | { type: "resolve_progress"; merged: number }
   | { type: "entities_resolved"; merged: number }
   | { type: "coverage_gaps"; gaps: string[] }
+  // Corpus composition, emitted after validation when the passing set is
+  // overwhelmingly tertiary (summaries/reviews rather than primary material).
+  // A warning, not a failure — the build continues; see builder.py.
+  | {
+      type: "corpus_warning";
+      reason: string;
+      message: string;
+      primary: number;
+      secondary: number;
+      tertiary: number;
+      unclassified: number;
+      classified: number;
+    }
+  | { type: "gapfill_done"; added: number; still_uncovered: string[] }
+  | { type: "chat_ready"; sources: number; chunks: number; graph_expanded: boolean }
+  | { type: "graph_ready"; nodes: number; edges: number; graph_expanded: boolean }
   | { type: "persona_ready"; name: string }
   | { type: "retry"; attempt: number; message?: string }
   // Terminal — see jobs/domain.py:TERMINAL_EVENT_TYPES.
@@ -211,7 +234,7 @@ export type SourceSort =
  * concept had no accepted source. The last is the differentiating one. */
 export type DiscoveryMethod = "plan" | "snowball" | "gapfill" | null;
 
-export interface LedgerSource {
+export interface SourceRow {
   id: number;
   decision: "accepted" | "rejected";
   title: string | null;
@@ -324,7 +347,7 @@ export interface CorpusReport {
     total_matching: number;
     has_more: boolean;
   };
-  sources: LedgerSource[];
+  sources: SourceRow[];
 }
 
 export type CoverageStrength = "absent" | "thin" | "adequate" | "strong";
@@ -533,35 +556,8 @@ export interface ScreeningFlow {
   };
 }
 
-// ── catalog & credits ───────────────────────────────────────────────────────
+// ── credits ──────────────────────────────────────────────────────────────
 // See docs/catalog-and-credits.md.
-
-export interface CatalogEntry {
-  name: string;
-  topic: string;
-  tier: string;
-  readiness: string;
-  graph_expanded: boolean;
-  persona_name: string | null;
-  persona_bio: string | null;
-  blurb: string | null;
-  category: string | null;
-  tags: string[];
-  is_featured: boolean;
-  key_concepts: string[];
-  source_count: number;
-  chunk_count: number;
-  node_count: number;
-  avg_quality: number | null;
-  source_type_counts: Record<string, number>;
-  published_at: string | null;
-  created_at: string;
-}
-
-export interface CatalogCategory {
-  name: string;
-  count: number;
-}
 
 export interface CreditState {
   plan: {
@@ -595,4 +591,29 @@ export interface LedgerEntry {
   source: string;
   cost_usd: number | null;
   created_at: string;
+}
+
+/** One source in an expert's corpus. `discovered_via === "upload"` marks
+ * material the owner supplied by hand rather than something discovery found. */
+export interface CorpusSource {
+  id: number;
+  source_type: string;
+  url: string | null;
+  title: string;
+  author: string | null;
+  quality_score: number | null;
+  content_type: string | null;
+  discovered_via: string | null;
+  source_tier: string | null;
+  chunk_count: number;
+  created_at: string;
+}
+
+/** Returned by the upload/url endpoints once the payload is durably queued.
+ * `job_id` is what the client tails on the build-events stream. */
+export interface UploadAccepted {
+  upload_id: number;
+  job_id: number;
+  title: string;
+  kind: "pdf" | "text" | "url";
 }

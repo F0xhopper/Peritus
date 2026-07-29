@@ -71,7 +71,11 @@ export async function POST(request: NextRequest) {
       const text = await upstream.text().catch(() => "");
       let message = text;
       try {
-        message = JSON.parse(text).detail ?? text;
+        // Entitlement denials send a structured `detail` object (code, tier,
+        // remedy, …) rather than a string — see EntitlementError.to_payload
+        // in billing/domain.py. Only its `message` is prose fit to display.
+        const detail = JSON.parse(text).detail;
+        message = typeof detail === "string" ? detail : (detail?.message ?? text);
       } catch {
         // not JSON — use the raw body
       }

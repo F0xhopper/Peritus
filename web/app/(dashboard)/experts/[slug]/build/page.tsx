@@ -1,7 +1,4 @@
 import { notFound } from "next/navigation";
-import { HammerIcon } from "lucide-react";
-import { PageHeader } from "@/components/page-header";
-import { StatusBadge } from "@/components/experts/status-badge";
 import { BuildProgress } from "@/components/experts/build-progress";
 import { getExpert } from "@/lib/api/data";
 
@@ -24,18 +21,11 @@ export default async function ExpertBuildPage({
   }
 
   return (
-    <>
-      <PageHeader
-        icon={HammerIcon}
-        title={`Building ${expert.topic}`}
-        action={<StatusBadge status={expert.status} />}
-      />
-      <BuildProgress
-        slug={expert.name}
-        topic={expert.topic}
-        initialStatus={expert.status}
-        initialError={expert.error}
-      />
-    </>
+    <BuildProgress
+      slug={expert.name}
+      topic={expert.topic}
+      initialStatus={expert.status}
+      initialError={expert.error}
+    />
   );
 }

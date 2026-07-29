@@ -16,8 +16,9 @@ export function ExpertsGrid({ experts }: { experts: ExpertSummary[] }) {
   if (experts.length === 0) return <ExpertsEmpty />;
 
   // 3-up waits for 2xl. At xl the sidebar leaves ~990px, and a third column
-  // squeezes the title to ~120px — narrow enough that most topics truncate to
-  // a dozen characters, which defeats the point of leading with the topic.
+  // squeezes the title to ~120px — and the title now shares that row with an
+  // avatar, so a name truncates to a first name and an initial, which defeats
+  // the point of leading with the person.
   return (
     <div className="grid gap-4 sm:grid-cols-2 2xl:grid-cols-3">
       {experts.map((expert) => (

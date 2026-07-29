@@ -8,11 +8,14 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StatusDot } from "@/components/experts/status-dot";
 import { ConceptList } from "@/components/experts/concept-list";
 import { ExpertMenu } from "@/components/experts/expert-menu";
+import { PersonaAvatar } from "@/components/experts/persona-avatar";
 import { formatCompact } from "@/lib/format";
+import { personaLabel } from "@/lib/persona";
 import type { ExpertSummary } from "@/lib/api/types";
 
 // Replaces the experts table. The table could only show `topic` plus build
@@ -20,16 +23,22 @@ import type { ExpertSummary } from "@/lib/api/types";
 // actually tell two experts apart (persona, bio, key concepts) don't fit in a
 // cell.
 //
-// The card leads with `topic`, not `name`: `name` is the URL slug
-// ("stoic-philosophy"), and leading with a kebab-case identifier buries the
-// readable phrase directly beneath it. The slug still reaches the reader as
-// the subtitle whenever there's no persona to put there.
+// The card leads with the person: "Dr. Elena Vasquez", topic underneath. What
+// you do with an expert is talk to it, and a grid of subject headings reads
+// like a filing cabinet — you pick a topic out of a filing cabinet, but you
+// ask a question of somebody. The topic is still the second line, so the
+// answer to "which of these knows about Stoicism" is one glance away.
 //
-// The whole card opens the chat, not the detail page. Chatting is what an
-// expert is *for*; the detail page is a spec sheet you consult occasionally,
-// so it gets the small explicit link in the footer rather than the 300px-wide
-// hit target. A card whose surface went to the spec sheet while the action it
-// exists for was a 60px button in the corner had that backwards.
+// Experts without a persona (queued, building, failed) lead with the topic
+// instead — there is no name yet, and captioning them "Dr. Stoic Philosophy"
+// would invent one. `name` (the URL slug) is the last resort under it.
+//
+// The whole card opens the detail page — the spec sheet with the persona,
+// bio, and corpus stats is what tells two same-topic experts apart, and
+// browsing the grid to find the right one is that kind of looking, not yet a
+// question you have. Starting a chat is a separate, deliberate act with its
+// own destination, so it gets its own explicit button in the corner rather
+// than riding the card's whole surface.
 //
 // Only a ready expert can be chatted with, so a pending or failed card opens
 // its build page instead — the live stage view while it runs, and the durable
@@ -40,13 +49,14 @@ export function ExpertCard({ expert }: { expert: ExpertSummary }) {
   // A card that isn't ready opens its build page, not its spec sheet: while it
   // is queued or building that is the only surface with anything live to say,
   // and once it has failed it is the only one holding the error log.
-  const href = ready
-    ? `/experts/${expert.name}/chat`
-    : `/experts/${expert.name}/build`;
+  const href = ready ? `/experts/${expert.name}` : `/experts/${expert.name}/build`;
+  const persona = personaLabel(expert.persona_name);
+  const heading = persona ?? expert.topic;
 
   return (
-    <Card className="relative h-full rounded-lg transition-[background-color,box-shadow] hover:bg-muted/25 hover:ring-foreground/25">
+    <Card className="relative h-full rounded-lg transition-colors hover:bg-muted/40">
       <CardHeader className="flex items-start gap-3">
+        <PersonaAvatar label={heading} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           {/* CardTitle is a plain block in this style, so the row is built
               here — an inline <a> has no width to truncate against. */}
@@ -63,25 +73,38 @@ export function ExpertCard({ expert }: { expert: ExpertSummary }) {
                 opts back above it with `relative z-10`. */}
             {/* min-w-0 is load-bearing: a flex item defaults to
                 min-width:auto, so without it `truncate` never engages and a
-                long topic runs out under the corner icon. */}
+                long name runs out under the corner icon. */}
             <Link
               href={href}
               className="min-w-0 flex-1 truncate rounded-lg outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
             >
-              {/* Names the destination, since the visible text is a topic and
-                  not an action: "Chat with Stoic Philosophy". */}
-              <span className="sr-only">{ready ? "Chat with " : "Open "}</span>
-              {expert.topic}
+              {/* Names the destination, since the visible text is a person and
+                  not an action: "View Dr. Elena Vasquez". */}
+              <span className="sr-only">{ready ? "View " : "Open "}</span>
+              {heading}
             </Link>
           </CardTitle>
           <CardDescription className="line-clamp-1 text-xs">
-            {subtitle(expert)}
+            {subtitle(expert, persona)}
           </CardDescription>
         </div>
-        {/* Says where the card goes before you click it — the tier badge used
-            to hold this corner, which spent the card's strongest position on
-            its least-consulted field. Tier moved to the footer strip. */}
-        <DestinationHint ready={ready} />
+        {/* The one control that isn't "browse into this card": starting a chat
+            has its own destination, so it stays a real button, above the
+            stretched link, rather than a hint about where the card goes. */}
+        {ready ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="relative z-10 shrink-0"
+            nativeButton={false}
+            render={<Link href={`/experts/${expert.name}/chat`} />}
+          >
+            <MessageSquareIcon />
+            Chat
+          </Button>
+        ) : (
+          <DestinationHint />
+        )}
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col gap-3">
@@ -90,22 +113,9 @@ export function ExpertCard({ expert }: { expert: ExpertSummary }) {
 
       <CardFooter className="mt-auto justify-between gap-3">
         <MetricStrip expert={expert} />
-        {/* Every interactive control on the card lives here, above the
-            stretched link. Keeping the destructive one down here rather than in
-            the header also keeps it away from the title. */}
-        <div className="relative z-10 flex shrink-0 items-center gap-1">
-          {/* The card already goes to the chat, so the detail page needs its
-              own way in. Ready experts only — a pending card *is* the detail
-              link. */}
-          {ready ? (
-            <Link
-              href={`/experts/${expert.name}`}
-              className="rounded-lg text-xs text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              Details
-              <span className="sr-only"> for {expert.topic}</span>
-            </Link>
-          ) : null}
+        {/* The only remaining footer control: the destructive action stays
+            down here, above the stretched link, and away from the title. */}
+        <div className="relative z-10 shrink-0">
           <ExpertMenu slug={expert.name} topic={expert.topic} />
         </div>
       </CardFooter>
@@ -113,10 +123,12 @@ export function ExpertCard({ expert }: { expert: ExpertSummary }) {
   );
 }
 
-function DestinationHint({ ready }: { ready: boolean }) {
-  const Icon = ready ? MessageSquareIcon : ArrowUpRightIcon;
+/** Not-ready cards still open the build page on click; this is the only
+ * indication of that before you click, since there is no separate button for
+ * a destination that isn't chattable yet. */
+function DestinationHint() {
   return (
-    <Icon
+    <ArrowUpRightIcon
       aria-hidden
       className="size-4 shrink-0 text-muted-foreground/50 transition-colors group-hover/card:text-foreground"
     />
@@ -170,11 +182,15 @@ function Notice({
   );
 }
 
-function subtitle(expert: ExpertSummary): string {
-  if (!expert.persona_name) return expert.name;
-  return expert.persona_style
-    ? `${expert.persona_name} · ${expert.persona_style}`
-    : expert.persona_name;
+/** Whatever the heading didn't say. A named expert is captioned with its
+ * subject; an unnamed one has only its slug left to give.
+ *
+ * `persona_style` used to ride here and doesn't any more: it is the expert's
+ * whole system-prompt instruction block, hundreds of characters of "cite the
+ * passage before you paraphrase it", and a one-line clamp turned that into a
+ * sentence fragment on every card. It belongs on the detail page. */
+function subtitle(expert: ExpertSummary, persona: string | null): string {
+  return persona ? expert.topic : expert.name;
 }
 
 function buildLabel(expert: ExpertSummary): string {

@@ -3,7 +3,7 @@ from typing import Any
 
 import asyncpg
 
-from peritus.jobs.domain import BuildEventRow, BuildJob, JobStatus
+from peritus.jobs.domain import BuildEventRow, BuildJob, JobStatus, JobType
 
 
 class JobRepository:
@@ -24,25 +24,34 @@ class JobRepository:
         tier: str,
         source_filter: list[str] | None,
         max_attempts: int,
+        job_type: JobType = JobType.BUILD,
+        payload: dict[str, Any] | None = None,
     ) -> BuildJob:
-        """Insert a queued job. If an active job already exists for this expert
+        """Insert a queued job. If an active *build* already exists for this expert
         (partial unique index), return that one instead — resubmits are idempotent.
+
+        Only builds are deduplicated that way. Two ingest jobs for one expert are
+        two different documents, and collapsing them would silently drop one; the
+        unique index is scoped to builds for the same reason (migration 021).
         """
         async with self._pool.acquire() as conn:
             try:
                 row = await conn.fetchrow(
                     """
-                    INSERT INTO build_jobs (expert_id, status, tier, source_filter, max_attempts)
-                    VALUES ($1, 'queued', $2, $3::jsonb, $4)
+                    INSERT INTO build_jobs
+                        (expert_id, status, tier, source_filter, max_attempts, job_type, payload)
+                    VALUES ($1, 'queued', $2, $3::jsonb, $4, $5, $6::jsonb)
                     RETURNING *
                     """,
                     expert_id, tier,
                     json.dumps(source_filter) if source_filter is not None else None,
                     max_attempts,
+                    str(job_type),
+                    json.dumps(payload) if payload is not None else None,
                 )
                 return _row_to_job(row)
             except asyncpg.UniqueViolationError:
-                existing = await self.get_active_job(expert_id)
+                existing = await self.get_active_job(expert_id, job_type=JobType.BUILD)
                 if existing:
                     return existing
                 raise
@@ -52,15 +61,25 @@ class JobRepository:
             row = await conn.fetchrow("SELECT * FROM build_jobs WHERE id = $1", job_id)
         return _row_to_job(row) if row else None
 
-    async def get_active_job(self, expert_id: int) -> BuildJob | None:
+    async def get_active_job(
+        self, expert_id: int, job_type: JobType | None = None
+    ) -> BuildJob | None:
+        """The newest queued-or-running job for this expert, optionally by type.
+
+        Callers that mean "is a build in progress" must pass
+        ``job_type=JobType.BUILD``: an unfiltered call can now return an ingest
+        job, and build-cancel and build-status logic would misread that as a
+        build.
+        """
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
                 SELECT * FROM build_jobs
                 WHERE expert_id = $1 AND status IN ('queued', 'running')
+                  AND ($2::text IS NULL OR job_type = $2)
                 ORDER BY id DESC LIMIT 1
                 """,
-                expert_id,
+                expert_id, str(job_type) if job_type is not None else None,
             )
         return _row_to_job(row) if row else None
 
@@ -205,17 +224,25 @@ class JobRepository:
                 )
         return len(requeued) + len(failed)
 
-    async def request_cancel(self, expert_id: int) -> bool:
-        """Cancel the active job for an expert. A running build sees the heartbeat
-        stop returning True and aborts cooperatively. Returns True if a job was cancelled.
+    async def request_cancel(
+        self, expert_id: int, job_type: JobType | None = None
+    ) -> bool:
+        """Cancel active jobs for an expert. A running job sees the heartbeat stop
+        returning True and aborts cooperatively. Returns True if anything was cancelled.
+
+        ``job_type=None`` cancels every active job, which is what deleting an
+        expert wants. Cancelling a *build* must pass ``JobType.BUILD``: an
+        unscoped cancel would also throw away documents the user had queued for
+        ingest, which they never asked to cancel and cannot recover.
         """
         async with self._pool.acquire() as conn:
             result = await conn.execute(
                 """
                 UPDATE build_jobs SET status = 'cancelled', updated_at = NOW()
                 WHERE expert_id = $1 AND status IN ('queued', 'running')
+                  AND ($2::text IS NULL OR job_type = $2)
                 """,
-                expert_id,
+                expert_id, str(job_type) if job_type is not None else None,
             )
         return not result.endswith(" 0")
 
@@ -254,6 +281,11 @@ def _row_to_job(row: asyncpg.Record) -> BuildJob:
     raw_filter = row["source_filter"]
     if isinstance(raw_filter, str):
         raw_filter = json.loads(raw_filter)
+    # `.get` rather than indexing: tests and older callers build Records/mappings
+    # that predate migration 021 and carry neither column.
+    payload = row.get("payload")
+    if isinstance(payload, str):
+        payload = json.loads(payload)
     return BuildJob(
         id=row["id"],
         expert_id=row["expert_id"],
@@ -268,6 +300,8 @@ def _row_to_job(row: asyncpg.Record) -> BuildJob:
         last_error=row["last_error"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        job_type=JobType(row.get("job_type") or JobType.BUILD),
+        payload=payload,
     )
 
 

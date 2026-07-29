@@ -30,13 +30,14 @@ from peritus.billing.repository import BillingRepository
 from peritus.billing.service import EntitlementService
 from peritus.billing.settings import settings as billing_settings
 from peritus.core.config import settings
-from peritus.core.exceptions import BuildError
+from peritus.core.exceptions import BuildError, IngestionError
 from peritus.core.logging import get_logger
 from peritus.experts.builder import BuildResult, ExpertBuilder
 from peritus.experts.domain import ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
 from peritus.jobs.domain import BuildJob
 from peritus.jobs.repository import JobRepository
+from peritus.uploads.service import ingest_upload, summary_event
 
 logger = get_logger(__name__)
 
@@ -131,6 +132,10 @@ class BuildWorker:
         if expert is None:
             # Expert was deleted before we started — nothing to build.
             await self._jobs.mark_failed(job.id, self.worker_id, "Expert no longer exists")
+            return
+
+        if not job.is_build:
+            await self._run_ingest_job(job, expert)
             return
 
         cancelled = False
@@ -253,6 +258,111 @@ class BuildWorker:
                     await flush_once(meter, self._persist_usage(meter))
             if meter_token is not None:
                 reset_meter(meter_token)
+
+    async def _run_ingest_job(self, job: BuildJob, expert) -> None:
+        """Ingest one user-supplied document.
+
+        Shares the queue's durability with a build — claimed, heartbeaten,
+        retried, reaped — and nothing else. In particular it never moves the
+        expert out of ``ready``: an upload is added *to* a working expert, and a
+        document that fails to parse is not a reason to take that expert offline.
+        There is no metering and no credit hold either; see UPLOAD_PLAN.md.
+        """
+        upload_id = (job.payload or {}).get("upload_id")
+        if not isinstance(upload_id, int):
+            await self._jobs.mark_failed(
+                job.id, self.worker_id, "Ingest job has no upload_id"
+            )
+            return
+
+        cancelled = False
+        ingest_task: asyncio.Task[Any] | None = None
+
+        async def heartbeat_loop() -> None:
+            nonlocal cancelled
+            while True:
+                await asyncio.sleep(settings.WORKER_HEARTBEAT_INTERVAL)
+                if not await self._jobs.heartbeat(job.id, self.worker_id):
+                    cancelled = True
+                    if ingest_task is not None:
+                        ingest_task.cancel()
+                    return
+
+        hb_task = asyncio.create_task(heartbeat_loop())
+        try:
+            await self._jobs.append_event(job.id, "build_started", {
+                "type": "build_started",
+                "kind": "ingest_source",
+                "attempt": job.attempts,
+                "max_attempts": job.max_attempts,
+            })
+
+            async def on_event(event: dict[str, Any]) -> None:
+                await self._jobs.append_event(job.id, event["type"], event)
+
+            ingest_task = asyncio.create_task(
+                ingest_upload(self._pool, expert, upload_id, on_event=on_event)
+            )
+            try:
+                summary = await ingest_task
+            except asyncio.CancelledError:
+                if cancelled:
+                    raise _JobCancelled from None
+                raise  # worker shutdown — propagate so _drain requeues it
+
+            await self._jobs.append_event(job.id, "done", summary_event(summary))
+            await self._jobs.mark_succeeded(job.id, self.worker_id)
+            logger.info(
+                "Ingest job %d succeeded (expert=%d, upload=%d)",
+                job.id, job.expert_id, upload_id,
+            )
+
+        except _JobCancelled:
+            await self._jobs.append_event(job.id, "cancelled", {
+                "type": "cancelled", "message": "Upload cancelled",
+            })
+            logger.info("Ingest job %d cancelled", job.id)
+        except asyncio.CancelledError:
+            await self._jobs.release_for_shutdown(job.id, self.worker_id)
+            logger.info("Ingest job %d released back to queue (shutdown)", job.id)
+            raise
+        except IngestionError as exc:
+            # A document we genuinely cannot read. Retrying will not change that,
+            # so fail it now with the message written for the person who
+            # uploaded it rather than burning the retry budget.
+            await self._jobs.append_event(job.id, "error", {
+                "type": "error", "message": str(exc),
+            })
+            await self._jobs.mark_failed(job.id, self.worker_id, str(exc))
+            logger.info("Ingest job %d rejected: %s", job.id, exc)
+        except Exception as exc:
+            # Anything else (a provider blip, a dropped connection) is worth
+            # another attempt on the normal backoff.
+            logger.exception("Ingest job %d failed", job.id)
+            await self._fail_or_retry_ingest(job, exc)
+        finally:
+            if ingest_task is not None and not ingest_task.done():
+                ingest_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await ingest_task
+            hb_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await hb_task
+
+    async def _fail_or_retry_ingest(self, job: BuildJob, exc: Exception) -> None:
+        message = f"{type(exc).__name__}: {exc}"
+        if job.attempts < job.max_attempts:
+            backoff = settings.WORKER_BACKOFF_BASE * (2 ** (job.attempts - 1))
+            logger.warning(
+                "Ingest job %d attempt %d/%d failed (%s) — retrying in %.0fs",
+                job.id, job.attempts, job.max_attempts, message, backoff,
+            )
+            await self._jobs.requeue(job.id, self.worker_id, message, backoff)
+            return
+        await self._jobs.append_event(job.id, "error", {
+            "type": "error", "message": message,
+        })
+        await self._jobs.mark_failed(job.id, self.worker_id, message)
 
     async def _start_meter(self, job: BuildJob, expert) -> "BuildMeter | None":
         """Build the cost meter for a job, or None if metering can't be set up.

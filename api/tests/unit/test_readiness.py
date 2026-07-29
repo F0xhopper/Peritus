@@ -140,4 +140,5 @@ def test_persona_is_not_required_for_a_grounded_prompt():
     """Persona is the last build stage; chat-ready precedes it."""
     prompt = build_system_prompt(None, "stoicism")
     assert "subject-matter expert in stoicism" in prompt
-    assert "Cite every factual claim" in prompt
+    # The grounding rules do not depend on the persona having been generated.
+    assert "must carry the bracketed number" in prompt

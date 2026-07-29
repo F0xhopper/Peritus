@@ -7,6 +7,7 @@ from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.triage import (
     TriagedCandidate,
     _matches_must_have,
+    domain_adjustment,
     rank_candidates,
 )
 
@@ -133,3 +134,54 @@ async def test_fetch_with_refill_handles_exhausted_ranked_list():
     ranked = [_triaged("only", "https://x.test/1", 7.0)]
     results = await builder._fetch_with_refill(ranked, budget=5, caps={})
     assert len(results) == 1
+
+
+# --- domain priors ---------------------------------------------------------
+#
+# The signal that title-and-snippet triage cannot provide: a page *about* a work
+# reads exactly like the work. These are a hand-maintained table, so the tests
+# pin the matching rules rather than every entry — a wrong suffix match is the
+# failure mode that would quietly mis-score a whole class of sources.
+
+
+def test_domain_adjustment_penalises_summary_and_review_hosts():
+    assert domain_adjustment("https://www.goodreads.com/book/show/1234") < 0
+    assert domain_adjustment("https://sparknotes.com/lit/meditations/") < 0
+    assert domain_adjustment("https://brainyquote.com/authors/seneca") < 0
+
+
+def test_domain_adjustment_boosts_primary_and_scholarly_hosts():
+    assert domain_adjustment("https://www.gutenberg.org/ebooks/2680") > 0
+    assert domain_adjustment("https://plato.stanford.edu/entries/stoicism/") > 0
+    assert domain_adjustment("https://arxiv.org/abs/2401.00001") > 0
+
+
+def test_domain_adjustment_matches_on_label_boundary():
+    """``notgoodreads.com`` must not inherit ``goodreads.com``'s penalty."""
+    assert domain_adjustment("https://notgoodreads.com/x") == 0.0
+    assert domain_adjustment("https://mygoodreads.com.example.test/x") == 0.0
+    # A genuine subdomain still matches.
+    assert domain_adjustment("https://m.goodreads.com/book/1") < 0
+
+
+def test_domain_adjustment_most_specific_host_wins_and_does_not_stack():
+    """Longest matching pattern wins; host rules never sum."""
+    specific = domain_adjustment("https://plato.stanford.edu/entries/stoicism/")
+    generic = domain_adjustment("https://cs.stanford.edu/some/page")
+    assert specific != generic
+    # Stacking would exceed any single entry in the table; it must not.
+    assert specific == max(specific, generic, key=abs)
+
+
+def test_domain_adjustment_path_rules_apply_to_neutral_hosts():
+    neutral = domain_adjustment("https://example.test/article")
+    reviewish = domain_adjustment("https://example.test/reviews/the-book")
+    assert neutral == 0.0
+    assert reviewish < neutral
+
+
+def test_domain_adjustment_is_total_on_bad_input():
+    """Never raises: an unparseable URL just means the model's score stands."""
+    assert domain_adjustment("") == 0.0
+    assert domain_adjustment("not a url") == 0.0
+    assert domain_adjustment("gutenberg.org/ebooks/1") > 0  # scheme-less still parses

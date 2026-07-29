@@ -169,9 +169,11 @@ _PLAN_TOOL: dict[str, Any] = {
                 "type": "array",
                 "items": {"type": "string"},
                 "description": (
-                    "5–8 concepts an expert on this topic must be able to teach. The "
-                    "corpus is checked against these and gaps are re-searched."
+                    "Concepts an expert on this topic must be able to teach. The corpus "
+                    "is checked against these and gaps are re-searched. Count scales with "
+                    "the topic's actual breadth — see the system prompt."
                 ),
+                "minItems": 5,
                 "maxItems": 8,
             },
             "must_have_works": {
@@ -205,7 +207,13 @@ _PLAN_SYSTEM = (
     "lectures and talks, wikipedia gets encyclopedic overviews, exa and web get "
     "high-quality articles and essays. Give weight 0 to source types that would add "
     "noise for this topic (e.g. gutenberg for modern technology, arxiv for a "
-    "non-academic craft) and weight 2 to the ones that carry it."
+    "non-academic craft) and weight 2 to the ones that carry it.\n\n"
+    "key_concepts must scale with how much ground the topic actually covers — this is "
+    "a judgment call, not a quota. A narrow or single-threaded topic (one thinker, one "
+    "event, one narrow technique) genuinely has fewer than 8 concepts worth naming as "
+    "separate teaching points; padding it out to 8 means inventing overlapping or "
+    "trivial ones. A broad field (a whole discipline, a wide practice) earns more, up "
+    "to 8. Default to the number the topic actually supports, not the maximum allowed."
 )
 
 
@@ -372,6 +380,18 @@ class ExpertBuilder:
         if not passed:
             raise BuildError("All sources failed validation. Try a different topic or sources.")
 
+        # Corpus composition, while the user is still watching the build. A
+        # weak-but-passing corpus is not a build failure, so this is a warning
+        # event rather than a raise — but it has to arrive before they start
+        # trusting the expert's answers.
+        warning = corpus_tier_warning(passed)
+        if warning:
+            logger.warning(
+                "Expert %d corpus is %d/%d tertiary",
+                expert.id, warning["tertiary"], warning["classified"],
+            )
+            await _emit_event(on_event, warning)
+
         source_db_ids = await self._persist_sources(expert.id, passed, dropped)
         avg_quality = _avg_quality(passed)
 
@@ -411,16 +431,35 @@ class ExpertBuilder:
         if not all_chunk_ids:
             raise BuildError("No chunks were embedded — ingestion failed for all sources.")
 
+        # User-supplied sources survive `reset_build_state`, so on a rebuild their
+        # chunks are already in the table and were never ingested by this run.
+        # They still have to reach the graph stage: the graph was wiped whole and
+        # is rebuilt whole, and leaving them out would quietly drop the owner's
+        # own material out of the concept graph on every rebuild.
+        preserved = await self._load_upload_chunks(expert.id)
+        all_chunks_for_graph.extend(preserved)
+
         # ── Chat-ready ───────────────────────────────────────────────────────
         # Everything retrieval needs now exists. Hybrid search reads only
         # source_chunks + sources, and graph expansion is a no-op while the
         # graph is empty, so the expert can already give a grounded, cited
         # answer. Publish it now instead of after the graph and persona stages,
         # and write the counts so the expert doesn't read as empty in the UI.
+        # Counts include the preserved uploads, which this run did not ingest but
+        # which are part of the corpus the expert answers from.
+        #
+        # No preserved chunks means no upload sources to count: `ingest_upload`
+        # deletes the sources row when nothing embeds, so an upload always has at
+        # least one chunk. Skipping the query on that path keeps the common case
+        # (an expert with no uploads) at zero extra round-trips.
+        total_sources = len(passed)
+        if preserved:
+            total_sources += await self._count_upload_sources(expert.id)
+        total_chunks = len(all_chunk_ids) + len(preserved)
         await self._repo.update_counts(
             expert.id,
-            source_count=len(passed),
-            chunk_count=len(all_chunk_ids),
+            source_count=total_sources,
+            chunk_count=total_chunks,
             node_count=0,
             edge_count=0,
             avg_quality=avg_quality,
@@ -430,8 +469,8 @@ class ExpertBuilder:
             on_event,
             {
                 "type": "chat_ready",
-                "sources": len(passed),
-                "chunks": len(all_chunk_ids),
+                "sources": total_sources,
+                "chunks": total_chunks,
                 "graph_expanded": False,
             },
         )
@@ -600,6 +639,51 @@ class ExpertBuilder:
         )
         return sources
 
+    async def _load_upload_chunks(
+        self, expert_id: int
+    ) -> list[tuple[TextChunk, int]]:
+        """Chunks belonging to user-supplied sources that survived the reset.
+
+        Returns ``(TextChunk, chunk_db_id)`` pairs in the shape the graph stage
+        consumes. ``context_text`` is not needed — graph extraction reads the
+        chunk text — so it is not selected.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT c.id, c.text, c.sequence_n, c.chunk_meta
+                FROM source_chunks c
+                JOIN sources s ON s.id = c.source_id
+                WHERE c.expert_id = $1 AND s.discovered_via = 'upload'
+                ORDER BY c.source_id, c.sequence_n
+                """,
+                expert_id,
+            )
+        out: list[tuple[TextChunk, int]] = []
+        for r in rows:
+            meta = r["chunk_meta"]
+            if isinstance(meta, str):
+                meta = json.loads(meta)
+            out.append((
+                TextChunk(
+                    text=r["text"],
+                    sequence_n=r["sequence_n"],
+                    chunk_meta=meta or {},
+                ),
+                r["id"],
+            ))
+        return out
+
+    async def _count_upload_sources(self, expert_id: int) -> int:
+        async with self._pool.acquire() as conn:
+            return await conn.fetchval(
+                """
+                SELECT COUNT(*) FROM sources
+                WHERE expert_id = $1 AND passed = true AND discovered_via = 'upload'
+                """,
+                expert_id,
+            ) or 0
+
     async def _fetch_with_refill(
         self,
         ranked: list[TriagedCandidate],
@@ -751,8 +835,8 @@ class ExpertBuilder:
                              quality_score, relevance_score, content_type,
                              difficulty, key_claims, passed,
                              validator_model, rubric_version,
-                             covered_concepts, discovered_via)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12,$13::jsonb,$14)
+                             covered_concepts, discovered_via, source_tier)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12,$13::jsonb,$14,$15)
                         RETURNING id
                         """,
                     expert_id,
@@ -769,6 +853,8 @@ class ExpertBuilder:
                     RUBRIC_VERSION,
                     json.dumps(vs.covered_concepts),
                     vs.raw.metadata.get("discovered_via", "plan"),
+                    # NULL when the validator didn't classify it — see migration 020.
+                    vs.source_tier,
                 )
                 passed_ids.append(row["id"])
 
@@ -1123,63 +1209,211 @@ async def _safe_fetch_candidate(fetcher, candidate: SourceCandidate) -> RawSourc
         return None
 
 
-async def _generate_persona(
+_PERSONA_TOOL: dict[str, Any] = {
+    "name": "generate_persona",
+    "description": "Generate a named expert persona grounded in the corpus.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "name": {
+                "type": "string",
+                # The UI titles any persona that comes back bare (see
+                # web/lib/persona.ts), so an untitled name is not a broken
+                # build — asking here just means the stored name and the
+                # displayed one agree.
+                "description": (
+                    "Expert's full name, prefixed with the honorific 'Dr.' — "
+                    "e.g. 'Dr. Elena Vasquez'."
+                ),
+            },
+            "bio": {
+                "type": "string",
+                "description": (
+                    "2-3 SHORT sentences, scannable in five seconds: what they "
+                    "specialize in and their angle on it. Plain and concrete — "
+                    "no compound sentences stacking multiple clauses, no "
+                    "throat-clearing ('with a career spanning...', 'has spent "
+                    "years...'), no restating the topic name back. Write it "
+                    "the way a conference program blurbs a speaker, not the "
+                    "way an academic CV opens."
+                ),
+            },
+            "style": {
+                "type": "string",
+                "description": (
+                    "A system-prompt block, in the second person, describing how "
+                    "this expert TEACHES: how they open an explanation, the "
+                    "framings and analogies they characteristically reach for, "
+                    "the kind of worked example they use, what they insist "
+                    "matters most and what they consider a distraction, and how "
+                    "they talk to someone new to the subject. Positive voice "
+                    "instructions only — write what they do, never a list of "
+                    "rules about sourcing, citation, hedging, or uncertainty."
+                ),
+            },
+        },
+        "required": ["name", "bio", "style"],
+    },
+}
+
+# The persona is the expert's teaching voice, and nothing else. It used to be
+# asked for "how the expert cites, qualifies claims, and handles uncertainty",
+# which reliably produced personas whose defining trait was hedging — a voice
+# that then argued with the answer-shape rules on every turn. Sourcing
+# discipline belongs to the grounding contract (chat/grounding.py), which is
+# absolute and needs no help from the persona; what the persona is for is the
+# thing a contract cannot supply, which is how a good teacher explains.
+_PERSONA_SYSTEM = (
+    "You are creating a named expert persona that will be the voice of a "
+    "grounded AI tutor. The persona must reflect what this corpus actually "
+    "contains — a specialist in these particular materials, not a generic "
+    "authority. Name them as a doctor of the subject ('Dr. <given> <family>'), "
+    "since every expert here is addressed by name and title.\n\n"
+    "Write the style block as a teacher's profile: how they explain a hard idea "
+    "to a newcomer, the analogies and framings they return to, the worked "
+    "examples they favour, what they emphasise and what they cut. Make it "
+    "concrete and specific to this corpus — a reader should be able to tell "
+    "this expert from any other expert in the same field.\n\n"
+    "Do not write anything about citation, sourcing, evidence quality, "
+    "qualifying claims, or handling uncertainty. Separate absolute rules govern "
+    "all of that, and duplicating them here produces a hedging, evasive voice "
+    "instead of a teaching one.\n\n"
+    "The bio and the style block have different jobs and should not read alike. "
+    "The bio is what a reader skims in five seconds to decide if this is the "
+    "right expert — keep it short and plain. The style block is what actually "
+    "governs how the expert teaches, so it can be as thorough as that job "
+    "requires; length there is not the problem the bio has."
+)
+
+
+def _persona_digest(sources: list[tuple[str, str, float | None, list[str]]]) -> str:
+    """One line per source: title, kind, quality, and its leading claims.
+
+    Takes plain tuples rather than ``ValidatedSource`` so a persona can be
+    regenerated from the ``sources`` table long after the build that produced it.
+    """
+    lines = []
+    for title, content_type, quality, claims in sources[:15]:
+        q = f"Q:{quality:.1f}" if quality is not None else "Q:—"
+        lines.append(f"- {title} ({content_type}, {q}): " + "; ".join(claims[:2]))
+    return "\n".join(lines)
+
+
+async def generate_persona(
     topic: str,
-    passed: list[ValidatedSource],
+    sources: list[tuple[str, str, float | None, list[str]]],
     top_nodes: list[dict],
 ) -> dict:
-    _TOOL: dict[str, Any] = {
-        "name": "generate_persona",
-        "description": "Generate a named expert persona grounded in the corpus.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string", "description": "Expert's full name with title."},
-                "bio": {"type": "string", "description": "2–3 sentence biography."},
-                "style": {
-                    "type": "string",
-                    "description": (
-                        "Full system-prompt instruction block describing how this expert "
-                        "speaks, what they emphasise, and how they cite sources."
-                    ),
-                },
-            },
-            "required": ["name", "bio", "style"],
-        },
-    }
+    """Generate ``{name, bio, style}`` from a corpus digest.
 
-    source_digest = "\n".join(
-        f"- {vs.title} ({vs.content_type}, Q:{vs.quality_score:.1f}): "
-        + "; ".join(vs.key_claims[:2])
-        for vs in passed[:15]
-    )
+    Public because personas outlive the build that made them: an expert built
+    under an older persona prompt can be re-voiced without re-fetching,
+    re-validating and re-embedding its whole corpus. See
+    ``ExpertService.regenerate_persona``.
+    """
     concept_list = ", ".join(n["label"] for n in top_nodes[:20])
 
     client = get_anthropic_client()
     resp = await client.messages.create(  # type: ignore[call-overload]
         model=settings.CLAUDE_MODEL,
-        max_tokens=1024,
-        system=(
-            "You are creating a named expert persona that will be used as the voice of a "
-            "grounded AI tutor. The persona must reflect what the corpus actually contains — "
-            "not a generic expert. The style instruction should be concrete, specific, and "
-            "describe how the expert cites, qualifies claims, and handles uncertainty."
-        ),
-        tools=[_TOOL],
+        # 1024 was enough when `style` was a sentence about how the expert cites.
+        # A teaching profile is several paragraphs, and `style` is the last field
+        # in the schema — too small a budget truncates the tool call and returns
+        # {name, bio} with no style at all, which is a KeyError at the call site
+        # rather than a degraded persona.
+        max_tokens=3072,
+        system=_PERSONA_SYSTEM,
+        tools=[_PERSONA_TOOL],
         tool_choice={"type": "tool", "name": "generate_persona"},
         messages=[
             {
                 "role": "user",
                 "content": (
                     f"Topic: {topic}\n\n"
-                    f"Sources ingested:\n{source_digest}\n\n"
+                    f"Sources ingested:\n{_persona_digest(sources)}\n\n"
                     f"Top concepts extracted: {concept_list}"
                 ),
             }
         ],
     )
     block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    return dict(block.input)
+    persona = dict(block.input)
+
+    # A tool call cut off by the token budget still parses — it just arrives
+    # missing its trailing fields. Catching it here names the cause; letting it
+    # through surfaces as a KeyError three frames away, at whichever caller
+    # happened to read `persona["style"]` first.
+    missing = [k for k in ("name", "bio", "style") if not persona.get(k)]
+    if missing:
+        raise RuntimeError(
+            f"Persona generation returned no {', '.join(missing)} "
+            f"(stop_reason={resp.stop_reason!r}). Raise max_tokens if this is "
+            "'max_tokens'."
+        )
+    return persona
+
+
+async def _generate_persona(
+    topic: str,
+    passed: list[ValidatedSource],
+    top_nodes: list[dict],
+) -> dict:
+    """Persona for a build that has the validated sources in hand."""
+    return await generate_persona(
+        topic,
+        [(vs.title, vs.content_type, vs.quality_score, vs.key_claims) for vs in passed],
+        top_nodes,
+    )
+
+
+# A corpus that is overwhelmingly tertiary answers everything second-hand: it
+# can tell you what people say about a subject and never what the subject is.
+# Below this share of classified sources, the expert is worth building but the
+# user should know what they are getting *before* they chat with it — the failure
+# it produces is subtle, and reads as the model being evasive rather than as the
+# corpus being thin.
+_TERTIARY_WARN_SHARE = 0.7
+# Under this many classified sources the share is noise, not a finding.
+_TERTIARY_WARN_MIN_CLASSIFIED = 3
+
+
+def corpus_tier_warning(passed: list[ValidatedSource]) -> dict | None:
+    """A build warning if the passing corpus is overwhelmingly second-hand.
+
+    Pure, so the threshold is testable without a build. Sources the validator
+    could not classify are counted separately and never held against the corpus:
+    an unclassified source is unknown, not tertiary.
+    """
+    counts = {tier: 0 for tier in ("primary", "secondary", "tertiary")}
+    unclassified = 0
+    for vs in passed:
+        if vs.source_tier in counts:
+            counts[vs.source_tier] += 1
+        else:
+            unclassified += 1
+
+    classified = sum(counts.values())
+    if classified < _TERTIARY_WARN_MIN_CLASSIFIED:
+        return None
+    if counts["tertiary"] / classified < _TERTIARY_WARN_SHARE:
+        return None
+
+    return {
+        "type": "corpus_warning",
+        "reason": "mostly_tertiary",
+        "primary": counts["primary"],
+        "secondary": counts["secondary"],
+        "tertiary": counts["tertiary"],
+        "unclassified": unclassified,
+        "classified": classified,
+        "message": (
+            f"{counts['tertiary']} of {classified} classified sources are "
+            "summaries, reviews or overviews rather than primary texts or "
+            "substantive analysis. This expert will answer second-hand. "
+            "Rebuilding with more specific sources — the works themselves, "
+            "original papers, or practitioners' own writing — would help."
+        ),
+    }
 
 
 def _compute_coverage(

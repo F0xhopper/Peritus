@@ -2,12 +2,7 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import {
-  UsersIcon,
-  SettingsIcon,
-  BarChart3Icon,
-  MessageSquareIcon,
-} from "lucide-react";
+import { UsersIcon, SettingsIcon, MessageSquareIcon } from "lucide-react";
 import {
   CommandDialog,
   CommandEmpty,
@@ -81,10 +76,6 @@ export function CommandMenu({
               <CommandItem onSelect={() => go("/experts")}>
                 <UsersIcon />
                 Experts
-              </CommandItem>
-              <CommandItem onSelect={() => go("/analytics")}>
-                <BarChart3Icon />
-                Analytics
               </CommandItem>
               <CommandItem onSelect={() => go("/settings")}>
                 <SettingsIcon />

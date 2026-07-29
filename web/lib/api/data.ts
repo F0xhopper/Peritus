@@ -3,9 +3,8 @@ import { redirect } from "next/navigation";
 import { ApiError } from "@/lib/api/server";
 import { proxyJson, NotAuthenticatedError } from "@/lib/api/proxy";
 import type {
-  CatalogCategory,
-  CatalogEntry,
   ContradictionsReport,
+  CorpusSource,
   ConversationDetail,
   ConversationSummary,
   CorpusReport,
@@ -17,6 +16,7 @@ import type {
   ScreeningFlow,
   SourceDecision,
   SourceSort,
+  User,
 } from "@/lib/api/types";
 
 // Fetchers for server components. These call FastAPI directly through the
@@ -39,6 +39,10 @@ async function fetchOrLogin<T>(fetcher: () => Promise<T>): Promise<T> {
   }
 }
 
+export async function getCurrentUser(): Promise<User> {
+  return fetchOrLogin(() => proxyJson<User>("/auth/me"));
+}
+
 export async function getExperts(): Promise<ExpertSummary[]> {
   return fetchOrLogin(() => proxyJson<ExpertSummary[]>("/experts"));
 }
@@ -51,6 +55,23 @@ export async function getExpert(slug: string): Promise<ExpertDetail | null> {
       // 404 covers both "no such expert" and "not yours" — the backend hides
       // the difference on purpose, and so does the page (notFound()).
       if (err instanceof ApiError && err.status === 404) return null;
+      throw err;
+    }
+  });
+}
+
+/** Every source in an expert's corpus. Owner-only upstream, so this 404s for
+ * anyone else — the page already handles that via getExpert. */
+export async function getExpertSources(slug: string): Promise<CorpusSource[]> {
+  return fetchOrLogin(async () => {
+    try {
+      return await proxyJson<CorpusSource[]>(
+        `/experts/${encodeURIComponent(slug)}/sources`,
+      );
+    } catch (err) {
+      // A corpus the caller cannot manage simply has no manageable sources;
+      // the panel renders empty rather than taking the whole page down.
+      if (err instanceof ApiError && err.status === 404) return [];
       throw err;
     }
   });
@@ -189,28 +210,12 @@ export async function getContradictions(
   });
 }
 
-// ── catalog & credits ───────────────────────────────────────────────────────
-
-export async function getCatalog(
-  opts: { category?: string; featured?: boolean } = {},
-): Promise<CatalogEntry[]> {
-  const query = new URLSearchParams();
-  if (opts.category) query.set("category", opts.category);
-  if (opts.featured) query.set("featured", "true");
-  const qs = query.toString();
-  // Catalog is readable without a session, so a dead session must not bounce a
-  // visitor to /login from the one page built to work before signing in.
-  return proxyJson<CatalogEntry[]>(`/experts/catalog${qs ? `?${qs}` : ""}`);
-}
-
-export async function getCatalogCategories(): Promise<CatalogCategory[]> {
-  return proxyJson<CatalogCategory[]>("/experts/catalog/categories");
-}
+// ── credits ──────────────────────────────────────────────────────────────
 
 export async function getCreditState(): Promise<CreditState> {
-  return fetchOrLogin(() => proxyJson<CreditState>("/experts/billing/me"));
+  return fetchOrLogin(() => proxyJson<CreditState>("/billing/me"));
 }
 
 export async function getCreditLedger(): Promise<LedgerEntry[]> {
-  return fetchOrLogin(() => proxyJson<LedgerEntry[]>("/experts/billing/ledger"));
+  return fetchOrLogin(() => proxyJson<LedgerEntry[]>("/billing/ledger"));
 }

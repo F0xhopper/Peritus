@@ -1,11 +1,9 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 
-// Laid out as a title page: standing head, title in capitals, a ruled break,
-// then the opening paragraph set to measure with an illuminated initial. The
-// title stays centred the way a title page centres; the lead goes flush left,
-// because a drop cap needs a straight left edge to sink into and centred body
-// copy is unreadable past a couple of lines anyway.
+// A reference-page opening: standing eyebrow, title, then the lead paragraph
+// set to a comfortable reading measure. Nothing here names anything the rest
+// of the app doesn't already say plainly — no ornament stands in for content.
 
 export function Hero() {
   return (
@@ -18,9 +16,7 @@ export function Hero() {
         you can defend
       </h1>
 
-      <div className="rule-ornament w-full max-w-xs">◆</div>
-
-      <p className="dropcap max-w-measure text-[1.0625rem] leading-[1.7] text-muted-foreground">
+      <p className="max-w-measure text-center text-[1.0625rem] leading-[1.7] text-muted-foreground">
         Peritus searches the literature a database export misses — reports,
         preprints, standards, conference talks, practitioner writing — and
         records every source it considered: what it scored for quality and

@@ -29,7 +29,7 @@ type ScreeningStages = {
   assessed_at_validation: AuditCount;
 };
 
-export default async function ScreeningPage({
+export default async function DiscoveryPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
@@ -43,9 +43,9 @@ export default async function ScreeningPage({
 
   return (
     <>
-      <PageHeader icon={FilterIcon} title="Screening flow" />
+      <PageHeader icon={FilterIcon} title="Discovery" />
 
-      <AuditNav slug={slug} active="screening" />
+      <AuditNav slug={slug} active="discovery" />
 
       <MethodNote>{flow.method_statement}</MethodNote>
 

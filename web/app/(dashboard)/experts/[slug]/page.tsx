@@ -9,7 +9,10 @@ import { ExpertMenu } from "@/components/experts/expert-menu";
 import { ChatButton } from "@/components/chat/chat-button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConceptList } from "@/components/experts/concept-list";
-import { getExpert } from "@/lib/api/data";
+import { PersonaAvatar } from "@/components/experts/persona-avatar";
+import { SourceManager } from "@/components/experts/source-manager";
+import { getExpert, getExpertSources } from "@/lib/api/data";
+import { personaLabel } from "@/lib/persona";
 
 export default async function ExpertDetailPage({
   params,
@@ -22,6 +25,8 @@ export default async function ExpertDetailPage({
   if (!expert) {
     notFound();
   }
+
+  const sources = await getExpertSources(slug);
 
   return (
     <>
@@ -61,16 +66,30 @@ export default async function ExpertDetailPage({
         <CardContent className="flex flex-col gap-3">
           {expert.persona_name ? (
             <>
-              <div className="text-sm">
-                <span className="font-medium">{expert.persona_name}</span>
-                <span className="text-muted-foreground">
-                  {" "}
-                  — {expert.persona_style}
-                </span>
+              <div className="flex items-start gap-3">
+                <PersonaAvatar
+                  label={personaLabel(expert.persona_name) ?? expert.topic}
+                  size="lg"
+                />
+                <div className="flex min-w-0 flex-col gap-1">
+                  <span className="font-medium">
+                    {personaLabel(expert.persona_name)}
+                  </span>
+                  <p className="text-sm text-muted-foreground">
+                    {expert.persona_bio}
+                  </p>
+                </div>
               </div>
-              <p className="text-sm text-muted-foreground">
-                {expert.persona_bio}
-              </p>
+              {/* The style block is the expert's actual system prompt, so it
+                  reads as instructions rather than prose — it stays on this
+                  page, but under its own label and away from the bio it was
+                  previously run together with. */}
+              <div className="flex flex-col gap-2">
+                <p className="text-eyebrow text-muted-foreground">Voice</p>
+                <p className="text-sm text-muted-foreground">
+                  {expert.persona_style}
+                </p>
+              </div>
               {/* Uncapped and unclipped here: this is the page you open to
                   read the whole list, so it wraps rather than truncating. */}
               <div className="mt-1 flex flex-col gap-2">
@@ -91,6 +110,15 @@ export default async function ExpertDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* Adding material is owner-only upstream, and a build rewrites the
+          corpus underneath an ingest — so the panel disables itself rather
+          than letting the user find out from a 409. */}
+      <SourceManager
+        slug={expert.name}
+        sources={sources}
+        buildInProgress={expert.status === "building" || expert.status === "queued"}
+      />
     </>
   );
 }

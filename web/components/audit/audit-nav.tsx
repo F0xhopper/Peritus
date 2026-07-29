@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 
 const TABS = [
   { segment: "", label: "Overview" },
-  { segment: "ledger", label: "Ledger" },
-  { segment: "screening", label: "Screening" },
+  { segment: "sources", label: "Sources" },
+  { segment: "discovery", label: "Discovery" },
   { segment: "coverage", label: "Coverage" },
   { segment: "contradictions", label: "Disagreements" },
 ] as const;
@@ -26,6 +26,9 @@ export function AuditNav({
           key={segment}
           size="sm"
           variant={segment === active ? "secondary" : "ghost"}
+          // Required whenever `render` supplies a non-<button> element — see
+          // components/auth/google-sign-in.tsx for the same fix.
+          nativeButton={false}
           render={
             <Link href={`/experts/${slug}${segment ? `/${segment}` : ""}`} />
           }

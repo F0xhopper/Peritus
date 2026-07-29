@@ -8,22 +8,21 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   /*
-   * Three voices (see app/layout.tsx for why each face was chosen):
-   *   sans/serif  — Literata, the reading face. `--font-sans` is aliased to
-   *                 it deliberately: every unmarked `font-sans` in shadcn's
-   *                 primitives should come out as book text, not grotesque.
-   *   display     — Cinzel, inscriptional capitals. Names things (titles,
-   *                 running heads, eyebrow labels); never used for controls,
-   *                 which have no true lowercase to fall back on.
+   * Two voices (see app/layout.tsx for why each face was chosen):
+   *   sans/serif/display — Literata, the reading face, for everything read as
+   *                 language: body copy, titles, running heads, labels.
+   *                 `--font-sans` is aliased to it deliberately: every
+   *                 unmarked `font-sans` in shadcn's primitives should come
+   *                 out as book text, not grotesque. `--font-display` is kept
+   *                 as a separate token — same face today — so labels and
+   *                 titles can still be styled apart from prose without a
+   *                 second typeface doing the work.
    *   mono        — JetBrains Mono, demoted from "everything" to data only.
-   *   blackletter — one ornamental initial, never inherited.
    */
   --font-sans: var(--font-literata);
   --font-serif: var(--font-literata);
-  --font-display: var(--font-cinzel);
-  --font-blackletter: var(--font-unifraktur);
+  --font-display: var(--font-literata);
   --font-mono: var(--font-jetbrains-mono);
-  --font-heading: var(--font-cinzel);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -139,7 +138,7 @@
   body {
     @apply bg-background text-foreground font-serif;
     /*
-     * Normalizes x-height across the three faces. Literata sits near 0.49 and
+     * Normalizes x-height across the two faces. Literata sits near 0.49 and
      * JetBrains Mono near 0.55, so at equal `font-size` the mono still looks a
      * size larger than the serif beside it — the mismatch that makes mixed-face
      * UIs look accidental. Adjusting to 0.5 settles both on the same optical
@@ -175,8 +174,8 @@
    * A heading element says "this names the section below it" — it says
    * nothing about whether the words in it are chrome or content, and plenty
    * of them hold content: a conversation's <h1> is the question the user
-   * typed. Blanket-setting h1–h3 in inscriptional capitals set that question
-   * in capitals too. The display face is opted into per site instead.
+   * typed. The display voice (uppercase, wide tracking) is opted into per
+   * site instead, so it never lands on a heading that is actually content.
    */
   h1,
   h2,
@@ -188,9 +187,8 @@
 @layer components {
   /*
    * Small caps with wide tracking — the running-head/eyebrow voice, used for
-   * section labels, stat captions and table headers. Cinzel has no true
-   * small-cap set, so this is capitals held down in size, which is what
-   * letterpress did for the same job anyway.
+   * section labels, stat captions and table headers. Capitals held down in
+   * size, which is what letterpress did for the same job.
    */
   .text-eyebrow {
     @apply font-display text-[0.6875rem] leading-none font-medium uppercase;
@@ -214,30 +212,9 @@
   }
 
   /*
-   * Illuminated initial. Two lines tall, sunk into the paragraph the way a
-   * manuscript drops its opening capital. Only ever applied to the first
-   * paragraph of a body of text.
-   */
-  .dropcap::first-letter {
-    /*
-     * Set in blackletter — this is the one place the face earns its download.
-     * An illuminated versal is precisely what blackletter was cut for, and at
-     * ~3.4em it is the largest glyph on the page, so the legibility problem
-     * that rules it out of logotypes and labels simply does not arise.
-     *
-     * Sized against a 1.7 leading: the float box (font-size × line-height)
-     * has to land just under two lines so it displaces exactly two, while the
-     * visible cap fills most of that height.
-     */
-    @apply font-blackletter float-left pr-2.5 text-[3.4em] leading-[0.92] font-normal;
-    padding-top: 0.02em;
-    color: var(--foreground);
-  }
-
-  /*
-   * A ruled line with a centered lozenge — the printer's break between
-   * sections. Replaces the plain <hr> wherever a section boundary wants to be
-   * felt rather than merely obeyed.
+   * A ruled line flanking whatever sits inside it — a plain divider for
+   * inline separators (e.g. "or" between two sign-in options). Replaces the
+   * plain <hr> wherever a break needs a label in the middle.
    */
   .rule-ornament {
     @apply flex items-center gap-3 text-muted-foreground/50;

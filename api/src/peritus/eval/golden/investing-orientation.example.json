@@ -1,0 +1,54 @@
+{
+  "expert": "investing",
+  "_comment": "Orientation golden set — the regression suite for answer USEFULNESS rather than groundedness. These are the questions a newcomer actually asks: broad, no jargon, wanting a way in. The first is the verbatim question that prompted the answer-quality overhaul; its original answer was a hedged tour of the retrieval set that defined no terms and led with no substance, while scoring ~1.0 on citation validity. supporting_chunk_ids/source_ids are intentionally empty — this set measures answer shape, not retrieval recall, and recall_at_k returns 1.0 for an empty gold set. Fill them in only if you also want recall measured. asker_level and question_type are what the helpfulness judge holds the answer to.",
+  "questions": [
+    {
+      "question": "what are the go to tips for investing",
+      "asker_level": "novice",
+      "question_type": "orientation",
+      "supporting_chunk_ids": [],
+      "supporting_source_ids": [],
+      "must_refuse": false
+    },
+    {
+      "question": "I don't know much about this field. Where should I start?",
+      "asker_level": "novice",
+      "question_type": "orientation",
+      "supporting_chunk_ids": [],
+      "supporting_source_ids": [],
+      "must_refuse": false
+    },
+    {
+      "question": "What does margin of safety mean and why does it matter?",
+      "asker_level": "novice",
+      "question_type": "specific_fact",
+      "supporting_chunk_ids": [],
+      "supporting_source_ids": [],
+      "must_refuse": false
+    },
+    {
+      "question": "How is Graham's approach different from Fisher's?",
+      "asker_level": "informed",
+      "question_type": "comparison",
+      "supporting_chunk_ids": [],
+      "supporting_source_ids": [],
+      "must_refuse": false
+    },
+    {
+      "question": "How would I actually screen for an undervalued stock?",
+      "asker_level": "informed",
+      "question_type": "how_to",
+      "supporting_chunk_ids": [],
+      "supporting_source_ids": [],
+      "must_refuse": false
+    },
+    {
+      "question": "What did this expert's sources say about tectonic plate subduction?",
+      "asker_level": "informed",
+      "question_type": "specific_fact",
+      "supporting_chunk_ids": [],
+      "supporting_source_ids": [],
+      "must_refuse": true
+    }
+  ]
+}

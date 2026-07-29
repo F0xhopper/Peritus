@@ -1,12 +1,13 @@
 import { SettingsIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { ComingSoon } from "@/components/coming-soon";
+import { AccountCard } from "@/components/settings/account-card";
 import { CreditSummary } from "@/components/billing/credit-summary";
-import { getCreditState, getCreditLedger } from "@/lib/api/data";
+import { getCreditState, getCreditLedger, getCurrentUser } from "@/lib/api/data";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 export default async function SettingsPage() {
-  const [state, ledger] = await Promise.all([
+  const [user, state, ledger] = await Promise.all([
+    getCurrentUser(),
     getCreditState(),
     getCreditLedger(),
   ]);
@@ -14,6 +15,8 @@ export default async function SettingsPage() {
   return (
     <>
       <PageHeader icon={SettingsIcon} title="Settings" />
+
+      <AccountCard user={user} />
 
       <CreditSummary state={state} />
 
@@ -64,11 +67,6 @@ export default async function SettingsPage() {
           </CardContent>
         </Card>
       ) : null}
-
-      <ComingSoon
-        phase="phase 6"
-        description="Account email, sign out, and session info once auth (GET /auth/me) is wired up."
-      />
     </>
   );
 }

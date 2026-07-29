@@ -66,7 +66,7 @@ def test_pro_builder_multiplier():
 
 @pytest.mark.asyncio
 async def test_lite_chat_pipeline_top_k():
-    from peritus.chat.agent import ChatAgent
+    from peritus.chat.agent import ChatAgent, QueryPlan
 
     pool = MagicMock()
     agent = ChatAgent(pool)
@@ -78,7 +78,7 @@ async def test_lite_chat_pipeline_top_k():
     agent._search.batch_search = AsyncMock(return_value=search_mock)
     agent._graph.expand = AsyncMock(return_value=[])
     agent._assess_coverage = AsyncMock(return_value={"satisfied": True, "suggested_queries": []})
-    agent._plan = AsyncMock(return_value=["subquery"])
+    agent._plan = AsyncMock(return_value=QueryPlan(subqueries=["subquery"]))
 
     with patch("peritus.chat.agent.get_anthropic_client") as mock_client:
         mock_resp = MagicMock()
@@ -93,7 +93,7 @@ async def test_lite_chat_pipeline_top_k():
 
 @pytest.mark.asyncio
 async def test_pro_chat_pipeline_top_k():
-    from peritus.chat.agent import ChatAgent
+    from peritus.chat.agent import ChatAgent, QueryPlan
 
     pool = MagicMock()
     agent = ChatAgent(pool)
@@ -105,7 +105,7 @@ async def test_pro_chat_pipeline_top_k():
     agent._search.batch_search = AsyncMock(return_value=search_mock)
     agent._graph.expand = AsyncMock(return_value=[])
     agent._assess_coverage = AsyncMock(return_value={"satisfied": True, "suggested_queries": []})
-    agent._plan = AsyncMock(return_value=["subquery"])
+    agent._plan = AsyncMock(return_value=QueryPlan(subqueries=["subquery"]))
 
     with patch("peritus.chat.agent.get_anthropic_client") as mock_client:
         mock_resp = MagicMock()
@@ -119,7 +119,7 @@ async def test_pro_chat_pipeline_top_k():
 
 @pytest.mark.asyncio
 async def test_graph_hops_propagates():
-    from peritus.chat.agent import ChatAgent
+    from peritus.chat.agent import ChatAgent, QueryPlan
 
     pool = MagicMock()
     agent = ChatAgent(pool)
@@ -132,7 +132,7 @@ async def test_graph_hops_propagates():
         agent._search.batch_search = AsyncMock(return_value=search_mock)
         agent._graph.expand = AsyncMock(return_value=[])
         agent._assess_coverage = AsyncMock(return_value={"satisfied": True, "suggested_queries": []})
-        agent._plan = AsyncMock(return_value=["subquery"])
+        agent._plan = AsyncMock(return_value=QueryPlan(subqueries=["subquery"]))
 
         with patch("peritus.chat.agent.get_anthropic_client") as mock_client:
             mock_resp = MagicMock()

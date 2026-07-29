@@ -9,7 +9,7 @@ import { TierBadge } from "@/components/experts/tier-badge";
 import type { ExpertStatus, ExpertTier } from "@/lib/api/types";
 
 // A specimen sheet, not a route the product links to. It exists so the type
-// scale, the three faces and the monochrome ramp can be judged side by side —
+// scale, the two faces and the monochrome ramp can be judged side by side —
 // which is the only way to catch a face that has drifted or a step in the ramp
 // that has stopped being distinguishable.
 
@@ -38,10 +38,9 @@ export default function DesignPreviewPage() {
         <h1 className="font-display text-3xl font-semibold tracking-[0.04em]">
           Specimen
         </h1>
-        <div className="rule-ornament">◆</div>
-        <p className="dropcap max-w-measure text-[1.0625rem] leading-[1.7] text-muted-foreground">
-          Three faces carry the whole interface. Literata sets everything that
-          is read as language; Cinzel sets everything that labels or names a
+        <p className="max-w-measure text-[1.0625rem] leading-[1.7] text-muted-foreground">
+          Two faces carry the whole interface. Literata sets everything that is
+          read as language — body copy and anything that labels or names a
           thing; JetBrains Mono is left with the identifiers, counts and code it
           was always best at. Nothing else is permitted a typeface.
         </p>
@@ -50,31 +49,14 @@ export default function DesignPreviewPage() {
       <Section title="Faces">
         <Specimen
           label="Serif — Literata"
-          note="Body, card titles, quoted extracts. Proportional figures 1234567890."
+          note="Body, headings, titles, labels, quoted extracts. Proportional figures 1234567890."
           className="font-serif text-lg"
-        />
-        <Specimen
-          label="Display — Cinzel"
-          note="Titles, running heads, eyebrows. Never controls. Figures 1234567890."
-          className="font-display text-lg"
         />
         <Specimen
           label="Mono — JetBrains Mono"
           note="Slugs, counts, code, citations. Tabular figures 1234567890."
           className="font-mono text-base"
         />
-        <div className="flex items-center gap-4">
-          <span
-            aria-hidden
-            className="font-blackletter text-[2.4rem] leading-none [font-size-adjust:none]"
-          >
-            P
-          </span>
-          <p className="text-sm text-muted-foreground">
-            Blackletter — UnifrakturMaguntia. Drop caps only, at the top of a
-            body of text. Never inherited, never set below display size.
-          </p>
-        </div>
       </Section>
 
       <Section title="Scale">
@@ -143,10 +125,10 @@ export default function DesignPreviewPage() {
           </CardHeader>
           <CardContent>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Two jobs, two faces. Anything that *names* — the running head
-              above, the eyebrow labels, this card’s section title — is set in
-              Cinzel. Anything you *read or act on* — this paragraph, the card
-              title, every button — stays in Literata.
+              One face, two voices. The running head above, the eyebrow
+              labels, and this card’s section title all name things and are
+              styled apart from prose by weight and tracking, not typeface —
+              everything, named or read, sets in Literata.
             </p>
           </CardContent>
         </Card>

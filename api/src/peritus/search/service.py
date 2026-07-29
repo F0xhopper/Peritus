@@ -4,10 +4,12 @@ import json
 import asyncpg
 
 from peritus.core.config import settings
-from peritus.infrastructure.database import halfvec_supported
+from peritus.infrastructure.database import halfvec_supported, iterative_scan_sql
 from peritus.infrastructure.embeddings import embed_query
 from peritus.infrastructure.reranker import rerank
 from peritus.search.domain import SearchResponse, SearchResult, SourceRef
+
+_ITERATIVE_SCAN_SQL = iterative_scan_sql(local=True)
 
 
 def _distance_expr() -> tuple[str, str]:
@@ -182,10 +184,26 @@ class SearchService:
             LIMIT $5
         """
         async with self._pool.acquire(timeout=settings.DB_ACQUIRE_TIMEOUT) as conn:
-            rows = await conn.fetch(
+            if halfvec_supported():
+                # Correctness, not tuning — and it has to be SET LOCAL inside an
+                # explicit transaction. An HNSW index cannot carry the expert_id
+                # filter, so the scan finds globally-nearest vectors and Postgres
+                # discards other experts' rows afterwards; with the default
+                # `hnsw.iterative_scan = off` it stops after one ef_search pass
+                # and quietly returns however few survived (measured: 40 rows of
+                # a 184-chunk expert). Setting it per-connection does not work
+                # here — DATABASE_URL points at Supabase's transaction pooler,
+                # which hands each transaction a different backend and resets
+                # session state between them, and the durable ALTER
+                # DATABASE/ROLE form is refused to non-superusers.
+                async with conn.transaction():
+                    await conn.execute(_ITERATIVE_SCAN_SQL)
+                    return await conn.fetch(
+                        sql, query_embedding, expert_id, candidate_k, query_text, top_k
+                    )
+            return await conn.fetch(
                 sql, query_embedding, expert_id, candidate_k, query_text, top_k
             )
-        return rows
 
 
 def _row_to_result(row) -> SearchResult:

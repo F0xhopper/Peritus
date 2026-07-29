@@ -8,10 +8,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import type { LedgerSource } from "@/lib/api/types";
+import type { SourceRow } from "@/lib/api/types";
 import { DiscoveryBadge } from "@/components/audit/discovery-badge";
 
-// The ledger itself: what was kept, what was dropped, and why.
+// The source list itself: what was kept, what was dropped, and why.
 //
 // Rejected rows are not a debug view — they are the evidence that the accepted
 // ones were selected — so they render at full fidelity alongside the accepted
@@ -34,12 +34,12 @@ function Score({ value, min }: { value: number | null; min: number }) {
   );
 }
 
-export function LedgerTable({
+export function SourceTable({
   sources,
   qualityMin,
   relevanceMin,
 }: {
-  sources: LedgerSource[];
+  sources: SourceRow[];
   qualityMin: number;
   relevanceMin: number;
 }) {

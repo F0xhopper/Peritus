@@ -3,7 +3,13 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { CheckIcon, TriangleAlertIcon, XIcon } from "lucide-react";
+import {
+  ArrowLeftIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  TriangleAlertIcon,
+  XIcon,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { StatusDot } from "@/components/experts/status-dot";
@@ -34,17 +40,31 @@ const RECONNECT_DELAY_MS = 2000;
 
 type Phase = "connecting" | "running" | "done" | "error" | "cancelled";
 
+type StageLogs = Record<BuildStage, string[]>;
+
 interface State {
   phase: Phase;
   /** Stage names already finished, in completion order. */
   completed: BuildStage[];
   current: BuildStage | null;
-  /** Human lines for the log tail, newest last. */
-  log: string[];
+  /** Human detail lines, grouped under whichever stage was active when the
+   * event arrived — so the stream reads as "what happened during discovery"
+   * rather than one undifferentiated feed. Newest last within each stage. */
+  logs: StageLogs;
+  /** Whichever stage was current when an `error` event landed — `current`
+   * itself gets nulled so the pipeline rail stops animating it, but the rail
+   * still needs to know which node to mark as the failure. */
+  failedStage: BuildStage | null;
   message: string | null;
   attempt: number | null;
   maxAttempts: number | null;
   counts: { sources?: number; chunks?: number; nodes?: number; edges?: number };
+}
+
+function emptyLogs(): StageLogs {
+  return Object.fromEntries(
+    BUILD_STAGES.map((s) => [s, [] as string[]]),
+  ) as unknown as StageLogs;
 }
 
 /** Start from what the server already knows, so the first paint is honest
@@ -63,7 +83,8 @@ const INITIAL: State = {
   phase: "connecting",
   completed: [],
   current: null,
-  log: [],
+  logs: emptyLogs(),
+  failedStage: null,
   message: null,
   attempt: null,
   maxAttempts: null,
@@ -89,11 +110,24 @@ export function BuildProgress({
   // "connecting". Replaying a finished build takes a second or two, and during
   // it a page that assumes "live" offers a Cancel button for a build that
   // ended days ago — an action that can only ever 409.
-  const seededTerminal = initialStatus === "ready" || initialStatus === "failed";
+  const seededTerminal =
+    initialStatus === "ready" || initialStatus === "failed";
   const [state, setState] = React.useState<State>(() =>
     seedState(initialStatus, initialError),
   );
   const [cancelling, setCancelling] = React.useState(false);
+  const [expanded, setExpanded] = React.useState<Set<BuildStage>>(
+    () => new Set(),
+  );
+
+  const toggleExpanded = (stage: BuildStage) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(stage)) next.delete(stage);
+      else next.add(stage);
+      return next;
+    });
+  };
 
   // Held in a ref, not state: the reconnect loop reads it after awaits, and a
   // stale closure over a state value would restart the stream from an old
@@ -107,7 +141,11 @@ export function BuildProgress({
     async function run() {
       while (!cancelledByUnmount) {
         try {
-          const stream = streamBuildEvents(slug, cursor.current, controller.signal);
+          const stream = streamBuildEvents(
+            slug,
+            cursor.current,
+            controller.signal,
+          );
           for await (const event of stream) {
             if (typeof event.seq === "number") cursor.current = event.seq;
             setState((prev) => reduce(prev, event));
@@ -120,7 +158,11 @@ export function BuildProgress({
           // it. So the job's own status is the authority on how this ended,
           // not the absence of an event.
           const status = await fetchJobStatus(slug);
-          if (status && status.job_status !== "queued" && status.job_status !== "running") {
+          if (
+            status &&
+            status.job_status !== "queued" &&
+            status.job_status !== "running"
+          ) {
             setState((prev) => applyJobStatus(prev, status));
             return;
           }
@@ -159,15 +201,19 @@ export function BuildProgress({
   async function onCancel() {
     setCancelling(true);
     try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/build/cancel`, {
-        method: "POST",
-      });
+      const res = await fetch(
+        `/api/experts/${encodeURIComponent(slug)}/build/cancel`,
+        {
+          method: "POST",
+        },
+      );
       if (!res.ok) {
         const payload = await res.json().catch(() => ({}));
         // 409 means it finished first — not worth an error banner.
         setState((prev) => ({
           ...prev,
-          message: res.status === 409 ? "The build already finished." : payload.error,
+          message:
+            res.status === 409 ? "The build already finished." : payload.error,
         }));
       }
       // The success path needs no local update: cancelling appends a terminal
@@ -183,10 +229,34 @@ export function BuildProgress({
   // the replay walks back through "running" on its way to the real outcome,
   // and Cancel must not blink into existence during that.
   const live =
-    !seededTerminal && (state.phase === "connecting" || state.phase === "running");
+    !seededTerminal &&
+    (state.phase === "connecting" || state.phase === "running");
 
   return (
     <div className="flex max-w-3xl flex-col gap-8">
+      <Button
+        variant="ghost"
+        size="sm"
+        nativeButton={false}
+        // Not router.back(): a build page reached directly (a bookmark, a
+        // shared link, a new tab) has no in-app history to go back to, and
+        // router.back() then leaves the app entirely. The expert page is
+        // always the correct destination — it's this page's own breadcrumb
+        // parent.
+        render={<Link href={`/experts/${slug}`} />}
+        className="w-fit"
+      >
+        <ArrowLeftIcon />
+        Back
+      </Button>
+
+      <PipelineRail
+        current={state.current}
+        completed={state.completed}
+        failedStage={state.failedStage}
+        seededTerminal={seededTerminal}
+      />
+
       <Summary
         state={state}
         topic={topic}
@@ -194,29 +264,20 @@ export function BuildProgress({
         initiallyTerminal={seededTerminal}
       />
 
-      <ol className="flex flex-col gap-0">
+      <ol className="flex flex-col gap-1">
         {BUILD_STAGES.map((stage) => (
           <StageRow
             key={stage}
             stage={stage}
             done={state.completed.includes(stage)}
             active={state.current === stage && !seededTerminal}
+            failed={state.failedStage === stage}
+            lines={state.logs[stage]}
+            expanded={expanded.has(stage)}
+            onToggle={() => toggleExpanded(stage)}
           />
         ))}
       </ol>
-
-      {state.log.length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <p className="text-eyebrow text-muted-foreground">Activity</p>
-          {/* Newest first so the interesting end is the end you can see
-              without scrolling a box that grows under you. */}
-          <ul className="flex max-h-64 flex-col gap-1 overflow-y-auto font-mono text-xs text-muted-foreground">
-            {[...state.log].reverse().map((line, i) => (
-              <li key={`${state.log.length - i}-${line}`}>{line}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
 
       {live ? (
         <div className="flex items-center gap-3">
@@ -247,14 +308,20 @@ function Summary({
   if (state.phase === "done") {
     const { sources, chunks, nodes } = state.counts;
     return (
-      <Banner icon={<CheckIcon className="size-4" />} title={`${topic} is ready.`}>
+      <Banner
+        icon={<CheckIcon className="size-4" />}
+        title={`${topic} is ready.`}
+      >
         <p className="text-sm text-muted-foreground">
           {sources !== undefined
             ? `${sources.toLocaleString()} sources · ${chunks?.toLocaleString() ?? 0} chunks · ${nodes?.toLocaleString() ?? 0} graph nodes.`
             : "The build finished."}
         </p>
         <div className="mt-3 flex gap-2">
-          <Button nativeButton={false} render={<Link href={`/experts/${slug}/chat`} />}>
+          <Button
+            nativeButton={false}
+            render={<Link href={`/experts/${slug}/chat`} />}
+          >
             Start a chat
           </Button>
           <Button
@@ -273,13 +340,19 @@ function Summary({
     return (
       <Banner
         icon={<TriangleAlertIcon className="size-4" />}
-        title={state.phase === "cancelled" ? "Build cancelled." : "Build failed."}
+        title={
+          state.phase === "cancelled" ? "Build cancelled." : "Build failed."
+        }
       >
         <p className="text-sm text-muted-foreground">
           {state.message ?? "No further detail was reported."}
         </p>
         <div className="mt-3 flex gap-2">
-          <Button variant="outline" nativeButton={false} render={<Link href="/experts/new" />}>
+          <Button
+            variant="outline"
+            nativeButton={false}
+            render={<Link href="/experts/new" />}
+          >
             Start another build
           </Button>
           <Button
@@ -294,23 +367,46 @@ function Summary({
     );
   }
 
+  // Running / connecting: the rail above already carries the step-by-step
+  // overview, so this is a compact readout of the one thing that's actually
+  // changing right now — not a second hero competing with it.
+  const stepIndex = state.current ? BUILD_STAGES.indexOf(state.current) : -1;
+  const stageLines = state.current ? state.logs[state.current] : [];
+  const latestLine = stageLines[stageLines.length - 1];
+
   return (
-    <Banner
-      icon={<StatusDot status="building" />}
-      title={state.current ? STAGE_LABELS[state.current] : "Starting the build…"}
-    >
+    <div className="flex flex-col items-center gap-1.5 py-1 text-center">
+      <p className="flex items-center gap-2 font-serif text-lg font-medium">
+        {state.current ? (
+          <Spinner className="size-4" />
+        ) : (
+          <StatusDot status="building" />
+        )}
+        {state.current ? STAGE_LABELS[state.current] : "Starting the build…"}
+      </p>
       <p className="text-sm text-muted-foreground">
+        {stepIndex >= 0
+          ? `Step ${stepIndex + 1} of ${BUILD_STAGES.length}`
+          : "Connecting…"}
+        {state.attempt && state.attempt > 1
+          ? ` · Attempt ${state.attempt} of ${state.maxAttempts}`
+          : ""}
+      </p>
+      <p
+        aria-live="polite"
+        className="mt-1 min-h-5 max-w-md font-mono text-xs text-muted-foreground"
+      >
+        {latestLine ?? ""}
+      </p>
+      <p className="text-xs text-muted-foreground/70">
         {initiallyTerminal
           ? "Replaying this expert's last build log."
           : "Building in the background. This page can be closed and reopened."}
-        {state.attempt && state.attempt > 1
-          ? ` Attempt ${state.attempt} of ${state.maxAttempts}.`
-          : ""}
       </p>
       {state.message ? (
-        <p className="mt-2 text-sm text-foreground">{state.message}</p>
+        <p className="mt-1 text-sm text-foreground">{state.message}</p>
       ) : null}
-    </Banner>
+    </div>
   );
 }
 
@@ -324,7 +420,7 @@ function Banner({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex gap-3 rounded-lg border border-border bg-muted/30 p-4">
+    <div className="flex gap-3 rounded-lg bg-muted/30 p-4">
       <span className="mt-0.5 flex shrink-0 items-center">{icon}</span>
       <div className="min-w-0 flex-1">
         <p className="font-serif text-[1.0625rem] font-medium">{title}</p>
@@ -344,35 +440,183 @@ const STAGE_LABELS: Record<BuildStage, string> = {
   persona: "Generating the persona",
 };
 
+const SHORT_STAGE_LABELS: Record<BuildStage, string> = {
+  plan: "Plan",
+  discover: "Discover",
+  validate: "Validate",
+  chunk: "Chunk",
+  graph: "Graph",
+  resolve: "Resolve",
+  persona: "Persona",
+};
+
+/** The at-a-glance overview: a CI-run-style rail of connected nodes, one per
+ * stage. The vertical list below is where the detail lives — this is only
+ * "where am I in the 7 steps," answerable without reading anything. */
+function PipelineRail({
+  current,
+  completed,
+  failedStage,
+  seededTerminal,
+}: {
+  current: BuildStage | null;
+  completed: BuildStage[];
+  failedStage: BuildStage | null;
+  seededTerminal: boolean;
+}) {
+  return (
+    <ol className="relative flex items-start">
+      {/* One continuous line from the first node's center to the last's —
+          symmetric because every column below is an equal flex-1 share, so
+          each node sits exactly 100% / (2 × 7 stages) in from its edge.
+          Tailwind's scanner needs a literal class string, not a template
+          built from BUILD_STAGES.length, so this is hand-computed and would
+          need updating alongside BUILD_STAGES if a stage is ever added. */}
+      <div
+        aria-hidden
+        className="absolute inset-x-[calc(100%/14)] top-3 h-px bg-border"
+      />
+      {BUILD_STAGES.map((stage) => {
+        const done = completed.includes(stage);
+        const active = current === stage && !seededTerminal;
+        const failed = failedStage === stage;
+        return (
+          <li
+            key={stage}
+            className="relative flex flex-1 flex-col items-center gap-1.5"
+          >
+            <span
+              className={cn(
+                "flex size-6 shrink-0 items-center justify-center rounded-full bg-background",
+                !done && !active && !failed && "text-muted-foreground/50",
+              )}
+            >
+              {failed ? (
+                <TriangleAlertIcon className="size-4 text-foreground" />
+              ) : active ? (
+                <Spinner className="size-4" />
+              ) : done ? (
+                <CheckIcon className="size-4" />
+              ) : (
+                <span
+                  aria-hidden
+                  className="size-1.5 rounded-full bg-current"
+                />
+              )}
+            </span>
+            <span
+              className={cn(
+                "hidden text-center text-[0.6875rem] text-muted-foreground sm:block",
+                (active || failed) && "text-foreground",
+                !done && !active && !failed && "text-muted-foreground/50",
+              )}
+            >
+              {SHORT_STAGE_LABELS[stage]}
+            </span>
+            <span className="sr-only">
+              {failed
+                ? " — failed here"
+                : done
+                  ? " — complete"
+                  : active
+                    ? " — in progress"
+                    : " — pending"}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function StageRow({
   stage,
   done,
   active,
+  failed,
+  lines,
+  expanded,
+  onToggle,
 }: {
   stage: BuildStage;
   done: boolean;
   active: boolean;
+  failed: boolean;
+  /** Detail lines streamed while this stage was current. */
+  lines: string[];
+  /** Whether a finished stage's detail is toggled open. Ignored while active
+   * — the active stage's detail is always visible, since that is the thing
+   * being watched. */
+  expanded: boolean;
+  onToggle: () => void;
 }) {
+  const hasLines = lines.length > 0;
+  const open = active || (hasLines && expanded);
+
   return (
     <li
       className={cn(
-        "flex items-center gap-3 border-b border-border/60 py-2.5 text-sm last:border-b-0",
-        !done && !active && "text-muted-foreground/50",
+        "py-1",
+        !done && !active && !failed && "text-muted-foreground/50",
       )}
     >
-      <span className="flex size-4 shrink-0 items-center justify-center">
-        {active ? (
-          <Spinner className="size-3.5" />
-        ) : done ? (
-          <CheckIcon className="size-3.5" />
-        ) : (
-          <span aria-hidden className="size-1.5 rounded-full bg-current" />
+      <button
+        type="button"
+        onClick={hasLines && !active ? onToggle : undefined}
+        disabled={!hasLines || active}
+        aria-expanded={hasLines ? open : undefined}
+        className={cn(
+          "flex w-full items-center gap-3 text-left text-sm outline-none",
+          hasLines && !active && "cursor-pointer hover:text-foreground",
         )}
-      </span>
-      <span className={cn(active && "text-foreground")}>{STAGE_LABELS[stage]}</span>
-      <span className="sr-only">
-        {done ? " — complete" : active ? " — in progress" : " — pending"}
-      </span>
+      >
+        <span className="flex size-4 shrink-0 items-center justify-center">
+          {failed ? (
+            <TriangleAlertIcon className="size-3.5" />
+          ) : active ? (
+            <Spinner className="size-3.5" />
+          ) : done ? (
+            <CheckIcon className="size-3.5" />
+          ) : (
+            <span aria-hidden className="size-1.5 rounded-full bg-current" />
+          )}
+        </span>
+        <span className={cn("flex-1", (active || failed) && "text-foreground")}>
+          {STAGE_LABELS[stage]}
+        </span>
+        {hasLines ? (
+          <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+            {lines.length} {lines.length === 1 ? "event" : "events"}
+            {!active ? (
+              <ChevronDownIcon
+                aria-hidden
+                className={cn(
+                  "size-3.5 transition-transform",
+                  open && "rotate-180",
+                )}
+              />
+            ) : null}
+          </span>
+        ) : null}
+        <span className="sr-only">
+          {failed
+            ? " — failed here"
+            : done
+              ? " — complete"
+              : active
+                ? " — in progress"
+                : " — pending"}
+        </span>
+      </button>
+      {open ? (
+        <ul className="mt-2 ml-7 flex max-h-40 flex-col gap-1 overflow-y-auto py-0.5 font-mono text-xs text-muted-foreground/80">
+          {/* Newest first so the interesting end is the end you can see
+              without scrolling a box that grows under you. */}
+          {[...lines].reverse().map((line, i) => (
+            <li key={`${lines.length - i}-${line}`}>{line}</li>
+          ))}
+        </ul>
+      ) : null}
     </li>
   );
 }
@@ -384,11 +628,14 @@ function reduce(prev: State, event: BuildEvent): State {
     case "build_started":
       // A retry re-emits this. The stage checklist has to rewind with it, or
       // attempt 2 would appear to start halfway through attempt 1's progress.
+      // Prior stages' logs are kept (not cleared) — the retry line itself,
+      // attached to whichever stage was active when it failed, marks the seam.
       return {
         ...prev,
         phase: "running",
         current: null,
         completed: [],
+        failedStage: null,
         attempt: event.attempt,
         maxAttempts: event.max_attempts,
       };
@@ -448,7 +695,31 @@ function reduce(prev: State, event: BuildEvent): State {
       );
 
     case "validate_done":
-      return log(prev, `Validation done — ${event.passed} kept, ${event.dropped} dropped.`);
+      return log(
+        prev,
+        `Validation done — ${event.passed} kept, ${event.dropped} dropped.`,
+      );
+
+    case "coverage_gaps":
+      return log(prev, `Coverage gaps found for: ${event.gaps.join(", ")}.`);
+
+    // Not a failure — the build continues — but the user should read this
+    // before they trust the expert's answers, so it says what it means rather
+    // than reporting a ratio.
+    case "corpus_warning":
+      return log(prev, `⚠ ${event.message}`);
+
+    case "gapfill_done":
+      return log(
+        prev,
+        event.added > 0
+          ? `Gap-fill added ${event.added} source${event.added === 1 ? "" : "s"}.${
+              event.still_uncovered.length
+                ? ` Still uncovered: ${event.still_uncovered.join(", ")}.`
+                : ""
+            }`
+          : `Gap-fill found nothing new for: ${event.still_uncovered.join(", ")}.`,
+      );
 
     case "source_ingested":
       return log(
@@ -456,15 +727,27 @@ function reduce(prev: State, event: BuildEvent): State {
         `Ingested ${truncate(event.title)} — ${event.chunks} chunks (${event.total_chunks} total).`,
       );
 
+    case "chat_ready":
+      return log(
+        prev,
+        `Chat-ready — ${event.sources} sources, ${event.chunks} chunks indexed.`,
+      );
+
     case "graph_batch_done":
-      return log(prev, `Graph batch — ${event.labels ?? 0} labels, ${event.edges ?? 0} edges.`);
+      return log(
+        prev,
+        `Graph batch — ${event.labels ?? 0} labels, ${event.edges ?? 0} edges.`,
+      );
+
+    case "graph_ready":
+      return log(
+        prev,
+        `Graph ready — ${event.nodes} nodes, ${event.edges} edges.`,
+      );
 
     case "resolve_progress":
     case "entities_resolved":
       return log(prev, `Merged ${event.merged} duplicate entities.`);
-
-    case "coverage_gaps":
-      return log(prev, `Coverage gaps: ${event.gaps.join(", ")}`);
 
     case "persona_ready":
       return log(prev, `Persona ready — ${event.name}.`);
@@ -491,26 +774,44 @@ function reduce(prev: State, event: BuildEvent): State {
       };
 
     case "error":
-      return { ...prev, phase: "error", current: null, message: event.message };
+      return {
+        ...prev,
+        phase: "error",
+        current: null,
+        failedStage: prev.current,
+        message: event.message,
+      };
 
     case "cancelled":
-      return { ...prev, phase: "cancelled", current: null, message: event.message };
+      return {
+        ...prev,
+        phase: "cancelled",
+        current: null,
+        message: event.message,
+      };
 
     default:
       return prev;
   }
 }
 
-/** Bounded so a pro build's thousands of source events can't grow the DOM
- * without limit over a long-running page. */
-const MAX_LOG_LINES = 200;
+/** Bounded per stage so a pro build's thousands of source events can't grow
+ * the DOM without limit over a long-running page. */
+const MAX_STAGE_LOG_LINES = 150;
 
 function log(prev: State, line: string): State {
-  const next = [...prev.log, line];
+  const stage = prev.current ?? "plan";
+  const next = [...prev.logs[stage], line];
   return {
     ...prev,
     phase: "running",
-    log: next.length > MAX_LOG_LINES ? next.slice(-MAX_LOG_LINES) : next,
+    logs: {
+      ...prev.logs,
+      [stage]:
+        next.length > MAX_STAGE_LOG_LINES
+          ? next.slice(-MAX_STAGE_LOG_LINES)
+          : next,
+    },
   };
 }
 
@@ -526,7 +827,9 @@ function isTerminal(type: BuildEvent["type"]): boolean {
  * the request failed — both "stop asking", neither "it succeeded". */
 async function fetchJobStatus(slug: string): Promise<BuildStatus | null> {
   try {
-    const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/build/status`);
+    const res = await fetch(
+      `/api/experts/${encodeURIComponent(slug)}/build/status`,
+    );
     if (!res.ok) return null;
     return (await res.json()) as BuildStatus;
   } catch {
@@ -543,7 +846,12 @@ async function fetchJobStatus(slug: string): Promise<BuildStatus | null> {
 function applyJobStatus(prev: State, status: BuildStatus): State {
   switch (status.job_status) {
     case "succeeded":
-      return { ...prev, phase: "done", current: null, completed: [...BUILD_STAGES] };
+      return {
+        ...prev,
+        phase: "done",
+        current: null,
+        completed: [...BUILD_STAGES],
+      };
     case "cancelled":
       return {
         ...prev,
@@ -556,6 +864,7 @@ function applyJobStatus(prev: State, status: BuildStatus): State {
         ...prev,
         phase: "error",
         current: null,
+        failedStage: prev.current,
         message:
           status.last_error ??
           `The build stopped after ${status.attempts} of ${status.max_attempts} attempts.`,

@@ -5,7 +5,9 @@ import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/experts/status-badge";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { NewChatComposer } from "@/components/chat/new-chat-composer";
+import { PersonaAvatar } from "@/components/experts/persona-avatar";
 import { getExpert, getExpertConversations, safely } from "@/lib/api/data";
+import { personaLabel } from "@/lib/persona";
 
 export default async function ExpertChatPage({
   params,
@@ -21,19 +23,27 @@ export default async function ExpertChatPage({
 
   const conversations = await safely(() => getExpertConversations(slug), []);
   const ready = expert.status === "ready";
-  const expertLabel = expert.persona_name ?? expert.topic;
+  const expertLabel = personaLabel(expert.persona_name) ?? expert.topic;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6">
       <PageHeader
         icon={MessageSquareIcon}
-        title={`Chat with ${expert.topic}`}
+        title={`Chat with ${expertLabel}`}
         action={<StatusBadge status={expert.status} />}
       />
 
       <div className="flex flex-1 flex-col justify-end gap-6">
-        <div className="mx-auto w-full max-w-3xl text-center">
+        <div className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
+          {/* Whoever you are about to talk to, above the box you talk into —
+              the header names the page, this names the person. */}
+          <PersonaAvatar label={expertLabel} size="lg" className="mb-3" />
           <h2 className="text-base font-medium">{expertLabel}</h2>
+          {expert.persona_name ? (
+            <p className="text-eyebrow mt-1 text-muted-foreground">
+              {expert.topic}
+            </p>
+          ) : null}
           <p className="mt-1 text-sm text-muted-foreground">
             {ready ? (
               <>

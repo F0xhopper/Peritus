@@ -9,6 +9,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { personaLabel } from "@/lib/persona";
 import type { ConversationSummary } from "@/lib/api/types";
 
 // Replaces the old "Recent experts" list. Access frequency is what earns
@@ -43,7 +44,8 @@ export function NavRecentChats({
                   {conversation.title ?? "Untitled chat"}
                 </span>
                 <span className="truncate text-xs text-muted-foreground">
-                  {conversation.expert_persona_name ?? conversation.expert_topic}
+                  {personaLabel(conversation.expert_persona_name) ??
+                    conversation.expert_topic}
                 </span>
               </div>
             </SidebarMenuButton>

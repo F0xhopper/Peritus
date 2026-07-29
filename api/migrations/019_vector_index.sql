@@ -68,3 +68,25 @@ END $$;
 -- case a deployment on a build with a raised dimension limit did create it —
 -- two ANN indexes on one column would just make the planner choose badly.
 DROP INDEX IF EXISTS idx_source_chunks_hnsw;
+
+-- hnsw.iterative_scan is a CORRECTNESS setting for this schema, because every
+-- semantic search filters by expert_id and an HNSW index cannot carry that
+-- filter. With the default `off`, a filtered scan stops after one ef_search
+-- pass and silently returns however few rows survived the filter — measured
+-- here at 40 rows returned for an expert owning 184 chunks.
+--
+-- Set it at database level where permissions allow, so every backend inherits
+-- it. On managed Postgres (Supabase) this is refused to non-superusers, which
+-- is why SearchService._hybrid_search also issues `SET LOCAL` inside the
+-- query's own transaction — the only scope that survives a transaction pooler.
+-- Applying it here as well is free and removes the need for that on
+-- self-hosted deployments.
+DO $$
+BEGIN
+    EXECUTE format(
+        'ALTER DATABASE %I SET hnsw.iterative_scan = relaxed_order', current_database()
+    );
+    RAISE NOTICE 'Set hnsw.iterative_scan = relaxed_order on database %.', current_database();
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Could not set hnsw.iterative_scan at database level (%) — the retrieval path sets it per transaction instead.', SQLERRM;
+END $$;

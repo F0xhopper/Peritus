@@ -57,7 +57,7 @@ from peritus.core.logging import get_logger
 from peritus.experts.domain import ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
 from peritus.infrastructure.database import get_pool
-from peritus.jobs.domain import TERMINAL_EVENT_TYPES, BuildJob
+from peritus.jobs.domain import TERMINAL_EVENT_TYPES, BuildJob, JobType
 from peritus.jobs.repository import JobRepository
 
 logger = get_logger(__name__)
@@ -358,7 +358,7 @@ async def build_expert(
         # (or is a catalog expert the caller merely has read access to). Hide its
         # existence (404, not 403) rather than let them rebuild it.
         raise HTTPException(status_code=404, detail="Expert not found")
-    active = await jobs.get_active_job(expert.id) if expert else None
+    active = await jobs.get_active_job(expert.id, job_type=JobType.BUILD) if expert else None
 
     if active is not None:
         # A build is already queued/running — attach to it rather than starting a
@@ -395,7 +395,7 @@ async def build_expert(
         try:
             await entitlements.hold_for_job(user.id, job.id, tier)
         except EntitlementError as exc:
-            await jobs.request_cancel(expert.id)
+            await jobs.request_cancel(expert.id, job_type=JobType.BUILD)
             await repo.update_status(expert.id, ExpertStatus.FAILED, "Not enough credits")
             raise _entitlement_http_error(exc) from None
 
@@ -502,10 +502,10 @@ async def cancel_build(
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     jobs = JobRepository(pool)
-    job = await jobs.get_active_job(expert.id)
+    job = await jobs.get_active_job(expert.id, job_type=JobType.BUILD)
     if job is None:
         raise HTTPException(status_code=409, detail="No active build for this expert")
-    await jobs.request_cancel(expert.id)
+    await jobs.request_cancel(expert.id, job_type=JobType.BUILD)
     # Terminal event so any client tailing the log stops cleanly, and a status the
     # worker would otherwise only set once its heartbeat fails.
     await jobs.append_event(job.id, "cancelled", {

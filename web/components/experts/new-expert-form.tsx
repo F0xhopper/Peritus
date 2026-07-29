@@ -54,9 +54,22 @@ export function NewExpertForm() {
   const router = useRouter();
   const [topic, setTopic] = React.useState("");
   const [tier, setTier] = React.useState<ExpertTier>("standard");
-  const [sources, setSources] = React.useState<Set<Fetcher>>(new Set());
+  // Every source starts on. The old default was an empty set that the backend
+  // read as "all of them", which is the same build — but a row of unchecked
+  // boxes says the opposite, so people checked two, narrowed a build they
+  // meant to leave wide, and never saw the ones they'd switched off. Showing
+  // the true default and letting it be narrowed by unchecking is the same
+  // control, stated honestly.
+  const [sources, setSources] = React.useState<Set<Fetcher>>(
+    // Lazy init: `new Set(FETCHERS)` as a bare argument would rebuild the set
+    // on every keystroke in the topic field and throw it away.
+    () => new Set(FETCHERS),
+  );
   const [pending, setPending] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  const allSelected = sources.size === FETCHERS.length;
+  const noneSelected = sources.size === 0;
 
   const toggleSource = (name: Fetcher) => {
     setSources((prev) => {
@@ -69,7 +82,7 @@ export function NewExpertForm() {
 
   async function onSubmit(event: React.FormEvent) {
     event.preventDefault();
-    if (pending) return;
+    if (pending || noneSelected) return;
 
     setError(null);
     setPending(true);
@@ -80,9 +93,14 @@ export function NewExpertForm() {
         body: JSON.stringify({
           topic: topic.trim(),
           tier,
-          // Empty set means "no opinion", which the backend reads as "every
-          // fetcher" — not "no fetchers".
-          sources: sources.size > 0 ? [...sources] : null,
+          // Everything checked is sent as null, not as the full list. They are
+          // not the same request: an explicit allowlist also *guarantees* each
+          // named fetcher a slice of the budget (`_build_fetchers` floors its
+          // weight at 1.0), so posting all nine would force Reddit into a
+          // pharmacology build the planner had rightly zeroed out. Null keeps
+          // every fetcher eligible and lets the planner weight them — which is
+          // exactly what "all sources" means here.
+          sources: allSelected ? null : [...sources],
         }),
       });
 
@@ -178,14 +196,31 @@ export function NewExpertForm() {
       </fieldset>
 
       <fieldset className="flex flex-col gap-3">
+        {/* The legend stays the fieldset's first child — a <legend> that isn't
+            is just a styled block, and the group loses its accessible name. So
+            the bulk control rides with the help text instead. */}
         <legend className="mb-1 text-eyebrow text-muted-foreground">
           Sources
         </legend>
-        <p className="mb-2 text-sm text-muted-foreground">
-          Leave all unchecked to let the research planner choose. Checking any
-          restricts the build to those fetchers and guarantees each one a share
-          of the budget.
-        </p>
+        <div className="mb-2 flex items-start justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            All sources are on, and the research planner decides how much of the
+            budget each one earns. Switch some off to hold the build to the rest
+            — a narrowed list also guarantees every source left on it a share.
+          </p>
+          {/* One control, two directions: "all on" and "all off" are the only
+              places a bulk action can go, and a pair of buttons would leave one
+              of them permanently in a no-op state. */}
+          <button
+            type="button"
+            onClick={() =>
+              setSources(allSelected ? new Set() : new Set(FETCHERS))
+            }
+            className="shrink-0 rounded-lg text-xs text-muted-foreground underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {allSelected ? "Clear all" : "Select all"}
+          </button>
+        </div>
         <div className="flex flex-wrap gap-2">
           {FETCHERS.map((name) => {
             const checked = sources.has(name);
@@ -196,7 +231,11 @@ export function NewExpertForm() {
                   "cursor-pointer rounded-lg border px-3 py-1.5 text-sm transition-colors",
                   checked
                     ? "border-foreground/40 bg-muted/60 text-foreground"
-                    : "border-border text-muted-foreground hover:bg-muted/25",
+                    // Off is now a decision rather than a starting point, so it
+                    // gets its own mark. The theme is monochrome — a dashed
+                    // edge is the "excluded" signal a color would otherwise
+                    // carry, and it survives being read at a glance.
+                    : "border-dashed border-border text-muted-foreground/60 hover:bg-muted/25",
                 )}
               >
                 <input
@@ -210,6 +249,16 @@ export function NewExpertForm() {
             );
           })}
         </div>
+        {/* Nothing checked can't be sent: the backend reads an empty list as
+            "every fetcher", so a build started from a blank row would use the
+            sources the user had just switched off. Blocked here rather than
+            silently reinterpreted. */}
+        {noneSelected ? (
+          <p className="text-sm text-foreground">
+            Leave at least one source on — a build with none has nothing to
+            read.
+          </p>
+        ) : null}
       </fieldset>
 
       {error ? (
@@ -219,7 +268,7 @@ export function NewExpertForm() {
       ) : null}
 
       <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending || !topic.trim()}>
+        <Button type="submit" disabled={pending || !topic.trim() || noneSelected}>
           {pending ? <Loader2Icon className="animate-spin" /> : null}
           {pending ? "Starting build…" : "Start build"}
         </Button>

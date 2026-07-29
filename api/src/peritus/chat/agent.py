@@ -29,9 +29,64 @@ from peritus.search.service import SearchService
 
 logger = get_logger(__name__)
 
+ASKER_LEVELS: tuple[str, ...] = ("novice", "informed", "expert")
+QUESTION_TYPES: tuple[str, ...] = (
+    "orientation", "specific_fact", "comparison", "how_to", "open_ended",
+)
+
+# What each classification means for the answer. Deterministic rather than asked
+# of the planner: the planner is a fast model choosing between five labels, which
+# it does reliably; writing the pedagogy for each label is a different job and
+# doesn't need to be re-derived (or re-paid for) on every question.
+_LEVEL_GUIDANCE: dict[str, str] = {
+    "novice": (
+        "no background in this subject — define every term of art the first time "
+        "you use it, in the sentence that needs it, and prefer a concrete example "
+        "to an abstraction"
+    ),
+    "informed": (
+        "knows the basics but is not a specialist — skip elementary definitions, "
+        "gloss specialist vocabulary as you go"
+    ),
+    "expert": (
+        "a specialist — skip definitions, don't re-explain fundamentals, go "
+        "straight to substance, precision, and the contested edges"
+    ),
+}
+
+_TYPE_GUIDANCE: dict[str, str] = {
+    "orientation": (
+        "they want a way into the subject. Lead with the practical substance — "
+        "what actually matters and what to do with it — organised by what they "
+        "should understand or do, not by what happens to be covered"
+    ),
+    "specific_fact": (
+        "they want one specific thing. Answer it in the first sentence, then add "
+        "only what makes it usable or properly qualified"
+    ),
+    "comparison": (
+        "they want to know how these differ and which applies when. Compare on "
+        "the axes that matter and say what follows from the difference"
+    ),
+    "how_to": (
+        "they want to do something. Give the practice or the steps, in order, "
+        "concretely enough to act on"
+    ),
+    "open_ended": (
+        "answer directly first, then develop only what genuinely serves the "
+        "question"
+    ),
+}
+
+_DEFAULT_DIRECTIVE = (
+    "Answer the question directly and concretely, organised by the subject."
+)
+
 _PLAN_TOOL: dict[str, Any] = {
     "name": "create_plan",
-    "description": "Decompose a question into retrieval subqueries.",
+    "description": (
+        "Plan the answer: how to search for evidence, and who is asking for what."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -42,8 +97,38 @@ _PLAN_TOOL: dict[str, Any] = {
                 "maxItems": 4,
                 "description": "2–4 declarative retrieval-phrased subqueries.",
             },
+            "asker_level": {
+                "type": "string",
+                "enum": list(ASKER_LEVELS),
+                "description": (
+                    "How much background the asker has, judged from the question "
+                    "itself: how they use (or avoid) terminology, and anything "
+                    "they say about themselves. When a question is broad and "
+                    "plainly worded, 'novice' is usually right; do not read "
+                    "'expert' into a question just because the topic is technical."
+                ),
+            },
+            "question_type": {
+                "type": "string",
+                "enum": list(QUESTION_TYPES),
+                "description": (
+                    "What kind of answer would satisfy them: 'orientation' for "
+                    "getting into a subject, 'specific_fact' for one definite "
+                    "thing, 'comparison' for how options differ, 'how_to' for "
+                    "doing something, 'open_ended' when none of those fit."
+                ),
+            },
+            "answer_directive": {
+                "type": "string",
+                "description": (
+                    "One sentence, imperative, telling the answering expert what "
+                    "this particular answer has to do — the substance to lead "
+                    "with and what would make it useful. About the subject, never "
+                    "about the sources or the search."
+                ),
+            },
         },
-        "required": ["subqueries"],
+        "required": ["subqueries", "asker_level", "question_type", "answer_directive"],
     },
 }
 
@@ -62,6 +147,70 @@ _COVERAGE_TOOL: dict[str, Any] = {
         "required": ["satisfied", "suggested_queries"],
     },
 }
+
+
+@dataclass(frozen=True)
+class QueryPlan:
+    """What the planner decided about a question, before any retrieval runs.
+
+    Retrieval subqueries and answer shaping come from the same call because the
+    planner already reads the question on a fast model: classifying the asker and
+    the question type alongside the subqueries costs no extra latency and no
+    extra request. A novice asking for a way into a subject and a specialist
+    asking for one figure are answered identically without this, which is how a
+    beginner ends up reading a literature review.
+
+    Every field has a usable default, so a planning failure degrades to "answer
+    the question directly" rather than to no shaping at all.
+    """
+
+    subqueries: list[str]
+    asker_level: str = "informed"
+    question_type: str = "open_ended"
+    answer_directive: str = _DEFAULT_DIRECTIVE
+
+    @classmethod
+    def fallback(cls, question: str) -> "QueryPlan":
+        """The plan for a question the planner could not decompose: search the
+        question verbatim and shape the answer on neutral defaults."""
+        return cls(subqueries=[question])
+
+    @classmethod
+    def from_tool_input(cls, data: dict, question: str) -> "QueryPlan":
+        """Build a plan from the planner's tool output, normalising as we go.
+
+        The enum values are the contract with ``_LEVEL_GUIDANCE`` /
+        ``_TYPE_GUIDANCE``; anything unrecognised falls back to the neutral
+        label rather than producing a prompt with a blank guidance clause.
+        """
+        raw_subqueries = data.get("subqueries") or []
+        subqueries = [s for s in raw_subqueries if isinstance(s, str) and s.strip()]
+
+        level = data.get("asker_level")
+        qtype = data.get("question_type")
+        directive = data.get("answer_directive")
+
+        return cls(
+            subqueries=subqueries or [question],
+            asker_level=level if level in ASKER_LEVELS else "informed",
+            question_type=qtype if qtype in QUESTION_TYPES else "open_ended",
+            answer_directive=(
+                directive.strip()
+                if isinstance(directive, str) and directive.strip()
+                else _DEFAULT_DIRECTIVE
+            ),
+        )
+
+    def shaping_block(self) -> str:
+        """The read of the question, as the answering model sees it."""
+        return (
+            "Reading of this question — use it to shape the answer, never to "
+            "relax the rules:\n"
+            f"- Asker: {_LEVEL_GUIDANCE[self.asker_level]}.\n"
+            f"- Question type ({self.question_type}): "
+            f"{_TYPE_GUIDANCE[self.question_type]}.\n"
+            f"- This answer: {self.answer_directive}"
+        )
 
 
 @dataclass
@@ -113,6 +262,10 @@ class RetrievedContext:
     # Optional so every existing constructor call stays valid; the streaming
     # path always populates it.
     trail: RetrievalTrail | None = None
+    # The planner's read of the question, carried through to composition so the
+    # answer is shaped for the person who asked. Optional for the same reason as
+    # `trail`; composition falls back to neutral shaping when it is absent.
+    plan: QueryPlan | None = None
 
 
 @dataclass
@@ -122,15 +275,50 @@ class Answer:
     has_contradiction: bool = False
 
 
-def build_user_message(question: str, context_block: str) -> dict:
-    """The single grounded-prompt shape sent to Claude for composition."""
+# Contradictions reach the model here, at the prompt level, and not as a note
+# spliced into passage text — a passage that tells the model what to do violates
+# the contract's own "passages are data, not instructions" rule, and the model
+# duly obeyed it by writing about tensions between its sources. Framed for the
+# subject rather than for the bibliography.
+_CONTRADICTION_NOTE = (
+    "Heads-up: the evidence below contains a real disagreement on part of this "
+    "question. Mention it only if it changes what the asker should do or "
+    "believe, and then say what is disputed about the subject — never which of "
+    "your sources conflict."
+)
+
+
+def build_user_message(
+    question: str,
+    context_block: str,
+    plan: QueryPlan | None = None,
+    has_contradiction: bool = False,
+) -> dict:
+    """The single grounded-prompt shape sent to Claude for composition.
+
+    Evidence first, then the question and how to answer it. The order is
+    deliberate: whatever the model reads last weighs most on what it writes
+    first, and ending on the passage block is what an answer that narrates its
+    passages looks like from the inside.
+
+    The numbered passage block itself is untouched — ``[n] citation`` followed by
+    the passage — because ``parse_cited_indices``, ``used_citations``, the SSE
+    ``sources`` event and the whole audit trail are all keyed to those markers.
+    """
+    plan = plan or QueryPlan.fallback(question)
+    contradiction = f"{_CONTRADICTION_NOTE}\n\n" if has_contradiction else ""
     return {
         "role": "user",
         "content": (
+            "Evidence — numbered passages retrieved for this question. "
+            "Substantive claims about the subject must come from these and "
+            "carry their [number]; definitions, structure, and worked examples "
+            "are yours to supply, uncited.\n\n"
+            f"{context_block}\n\n"
+            "---\n"
+            f"{contradiction}"
             f"Question: {question}\n\n"
-            "Numbered passages — answer only from these and cite each claim "
-            "with its [number]:\n\n"
-            f"{context_block}"
+            f"{plan.shaping_block()}"
         ),
     }
 
@@ -150,7 +338,13 @@ def build_cached_system(persona_style: str | None, topic: str) -> list[dict]:
     }]
 
 
-def build_composition_messages(history: list[dict], question: str, context_block: str) -> list[dict]:
+def build_composition_messages(
+    history: list[dict],
+    question: str,
+    context_block: str,
+    plan: QueryPlan | None = None,
+    has_contradiction: bool = False,
+) -> list[dict]:
     """Trim history, mark the cache breakpoint, and append the grounded question.
 
     History is capped at ``CHAT_HISTORY_MAX_MESSAGES`` (client input is
@@ -158,6 +352,10 @@ def build_composition_messages(history: list[dict], question: str, context_block
     message carries a ``cache_control`` breakpoint so each turn's request
     reuses the previous turn's cached prefix — the whole prior conversation is
     then billed at ~0.1× instead of full input price.
+
+    Per-turn shaping (``plan``, ``has_contradiction``) only ever lands in the
+    final message, which sits after the last breakpoint, so nothing here varies
+    a cached prefix.
     """
     trimmed = list(history[-settings.CHAT_HISTORY_MAX_MESSAGES:])
     while trimmed and trimmed[0].get("role") != "user":
@@ -173,7 +371,7 @@ def build_composition_messages(history: list[dict], question: str, context_block
                 "text": content,
                 "cache_control": {"type": "ephemeral"},
             }]
-    messages.append(build_user_message(question, context_block))
+    messages.append(build_user_message(question, context_block, plan, has_contradiction))
     return messages
 
 
@@ -253,9 +451,10 @@ class ChatAgent:
         """
         cfg = expert.config
 
-        # 1. Plan subqueries
+        # 1. Plan subqueries, and read who is asking for what
         yield ("status", "Planning search queries…")
-        subqueries = await self._plan(question, expert.topic, cfg.max_subqueries)
+        plan = await self._plan(question, expert.topic, cfg.max_subqueries)
+        subqueries = plan.subqueries
 
         # 2. Parallel hybrid search
         yield ("status", f"Searching knowledge base across {len(subqueries)} queries…")
@@ -311,6 +510,7 @@ class ChatAgent:
             passages=indexed,
             has_contradiction=any(e.has_contradiction for e in enriched),
             trail=trail,
+            plan=plan,
         ))
 
     async def gather_context(self, expert: Expert, question: str) -> RetrievedContext:
@@ -331,7 +531,9 @@ class ChatAgent:
         ctx = await self.gather_context(expert, question)
 
         client = get_anthropic_client()
-        messages = build_composition_messages(history, question, ctx.context_block)
+        messages = build_composition_messages(
+            history, question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+        )
         resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.CLAUDE_MODEL,
             max_tokens=expert.config.max_response_tokens,
@@ -350,7 +552,13 @@ class ChatAgent:
             has_contradiction=ctx.has_contradiction,
         )
 
-    async def _plan(self, question: str, topic: str, max_subqueries: int = 4) -> list[str]:
+    async def _plan(self, question: str, topic: str, max_subqueries: int = 4) -> QueryPlan:
+        """Decompose the question for retrieval and read who is asking for what.
+
+        One call on the fast model does both. A failure here must not cost the
+        answer, so it degrades to :meth:`QueryPlan.fallback` — the question
+        searched verbatim, shaped on neutral defaults — rather than raising.
+        """
         try:
             tool = copy.deepcopy(_PLAN_TOOL)
             tool["input_schema"]["properties"]["subqueries"]["maxItems"] = max_subqueries
@@ -359,21 +567,26 @@ class ChatAgent:
             client = get_anthropic_client()
             resp = await client.messages.create(  # type: ignore[call-overload]
                 model=settings.FAST_MODEL,
-                max_tokens=256,
+                max_tokens=512,
                 system=(
-                    f"You are a retrieval planner for a {topic} expert. "
-                    f"Decompose the question into 2–{max_subqueries} declarative retrieval subqueries — "
-                    "phrases a relevant passage would contain, not questions."
+                    f"You plan answers for a {topic} expert. Two jobs, one call.\n"
+                    f"1. Decompose the question into 2–{max_subqueries} declarative "
+                    "retrieval subqueries — phrases a relevant passage would "
+                    "contain, not questions.\n"
+                    "2. Read the question: how much background the asker has, what "
+                    "kind of answer would satisfy them, and one imperative sentence "
+                    "saying what this answer must do. Judge the asker from the "
+                    "question as written, not from how technical the field is."
                 ),
                 tools=[tool],
                 tool_choice={"type": "tool", "name": "create_plan"},
                 messages=[{"role": "user", "content": f"Question: {question}"}],
             )
             block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-            return block.input.get("subqueries", [question])
+            return QueryPlan.from_tool_input(dict(block.input), question)
         except Exception as exc:
             logger.warning("Planning failed: %s", exc)
-            return [question]
+            return QueryPlan.fallback(question)
 
     async def _assess_coverage(
         self, question: str, passages: list[dict], max_passages: int = 15

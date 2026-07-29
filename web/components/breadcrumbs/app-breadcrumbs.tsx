@@ -22,14 +22,17 @@ import type { ConversationSummary, ExpertSummary } from "@/lib/api/types";
 // is never wrong, and it never blocks rendering on a second request.
 //
 // Segment→label rules, in full:
-//   /experts                  Experts
-//   /experts/new              Experts › New expert
-//   /experts/{slug}           Experts › {topic}
-//   /experts/{slug}/chat      Experts › {topic} › Chat
-//   /experts/{slug}/build     Experts › {topic} › Build
-//   /chats/{id}               Experts › {topic} › {conversation title}
-//   /analytics                Analytics
-//   /settings                 Settings
+//   /experts                       Experts
+//   /experts/new                   Experts › New expert
+//   /experts/{slug}                Experts › {topic}
+//   /experts/{slug}/chat           Experts › {topic} › Chat
+//   /experts/{slug}/build          Experts › {topic} › Build
+//   /experts/{slug}/sources        Experts › {topic} › Sources
+//   /experts/{slug}/discovery      Experts › {topic} › Discovery
+//   /experts/{slug}/coverage       Experts › {topic} › Coverage
+//   /experts/{slug}/contradictions Experts › {topic} › Disagreements
+//   /chats/{id}                    Experts › {topic} › {conversation title}
+//   /settings                      Settings
 
 export interface Crumb {
   label: string;
@@ -39,8 +42,18 @@ export interface Crumb {
 
 const SECTION_LABELS: Record<string, string> = {
   experts: "Experts",
-  analytics: "Analytics",
   settings: "Settings",
+};
+
+// Matches components/audit/audit-nav.tsx's TABS labels ("contradictions" is
+// styled "Disagreements" there too) plus the chat/build leaves.
+const EXPERT_LEAF_LABELS: Record<string, string> = {
+  chat: "Chat",
+  build: "Build",
+  sources: "Sources",
+  discovery: "Discovery",
+  coverage: "Coverage",
+  contradictions: "Disagreements",
 };
 
 export function AppBreadcrumbs({
@@ -137,8 +150,8 @@ function expertsTrail(rest: string[], experts: ExpertSummary[]): Crumb[] {
     { label: expert?.topic ?? slug, href: `/experts/${slug}` },
   ];
 
-  if (leaf === "chat") trail.push({ label: "Chat" });
-  if (leaf === "build") trail.push({ label: "Build" });
+  const leafLabel = leaf ? EXPERT_LEAF_LABELS[leaf] : undefined;
+  if (leafLabel) trail.push({ label: leafLabel });
 
   return trail;
 }

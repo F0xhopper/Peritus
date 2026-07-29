@@ -26,6 +26,10 @@ class Settings:
     # How long a caller waits for a free connection before giving up. Bounded so
     # an exhausted pool surfaces as a fast 503 instead of an indefinite hang.
     DB_ACQUIRE_TIMEOUT: float = float(os.getenv("DB_ACQUIRE_TIMEOUT", "10"))
+    # How a filtered HNSW scan behaves when the expert_id filter rejects most of
+    # what the index returns. Must not be "off": that silently truncates results
+    # (measured 40 rows returned out of 184). See database._enable_iterative_scan.
+    HNSW_ITERATIVE_SCAN: str = os.getenv("HNSW_ITERATIVE_SCAN", "relaxed_order")
 
     # Embeddings
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")

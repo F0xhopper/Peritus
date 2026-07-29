@@ -380,12 +380,24 @@ class ExpertRepository:
             )
 
     async def reset_build_state(self, expert_id: int) -> None:
-        """Clear all derived corpus state so a (re)build starts from a clean slate.
+        """Clear derived corpus state so a (re)build starts from a clean slate.
 
         Builds are not checkpointed, so a retry re-runs the whole pipeline. Deleting
         the previous attempt's sources/chunks/graph first keeps a retry from creating
         duplicate rows. Child tables cascade from `sources`, but we delete each
         explicitly so this is correct regardless of FK cascade direction.
+
+        **User-supplied sources survive.** Anything with
+        ``discovered_via = 'upload'`` was handed over by the owner, not found by
+        discovery, and in most cases cannot be found again — that is usually the
+        reason it was uploaded. Wiping it on a rebuild would destroy the one part
+        of the corpus the pipeline cannot reconstruct, so uploads and their
+        chunks are kept and the rebuild adds discovery's findings around them.
+
+        The concept graph is still wiped whole, because it is rebuilt whole and a
+        node can be anchored in both uploaded and discovered chunks. The build's
+        graph stage re-reads the surviving upload chunks, so they are back in the
+        graph by the time it finishes.
 
         Readiness is reset here, inside the same transaction that wipes the
         corpus, rather than by the builder a moment later. Otherwise there is a
@@ -396,13 +408,33 @@ class ExpertRepository:
         async with self._pool.acquire() as conn, conn.transaction():
             await conn.execute("DELETE FROM expert_edges WHERE expert_id = $1", expert_id)
             await conn.execute("DELETE FROM expert_nodes WHERE expert_id = $1", expert_id)
-            await conn.execute("DELETE FROM source_chunks WHERE expert_id = $1", expert_id)
-            await conn.execute("DELETE FROM sources WHERE expert_id = $1", expert_id)
+            await conn.execute(
+                """
+                DELETE FROM source_chunks
+                WHERE expert_id = $1 AND source_id IN (
+                    SELECT id FROM sources
+                    WHERE expert_id = $1
+                      AND (discovered_via IS DISTINCT FROM 'upload')
+                )
+                """,
+                expert_id,
+            )
+            await conn.execute(
+                """
+                DELETE FROM sources
+                WHERE expert_id = $1 AND (discovered_via IS DISTINCT FROM 'upload')
+                """,
+                expert_id,
+            )
             await conn.execute(
                 """
                     UPDATE experts
-                    SET source_count = 0, chunk_count = 0, node_count = 0,
-                        edge_count = 0, avg_quality = NULL, error = NULL,
+                    SET source_count = (SELECT COUNT(*) FROM sources
+                                        WHERE expert_id = $1 AND passed = true),
+                        chunk_count = (SELECT COUNT(*) FROM source_chunks
+                                       WHERE expert_id = $1),
+                        node_count = 0, edge_count = 0,
+                        avg_quality = NULL, error = NULL,
                         readiness = 'pending', chat_ready_at = NULL, graph_ready_at = NULL,
                         updated_at = NOW()
                     WHERE id = $1

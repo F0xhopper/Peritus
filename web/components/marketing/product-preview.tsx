@@ -28,7 +28,7 @@ const LOG = [
 export function ProductPreview() {
   return (
     <section className="mx-auto max-w-5xl px-4 py-20">
-      <SectionHeading eyebrow="The ledger" title="Every decision, as it happens">
+      <SectionHeading eyebrow="The build log" title="Every decision, as it happens">
         The build streams each accept and reject while it runs, with the scores
         behind it and the reason for every drop. The same record — plus the
         validator model, the rubric version and the search each source came

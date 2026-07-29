@@ -56,7 +56,11 @@ async function toApiError(res: Response): Promise<ApiError> {
   const body = await res.text().catch(() => "");
   let message = body;
   try {
-    message = JSON.parse(body).detail ?? body;
+    // Entitlement denials send a structured `detail` object (code, tier,
+    // remedy, …) rather than a string — see EntitlementError.to_payload in
+    // billing/domain.py. Only its `message` is prose fit for ApiError.
+    const detail = JSON.parse(body).detail;
+    message = typeof detail === "string" ? detail : (detail?.message ?? body);
   } catch {
     // not JSON — use the raw body
   }

@@ -6,7 +6,7 @@ import { AuditNav } from "@/components/audit/audit-nav";
 import { StatTile } from "@/components/experts/stat-tile";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { LedgerTable } from "@/components/audit/ledger-table";
+import { SourceTable } from "@/components/audit/source-table";
 import { SearchProvenance } from "@/components/audit/search-provenance";
 import { MethodNote } from "@/components/audit/method-note";
 import { ExportMenu } from "@/components/audit/export-menu";
@@ -24,7 +24,7 @@ function isDecision(v: string | undefined): v is SourceDecision {
   return v != null && (DECISIONS as string[]).includes(v);
 }
 
-export default async function LedgerPage({
+export default async function SourcesPage({
   params,
   searchParams,
 }: {
@@ -49,11 +49,11 @@ export default async function LedgerPage({
     <>
       <PageHeader
         icon={ScrollTextIcon}
-        title="Screening ledger"
+        title="Sources"
         action={<ExportMenu slug={slug} decision={decision} />}
       />
 
-      <AuditNav slug={slug} active="ledger" />
+      <AuditNav slug={slug} active="sources" />
 
       <MethodNote>{report.method_statement}</MethodNote>
 
@@ -102,12 +102,13 @@ export default async function LedgerPage({
                 key={d}
                 size="sm"
                 variant={d === decision ? "secondary" : "ghost"}
+                nativeButton={false}
                 render={
                   <Link
                     href={
                       d === "all"
-                        ? `/experts/${slug}/ledger`
-                        : `/experts/${slug}/ledger?decision=${d}`
+                        ? `/experts/${slug}/sources`
+                        : `/experts/${slug}/sources?decision=${d}`
                     }
                   />
                 }
@@ -118,7 +119,7 @@ export default async function LedgerPage({
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <LedgerTable
+          <SourceTable
             sources={report.sources}
             qualityMin={thresholds.quality_min}
             relevanceMin={thresholds.relevance_min}
@@ -126,7 +127,7 @@ export default async function LedgerPage({
           {report.page.has_more ? (
             <p className="text-xs text-muted-foreground">
               Showing {report.page.returned} of {report.page.total_matching}.
-              Export for the complete ledger.
+              Export for the complete list.
             </p>
           ) : null}
           <MethodNote>{thresholds.note}</MethodNote>

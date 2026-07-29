@@ -22,6 +22,8 @@ Prompt-cache economics are unchanged: ``build_cached_system`` keeps the
 byte-identical system prompt breakpoint, ``build_composition_messages`` keeps
 the trailing-history breakpoint, so follow-up turns bill prior context at
 ~0.1× regardless of whether history came from the request body or Postgres.
+Per-turn answer shaping (the planner's read of the question, the contradiction
+flag) lands only in the final message, after the last breakpoint.
 """
 
 from collections.abc import AsyncIterator
@@ -69,8 +71,11 @@ async def stream_expert_answer(
 
     # Stream the Anthropic response token by token. System prompt and history
     # carry prompt-cache breakpoints so follow-up turns read the shared prefix
-    # at ~0.1× input price.
-    messages = build_composition_messages(history, question, ctx.context_block)
+    # at ~0.1× input price. The plan and the contradiction flag shape only the
+    # final (uncached) message — see `build_composition_messages`.
+    messages = build_composition_messages(
+        history, question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+    )
     client = get_anthropic_client()
     answer_parts: list[str] = []
     async with client.messages.stream(

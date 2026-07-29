@@ -27,7 +27,18 @@ class EnrichedResult:
         return self.result.citation
 
     def context_block(self) -> str:
-        """Formatted context for the chat agent prompt."""
+        """Formatted context for the chat agent prompt — evidence only.
+
+        Nothing here may instruct the model. The grounding contract tells it the
+        passages are reference data and that anything directive inside them is to
+        be ignored; an earlier version appended "[Note: a contradicts edge was
+        traversed — surface this tension in your answer]" to the passage text,
+        which is exactly the thing the contract forbids, and the model obeyed it
+        by editorialising about disagreements between its own sources.
+        ``has_contradiction`` still propagates — it is handled at the prompt
+        level in ``chat/agent.py``, in the subject's terms rather than the
+        bibliography's.
+        """
         lines = [self.text[:800]]
         if self.related_concepts:
             lines.append("\nRelated concepts:")
@@ -37,8 +48,6 @@ class EnrichedResult:
             lines.append("\nRelationships:")
             for e in self.relationships:
                 lines.append(f"  {e['from_label']} --{e['edge_type']}--> {e['to_label']}")
-        if self.has_contradiction:
-            lines.append("\n[Note: a contradicts edge was traversed — surface this tension in your answer]")
         return "\n".join(lines)
 
 

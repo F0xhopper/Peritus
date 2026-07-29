@@ -10,6 +10,7 @@ import { Composer } from "@/components/chat/composer";
 import { ConversationMenu } from "@/components/chat/conversation-menu";
 import { MessageList } from "@/components/chat/message-list";
 import { useChatStream } from "@/components/chat/use-chat-stream";
+import { personaLabel } from "@/lib/persona";
 import type { ConversationDetail } from "@/lib/api/types";
 
 /** sessionStorage key carrying the first question across the
@@ -75,7 +76,7 @@ export function ChatView({ conversation }: { conversation: ConversationDetail })
   }, [conversation.id, send]);
 
   const expertLabel =
-    conversation.expert_persona_name ?? conversation.expert_topic;
+    personaLabel(conversation.expert_persona_name) ?? conversation.expert_topic;
   const streaming = status === "streaming";
 
   return (
@@ -86,7 +87,7 @@ export function ChatView({ conversation }: { conversation: ConversationDetail })
           size="icon-sm"
           aria-label="Back to expert"
           nativeButton={false}
-          render={<Link href={`/experts/${conversation.expert_slug}/chat`} />}
+          render={<Link href={`/experts/${conversation.expert_slug}`} />}
         >
           <ChevronLeftIcon />
         </Button>

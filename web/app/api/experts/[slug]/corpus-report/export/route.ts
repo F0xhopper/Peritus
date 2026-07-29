@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { proxyFetch, proxyErrorResponse } from "@/lib/api/proxy";
 
-// Streams the screening ledger back as a file download (CSV or RIS).
+// Streams the source list back as a file download (CSV or RIS).
 //
 // Passed through rather than re-serialised: the backend owns the format, and
 // RIS in particular has escaping rules that a second encoder here could only
@@ -45,8 +45,8 @@ export async function GET(
         // not JSON — use the raw body
       }
       // 507 is the export guard: the corpus is larger than the export ceiling
-      // and a truncated ledger would misrepresent the search, so the backend
-      // refuses rather than emitting a partial file.
+      // and a truncated source list would misrepresent the search, so the
+      // backend refuses rather than emitting a partial file.
       return NextResponse.json(
         { error: message || upstream.statusText },
         { status: upstream.status },
