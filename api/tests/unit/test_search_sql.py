@@ -158,20 +158,24 @@ async def test_candidate_arms_project_ids_only():
     candidate and then discarded it to re-fetch the same columns in the outer
     query, at candidate_k rows per subquery and four to six subqueries a turn.
 
-    The keyword arm still *references* ``sc.text`` inside ``to_tsvector`` — that
-    is the index expression, and it produces a rank, not a returned column. What
-    matters is that neither arm projects the wide columns, and neither joins
-    ``sources``.
+    The keyword arm still *references* ``sc.text`` and ``sc.context_text`` inside
+    ``to_tsvector`` — that is the index expression (migration 022), and it
+    produces a rank, not a returned column. What matters is that neither arm
+    projects the wide columns, and neither joins ``sources``.
     """
     conn = await _capture_sql(halfvec=True)
     candidates = conn.sql[conn.sql.index("WITH semantic"):conn.sql.index("fused AS")]
 
-    for column in ("sc.context_text", "sc.chunk_meta", "sc.sequence_n", "source_title"):
+    for column in ("sc.chunk_meta", "sc.sequence_n", "source_title"):
         assert column not in candidates, f"{column} is fetched per candidate"
     assert "JOIN sources" not in candidates, "candidate arms should not join sources"
-    # sc.text appears only as the tsvector input, never as a projected column.
+    # text/context_text appear only as tsvector input, never as projected columns:
+    # each arm's SELECT list is `sc.id` plus a computed score.
     assert "SELECT sc.id, sc.text" not in candidates
-    assert candidates.count("sc.text") == 2  # to_tsvector in the SELECT and the WHERE
+    assert "SELECT sc.id, sc.context_text" not in candidates
+    # Twice each — the ranked SELECT and the WHERE — and nowhere else.
+    assert candidates.count("sc.text") == 2
+    assert candidates.count("sc.context_text") == 2
 
     # The wide columns are still selected once, at the end, for the fused ids.
     final = conn.sql[conn.sql.index("fused AS"):]

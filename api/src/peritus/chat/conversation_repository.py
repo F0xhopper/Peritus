@@ -283,7 +283,9 @@ class ConversationRepository:
 
 
 def _row_to_conversation(row: asyncpg.Record) -> Conversation:
-    keys = row.keys()
+    # Materialised — `row.keys()` is a one-shot iterator, and the four `in`
+    # checks below would consume it (see _row_to_expert for the same trap).
+    keys = set(row.keys())
     return Conversation(
         id=str(row["id"]),
         expert_id=row["expert_id"],

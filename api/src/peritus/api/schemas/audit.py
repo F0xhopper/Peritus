@@ -81,6 +81,13 @@ CONTRADICTIONS_PAGE_MAX = 100
 AUDITS_PAGE_DEFAULT = 25
 AUDITS_PAGE_MAX = 100
 
+# The graph view renders every returned node client-side with a force layout,
+# so this caps render cost, not just payload size — busiest nodes first (see
+# AuditRepository.full_graph), so a truncated graph still reads as the
+# corpus's real spine rather than an arbitrary slice.
+GRAPH_NODES_DEFAULT = 400
+GRAPH_NODES_MAX = 1500
+
 # Runaway guard on exports. An export must be complete or refuse to be an
 # export, so this sits far above any real corpus and the route reports a
 # truncation rather than emitting a silently partial file.

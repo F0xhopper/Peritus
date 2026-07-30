@@ -583,6 +583,51 @@ class AuditRepository:
             )
         return [dict(r) for r in rows]
 
+    async def full_graph(
+        self, expert_id: int, node_limit: int
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        """The concept graph for visualization: nodes ranked by degree, and every
+        edge between the returned nodes.
+
+        Ranked by degree (busiest concepts first) rather than id, so a node
+        list truncated to ``node_limit`` still reads as the corpus's real
+        spine rather than an arbitrary slice. Edges are fetched only between
+        the returned nodes — an edge touching a node outside the cap would
+        dangle with nothing to draw it to.
+        """
+        async with self._pool.acquire() as conn:
+            nodes = await conn.fetch(
+                """
+                SELECT n.id, n.label, n.node_type,
+                       count(e.id)::int AS degree
+                FROM expert_nodes n
+                LEFT JOIN expert_edges e
+                  ON e.expert_id = n.expert_id
+                 AND (e.from_node_id = n.id OR e.to_node_id = n.id)
+                WHERE n.expert_id = $1
+                GROUP BY n.id
+                ORDER BY degree DESC, n.id
+                LIMIT $2
+                """,
+                expert_id, node_limit,
+            )
+            node_ids = [r["id"] for r in nodes]
+            edges = (
+                await conn.fetch(
+                    """
+                    SELECT id, from_node_id, to_node_id, edge_type, weight
+                    FROM expert_edges
+                    WHERE expert_id = $1
+                      AND from_node_id = ANY($2::int[])
+                      AND to_node_id = ANY($2::int[])
+                    """,
+                    expert_id, node_ids,
+                )
+                if node_ids
+                else []
+            )
+        return [dict(r) for r in nodes], [dict(r) for r in edges]
+
     async def chunks_with_sources(
         self, chunk_ids: list[int], excerpt_chars: int
     ) -> dict[int, dict[str, Any]]:

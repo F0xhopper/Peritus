@@ -180,6 +180,22 @@ def _normalise_tier(raw) -> str | None:
     return None
 
 
+def _coerce_score(raw, field: str) -> float:
+    """Read one 0–10 score out of model output without trusting its type.
+
+    The tool schema asks for a number, but this value decides whether a source is
+    kept, and it is the last thing in the pipeline still able to fail a build
+    *after* discovery and fetching have already been paid for. An unreadable
+    score is treated as 0 — the same as an explicit rejection — so a malformed
+    field drops one source instead of losing the whole run.
+    """
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        logger.warning("Unreadable %s in validation output: %r — scoring 0", field, raw)
+        return 0.0
+
+
 async def validate_sources(
     topic: str,
     sources: list[RawSource],
@@ -219,8 +235,13 @@ async def validate_sources(
                 raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
 
         for source, raw in zip(batch, raw_validations, strict=True):
-            q = float(raw.get("quality_score", 0))
-            r = float(raw.get("relevance_score", 0))
+            # Write the coerced floats back: everything downstream (the drop
+            # decision, the persisted row, the audit export) must see the same
+            # number, not whatever type the model happened to emit.
+            q = raw["quality_score"] = _coerce_score(raw.get("quality_score", 0), "quality_score")
+            r = raw["relevance_score"] = _coerce_score(
+                raw.get("relevance_score", 0), "relevance_score"
+            )
             raw["drop"] = q < _PASS_THRESHOLD_Q or r < _PASS_THRESHOLD_R
             if on_result:
                 await on_result({

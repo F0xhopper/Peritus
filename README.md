@@ -12,10 +12,11 @@ The point is not the answer. The point is being able to show how the body of evi
 
 **What it is not.** Not a systematic-review screening platform: a build handles dozens of sources, not thousands, so keep screening your database export in Covidence or Rayyan. Not a substitute for two independent human reviewers — screening is a single model pass against a rubric, with no calibration set and therefore no published accuracy figures. Not PRISMA compliance, which is a property of your write-up and not of any tool; Peritus just happens to record the data those reports ask for. Treat its decisions as auditable triage that a human checks.
 
-Peritus is two components:
+Peritus is three components:
 
 - **`api/`**: a Python 3.12 / FastAPI server that runs the build pipeline and the retrieval-augmented chat, streaming progress and tokens over Server-Sent Events.
-- **`cli/`**: a Rust [ratatui](https://ratatui.rs) terminal UI that talks to the server: browse experts, kick off builds with a live log, and chat.
+- **`web/`**: a Next.js dashboard — the primary interface. Browse and build experts, watch a build stream live, read the source ledger, question an expert with citations, and export the record.
+- **`cli/`**: a Rust [ratatui](https://ratatui.rs) terminal UI over the same API: browse experts, kick off builds with a live log, and chat.
 
 Storage is PostgreSQL + [pgvector](https://github.com/pgvector/pgvector). There is no external vector database; the corpus, the concept graph, and the chunk embeddings all live in Postgres.
 
@@ -50,7 +51,15 @@ Every source the build considered is persisted in the `sources` table, kept or d
 
 This is the part that matters: `discovered_via` records *which search produced this source*, including whether it exists only because a named concept was still uncovered. That is the search-strategy half of an evidence report — the half grey literature has no tooling for.
 
-**Today the ledger is written on every build and streamed live as the build runs** (each keep/drop appears in the build log with its scores and reason), **but it is not yet readable back through the API.** `GET /experts/{slug}` returns counts and average quality, not the per-source rows. Exposing the ledger, plus CSV and RIS export, is the next thing being built; see [POSITIONING.md](POSITIONING.md).
+The ledger is written on every build, streamed live as the build runs (each keep/drop appears in the build log with its scores and reason), and readable back afterwards:
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /experts/{slug}/sources` | The per-source rows — every source considered, kept or dropped, with scores, drop reason, validator model, rubric version, discovery path and concept coverage |
+| `GET /experts/{slug}/corpus-report` | Corpus composition, concept coverage, and where the corpus contradicts itself |
+| `GET /experts/{slug}/corpus-report/export?format=csv\|ris` | The same ledger as CSV, or as RIS for import into Zotero / EndNote |
+
+RIS is there because a grey-literature source Peritus found has no bibliographic record to import from anywhere else — see [POSITIONING.md](POSITIONING.md) for where this is going next.
 
 ### Chat
 

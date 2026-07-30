@@ -52,11 +52,6 @@ def _get_jwks_client() -> PyJWKClient:
 
 def _verify_sync(token: str) -> dict:
     """Blocking JWT verification. Runs in a worker thread via ``asyncio.to_thread``."""
-    common = {
-        "audience": settings.SUPABASE_JWT_AUD,
-        "options": {"require": ["exp", "sub"]},
-    }
-
     # Preferred path: asymmetric keys via the project's JWKS endpoint.
     if settings.SUPABASE_URL:
         try:
@@ -66,7 +61,8 @@ def _verify_sync(token: str) -> dict:
                 signing_key.key,
                 algorithms=["ES256", "RS256"],
                 issuer=settings.SUPABASE_ISSUER,
-                **common,
+                audience=settings.SUPABASE_JWT_AUD,
+                options={"require": ["exp", "sub"]},
             )
         except jwt.PyJWKClientError:
             # Project has not published asymmetric keys (still on HS256) — only a
@@ -75,15 +71,16 @@ def _verify_sync(token: str) -> dict:
             if not settings.SUPABASE_JWT_SECRET:
                 raise
 
-    # Legacy fallback: shared HS256 secret.
+    # Legacy fallback: shared HS256 secret. Without a project URL there is no
+    # issuer to check against; PyJWT skips the claim when `issuer` is None.
     if settings.SUPABASE_JWT_SECRET:
-        extra = {"issuer": settings.SUPABASE_ISSUER} if settings.SUPABASE_URL else {}
         return jwt.decode(
             token,
             settings.SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
-            **extra,
-            **common,
+            issuer=settings.SUPABASE_ISSUER if settings.SUPABASE_URL else None,
+            audience=settings.SUPABASE_JWT_AUD,
+            options={"require": ["exp", "sub"]},
         )
 
     raise RuntimeError("Supabase auth is enabled but no verification method is configured")

@@ -23,6 +23,8 @@ import json
 import sys
 from dataclasses import asdict, dataclass
 
+from anthropic.types import MessageParam, TextBlockParam
+
 from peritus.chat.agent import ChatAgent, build_cached_system, build_user_message
 from peritus.core.config import settings
 from peritus.core.exceptions import NotFoundError
@@ -63,7 +65,7 @@ def _legacy_system_prompt(persona_style: str | None, topic: str) -> str:
     )
 
 
-def _legacy_user_message(question: str, context_block: str) -> dict:
+def _legacy_user_message(question: str, context_block: str) -> MessageParam:
     return {
         "role": "user",
         "content": (
@@ -121,8 +123,8 @@ class ComparisonReport:
 
 
 async def _compose(
-    system: list[dict] | str,
-    message: dict,
+    system: list[TextBlockParam] | str,
+    message: MessageParam,
     expert: Expert,
 ) -> str:
     client = get_anthropic_client()

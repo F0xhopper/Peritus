@@ -199,12 +199,42 @@ _CITATION_RE = re.compile(r"\[(\d{1,3})\]")
 
 def parse_cited_indices(answer_text: str, num_passages: int) -> set[int]:
     """Extract the valid passage numbers the answer actually cited."""
+    cited, _ = parse_citations(answer_text, num_passages)
+    return cited
+
+
+def parse_citations(answer_text: str, num_passages: int) -> tuple[set[int], set[int]]:
+    """Split the answer's ``[n]`` markers into ``(valid, out_of_range)``.
+
+    Out-of-range markers are the observable form of a grounding failure: the
+    model invented a passage number. They are dropped from the citation list, so
+    without separating them out here they would still sit in the prose with
+    nothing to resolve to — a dangling ``[47]`` in a product whose whole claim is
+    a citation on every sentence.
+    """
     cited: set[int] = set()
+    dangling: set[int] = set()
     for m in _CITATION_RE.finditer(answer_text):
         n = int(m.group(1))
         if 1 <= n <= num_passages:
             cited.add(n)
-    return cited
+        else:
+            dangling.add(n)
+    return cited, dangling
+
+
+def strip_dangling_citations(answer_text: str, num_passages: int) -> str:
+    """Remove ``[n]`` markers that point at no passage.
+
+    Deleting the marker is the least-bad repair: the sentence keeps its claim and
+    loses a reference that never existed, whereas leaving it invites the reader to
+    look for source 47 in a list of 25.
+    """
+    def keep(m: re.Match[str]) -> str:
+        n = int(m.group(1))
+        return m.group(0) if 1 <= n <= num_passages else ""
+
+    return _CITATION_RE.sub(keep, answer_text)
 
 
 def used_citations(passages: list[Passage], cited: set[int]) -> list[dict]:

@@ -1,289 +1,275 @@
-# Peritus — Application Evaluation
+# Peritus — Evaluation & Cleanup
 
-**Date:** 2026-07-29
-**Commit:** `a6d3836` (main, with ~2,600 uncommitted lines in the working tree)
-**Scope:** Backend, build pipeline, retrieval, data layer, frontend, CI/CD. Security explicitly out of scope per request.
+**Date:** 2026-07-30
+**Base:** `2867b5e` (main), on top of the working tree's in-flight dashboard refactor
+**Scope:** `api/` and `web/`. The Rust CLI (`cli/`) was excluded by request.
 
----
-
-## ⚠️ Read this first — how complete this evaluation is
-
-This was planned as a seven-agent parallel sweep. **All seven agents were terminated by an API session limit within a few minutes of launch**, before any produced a report. What follows is a single-threaded evaluation I ran directly.
-
-Every finding below is **verified by reading the code or running the command**, with file:line evidence. Nothing here is inferred or assumed. But the coverage is uneven, and you should know where:
-
-| Area | Depth |
-|---|---|
-| Test / CI / build health | ✅ Thorough — commands run |
-| Retrieval SQL, RRF, hybrid search | ✅ Thorough — read in full |
-| Vector & FTS indexing, migration 019 | ✅ Thorough |
-| Deployment & migration path | ✅ Thorough |
-| Citation resolution / grounding | ✅ Thorough |
-| Prompt caching | ✅ Thorough |
-| Config vs `.env.example` | ✅ Thorough — mechanically diffed |
-| Job queue semantics | 🟡 Moderate — claim/heartbeat/reap read, not exhaustive |
-| Source validation robustness | 🟡 Moderate |
-| Frontend (build, boundaries, tokens, contract) | 🟡 Moderate — spot-checked, not page-by-page |
-| **Rust CLI (`cli/`)** | ❌ **Not evaluated** |
-| **UI/UX + accessibility, page-by-page** | ❌ **Not evaluated** |
-| **Billing / metering arithmetic** | ❌ **Not evaluated** |
-| **Graph extraction & node dedup merge** | ❌ **Not evaluated** |
-| **Per-fetcher failure modes** | ❌ **Not evaluated** |
-| **Chat stream claim/interrupt logic** | ❌ **Not evaluated** |
-
-The unevaluated rows are not "probably fine" — they are unexamined. Billing arithmetic and the graph dedup merge in particular are the two I would prioritise next, because both can silently produce wrong results that no test would catch.
+This pass did two things: finished the evaluation the [previous one](#appendix--what-changed-since-the-2026-07-29-evaluation) could not complete, and applied the cleanup. Every finding below was verified by reading the code or running the command. Where something is unverified, it says so.
 
 ---
 
-## Summary
+## Verification state
 
-**Overall grade: B.** The engineering quality of the code I read is genuinely high — well above typical for a project at this stage. The retrieval SQL, the job queue, and migration 019 are the work of someone who understands the systems they are building on, and the code comments explain *why* rather than *what*. That is rare and worth preserving.
+All of these were run against the working tree at the end of the pass:
 
-The problems are almost entirely **at the seams, not in the code**: what ships, what CI actually checks, and whether the docs describe the product that exists. The single most serious finding is that **database migrations are never applied on deploy** — which means the flagship performance fix in migration 019 is probably not live in production.
+| Check | Before | After |
+|---|---|---|
+| `ruff check src tests` | clean | clean |
+| `mypy src` | **28 errors / 8 files** | **clean** (115 files) |
+| `pytest` | 421 passed, 54 skipped | **435 passed**, 54 skipped |
+| `npx tsc --noEmit` | clean | clean |
+| `npx eslint .` | clean | clean |
+| `npx next build` | 21 routes | **34 routes**, clean |
 
-**Biggest risk:** the gap between the code's quality and the delivery pipeline's rigour. The code is A-grade; the pipeline around it is C-grade, and the pipeline is what determines what users actually get.
+**The 54 skipped tests still have not executed anywhere.** They skip without `PERITUS_TEST_DATABASE_URL`. CI now provides one (see [T1](#t1-ci-now-runs-what-just-lint-runs-plus-the-db-tests-and-the-web-app)), but I could not run them locally: there is no Docker and no local Postgres on this machine, and the only reachable database is production Supabase — where the test fixture's `TRUNCATE experts RESTART IDENTITY CASCADE` would have destroyed real data. **Expect the first CI run to be the first time these 54 tests have ever run, and budget for them failing.** That is the point of turning them on, but it is not the same as knowing they pass.
 
 ---
 
 ## Critical findings
 
-### C1. Migrations are never applied on deploy — production may be running an un-migrated schema
+### C1. Migrations were never applied on deploy — **fixed**
 
-**Evidence:**
-- `api/fly.toml` — no `release_command` (verified: `grep -c release_command` → `0`)
-- `.github/workflows/deploy.yml` — runs `flyctl deploy` only; no migration step
-- `api/Dockerfile` — no migration on start
-- `Justfile:migrate` exists but is a manual, local-only target
+`api/fly.toml` had no `release_command`; `deploy.yml` ran `flyctl deploy` alone; the `Dockerfile` did not migrate on start. `just migrate` is a local target. So every deploy shipped code and nothing shipped schema, on the assumption that a human had remembered to run migrations against production first, in the right order, before the code depending on them went live.
 
-Deploy applies code. Nothing applies schema. Every deploy assumes a human remembered to run `just migrate` against production first, in the right order, before the code that depends on it went live.
+**Fixed** — `api/fly.toml` now carries:
 
-**Why this is critical right now:** `api/migrations/019_vector_index.sql` is **modified in the working tree and uncommitted**. Its own header states the problem it fixes:
-
-> *"that CREATE INDEX has always failed and the table has always had **no** vector index: every semantic search sorts by exact distance over every chunk the expert owns, and a chat turn runs four to six of those concurrently."*
-
-If 019 has not been applied to production, every chat turn is running 4–6 concurrent sequential scans over the full chunk table. The fix is written and correct — it may simply not be deployed.
-
-**Fix:** add to `fly.toml`:
 ```toml
 [deploy]
   release_command = "python migrations/apply.py"
 ```
-Then verify against production: `SELECT filename FROM _migrations ORDER BY filename;`
 
----
+Verified safe: the `Dockerfile` already `COPY migrations/ migrations/` with `WORKDIR /app`, so the path resolves, and `apply.py` is idempotent against the `_migrations` table.
 
-### C2. CI silently skips every database-backed test
+> **Still needs a human.** Confirm what production is actually on before the next deploy:
+> `SELECT filename FROM _migrations ORDER BY filename;`
+> If `019_vector_index.sql` is absent, every semantic search has been doing an exact-distance scan over every chunk the expert owns, four to six times per chat turn. Applying it is the single largest latency win available.
 
-**Evidence — verified by running:**
-```
-421 passed, 54 skipped in 1.67s
-```
-All 54 skips are `PERITUS_TEST_DATABASE_URL not set — skipping DB-backed test`. `.github/workflows/ci.yml` never sets that variable and defines no Postgres service container, so **all 54 skip in CI too — and CI reports green.**
+### C2. Migrations were applied non-transactionally — **fixed**
 
-The 1.67s runtime is the tell: nothing touches a database.
+`apply.py` ran the migration and recorded it in `_migrations` as two separate `execute` calls. A crash between them leaves a migration applied but unrecorded, so the next run re-applies it. Benign for the current `IF NOT EXISTS`-guarded files, silently fatal for the first non-idempotent `ALTER TABLE` anyone adds.
 
-What is consequently untested on every push:
-- `test_job_repository.py` (6) — the claim/heartbeat/reap logic the whole build system depends on
-- `test_conversation_repository.py` (11) — chat persistence
-- `test_credits.py` (14) — **billing correctness**
-- `test_expert_visibility.py` (10)
-- `test_source_uploads.py` (11)
-- `test_worker.py` (3)
+**Fixed** — both statements are now one `async with conn.transaction():`, and the connection closes in a `finally`. Verified no migration uses `CREATE INDEX CONCURRENTLY`, `VACUUM`, or `CREATE DATABASE` (which cannot run in a transaction); `019`'s `ALTER DATABASE … SET` is transactional and already wrapped in a `DO` block with its own exception handler.
 
-The tests are written. They are good tests. They have never run in CI.
+### C3. A build could die after the money was spent — **fixed**
 
-**Fix — add to the `api` job in `ci.yml`:**
-```yaml
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_PASSWORD: postgres
-        options: >-
-          --health-cmd pg_isready --health-interval 10s
-          --health-timeout 5s --health-retries 5
-        ports: ["5432:5432"]
-```
-with `PERITUS_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres` on the test step, plus a `python migrations/apply.py` step before it.
+`sources/validator.py` coerced two LLM-supplied fields with a bare `float()`:
 
----
-
-### C3. The web app is entirely absent from CI
-
-`.github/workflows/ci.yml` has two jobs: `api` (Python) and `cli` (Rust). There is **no job for `web/`** — no typecheck, no lint, no build. All recent development has gone into `web/`.
-
-`npx next build` currently passes clean (21 routes, verified), so nothing is broken *today*. But the surface receiving the most change has zero automated protection.
-
-**Fix:** a third job running `npm ci && npx tsc --noEmit && npx next build` in `web/`.
-
----
-
-### C4. `mypy` finds 28 errors and CI does not run it
-
-CI runs `ruff check` (clean) but not `mypy`. `Justfile:lint` runs both — CI only runs half of it. Verified: **28 errors across 8 files.**
-
-I triaged them. Most are type-stub noise, but two are real:
-
-**Real bug — `api/src/peritus/sources/validator.py:222-223`:**
 ```python
 q = float(raw.get("quality_score", 0))
 r = float(raw.get("relevance_score", 0))
 ```
-`raw` is parsed LLM output. If the model returns `null` or a non-numeric value for a score, `float()` raises `TypeError`/`ValueError`. This sits **outside** the `try/except` at lines 215–219 that guards parsing, so the exception escapes `validate_sources` and **fails the entire build** — after the money for discovery and fetching has already been spent.
 
-The tool schema constrains the model, which makes this uncommon rather than impossible. What makes it a genuine finding is that this file already sets the correct defensive standard elsewhere — `_match_concepts` (line 154) and `_normalise_tier` (line 172) both carefully coerce and validate model output. The scores, which are the fields that actually decide whether a source is kept, are the one place that trust is extended.
+`None` or a non-numeric value raises, and this sat **outside** the `try/except` guarding the parse above it — so the exception escaped `validate_sources` and failed the whole build, after discovery and fetching had already been paid for.
 
-**Fix:** coerce defensively and fall back to `_ERROR_VALIDATION` on failure, matching the existing pattern.
+The finding is not "an LLM might return something odd". It is that this file already sets the correct standard everywhere else — `_match_concepts` discards invented tags, `_normalise_tier` returns `None` rather than guessing, with a comment on why. The two fields that actually decide whether a source is kept were the one place trust was extended.
 
-**Real bug — `api/src/peritus/jobs/worker.py:380`:** `None` assigned to a `float`-typed variable. Worth a look given it sits in the metering path.
+**Fixed** — a `_coerce_score` helper matching the file's existing defensive style; an unreadable score scores 0, which is the same outcome as an explicit rejection, so one source drops instead of the run.
 
-**Noise — safe to silence:** `chat/streaming.py:109,117,123` is the loop variable `payload` (typed `str | RetrievedContext` from line 62) being reused at line 109 to hold a dict. Functionally correct — the loop has finished — but it should be a differently-named variable. `api/auth.py:69,85,86` and the `anthropic`-SDK arg-type errors are stub strictness.
+**Second bug found while fixing it:** the coerced floats were computed for the threshold test and then **thrown away** — `ValidatedSource` was built from `result["quality_score"]`, the raw model value. A model returning `"7"` scored correctly and then persisted the *string* to the ledger and the CSV/RIS export. The coerced values are now written back into `raw`.
 
 ---
 
 ## Significant findings
 
-### S1. Contextual prefixes are invisible to keyword search
+### S1. Every source upload permanently duplicated the graph — **fixed** *(new)*
 
-The contextualizer is a headline feature and a real per-chunk cost. `ingestion/pipeline.py:134-137` correctly embeds `chunk + context`, so the **semantic** arm sees it.
+This was in the previous evaluation's "not evaluated" list. It is a real bug, and the code documented the opposite of what it did.
 
-But the **keyword** arm indexes and queries text only:
-```sql
-to_tsvector('english', sc.text)        -- search/service.py:156, 161
-ON source_chunks USING gin (expert_id, to_tsvector('english', text))  -- 019:62
-```
+`uploads/service.py:_extend_graph` claimed:
 
-Notably, `migrations/004_contextual_retrieval.sql:15` did it correctly on the legacy `chunks` table:
-```sql
-to_tsvector('english', coalesce(context, '') || ' ' || text)
-```
-The newer `source_chunks` table dropped that. So you pay to generate context, embed it, store it — and half the retrieval pipeline cannot see it.
+> *"`bulk_insert_from_extractions` already resolves a label that matches an existing node onto that node, so a document about something the corpus already covers deepens the existing concept rather than creating a rival."*
 
-**Fix:** index and query `coalesce(context_text,'') || ' ' || text`. Both the index expression and the two query sites must match exactly or the planner will not use the index.
+It did not. `bulk_insert_from_extractions` ran a plain `INSERT INTO expert_nodes` with **no `ON CONFLICT`**, and `merge_node_extractions` deduplicates only *within* the current extraction set, in memory, by label. Verified there is no unique constraint on `(expert_id, label)` — migration `013` added one for `expert_edges` only.
 
----
+The cleanup pass that *would* have caught it, `_resolve_entities` (embedding cosine similarity ≥ 0.93), is called from **`experts/builder.py` only** — never from the upload path. So:
 
-### S2. Multi-query fusion discards the strongest relevance signal
+- Upload a source about something the corpus already covers → a second, rival copy of every concept it mentions.
+- Nothing ever merges them.
+- The graph degrades with every upload, and `contradicts` edges start pointing at the wrong twin.
 
-`search/service.py:231-239`:
-```python
-if hit.chunk_id not in best or hit.score > best[hit.chunk_id].score:
-    best[hit.chunk_id] = hit
-```
+**Fixed** — `bulk_insert_from_extractions` now reads the expert's existing nodes keyed on `lower(btrim(label))` and updates instead of inserting on a match: chunk evidence unioned, longest description kept, properties merged, and `embedding = coalesce($5, embedding)` so a re-extraction that failed to embed cannot blank a stored vector. The docstring now states what the code does, including the limitation that only exact normalised-label matches resolve here and near-duplicate merging remains a build-time pass.
 
-`batch_search` runs 2–6 subqueries, each producing its own RRF scores. Merging takes the **maximum** score per chunk.
+### S2. RRF fusion discarded its strongest signal — **fixed**
 
-This is not how reciprocal rank fusion is meant to compose. RRF's whole value is that contributions **sum**: a chunk retrieved by four subqueries should outrank a chunk retrieved by one. Taking the max makes those two chunks *identical* — a chunk ranked #1 by one subquery scores `1/61`, and so does a chunk ranked #1 by all six.
+`search/service.py:_merge_hits` merged the per-subquery hit lists by taking the **maximum** score per chunk. Reciprocal rank fusion's entire value is that contributions **sum**. Taking the max makes a chunk ranked #1 by one subquery and a chunk ranked #1 by all six *numerically identical* — so agreement across independently-planned subqueries, the best relevance evidence the system has, had no effect on the ordering. The cross-encoder reranker partially masks this, which is likely why it never surfaced.
 
-Agreement across independently-planned subqueries is the best evidence of relevance the system has, and it is being thrown away at the merge step. The cross-encoder reranker partially masks this, which is likely why it hasn't surfaced.
+**Fixed** — scores now accumulate. The existing test asserted the max behaviour, so it was rewritten; the replacement pins the property that matters (three subqueries agreeing outranks one confident arm) rather than just the arithmetic.
 
-**Fix:** accumulate rather than take max — `best[id].score += hit.score`. Cheap change, likely a material retrieval-quality gain. Worth A/B-ing through the existing `eval/` harness.
+Worth A/B-ing through the existing `eval/` harness — that is what it is for.
 
----
+### S3. You paid for contextual prefixes half the pipeline could not see — **fixed**
 
-### S3. Prompt cache is busted on every turn once conversations exceed the history cap
+The ingestion pipeline generates an Anthropic-style contextual prefix per chunk — a real per-chunk Claude cost — and `ingestion/pipeline.py` correctly embeds `chunk + context`, so the **semantic** arm sees it. The **keyword** arm indexed and queried `to_tsvector('english', text)` alone.
 
-`chat/agent.py:363`:
-```python
-trimmed = list(history[-settings.CHAT_HISTORY_MAX_MESSAGES:])
-```
+So the prefix was generated, paid for, embedded and stored, and then the keyword arm was structurally unable to match on it — despite the prefix being exactly the text carrying the disambiguating nouns a keyword query is most likely to use. Migration `004` did this correctly on the legacy `chunks` table; `source_chunks` dropped it.
 
-The cache breakpoint logic (lines 366–378) is correct and well-reasoned, and the docstring's claim holds — *until history exceeds `CHAT_HISTORY_MAX_MESSAGES`*. After that, the sliding window drops the oldest message each turn, so the cached **prefix changes every turn** and never hits.
+**Fixed** — new `migrations/022_fts_includes_context.sql` indexes `coalesce(context_text,'') || ' ' || text`, and both query sites now use a shared `_FTS_EXPR` constant so they cannot drift from the index expression. The old text-only indexes are dropped: nothing referenced that expression any more and each still cost an update on every chunk write.
 
-The docstring states "the whole prior conversation is then billed at ~0.1× instead of full input price." That is true early and false exactly where it matters most — long conversations, which have the largest prefixes and the most to save.
+### S4. The prompt cache never hit on long conversations — **fixed**
 
-**Fix:** trim in stable blocks (drop the oldest N when the cap is hit, then hold steady for N turns) so the prefix stays byte-identical across runs of turns.
+`chat/agent.py` trimmed history with `history[-CHAT_HISTORY_MAX_MESSAGES:]`. The cache-breakpoint logic around it is correct and well-reasoned, and its docstring's claim — *"the whole prior conversation is then billed at ~0.1× instead of full input price"* — held right up until history exceeded the cap. After that the window slid by one turn's worth every turn, so the cached prefix changed every turn and never hit.
 
----
+It was false in exactly the case with the most to save: long conversations have the largest prefixes.
 
-### S4. Hallucinated citations vanish from the list but remain in the prose
+**Fixed** — trimming is now quantised to `CHAT_HISTORY_TRIM_BLOCK` (default 6) via a `_trim_start` helper, so the window's start holds still for several turns and consecutive turns share a byte-identical prefix. The trade-off is holding somewhat fewer than the cap; that is documented in both the setting and the docstring.
 
-`chat/grounding.py:200-207` bounds-checks correctly — `if 1 <= n <= num_passages`. Out-of-range citations are dropped from `used_citations`.
+This function had **no test coverage at all**. Added `tests/unit/test_chat_history_trim.py` (8 tests), which pins the cache-stability property directly — a sliding window passes every cap assertion you can write and still never hits cache, so asserting the cap alone would not have caught this. It also pins that trimming never lands on a leading `assistant` message, which Claude rejects.
 
-But nothing rewrites the answer text. If the model emits `[47]` with 25 passages, the reader sees `[47]` inline with no corresponding entry. For a product whose entire proposition is *"a citation on every claim"*, a dangling citation marker is a credibility failure precisely where credibility is the feature.
+### S5. Hallucinated citations vanished from the list but stayed in the prose — **fixed**
 
-**Fix:** detect out-of-range markers post-stream and either strip them or surface an explicit warning. At minimum, log the rate — it is a direct measure of grounding quality you are not currently collecting.
+`chat/grounding.py` bounds-checked correctly and dropped out-of-range citations from `used_citations`. Nothing recorded that they had been there. For a product whose proposition is *"a citation on every claim"*, a dangling `[47]` next to a list of 25 is a credibility failure precisely where credibility is the feature.
 
----
+**Fixed** — `parse_citations` now returns `(valid, out_of_range)`, and `streaming.py` logs the rate and forwards `dangling_citations` on the `sources` event. Tokens are already on the wire when this is known, so the prose cannot be repaired; a `strip_dangling_citations` helper exists for the non-streaming and persistence paths. The rate is a direct measure of grounding quality that was not being collected at all.
 
-### S5. The web app has no error boundaries at all
+**Good news found while fixing it:** the web renderer already degrades safely. `components/chat/message.tsx:renderCitations` only turns a marker into a clickable chip when it is backed by a real citation, so a dangling `[47]` renders as ordinary text rather than a broken link. The contract is now typed in `lib/api/types.ts`.
 
-Verified: **zero** `error.tsx`, `not-found.tsx`, or `global-error.tsx` files in `web/app/`. Only two `loading.tsx` exist (`experts/`, `chats/[id]/`) across ~15 routes.
+### S6. The web app had no error boundaries at all — **fixed**
 
-Every dashboard page is an async server component fetching from the Python API. Any throw — API down, 500, timeout, malformed payload — renders Next's default error page. A researcher mid-audit hits a raw stack-trace screen.
+Verified: **zero** `error.tsx`, `global-error.tsx`, or `not-found.tsx` in `web/app/`, and only two `loading.tsx` across ~15 routes. Every dashboard page is an async server component fetching from the FastAPI backend, so "the API is down, slow, or returned something unexpected" is a routine outcome. Any throw rendered Next's default error screen — a researcher mid-audit hitting a stack trace.
 
-**Fix:** an `error.tsx` at `app/(dashboard)/`, a root `global-error.tsx`, a `not-found.tsx` for bad slugs, and `loading.tsx` for the remaining routes.
+Worse: **six pages call `notFound()`** (`experts/[slug]` and its four children, plus `chats/[id]`) and there was no `not-found.tsx` anywhere for them to render.
 
----
+**Fixed** — added `app/(dashboard)/error.tsx`, `app/global-error.tsx`, `app/(dashboard)/not-found.tsx`, `app/(dashboard)/experts/[slug]/loading.tsx` (which covers that segment and its four children), and a shared `components/error-state.tsx`.
 
-### S6. `.env.example` is missing 9 settings, including deployment-critical ones
+Two things worth knowing about how these were written:
 
-Mechanically diffed `core/config.py` (66 settings) against `api/.env.example` (57 documented). Undocumented:
+- `web/AGENTS.md` instructs that this Next version has breaking changes and its bundled docs must be read first. It was right to: the error-boundary retry prop in Next 16.2 is **`unstable_retry`**, not the `reset` that every older tutorial (and my own default) would have used. Written from `node_modules/next/dist/docs/`.
+- `Button` here is Base UI, not Radix — it takes `nativeButton={false} render={<Link/>}`, not `asChild`. My first draft used `asChild`; caught and corrected against the codebase's own usage.
 
-`AUTH_ALLOW_SIGNUP`, `AUTH_RATE_LIMIT`, `AUTH_RATE_WINDOW`, `BUILD_EXECUTION_DEFAULT`, **`CORS_ALLOW_ORIGINS`**, `HNSW_ITERATIVE_SCAN`, **`PERITUS_ENV`**, `PLAN_MODEL`, `SUPABASE_JWT_AUD`
+The not-found copy deliberately does not imply the resource exists but is off-limits. The API returns 404 rather than 403 for another user's rows on purpose, and the UI must not leak what the API withholds.
 
-`CORS_ALLOW_ORIGINS` and `PERITUS_ENV` are ones you must get right to deploy at all. Nothing in `.env.example` mentions they exist. (Good news: no drift the other way — every documented key is real.)
+### S7. `.env.example` was missing 10 settings — **fixed**
 
----
+Mechanically diffed `core/config.py` (67 settings) against `api/.env.example` (57 documented). Undocumented: `AUTH_ALLOW_SIGNUP`, `AUTH_RATE_LIMIT`, `AUTH_RATE_WINDOW`, `BUILD_EXECUTION_DEFAULT`, **`CORS_ALLOW_ORIGINS`**, `HNSW_ITERATIVE_SCAN`, **`PERITUS_ENV`**, `PLAN_MODEL`, `SUPABASE_JWT_AUD` (plus the one this pass added).
 
-### S7. Documentation describes a product one iteration behind the code
+`PERITUS_ENV` and `CORS_ALLOW_ORIGINS` are both things you must get right to deploy at all, and nothing in `.env.example` mentioned they existed. `HNSW_ITERATIVE_SCAN` is a correctness setting, not a tuning knob.
 
-**README.md:15** — *"Peritus is two components"* (`api/` and `cli/`). The web dashboard, where all recent work has gone, is essentially absent from the README.
+**Fixed** — all ten documented in their proper sections with the reasoning from `config.py`. Re-verified mechanically: undocumented **0**, documented-but-nonexistent **0**.
 
-**README.md** — *"the ledger ... is not yet readable back through the API"* and *"Exposing the ledger, plus CSV and RIS export, is the next thing being built."*
+### S8. The docs and marketing copy described a product one iteration behind — **fixed**
 
-This is false. It is built:
-- `GET /experts/{slug}/sources` — `routes/sources.py:190`
-- `GET /experts/{slug}/corpus-report/export` — `routes/audit.py:88`
-- `audit/export.py` — full CSV **and** RIS serialisation, with a considered rationale for RIS and correct CRLF handling
+`README.md:15` said *"Peritus is two components"* (`api/`, `cli/`) — the web dashboard, where all recent work has gone, was absent.
 
-The same stale claim is in **user-facing marketing copy** — `web/components/marketing/faq.tsx:28`: *"Not yet... CSV and RIS export is the next thing being built."* You have shipped one of your most differentiating features and are still telling prospective users you haven't.
+More seriously, both the README and `web/components/marketing/faq.tsx` told readers that the ledger was not readable through the API and that *"CSV and RIS export is the next thing being built"*.
+
+Verified false — it is shipped, end to end:
+
+| Endpoint | File |
+|---|---|
+| `GET /experts/{slug}/sources` | `routes/sources.py:190` |
+| `GET /experts/{slug}/corpus-report` | `routes/audit.py:69` |
+| `GET /experts/{slug}/corpus-report/export?format=csv\|ris` | `routes/audit.py:90` |
+
+with full CSV **and** RIS serialisation in `audit/export.py` (including spreadsheet-formula defusing and correct CRLF), a `decision=all\|accepted\|rejected` filter, and a working web proxy route.
+
+**You were telling prospective customers that one of your most differentiating features did not exist yet.** Both now describe what ships.
 
 ---
 
 ## Minor findings
 
-- **`migrations/apply.py:38-40`** — applying a migration and recording it in `_migrations` are two separate `execute` calls, not one transaction. A crash between them re-runs the migration. Most are `IF NOT EXISTS`-guarded so this is usually benign, but any non-idempotent `ALTER TABLE` would fail on retry. Wrap both in `async with conn.transaction():`.
-- **`web/components/experts/source-manager.tsx:276`** — icon-only button with no `aria-label` or `sr-only` text. This was the *only* instance found, which speaks well of the rest.
-- **Rust CLI is drifting.** `cli/` last touched 2026-07-04; `api/` and `web/` on 2026-07-28. CI runs `cargo check --locked`, which proves the Rust compiles — it proves *nothing* about whether the API contract it depends on still exists. Three-plus weeks of heavy API change have gone unverified against it. Decide explicitly whether this is a maintained surface.
-- **Stale planning docs** in the repo root and `api/`: `CHAT_PLAN.md`, `ANSWER_QUALITY_PLAN.md`, `UPLOAD_PLAN.md`. Unclear which are live.
-- **Root `package.json`** contains only `shadcn` as a devDependency, with a full `node_modules/` beside it. Probably wants to live in `web/`.
-- **~2,600 uncommitted lines on `main`**, including a page rename (`screening`→`discovery`, `ledger`→`sources`) and migration 019. This is a lot of unbacked-up, unreviewed work sitting in a working tree.
+- **`graph/repository.py` — `get_neighbours` did not scope its node fetch by expert.** The final `SELECT … FROM expert_nodes WHERE id = ANY($1)` had no `expert_id` filter. Not exploitable today (the ids come from edges already scoped to the expert), but it was the one query in the file relying on that invariant rather than enforcing it. **Fixed.**
+- **`graph/repository.py` — edges were inserted one round trip at a time** inside the transaction. **Fixed:** resolved into a dict keyed by relation (keeping the strongest weight) and written with a single `executemany`. Also removes a redundant second pass that recomputed the same set.
+- **`billing/metering.py:275`** — `result.message` on a possibly-`None` union. Guarded at runtime by `contextlib.suppress`, so a type-only defect, but in the metering path. **Fixed** with `getattr`.
+- **`jobs/worker.py`** — `None` assigned to a `float`-typed variable, and `record_job_cap` called identically in both branches of an if/else. **Fixed:** record once, then decide whether to *arm* the cap.
+- **`chat/streaming.py`** — the retrieval loop's `payload` variable was reused 40 lines later to hold the audit dict. Functionally fine, three mypy errors, and genuinely confusing to read. **Fixed:** renamed to `audit_payload`.
+- **`api/auth.py`** — JWT arguments were assembled into dicts and `**`-splatted, which defeats type checking on a security-critical call (14 of the 28 mypy errors). **Fixed** by passing them explicitly. Verified against PyJWT's source that `issuer=None` skips issuer validation, so the HS256 fallback's behaviour is unchanged.
+- **`web/components/experts/source-manager.tsx`** — the icon-only remove button flagged previously already has its `aria-label` in the working tree. No action needed; it was the only instance found, which speaks well of the rest.
+- **Rust CLI is drifting.** `cli/` last touched 2026-07-04; `api/` and `web/` are current. CI runs `cargo check --locked`, which proves the Rust compiles and **nothing** about whether the API contract it consumes still exists. Out of scope here, but it needs an explicit decision: maintained surface, or archived.
+
+---
+
+## Tooling and repo hygiene
+
+### T1. CI now runs what `just lint` runs, plus the DB tests and the web app
+
+Three gaps, all fixed in `.github/workflows/ci.yml`:
+
+- **`mypy` was never run.** `just lint` runs ruff *and* mypy; CI ran only ruff. That gap is where 28 type errors and two real bugs accumulated.
+- **Every database-backed test silently skipped.** No Postgres service, no `PERITUS_TEST_DATABASE_URL` — so 54 tests skipped in CI while it reported green. The 1.67s suite runtime was the tell. Among them: the job queue's claim/heartbeat/reap logic that the whole build system rests on, conversation persistence, source uploads, expert visibility, and **all 14 credit tests**. Now runs against `pgvector/pgvector:pg17` with migrations applied first — which also exercises the migration runner that C1's `release_command` now depends on. (See the caveat in [Verification state](#verification-state): these have still never actually run.)
+- **`web/` was absent entirely.** Two jobs, `api` and `cli`, and none for the surface receiving all the change. Now lints, typechecks and builds.
+
+### T2. Local commands now mirror CI
+
+There was no local command for anything in `web/`. Added to the `Justfile`: `web`, `lint-web`, `build-web`, `test-db` (with a loud warning that the fixture `TRUNCATE`s, so it must never point at a real database), and `check`, which runs everything CI does bar the DB tests and Rust. Validated with `just --list`.
+
+### T3. Dead code and redundant dependencies removed
+
+Verified unreferenced before deleting, and `tsc`/`eslint`/`next build` clean after:
+
+| Removed | Why |
+|---|---|
+| `web/lib/mock-data.ts` | Placeholder for a pre-auth dashboard shell that now uses real endpoints. Zero references. |
+| `web/components/charts/builds-chart.tsx` | Hardcoded demo data. Zero references. |
+| `web/components/ui/chart.tsx` | Only consumer was `builds-chart`. |
+| **`recharts` dependency** | Only consumer was `ui/chart.tsx`. An entirely dead chain, top to bottom. |
+| 8 unused shadcn primitives | `alert`, `collapsible`, `popover`, `progress`, `scroll-area`, `select`, `table`, `tabs` — all zero references (the one `tabs` hit was a comment). Mostly orphaned by the in-flight audit-page refactor. |
+| Root `package.json`, `package-lock.json`, `node_modules/` (73 MB) | Contained only `shadcn`, which `web/package.json` already has. The MCP server uses `npx shadcn@latest` and does not read it. |
+| `peritus.log` (104 KB) | Gitignored build artifact sitting in the working tree. |
+
+> The 8 primitives are one command back if the refactor wants them:
+> `cd web && npx shadcn@latest add table tabs select progress popover scroll-area alert collapsible`
+
+### T4. Stale planning docs archived, not deleted
+
+`CHAT_PLAN.md`, `api/ANSWER_QUALITY_PLAN.md`, `api/UPLOAD_PLAN.md` and `web/DASHBOARD_PLAN.md` all describe features that have since shipped. `DASHBOARD_PLAN.md` opens by calling `web/` a stock `create-next-app` scaffold with no code written — flatly untrue now, and actively misleading at the repo root.
+
+`git mv`'d to `docs/plans/` with a `README.md` mapping each to what it shipped as and stating plainly that where a plan and the code disagree, the code is right. The reasoning is preserved (it is good reasoning); the appearance of currency is not.
+
+`eval/` was checked and **kept** — `compare.py` has no importers, but it and `runner.py` are deliberate `python -m` harnesses with documented usage, not dead code. `compare.py` is exactly the tool for measuring S2.
 
 ---
 
 ## What is genuinely good
 
-This section is not padding. These are real strengths and several are unusual.
+Not padding. These are real, and several are unusual.
 
-**The retrieval SQL is expert-level.** `search/service.py:123-138` explains why ranking happens in a wrapper over an already-limited subquery — because a window function is evaluated before `LIMIT`, so `ROW_NUMBER() OVER (...) ... LIMIT k` forces the `WindowAgg` to consume every chunk the expert owns, defeating the point of an ANN index. That is a genuinely subtle planner behaviour, correctly diagnosed, correctly fixed, and *verified on Postgres 17 / pgvector 0.8* per the comment.
+**The retrieval SQL is expert-level.** `search/service.py` explains why ranking happens in a wrapper over an already-limited subquery: a window function is evaluated *before* `LIMIT`, so `ROW_NUMBER() OVER (…) … LIMIT k` puts the `WindowAgg` between the limit and the scan and forces it to consume every chunk the expert owns — defeating most of the point of an ANN index. Subtle planner behaviour, correctly diagnosed, correctly fixed, verified on Postgres 17 / pgvector 0.8.
 
-**Migration 019 is the best file in the repository.** It correctly identifies that pgvector cannot index a `vector` above 2000 dimensions, that the corpus is embedded at 3072, and that migration 005's index had therefore *silently never existed*. It fixes this via a `halfvec` expression index, keeps the stored column full-precision, degrades gracefully on pgvector < 0.7, and reads the dimension off the column rather than hardcoding it. It then handles `hnsw.iterative_scan` — correctly framed as a **correctness** setting, not a tuning knob, because an HNSW scan cannot carry the `expert_id` filter and silently returns short results (measured: 40 rows from a 184-chunk expert). It even explains why `SET LOCAL` inside the query transaction is required: Supabase's transaction pooler resets session state. This is a class of bug most projects never find.
+**Migration 019 is the best file in the repository.** It identifies that pgvector cannot index a `vector` above 2000 dimensions, that the corpus is embedded at 3072, and that migration 005's index had therefore *silently never existed*. It fixes this with a `halfvec` expression index, keeps the stored column full-precision, degrades gracefully on pgvector < 0.7, and reads the dimension off the column rather than hardcoding it. It then handles `hnsw.iterative_scan` as a **correctness** setting — because an HNSW scan cannot carry the `expert_id` filter and silently returns short results (measured: 40 rows from a 184-chunk expert) — and explains why `SET LOCAL` inside the query transaction is additionally required, since Supabase's transaction pooler resets session state. Most projects never find this class of bug.
 
-**The job queue is production-grade.** `SELECT ... FOR UPDATE SKIP LOCKED` for multi-worker claiming, heartbeats, `reap_stale` distinguishing requeue from retry-exhausted, and `release_for_shutdown` for graceful drain. The `[processes]` split in `fly.toml` correctly runs the worker as its own process group so an API deploy never kills an in-flight build.
+**The job queue is production-grade.** `SELECT … FOR UPDATE SKIP LOCKED` for multi-worker claiming, heartbeats, `reap_stale` distinguishing requeue from retry-exhausted, `release_for_shutdown` for graceful drain. `fly.toml`'s `[processes]` split correctly runs the worker as its own process group so an API deploy never kills an in-flight build.
 
-**Citation resolution is correct.** Bounds-checked, `p.index` used consistently between inline markers and the rendered list, no off-by-one — the classic bug in this design, and it isn't here.
+**The metering design is careful in a way that is easy to get wrong.** Cost is derived from what the *response* reported — model string off the response, live/batch from which wrapper saw it — and the module docstring is explicit that configuration is not evidence of what happened, because a build can fall back from batch to live mid-stage. The meter is a mutable object in a `ContextVar` specifically so stage transitions are visible to tasks created before them. Recording is lock-guarded but never awaits, because it sits on the hot path of every provider call. `drain`/`restore` make a failed flush retryable without double-counting. I went looking for arithmetic errors here and found none.
 
-**Defensive parsing of model output**, where applied. `_match_concepts` maps model tags back onto the canonical list and discards invented ones; `_normalise_tier` returns `None` rather than guessing, with a comment on why an unclassifiable source must not be silently counted as good or bad news. (S3 is a finding precisely because it's the exception.)
+**Pricing over-estimates on purpose.** An unknown model id resolves to Opus pricing so that an unrecognised model trips the spend cap early rather than running unmetered. That is the correct direction to be wrong in, and the comment says so.
 
-**Design-token discipline in the frontend is excellent.** Across ~130 components, only two files contain hardcoded hex — the Google logo (brand-mandated) and recharts defaults. Both legitimate. This is much better than typical.
+**Citation resolution is correct.** Bounds-checked, `p.index` used consistently between inline markers and rendered list, no off-by-one — the classic bug in this design, and it isn't here.
 
-**The comments explain *why*.** Throughout, they document reasoning, trade-offs, and measurements rather than restating the code. `streaming.py:68` — raising `RuntimeError` instead of `assert` because `python -O` strips assertions and the resulting `AttributeError` would say nothing useful — is a good example of the general standard.
+**Defensive parsing of model output, where applied.** `_match_concepts` maps tags back onto the canonical list and discards invented ones. `_normalise_tier` returns `None` rather than guessing, with a comment on why an unclassifiable source must not be silently counted as good or bad news. `graph/extractor.py` drops incomplete nodes and edges and logs the count, and warns explicitly on `max_tokens` truncation. C3 was a finding *because* it was the exception.
 
-**Intellectual honesty in the product copy.** `faq.tsx:20` states plainly that screening is a single model pass with no inter-rater statistic and no published sensitivity or specificity, and should be treated as auditable triage. For a product sold on defensibility, refusing to over-claim is the correct and the commercially harder choice.
+**Design-token discipline in the frontend is excellent.** Across ~130 components only two files contain hardcoded hex — the Google logo (brand-mandated) and recharts defaults (now deleted). Much better than typical.
+
+**The comments explain *why*.** Throughout, they document reasoning, trade-offs and measurements rather than restating the code. `streaming.py` raising `RuntimeError` instead of `assert` — because `python -O` strips assertions and the resulting `AttributeError` would say nothing useful — is representative of the standard.
+
+**Intellectual honesty in the product copy.** `faq.tsx` states plainly that screening is a single model pass with no inter-rater statistic and no published sensitivity or specificity, and should be treated as auditable triage. For a product sold on defensibility, refusing to over-claim is both correct and commercially harder. Which is exactly why S8 mattered: the same file was *under*-claiming a feature that shipped.
 
 ---
 
-## Recommended order of work
+## What to do next
 
-1. **Add `release_command` to `fly.toml`** and verify migration 019 is applied in production (C1) — highest impact, ~10 minutes. If 019 isn't live, this alone transforms chat latency.
-2. **Add Postgres to CI** (C2) — 54 written tests, including all billing tests, currently never run.
-3. **Add a `web/` job to CI** (C3) — your most active surface has no protection.
-4. **Fix the `float()` coercion in `validator.py`** (C4) — cheap; prevents a late-stage build failure after spend.
-5. **Sum RRF contributions instead of taking max** (S2) — small diff, plausibly the largest retrieval-quality win available; measure it with `eval/`.
-6. **Add error boundaries to `web/`** (S5).
-7. **Include `context_text` in the FTS index** (S1) — you're paying for context the keyword arm can't see.
-8. **Update README and `faq.tsx`** (S7) — you have shipped RIS/CSV export and are still advertising it as unbuilt.
-9. **Commit the working tree.** 2,600 lines of good work is sitting unbacked-up.
+1. **Verify migration state in production** before the next deploy — `SELECT filename FROM _migrations ORDER BY filename;`. If `019` is missing, applying it is the largest single latency win available. The `release_command` handles it from now on, but not retroactively.
+2. **Watch the first CI run.** 54 tests are executing for the first time. Failures there are pre-existing, not regressions from this pass.
+3. **Measure S2 and S3** through `eval/compare.py`. RRF summation and context-aware keyword search are both plausible retrieval-quality gains, and you have the harness to prove it rather than assume it.
+4. **Commit the working tree.** There is a large in-flight dashboard refactor here (audit pages being restructured into `sources`/`graph`) plus this pass, all unbacked-up on `main`.
+5. **Decide about `cli/`.** Three-plus weeks of API change have gone unverified against it. `cargo check` proves compilation, not contract.
+6. **Consider a unique index on `expert_nodes (expert_id, lower(btrim(label)))`.** S1 is fixed in application code; a constraint would make it structurally impossible to regress. Needs a dedup migration first, since existing data may already carry duplicates from the upload path.
 
-Then commission the evaluation passes that didn't run: **billing arithmetic** and the **graph dedup merge** first, since both fail silently.
+### Still not evaluated
+
+Stated plainly, because "not mentioned" should not read as "fine":
+
+- **Per-fetcher failure modes** across the nine source fetchers — not examined.
+- **Chat stream claim/interrupt** under concurrency — read the streaming path, did not test the claim/interrupt race.
+- **Frontend page-by-page UI/UX and accessibility** — structural issues addressed (S6), not a design review. `build-progress.tsx` (993 lines) and `knowledge-graph.tsx` (925 lines) are both large enough to deserve a look.
+- **`cli/`** — excluded by request.
+
+---
+
+## Appendix — what changed since the 2026-07-29 evaluation
+
+The previous pass was planned as a seven-agent parallel sweep; all seven were terminated by a session limit before reporting, and it fell back to a single-threaded review that left billing arithmetic, graph dedup, chat stream internals, per-fetcher behaviour and page-by-page frontend explicitly unexamined.
+
+This pass closed three of those. **Billing arithmetic** was reviewed and is sound — one type-only defect, no arithmetic errors. **Graph dedup** turned out to hold the most serious new bug in the codebase (S1). **Frontend** structural gaps are fixed (S6). Two remain open above.
+
+Its nine recommendations are all now done: `release_command` (C1), Postgres in CI (T1), a `web` CI job (T1), the `float()` coercion (C3), RRF summation (S2), error boundaries (S6), `context_text` in the FTS index (S3), README and `faq.tsx` (S8), with the working tree still to commit.

@@ -30,7 +30,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
+
+from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -170,7 +172,10 @@ async def _run_batch(
     client = get_anthropic_client()
     batch = await client.messages.batches.create(
         requests=[
-            {"custom_id": f"req-{i}", "params": params}
+            # Callers assemble params as plain dicts (they are built per-stage and
+            # passed through unchanged to either transport), so the SDK's
+            # TypedDict shape is asserted here rather than threaded through.
+            {"custom_id": f"req-{i}", "params": cast(MessageCreateParamsNonStreaming, params)}
             for i, params in enumerate(params_list)
         ]
     )

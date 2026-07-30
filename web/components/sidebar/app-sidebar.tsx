@@ -19,7 +19,7 @@ import { NavNewChat } from "@/components/sidebar/nav-new-chat";
 import { NavRecentChats } from "@/components/sidebar/nav-recent-chats";
 import { NavUser } from "@/components/sidebar/nav-user";
 import { CommandMenu } from "@/components/sidebar/command-menu";
-import { Wordmark } from "@/components/brand/wordmark";
+import { BrandMark, Logo } from "@/components/brand/wordmark";
 import type { ConversationSummary, ExpertSummary, User } from "@/lib/api/types";
 
 const NAV_ITEMS: NavItem[] = [
@@ -50,16 +50,22 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
-        {/* Not a SidebarMenuButton: the wordmark is an identity, not a nav row,
-            and giving it the hover/active treatment made it read as a fourth
-            destination above the real ones. It links home and gets out of the
-            way. Hidden when the rail collapses — there is no icon form of it
-            now, and a clipped "PER" is worse than nothing. */}
+        {/* Not a SidebarMenuButton: the identity is not a nav row, and giving
+            it the hover/active treatment made it read as a fourth destination
+            above the real ones. It links home and gets out of the way.
+            The rail used to hide it entirely when collapsed, because a clipped
+            "PER" is worse than nothing — now the mark is its collapsed form,
+            so the app keeps a face at every width. */}
         <Link
           href="/experts"
-          className="flex h-8 items-center px-2 group-data-[collapsible=icon]:hidden"
+          aria-label="Peritus — home"
+          className="flex items-center rounded-lg px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0"
         >
-          <Wordmark />
+          <Logo
+            tagline="Experts built from sources"
+            className="group-data-[collapsible=icon]:hidden"
+          />
+          <BrandMark className="hidden group-data-[collapsible=icon]:flex" />
         </Link>
         <SidebarGroup className="p-0">
           <SidebarMenu>

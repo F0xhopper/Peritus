@@ -28,9 +28,7 @@ import type { ConversationSummary, ExpertSummary } from "@/lib/api/types";
 //   /experts/{slug}/chat           Experts › {topic} › Chat
 //   /experts/{slug}/build          Experts › {topic} › Build
 //   /experts/{slug}/sources        Experts › {topic} › Sources
-//   /experts/{slug}/discovery      Experts › {topic} › Discovery
-//   /experts/{slug}/coverage       Experts › {topic} › Coverage
-//   /experts/{slug}/contradictions Experts › {topic} › Disagreements
+//   /experts/{slug}/graph          Experts › {topic} › Graph
 //   /chats/{id}                    Experts › {topic} › {conversation title}
 //   /settings                      Settings
 
@@ -45,15 +43,13 @@ const SECTION_LABELS: Record<string, string> = {
   settings: "Settings",
 };
 
-// Matches components/audit/audit-nav.tsx's TABS labels ("contradictions" is
-// styled "Disagreements" there too) plus the chat/build leaves.
+// Matches components/audit/audit-nav.tsx's TABS labels plus the chat/build
+// leaves.
 const EXPERT_LEAF_LABELS: Record<string, string> = {
   chat: "Chat",
   build: "Build",
   sources: "Sources",
-  discovery: "Discovery",
-  coverage: "Coverage",
-  contradictions: "Disagreements",
+  graph: "Graph",
 };
 
 export function AppBreadcrumbs({

@@ -16,11 +16,16 @@ export function MessageList({
   pending,
   statusLine,
   streaming,
+  emptyState,
 }: {
   messages: ChatMessage[];
   pending: PendingAnswer | null;
   statusLine: string | null;
   streaming: boolean;
+  /** Shown while the transcript is empty. Restarting a chat lands here every
+   * time, so "no messages yet" is a normal state rather than an edge case, and
+   * an unexplained pane of black above the composer is not an answer to it. */
+  emptyState?: React.ReactNode;
 }) {
   const bottomRef = React.useRef<HTMLDivElement>(null);
   const scrollRef = React.useRef<HTMLDivElement>(null);
@@ -45,14 +50,28 @@ export function MessageList({
   // marked as out of its window.
   const cutoff = Math.max(0, messages.length - HISTORY_WINDOW);
 
+  if (emptyState && messages.length === 0 && !pending && !statusLine) {
+    return (
+      <div className="flex flex-1 items-center justify-center overflow-y-auto p-4">
+        {emptyState}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={scrollRef}
       onScroll={handleScroll}
-      className="flex-1 overflow-y-auto"
+      // Feathered top and bottom. Without the mask, a scrolled transcript is
+      // sliced clean through a line of type at both ends — the answer appears
+      // to start and stop mid-word against the header rule and the composer,
+      // which reads as clipping rather than as more text above and below. The
+      // mask only bites once there is something to scroll, so a short answer
+      // is never dimmed at its own first line.
+      className="flex-1 overflow-y-auto [mask-image:linear-gradient(to_bottom,transparent,black_1.25rem,black_calc(100%-1.25rem),transparent)]"
     >
       <div
-        className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-1 py-4"
+        className="mx-auto flex w-full max-w-3xl flex-col gap-5 px-1 py-5"
         aria-live="polite"
         aria-busy={streaming}
       >
@@ -71,7 +90,6 @@ export function MessageList({
               role={message.role}
               content={message.content}
               citations={message.citations}
-              hasContradiction={message.has_contradiction}
               interrupted={message.interrupted}
               messageKey={String(message.id)}
             />
@@ -83,7 +101,6 @@ export function MessageList({
             role="assistant"
             content={pending.content}
             citations={pending.citations}
-            hasContradiction={pending.has_contradiction}
             interrupted={pending.interrupted}
             trail={pending.trail}
             messageKey="pending"

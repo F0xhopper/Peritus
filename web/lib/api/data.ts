@@ -3,19 +3,15 @@ import { redirect } from "next/navigation";
 import { ApiError } from "@/lib/api/server";
 import { proxyJson, NotAuthenticatedError } from "@/lib/api/proxy";
 import type {
-  ContradictionsReport,
   CorpusSource,
   ConversationDetail,
   ConversationSummary,
-  CorpusReport,
   CoverageReport,
   CreditState,
   LedgerEntry,
   ExpertDetail,
+  ExpertGraph,
   ExpertSummary,
-  ScreeningFlow,
-  SourceDecision,
-  SourceSort,
   User,
 } from "@/lib/api/types";
 
@@ -135,47 +131,6 @@ function isNextControlFlow(err: unknown): boolean {
 // See docs/audit-api.md. Every fetcher here is read-only; nothing under
 // /audit mutates a corpus.
 
-export async function getCorpusReport(
-  slug: string,
-  opts: {
-    decision?: SourceDecision;
-    sort?: SourceSort;
-    limit?: number;
-    offset?: number;
-  } = {},
-): Promise<CorpusReport | null> {
-  const query = new URLSearchParams();
-  if (opts.decision) query.set("decision", opts.decision);
-  if (opts.sort) query.set("sort", opts.sort);
-  if (opts.limit != null) query.set("limit", String(opts.limit));
-  if (opts.offset != null) query.set("offset", String(opts.offset));
-  const qs = query.toString();
-
-  return fetchOrLogin(async () => {
-    try {
-      return await proxyJson<CorpusReport>(
-        `/experts/${encodeURIComponent(slug)}/corpus-report${qs ? `?${qs}` : ""}`,
-      );
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return null;
-      throw err;
-    }
-  });
-}
-
-export async function getScreeningFlow(slug: string): Promise<ScreeningFlow | null> {
-  return fetchOrLogin(async () => {
-    try {
-      return await proxyJson<ScreeningFlow>(
-        `/experts/${encodeURIComponent(slug)}/screening-flow`,
-      );
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return null;
-      throw err;
-    }
-  });
-}
-
 export async function getCoverage(slug: string): Promise<CoverageReport | null> {
   return fetchOrLogin(async () => {
     try {
@@ -189,19 +144,15 @@ export async function getCoverage(slug: string): Promise<CoverageReport | null> 
   });
 }
 
-export async function getContradictions(
+export async function getExpertGraph(
   slug: string,
-  opts: { limit?: number; offset?: number } = {},
-): Promise<ContradictionsReport | null> {
-  const query = new URLSearchParams();
-  if (opts.limit != null) query.set("limit", String(opts.limit));
-  if (opts.offset != null) query.set("offset", String(opts.offset));
-  const qs = query.toString();
-
+  limit?: number,
+): Promise<ExpertGraph | null> {
+  const qs = limit != null ? `?limit=${limit}` : "";
   return fetchOrLogin(async () => {
     try {
-      return await proxyJson<ContradictionsReport>(
-        `/experts/${encodeURIComponent(slug)}/contradictions${qs ? `?${qs}` : ""}`,
+      return await proxyJson<ExpertGraph>(
+        `/experts/${encodeURIComponent(slug)}/graph${qs}`,
       );
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) return null;

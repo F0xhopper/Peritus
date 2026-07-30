@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Composer } from "@/components/chat/composer";
 import { ConversationMenu } from "@/components/chat/conversation-menu";
 import { MessageList } from "@/components/chat/message-list";
+import { PersonaAvatar } from "@/components/experts/persona-avatar";
 import { useChatStream } from "@/components/chat/use-chat-stream";
 import { personaLabel } from "@/lib/persona";
 import type { ConversationDetail } from "@/lib/api/types";
@@ -115,6 +116,16 @@ export function ChatView({ conversation }: { conversation: ConversationDetail })
         pending={pending}
         statusLine={statusLine}
         streaming={streaming}
+        emptyState={
+          <div className="flex flex-col items-center gap-3 text-center">
+            <PersonaAvatar label={expertLabel} size="lg" />
+            <p className="text-base font-medium">{expertLabel}</p>
+            <p className="max-w-measure text-sm text-pretty text-muted-foreground">
+              Nothing asked yet. Answers come from this expert&apos;s corpus and
+              are cited passage by passage.
+            </p>
+          </div>
+        }
       />
 
       {error && (

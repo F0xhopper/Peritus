@@ -374,17 +374,15 @@ class BuildWorker:
             install_instrumentation()
             tier = ExpertTier(job.tier) if job.tier else expert.tier
             cap = await self._entitlements.cap_for_build(expert.owner_id or "", tier)
-            if not billing_settings.SPEND_CAP_ENFORCED:
-                # Observe-only mode: record the cap on the job, but don't arm it.
-                await self._entitlements.record_job_cap(job.id, cap)
-                cap = None
-            else:
-                await self._entitlements.record_job_cap(job.id, cap)
+            # The cap is always snapshotted onto the job, so spend stays readable
+            # against the ceiling that applied. Whether it is *armed* is separate:
+            # in observe-only mode the meter carries no cap and never aborts.
+            await self._entitlements.record_job_cap(job.id, cap)
             return BuildMeter(
                 job_id=job.id,
                 expert_id=expert.id,
                 owner_id=expert.owner_id,
-                cap_usd=cap,
+                cap_usd=cap if billing_settings.SPEND_CAP_ENFORCED else None,
             )
         except Exception as exc:
             logger.warning("Could not start cost metering for job %d: %s", job.id, exc)

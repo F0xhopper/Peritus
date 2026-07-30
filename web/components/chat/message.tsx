@@ -3,7 +3,7 @@
 import * as React from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { AlertTriangleIcon, UnplugIcon } from "lucide-react";
+import { UnplugIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CitationList } from "@/components/chat/citation-list";
 import { RetrievalTrail } from "@/components/chat/retrieval-trail";
@@ -16,11 +16,17 @@ import type { Citation } from "@/lib/api/types";
 
 const MARKDOWN_PLUGINS = [remarkGfm];
 
+// The API still reports `has_contradiction` per answer, and the chat prompt
+// still uses it to shape how the model writes — but it no longer surfaces as a
+// footnote under the answer. A flag raised on every answer touching two
+// sources that disagree reads as a defect report on the answer rather than as
+// a property of the literature, and the answers already say so in prose where
+// it matters ("here's a genuine tension in the sources").
+
 export function Message({
   role,
   content,
   citations,
-  hasContradiction,
   interrupted,
   trail,
   messageKey,
@@ -29,7 +35,6 @@ export function Message({
   role: "user" | "assistant";
   content: string;
   citations: Citation[] | null;
-  hasContradiction: boolean;
   interrupted: boolean;
   trail?: RetrievalTrailData | null;
   messageKey: string;
@@ -118,16 +123,6 @@ export function Message({
           />
         )}
       </div>
-
-      {hasContradiction && (
-        // Amber was the last hue left in the app and broke the monochrome
-        // rule the rest of the theme keeps; the warning now reads through the
-        // icon plus the shift to full foreground weight.
-        <p className="mt-2 flex items-center gap-1.5 text-xs text-foreground">
-          <AlertTriangleIcon className="size-3.5" />
-          Sources disagree on part of this answer.
-        </p>
-      )}
 
       {interrupted && (
         <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">

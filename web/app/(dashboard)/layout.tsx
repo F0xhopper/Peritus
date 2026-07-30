@@ -34,7 +34,7 @@ export default async function DashboardLayout({
     // transcript.
     <SidebarProvider className="h-svh overflow-hidden">
       <AppSidebar experts={experts} conversations={conversations} user={user} />
-      <SidebarInset className="min-h-0">
+      <SidebarInset className="min-h-0 min-w-0">
         {/* No rule under this strip: the sidebar toggle and breadcrumb sit in
             their own row of whitespace, set off from the content below by the
             gap the content wrapper already opens rather than a drawn line. */}
@@ -44,7 +44,12 @@ export default async function DashboardLayout({
               lists already fetched above, so it costs no extra request. */}
           <AppBreadcrumbs experts={experts} conversations={conversations} />
         </header>
-        <div className="flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto p-4 md:p-6">
+        {/* [&>*]:shrink-0 matters once a page's content (e.g. the merged
+            expert Overview) exceeds viewport height: without it, flexbox
+            shrinks direct children to fit rather than letting this box
+            scroll, because Card's overflow-hidden strips their automatic
+            minimum size and leaves nothing to stop the shrink. */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6 overflow-y-auto p-4 [&>*]:shrink-0 md:p-6">
           {children}
         </div>
       </SidebarInset>

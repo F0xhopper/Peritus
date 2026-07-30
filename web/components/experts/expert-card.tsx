@@ -1,18 +1,27 @@
 import Link from "next/link";
-import { ArrowUpRightIcon, MessageSquareIcon, TriangleAlertIcon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  FileTextIcon,
+  MessageSquareIcon,
+  SparklesIcon,
+  TagIcon,
+  TriangleAlertIcon,
+} from "lucide-react";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
-  CardFooter,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { StatusDot } from "@/components/experts/status-dot";
 import { ConceptList } from "@/components/experts/concept-list";
 import { ExpertMenu } from "@/components/experts/expert-menu";
+import { InfoRow } from "@/components/experts/info-row";
 import { PersonaAvatar } from "@/components/experts/persona-avatar";
 import { formatCompact } from "@/lib/format";
 import { personaLabel } from "@/lib/persona";
@@ -28,6 +37,10 @@ import type { ExpertSummary } from "@/lib/api/types";
 // like a filing cabinet — you pick a topic out of a filing cabinet, but you
 // ask a question of somebody. The topic is still the second line, so the
 // answer to "which of these knows about Stoicism" is one glance away.
+//
+// Laid out like a contact card: avatar left, name and topic beside it,
+// everything else stacks under it. The shape reads as "a person," not "a
+// record."
 //
 // Experts without a persona (queued, building, failed) lead with the topic
 // instead — there is no name yet, and captioning them "Dr. Stoic Philosophy"
@@ -54,71 +67,89 @@ export function ExpertCard({ expert }: { expert: ExpertSummary }) {
   const heading = persona ?? expert.topic;
 
   return (
-    <Card className="relative h-full rounded-lg transition-colors hover:bg-muted/40">
-      <CardHeader className="flex items-start gap-3">
-        <PersonaAvatar label={heading} />
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          {/* CardTitle is a plain block in this style, so the row is built
-              here — an inline <a> has no width to truncate against. */}
-          <CardTitle className="flex min-w-0 items-center gap-1.5">
-            {/* Ready is the boring default, and a bright dot on every healthy
-                card spends the grid's attention budget on nothing. Only the
-                statuses that want something from you get a mark; the state is
-                still announced to screen readers on every card. */}
-            {ready ? null : <StatusDot status={expert.status} />}
-            <span className="sr-only">{expert.status}: </span>
-            {/* Stretched link: the pseudo-element covers the whole card, so
-                the card is one big hit target while staying a single link with
-                a single accessible name. Anything else interactive on the card
-                opts back above it with `relative z-10`. */}
-            {/* min-w-0 is load-bearing: a flex item defaults to
-                min-width:auto, so without it `truncate` never engages and a
-                long name runs out under the corner icon. */}
-            <Link
-              href={href}
-              className="min-w-0 flex-1 truncate rounded-lg outline-none after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
-            >
-              {/* Names the destination, since the visible text is a person and
-                  not an action: "View Dr. Elena Vasquez". */}
-              <span className="sr-only">{ready ? "View " : "Open "}</span>
-              {heading}
-            </Link>
-          </CardTitle>
-          <CardDescription className="line-clamp-1 text-xs">
-            {subtitle(expert, persona)}
-          </CardDescription>
+    <Card className="relative h-full transition-colors hover:bg-muted/40">
+      {/* CardHeader's default `1fr` track has `min-width: auto`, so it refuses
+          to shrink below the title's intrinsic width — a long persona name
+          ("Dr. Teodoro Alighieri Bianchi") pushed the action cluster past the
+          card's edge, where `overflow-hidden` clipped it off entirely. A
+          `minmax(0,1fr)` track lets the truncation below actually engage. */}
+      <CardHeader className="has-data-[slot=card-action]:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="flex min-w-0 items-center gap-3">
+          <PersonaAvatar label={heading} size="xl" />
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+            {/* CardTitle is a plain block in this style, so the row is built
+                here — an inline <a> has no width to truncate against. */}
+            <CardTitle className="flex min-w-0 items-center gap-1.5">
+              {/* Ready is the boring default, and a bright dot on every healthy
+                  card spends the grid's attention budget on nothing. Only the
+                  statuses that want something from you get a mark; the state is
+                  still announced to screen readers on every card. */}
+              {ready ? null : <StatusDot status={expert.status} />}
+              <span className="sr-only">{expert.status}: </span>
+              {/* Stretched link: the pseudo-element covers the whole card, so
+                  the card is one big hit target while staying a single link with
+                  a single accessible name. Anything else interactive on the card
+                  opts back above it with `relative z-10`. */}
+              <Link
+                href={href}
+                className="min-w-0 flex-1 truncate rounded-lg outline-none after:absolute after:inset-0 after:rounded-xl after:content-[''] focus-visible:after:ring-2 focus-visible:after:ring-ring"
+              >
+                {/* Names the destination, since the visible text is a person and
+                    not an action: "View Dr. Elena Vasquez". */}
+                <span className="sr-only">{ready ? "View " : "Open "}</span>
+                {heading}
+              </Link>
+            </CardTitle>
+            <CardDescription className="line-clamp-1 text-xs">
+              {subtitle(expert, persona)}
+            </CardDescription>
+          </div>
         </div>
-        {/* The one control that isn't "browse into this card": starting a chat
-            has its own destination, so it stays a real button, above the
-            stretched link, rather than a hint about where the card goes. */}
-        {ready ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="relative z-10 shrink-0"
-            nativeButton={false}
-            render={<Link href={`/experts/${expert.name}/chat`} />}
-          >
-            <MessageSquareIcon />
-            Chat
-          </Button>
-        ) : (
-          <DestinationHint />
-        )}
+
+        {/* card.tsx grid-positions this top-right whenever a CardAction is
+            present, so the corner cluster lands there without any manual
+            absolute positioning. Chat rides here rather than under the name:
+            it's the one control that isn't "browse into this card," so it
+            stays with the other corner controls, above the stretched link. */}
+        <CardAction className="relative z-10 flex items-center gap-1">
+          {ready ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Chat"
+              nativeButton={false}
+              render={<Link href={`/experts/${expert.name}/chat`} />}
+            >
+              <MessageSquareIcon />
+            </Button>
+          ) : (
+            <DestinationHint />
+          )}
+          <ExpertMenu slug={expert.name} topic={expert.topic} />
+        </CardAction>
       </CardHeader>
+
+      <Separator />
 
       <CardContent className="flex flex-1 flex-col gap-3">
         <ExpertCardBody expert={expert} />
       </CardContent>
 
-      <CardFooter className="mt-auto justify-between gap-3">
-        <MetricStrip expert={expert} />
-        {/* The only remaining footer control: the destructive action stays
-            down here, above the stretched link, and away from the title. */}
-        <div className="relative z-10 shrink-0">
-          <ExpertMenu slug={expert.name} topic={expert.topic} />
-        </div>
-      </CardFooter>
+      <Separator />
+
+      <CardContent className="flex flex-col gap-2">
+        <InfoRow
+          icon={FileTextIcon}
+          label="Sources"
+          value={formatCompact(expert.source_count)}
+        />
+        <InfoRow
+          icon={TagIcon}
+          label="Concepts"
+          value={formatCompact(expert.key_concepts.length)}
+        />
+        <InfoRow icon={SparklesIcon} label="Tier" value={expert.tier} />
+      </CardContent>
     </Card>
   );
 }
@@ -200,36 +231,4 @@ function buildLabel(expert: ExpertSummary): string {
   return expert.source_count > 0
     ? `Building — ${expert.source_count} sources ingested.`
     : "Building — gathering sources.";
-}
-
-/** Sources and tier. Chunk and node counts are build telemetry: they push this
- * strip onto a second line at three-column widths and they answer no question
- * the reader has while choosing an expert. Average source quality is gone from
- * the card for a related reason — it's a number about the corpus, not about
- * whether this is the expert you want. Both live on the detail page.
- * Tier rides here rather than in a header badge — it's a fact about the build,
- * scanned in the same pass as the count, not a headline. */
-function MetricStrip({ expert }: { expert: ExpertSummary }) {
-  return (
-    <div className="flex min-w-0 items-center gap-1.5 truncate text-xs text-muted-foreground">
-      {/* Tabular so the counts align down a grid column — running prose
-          takes the proportional default. */}
-      <span className="text-foreground tabular-nums lining-nums">
-        {formatCompact(expert.source_count)}
-      </span>
-      sources
-      <span className="text-muted-foreground/40">·</span>
-      {/* The bulleted list above is capped at three, so the total is not
-          readable from it — this is the only place the full count appears. */}
-      <span className="text-foreground tabular-nums lining-nums">
-        {formatCompact(expert.key_concepts.length)}
-      </span>
-      concepts
-      <span className="text-muted-foreground/40">·</span>
-      {/* Same voice as <TierBadge>, without the box — tier is a label here. */}
-      <span className="font-display text-[0.6875rem] tracking-[0.14em] uppercase">
-        {expert.tier}
-      </span>
-    </div>
-  );
 }

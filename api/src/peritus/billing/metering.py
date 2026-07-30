@@ -272,7 +272,7 @@ async def _metered_batch_results(decoder: Any, meter: BuildMeter | None) -> Asyn
             with contextlib.suppress(Exception):
                 result = getattr(entry, "result", None)
                 if getattr(result, "type", None) == "succeeded":
-                    message = result.message
+                    message = getattr(result, "message", None)
                     meter.record_message(
                         getattr(message, "model", "") or "",
                         getattr(message, "usage", None),

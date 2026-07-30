@@ -33,7 +33,13 @@ export default async function ExpertChatPage({
         action={<StatusBadge status={expert.status} />}
       />
 
-      <div className="flex flex-1 flex-col justify-end gap-6">
+      {/* Centred, not bottom-anchored. `justify-end` mimicked a live
+          transcript — composer pinned to the bottom, history above it — but
+          there is no history here yet, so it opened with roughly two-thirds of
+          the page as empty black and pushed the previous-chats list off the
+          bottom edge. Centring the whole group puts the composer where the eye
+          already is and brings the list back into view. */}
+      <div className="flex min-h-0 flex-1 flex-col justify-center gap-8 overflow-y-auto py-2">
         <div className="mx-auto flex w-full max-w-3xl flex-col items-center text-center">
           {/* Whoever you are about to talk to, above the box you talk into —
               the header names the page, this names the person. */}

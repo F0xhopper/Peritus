@@ -538,6 +538,55 @@ class AuditService:
             "contradictions": items,
         }
 
+    # ── concept graph (visualization) ───────────────────────────────────────
+
+    async def graph(self, expert: Expert, node_limit: int) -> dict[str, Any]:
+        """Nodes and edges for a force-directed rendering of the concept graph.
+
+        Gated on the same signal as contradictions: the graph is extracted a
+        whole stage after the corpus becomes searchable, so an expert can be
+        answering questions while it's still empty. ``computed: false`` there
+        means "not built yet", not "empty".
+        """
+        if not expert.graph_expanded:
+            return {
+                "expert": _expert_stub(expert),
+                "computed": False,
+                "nodes": [],
+                "edges": [],
+                "total_nodes": expert.node_count,
+                "total_edges": expert.edge_count,
+                "truncated": False,
+            }
+
+        nodes, edges = await self._repo.full_graph(expert.id, node_limit)
+        return {
+            "expert": _expert_stub(expert),
+            "computed": True,
+            "nodes": [
+                {
+                    "id": n["id"],
+                    "label": n["label"],
+                    "node_type": n["node_type"],
+                    "degree": n["degree"],
+                }
+                for n in nodes
+            ],
+            "edges": [
+                {
+                    "id": e["id"],
+                    "source": e["from_node_id"],
+                    "target": e["to_node_id"],
+                    "edge_type": e["edge_type"],
+                    "weight": e["weight"],
+                }
+                for e in edges
+            ],
+            "total_nodes": expert.node_count,
+            "total_edges": expert.edge_count,
+            "truncated": len(nodes) < expert.node_count,
+        }
+
     # ── answer-level retrieval trail ────────────────────────────────────────
 
     async def record_answer_audit(

@@ -80,7 +80,16 @@ export type ChatStreamEvent =
   | { type: "meta"; conversation_id: string; title: string | null }
   | { type: "status"; message: string }
   | { type: "token"; text: string }
-  | { type: "sources"; citations: Citation[]; has_contradiction: boolean }
+  | {
+      type: "sources";
+      citations: Citation[];
+      has_contradiction: boolean;
+      /** Inline `[n]` markers in the answer that point at no retrieved passage —
+       * the model invented a reference. They cannot be removed from the prose
+       * (tokens are already streamed), so the renderer must not present them as
+       * citations. Empty on a well-grounded answer. */
+      dangling_citations: number[];
+    }
   // The answer's retrieval trail: how many passages were retrieved, how many
   // reached the prompt, and how many the answer actually cited. A trail, never
   // a score — do not render it as a percentage.
@@ -382,6 +391,33 @@ export interface CoverageReport {
     note: string;
   };
   concepts: CoverageConcept[];
+}
+
+export interface GraphNode {
+  id: number;
+  label: string;
+  node_type: string | null;
+  degree: number;
+}
+
+export interface GraphEdge {
+  id: number;
+  source: number;
+  target: number;
+  edge_type: string;
+  weight: number | null;
+}
+
+/** `computed: false` means the concept graph has not been extracted yet — an
+ * empty `nodes`/`edges` in that state means "not built", not "empty graph". */
+export interface ExpertGraph {
+  expert: { name: string; topic: string; [k: string]: unknown };
+  computed: boolean;
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  total_nodes: number;
+  total_edges: number;
+  truncated: boolean;
 }
 
 /** `computed: false` means the concept graph has not been extracted yet.

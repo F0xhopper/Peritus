@@ -2,7 +2,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GoogleSignIn } from "@/components/auth/google-sign-in";
 import { LoginForm } from "@/components/auth/login-form";
-import { Wordmark } from "@/components/brand/wordmark";
+import { Logo } from "@/components/brand/wordmark";
 
 export default async function LoginPage({
   searchParams,
@@ -14,8 +14,8 @@ export default async function LoginPage({
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-6 px-4">
-      <Link href="/">
-        <Wordmark />
+      <Link href="/" aria-label="Peritus — home">
+        <Logo />
       </Link>
       <Card className="w-full max-w-sm rounded-lg">
         <CardHeader>

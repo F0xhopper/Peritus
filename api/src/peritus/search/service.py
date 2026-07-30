@@ -34,6 +34,14 @@ def _distance_expr() -> tuple[str, str]:
     return "sc.embedding", "$1"
 
 
+# The text the keyword arm matches on: the chunk plus its contextual prefix.
+# The prefix is generated and paid for per chunk at ingestion and is already part
+# of what the semantic arm embeds, so excluding it here made half the retrieval
+# pipeline blind to it. Must stay byte-identical to the index expression in
+# migration 022 — a mismatch silently costs the index, not correctness.
+_FTS_EXPR = "coalesce(sc.context_text, '') || ' ' || sc.text"
+
+
 class SearchService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self._pool = pool
@@ -153,12 +161,13 @@ class SearchService:
                 FROM (
                     SELECT sc.id,
                            ts_rank_cd(
-                               to_tsvector('english', sc.text),
+                               to_tsvector('english', {_FTS_EXPR}),
                                plainto_tsquery('english', $4)
                            ) AS rank
                     FROM source_chunks sc
                     WHERE sc.expert_id = $2
-                      AND to_tsvector('english', sc.text) @@ plainto_tsquery('english', $4)
+                      AND to_tsvector('english', {_FTS_EXPR})
+                          @@ plainto_tsquery('english', $4)
                     ORDER BY rank DESC
                     LIMIT $3
                 ) matched
@@ -229,11 +238,28 @@ def _row_to_result(row) -> SearchResult:
 
 
 def _merge_hits(all_hits: list[list[SearchResult]]) -> list[SearchResult]:
-    best: dict[int, SearchResult] = {}
+    """Fuse the per-subquery hit lists into one ranked list.
+
+    Scores **sum** across subqueries rather than taking the maximum. Each arm
+    already carries an RRF score, and summing is what makes RRF worth using: a
+    chunk that several independently-planned subqueries all retrieved outranks
+    one that only a single subquery found. Taking the max threw that away —
+    a chunk ranked first by one subquery and a chunk ranked first by all four
+    scored identically, so agreement across subqueries (the strongest relevance
+    signal the system has) had no effect on the ordering.
+
+    The first-seen ``SearchResult`` for a chunk is kept and its score
+    accumulated; the arms build fresh objects per subquery, so no caller's list
+    is aliased.
+    """
+    fused: dict[int, SearchResult] = {}
     for hits in all_hits:
         for hit in hits:
-            if hit.chunk_id not in best or hit.score > best[hit.chunk_id].score:
-                best[hit.chunk_id] = hit
-    merged = list(best.values())
+            existing = fused.get(hit.chunk_id)
+            if existing is None:
+                fused[hit.chunk_id] = hit
+            else:
+                existing.score += hit.score
+    merged = list(fused.values())
     merged.sort(key=lambda x: x.score, reverse=True)
     return merged

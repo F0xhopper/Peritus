@@ -243,9 +243,11 @@ async def _extend_graph(
 ) -> tuple[int, int]:
     """Extract concepts from the new chunks and merge them into the live graph.
 
-    ``bulk_insert_from_extractions`` already resolves a label that matches an
-    existing node onto that node, so a document about something the corpus
-    already covers deepens the existing concept rather than creating a rival.
+    ``bulk_insert_from_extractions`` resolves an extracted label against the
+    expert's existing nodes, so a document about something the corpus already
+    covers deepens that concept rather than creating a rival copy of it. Only
+    exact (case- and whitespace-normalised) label matches resolve here; merging
+    near-duplicates needs embedding similarity and stays a build-time pass.
     """
     extractions = await extract_graph_from_chunks(expert.topic, chunks, chunk_ids)
     return await GraphRepository(pool).bulk_insert_from_extractions(

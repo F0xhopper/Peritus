@@ -25,7 +25,7 @@ const FAQS = [
   },
   {
     q: "Can I export the record?",
-    a: "Not yet. Today you watch every decision stream past as the build runs, and the full record — quality and relevance scores, drop reasons, validator model, rubric version, discovery path and concept coverage — is stored against the expert. CSV and RIS export is the next thing being built, so grey-literature findings can be carried into your reference manager and screening tool alongside the database records.",
+    a: "Yes — as CSV, or as RIS for your reference manager. The export carries the full record for every source considered: quality and relevance scores, drop reason, validator model, rubric version, discovery path and concept coverage. RIS matters because a grey-literature source has no bibliographic record to import from anywhere else, so this is usually the only way those findings reach Zotero or EndNote alongside your database records. You can export everything, or just the sources that were kept, or just the ones that were dropped.",
   },
   {
     q: "What does it actually search?",

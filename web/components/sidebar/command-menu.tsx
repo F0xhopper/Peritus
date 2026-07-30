@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { UsersIcon, SettingsIcon, MessageSquareIcon } from "lucide-react";
 import {
   CommandDialog,
@@ -29,6 +29,7 @@ export function CommandMenu({
   chatOnly?: boolean;
 }) {
   const router = useRouter();
+  const pathname = usePathname();
   // Only ready experts can be chatted with, so an unbuilt one is not offered.
   const readyExperts = experts.filter((expert) => expert.status === "ready");
 
@@ -51,7 +52,10 @@ export function CommandMenu({
 
   function go(url: string) {
     onOpenChange(false);
-    router.push(url);
+    // Re-selecting the page you're already on shouldn't stack a duplicate
+    // history entry — that's what made "back" sometimes take two presses to
+    // move anywhere, landing on what looked like the same page again.
+    if (url !== pathname) router.push(url);
   }
 
   return (

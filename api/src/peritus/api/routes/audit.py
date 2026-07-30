@@ -20,6 +20,8 @@ from peritus.api.schemas.audit import (
     CONTRADICTIONS_PAGE_DEFAULT,
     CONTRADICTIONS_PAGE_MAX,
     EXPORT_MAX_ROWS,
+    GRAPH_NODES_DEFAULT,
+    GRAPH_NODES_MAX,
     SOURCES_PAGE_DEFAULT,
     SOURCES_PAGE_MAX,
     ExportFormat,
@@ -190,6 +192,24 @@ async def contradictions(
         passages_per_side=passages_per_side,
         excerpt_chars=excerpt_chars,
     )
+
+
+@router.get("/{slug}/graph")
+async def graph(
+    slug: str,
+    limit: int = Query(GRAPH_NODES_DEFAULT, ge=1, le=GRAPH_NODES_MAX),
+    user: AuthUser = Depends(require_user),
+) -> dict[str, Any]:
+    """The concept graph as nodes and edges, for a force-directed rendering.
+
+    Nodes are ranked by degree and capped at ``limit`` so a large corpus stays
+    renderable; edges are returned only between the nodes in that cap.
+
+    Check ``computed`` before reading ``nodes``/``edges``: it is ``false``
+    while the concept graph is still being extracted.
+    """
+    expert = await _readable_expert(slug, user)
+    return await AuditService(get_pool()).graph(expert, node_limit=limit)
 
 
 @router.get("/{slug}/answer-audits")

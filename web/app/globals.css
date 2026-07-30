@@ -79,6 +79,12 @@
  * character is carried entirely by the typography and the rules instead,
  * which is where it survives contrast changes.
  *
+ * --card sits a full step above --background (not the one-value nudge this
+ * used to be), and --secondary/--muted/--accent a step above that again, so a
+ * card visibly lifts off the page and a well inside a card (e.g. bg-muted/40)
+ * still reads as a further raise rather than flattening into it — the
+ * "layered panel" look, still built from lightness alone.
+ *
  * Same token values on :root and .dark since next-themes is forced to dark
  * (see app/layout.tsx) — no light mode exists today, but the shadcn token
  * contract (and a future light mode) stays intact by keeping both in sync.
@@ -87,24 +93,26 @@
 .dark {
   --background: #0a0a0a;
   --foreground: #ededed;
-  --card: #121212;
+  --card: #1a1a1a;
   --card-foreground: #ededed;
-  --popover: #121212;
-  --popover-foreground: #ededed;
+  --popover: var(--card);
+  --popover-foreground: var(--card-foreground);
   --primary: #ededed;
   --primary-foreground: #0a0a0a;
-  --secondary: #1a1a1a;
+  --secondary: #242424;
   --secondary-foreground: #ededed;
-  --muted: #1a1a1a;
+  --muted: #242424;
   --muted-foreground: #9b9b9b;
-  --accent: #1a1a1a;
+  --accent: #242424;
   --accent-foreground: #ededed;
   --destructive: #ededed;
   --destructive-foreground: #0a0a0a;
   --border: rgba(56, 56, 56, 0.6);
   --input: rgba(56, 56, 56, 0.8);
   --ring: rgba(237, 237, 237, 0.4);
-  /* neutral lightness ramp for chart series — no hue, ever */
+  /* neutral lightness ramp for chart series — no hue, ever. Doubles as the
+     PersonaAvatar tone ramp (see persona-avatar.tsx) so experts pick up a
+     distinct grayscale tint without either surface inventing a second scale. */
   --chart-1: #e0e0e0;
   --chart-2: #9b9b9b;
   --chart-3: #6f6f6f;
@@ -116,10 +124,12 @@
   --status-building: #9b9b9b;
   --status-ready: #ededed;
   --status-failed: #ededed;
-  /* Near-rectilinear. A printed page rules straight lines; the soft 8px
-     corners were the strongest "SaaS dashboard" cue left after the type
-     changed. Kept just off zero so edges don't alias harshly. */
-  --radius: 0.125rem;
+  /* Rounded enough to read as soft dashboard panels — cards, buttons, the
+     segmented tab track — without going capsule. Badge opts out via
+     Tailwind's own untouched `--radius-xs` default (see badge.tsx), so
+     marginalia still reads as stamped rather than pilled. The book character
+     now rides entirely on type and rule weight, not on squared corners. */
+  --radius: 0.625rem;
   --sidebar: #0a0a0a;
   --sidebar-foreground: #ededed;
   --sidebar-primary: #ededed;

@@ -37,7 +37,9 @@ export function NewChatComposer({
         PENDING_QUESTION_KEY,
         JSON.stringify({ conversationId: conversation.id, question }),
       );
-      router.replace(`/chats/${conversation.id}`);
+      // push, not replace: back from the new chat should return to this
+      // composer, not skip past it to whatever page came before it.
+      router.push(`/chats/${conversation.id}`);
     } catch (err) {
       setCreating(false);
       toast.error(

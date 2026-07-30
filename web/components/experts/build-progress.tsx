@@ -232,6 +232,26 @@ export function BuildProgress({
     !seededTerminal &&
     (state.phase === "connecting" || state.phase === "running");
 
+  const terminal =
+    state.phase === "done" ||
+    state.phase === "error" ||
+    state.phase === "cancelled";
+
+  const stageStates = Object.fromEntries(
+    BUILD_STAGES.map((stage) => [
+      stage,
+      stageState({
+        stage,
+        completed: state.completed,
+        current: state.current,
+        failedStage: state.failedStage,
+        hasLines: state.logs[stage].length > 0,
+        terminal,
+        seededTerminal,
+      }),
+    ]),
+  ) as Record<BuildStage, StageState>;
+
   return (
     <div className="flex max-w-3xl flex-col gap-8">
       <Button
@@ -250,12 +270,7 @@ export function BuildProgress({
         Back
       </Button>
 
-      <PipelineRail
-        current={state.current}
-        completed={state.completed}
-        failedStage={state.failedStage}
-        seededTerminal={seededTerminal}
-      />
+      <PipelineRail states={stageStates} />
 
       <Summary
         state={state}
@@ -269,15 +284,23 @@ export function BuildProgress({
           <StageRow
             key={stage}
             stage={stage}
-            done={state.completed.includes(stage)}
-            active={state.current === stage && !seededTerminal}
-            failed={state.failedStage === stage}
+            state={stageStates[stage]}
             lines={state.logs[stage]}
             expanded={expanded.has(stage)}
             onToggle={() => toggleExpanded(stage)}
           />
         ))}
       </ol>
+
+      {/* A retry rewinds the checklist, so without this the "ran earlier" rows
+          above look like a contradiction rather than the previous attempt's
+          real work. */}
+      {state.attempt && state.attempt > 1 ? (
+        <p className="text-xs text-muted-foreground">
+          Attempt {state.attempt} of {state.maxAttempts}. Stages marked “ran
+          earlier” completed on a previous attempt.
+        </p>
+      ) : null}
 
       {live ? (
         <div className="flex items-center gap-3">
@@ -348,12 +371,15 @@ function Summary({
           {state.message ?? "No further detail was reported."}
         </p>
         <div className="mt-3 flex gap-2">
+          {/* Not "retry": this goes to the new-expert form, which builds a
+              *different* expert. There is no rebuild-in-place action yet, and
+              a button that reads like one would be a lie. */}
           <Button
             variant="outline"
             nativeButton={false}
             render={<Link href="/experts/new" />}
           >
-            Start another build
+            Build a new expert
           </Button>
           <Button
             variant="ghost"
@@ -391,6 +417,10 @@ function Summary({
         {state.attempt && state.attempt > 1
           ? ` · Attempt ${state.attempt} of ${state.maxAttempts}`
           : ""}
+        {/* No percentage exists to show — the pipeline reports counts, not
+            progress — but "how long have I been here" is answerable exactly,
+            and it is the question a ten-minute build actually raises. */}
+        {!initiallyTerminal ? <Elapsed /> : null}
       </p>
       <p
         aria-live="polite"
@@ -407,6 +437,31 @@ function Summary({
         <p className="mt-1 text-sm text-foreground">{state.message}</p>
       ) : null}
     </div>
+  );
+}
+
+/** Time on this page, not build duration — the build may have been running
+ * before the page opened, and the event log carries no timestamps to
+ * reconstruct from. Worded as "watching for" so it never claims otherwise. */
+function Elapsed() {
+  const [seconds, setSeconds] = React.useState(0);
+
+  // The clock is read in the effect, not during render: `Date.now()` in a
+  // render body is an impure read that can drift between a render and its
+  // replay.
+  React.useEffect(() => {
+    const start = Date.now();
+    const id = window.setInterval(
+      () => setSeconds(Math.floor((Date.now() - start) / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(id);
+  }, []);
+
+  if (seconds < 10) return null;
+  const minutes = Math.floor(seconds / 60);
+  return (
+    <> · watching for {minutes > 0 ? `${minutes}m ` : ""}{seconds % 60}s</>
   );
 }
 
@@ -429,6 +484,51 @@ function Banner({
     </div>
   );
 }
+
+/** What a stage is doing, as far as the event log can tell.
+ *
+ * The list used to know only done / active / failed / pending, and rendered
+ * everything else as an unlit dot. That produced the one genuinely misleading
+ * thing on this page: after a failed build, a stage holding thirty events
+ * looked identical to a stage that never started — and a stage the build never
+ * reached looked identical to one still waiting its turn. Both now say what
+ * they are. `ran` is common on a retried build: attempt 1 gets several stages
+ * in before it dies, attempt 2 resets the checklist, and those earlier events
+ * are still real. */
+type StageState = "done" | "active" | "failed" | "ran" | "skipped" | "pending";
+
+function stageState({
+  stage,
+  completed,
+  current,
+  failedStage,
+  hasLines,
+  terminal,
+  seededTerminal,
+}: {
+  stage: BuildStage;
+  completed: BuildStage[];
+  current: BuildStage | null;
+  failedStage: BuildStage | null;
+  hasLines: boolean;
+  /** The build has stopped — nothing pending will ever start. */
+  terminal: boolean;
+  seededTerminal: boolean;
+}): StageState {
+  if (failedStage === stage) return "failed";
+  if (current === stage && !seededTerminal) return "active";
+  if (completed.includes(stage)) return "done";
+  if (hasLines) return "ran";
+  if (terminal) return "skipped";
+  return "pending";
+}
+
+/** The short note beside a stage row, for the states whose glyph alone would
+ * be ambiguous. Done/active/failed are already legible. */
+const STAGE_STATE_NOTE: Partial<Record<StageState, string>> = {
+  ran: "ran earlier",
+  skipped: "not reached",
+};
 
 const STAGE_LABELS: Record<BuildStage, string> = {
   plan: "Drafting the research plan",
@@ -453,17 +553,7 @@ const SHORT_STAGE_LABELS: Record<BuildStage, string> = {
 /** The at-a-glance overview: a CI-run-style rail of connected nodes, one per
  * stage. The vertical list below is where the detail lives — this is only
  * "where am I in the 7 steps," answerable without reading anything. */
-function PipelineRail({
-  current,
-  completed,
-  failedStage,
-  seededTerminal,
-}: {
-  current: BuildStage | null;
-  completed: BuildStage[];
-  failedStage: BuildStage | null;
-  seededTerminal: boolean;
-}) {
+function PipelineRail({ states }: { states: Record<BuildStage, StageState> }) {
   return (
     <ol className="relative flex items-start">
       {/* One continuous line from the first node's center to the last's —
@@ -477,9 +567,8 @@ function PipelineRail({
         className="absolute inset-x-[calc(100%/14)] top-3 h-px bg-border"
       />
       {BUILD_STAGES.map((stage) => {
-        const done = completed.includes(stage);
-        const active = current === stage && !seededTerminal;
-        const failed = failedStage === stage;
+        const state = states[stage];
+        const lit = state === "done" || state === "active" || state === "failed";
         return (
           <li
             key={stage}
@@ -488,39 +577,28 @@ function PipelineRail({
             <span
               className={cn(
                 "flex size-6 shrink-0 items-center justify-center rounded-full bg-background",
-                !done && !active && !failed && "text-muted-foreground/50",
+                !lit && "text-muted-foreground/50",
               )}
             >
-              {failed ? (
-                <TriangleAlertIcon className="size-4 text-foreground" />
-              ) : active ? (
-                <Spinner className="size-4" />
-              ) : done ? (
-                <CheckIcon className="size-4" />
-              ) : (
-                <span
-                  aria-hidden
-                  className="size-1.5 rounded-full bg-current"
-                />
-              )}
+              <StageGlyph state={state} className="size-4" />
             </span>
             <span
               className={cn(
                 "hidden text-center text-[0.6875rem] text-muted-foreground sm:block",
-                (active || failed) && "text-foreground",
-                !done && !active && !failed && "text-muted-foreground/50",
+                (state === "active" || state === "failed") && "text-foreground",
+                !lit && "text-muted-foreground/50",
+                // A stage the build never reached is struck through rather
+                // than merely dim, so "didn't happen" is distinguishable from
+                // "hasn't happened yet" at a glance.
+                state === "skipped" && "line-through",
               )}
             >
               {SHORT_STAGE_LABELS[stage]}
             </span>
+            {/* The labels are hidden below `sm`, so on a phone this is the
+                only thing naming the stage at all. */}
             <span className="sr-only">
-              {failed
-                ? " — failed here"
-                : done
-                  ? " — complete"
-                  : active
-                    ? " — in progress"
-                    : " — pending"}
+              {STAGE_LABELS[stage]} — {STAGE_STATE_SR[state]}
             </span>
           </li>
         );
@@ -529,19 +607,62 @@ function PipelineRail({
   );
 }
 
+const STAGE_STATE_SR: Record<StageState, string> = {
+  done: "complete",
+  active: "in progress",
+  failed: "failed here",
+  ran: "ran on an earlier attempt",
+  skipped: "not reached",
+  pending: "pending",
+};
+
+/** One glyph per state, shared by the rail and the list so the two can never
+ * disagree about what a stage is doing. */
+function StageGlyph({
+  state,
+  className,
+}: {
+  state: StageState;
+  className?: string;
+}) {
+  switch (state) {
+    case "failed":
+      return <TriangleAlertIcon className={cn(className, "text-foreground")} />;
+    case "active":
+      return <Spinner className={className} />;
+    case "done":
+      return <CheckIcon className={className} />;
+    case "ran":
+      // Ran but was never confirmed complete — a hollow ring against the solid
+      // tick, which is the same "started, unfinished" distinction the graph
+      // draws between a concept and a claim.
+      return (
+        <span
+          aria-hidden
+          className={cn(
+            "size-2 rounded-full border border-current",
+            className && "shrink-0",
+          )}
+        />
+      );
+    case "skipped":
+      return (
+        <span aria-hidden className="h-px w-2 bg-current" />
+      );
+    default:
+      return <span aria-hidden className="size-1.5 rounded-full bg-current" />;
+  }
+}
+
 function StageRow({
   stage,
-  done,
-  active,
-  failed,
+  state,
   lines,
   expanded,
   onToggle,
 }: {
   stage: BuildStage;
-  done: boolean;
-  active: boolean;
-  failed: boolean;
+  state: StageState;
   /** Detail lines streamed while this stage was current. */
   lines: string[];
   /** Whether a finished stage's detail is toggled open. Ignored while active
@@ -551,15 +672,13 @@ function StageRow({
   onToggle: () => void;
 }) {
   const hasLines = lines.length > 0;
+  const active = state === "active";
   const open = active || (hasLines && expanded);
+  const lit = state === "done" || active || state === "failed";
+  const note = STAGE_STATE_NOTE[state];
 
   return (
-    <li
-      className={cn(
-        "py-1",
-        !done && !active && !failed && "text-muted-foreground/50",
-      )}
-    >
+    <li className={cn("py-1", !lit && "text-muted-foreground/50")}>
       <button
         type="button"
         onClick={hasLines && !active ? onToggle : undefined}
@@ -571,19 +690,22 @@ function StageRow({
         )}
       >
         <span className="flex size-4 shrink-0 items-center justify-center">
-          {failed ? (
-            <TriangleAlertIcon className="size-3.5" />
-          ) : active ? (
-            <Spinner className="size-3.5" />
-          ) : done ? (
-            <CheckIcon className="size-3.5" />
-          ) : (
-            <span aria-hidden className="size-1.5 rounded-full bg-current" />
-          )}
+          <StageGlyph state={state} className="size-3.5" />
         </span>
-        <span className={cn("flex-1", (active || failed) && "text-foreground")}>
+        <span
+          className={cn(
+            "flex-1",
+            (active || state === "failed") && "text-foreground",
+            state === "skipped" && "line-through",
+          )}
+        >
           {STAGE_LABELS[stage]}
         </span>
+        {note ? (
+          <span className="shrink-0 text-xs text-muted-foreground/70">
+            {note}
+          </span>
+        ) : null}
         {hasLines ? (
           <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
             {lines.length} {lines.length === 1 ? "event" : "events"}
@@ -598,15 +720,7 @@ function StageRow({
             ) : null}
           </span>
         ) : null}
-        <span className="sr-only">
-          {failed
-            ? " — failed here"
-            : done
-              ? " — complete"
-              : active
-                ? " — in progress"
-                : " — pending"}
-        </span>
+        <span className="sr-only"> — {STAGE_STATE_SR[state]}</span>
       </button>
       {open ? (
         <ul className="mt-2 ml-7 flex max-h-40 flex-col gap-1 overflow-y-auto py-0.5 font-mono text-xs text-muted-foreground/80">

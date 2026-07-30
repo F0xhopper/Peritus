@@ -7,7 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { FETCHERS, type ExpertTier, type Fetcher } from "@/lib/api/types";
+import {
+  FETCHERS,
+  type CreditState,
+  type ExpertTier,
+  type Fetcher,
+} from "@/lib/api/types";
 
 // The build form. Submits to /api/experts/build, which enqueues the job and
 // answers with the slug to watch, then hands off to the progress page.
@@ -50,10 +55,38 @@ const FETCHER_LABELS: Record<Fetcher, string> = {
   thought_leaders: "Thought leaders",
 };
 
-export function NewExpertForm() {
+/** What a depth costs and whether this account can pick it. `null` credits (the
+ * billing call failed, or gating is off) means every depth is offered
+ * unannotated — the old behaviour, and the only honest fallback when the
+ * answer isn't known. */
+function tierAvailability(credits: CreditState | null) {
+  if (!credits || !credits.credits_enforced) return null;
+  const allowed = new Set(credits.plan.allowed_tiers);
+  return {
+    planName: credits.plan.display_name,
+    balance: credits.balance,
+    cost: new Map(credits.tiers.map((t) => [t.tier, t.credit_cost])),
+    allows: (tier: ExpertTier) => allowed.has(tier),
+  };
+}
+
+export function NewExpertForm({
+  credits = null,
+}: {
+  credits?: CreditState | null;
+}) {
   const router = useRouter();
+  const plan = React.useMemo(() => tierAvailability(credits), [credits]);
+
   const [topic, setTopic] = React.useState("");
-  const [tier, setTier] = React.useState<ExpertTier>("standard");
+  // Opens on the deepest build this plan actually allows rather than always on
+  // Standard. A Free account defaulted to a depth it could not buy, so the
+  // very first build anyone started came back as an error from the server.
+  const [tier, setTier] = React.useState<ExpertTier>(() => {
+    if (!plan) return "standard";
+    const preference: ExpertTier[] = ["standard", "lite", "pro"];
+    return preference.find((t) => plan.allows(t)) ?? "lite";
+  });
   // Every source starts on. The old default was an empty set that the backend
   // read as "all of them", which is the same build — but a row of unchecked
   // boxes says the opposite, so people checked two, narrowed a build they
@@ -70,6 +103,13 @@ export function NewExpertForm() {
 
   const allSelected = sources.size === FETCHERS.length;
   const noneSelected = sources.size === 0;
+
+  const selectedCost = plan?.cost.get(tier);
+  // Unknown cost is treated as affordable: the server holds the credits and is
+  // the authority, and blocking a build over a missing billing response would
+  // be worse than letting the server say no.
+  const affordable =
+    !plan || selectedCost === undefined || plan.balance >= selectedCost;
 
   const toggleSource = (name: Fetcher) => {
     setSources((prev) => {
@@ -153,14 +193,19 @@ export function NewExpertForm() {
         <div className="grid gap-2 sm:grid-cols-3">
           {TIERS.map((option) => {
             const selected = tier === option.value;
+            const locked = plan ? !plan.allows(option.value) : false;
+            const cost = plan?.cost.get(option.value);
             return (
               <label
                 key={option.value}
                 className={cn(
-                  "flex cursor-pointer flex-col gap-1.5 rounded-lg border p-3 transition-colors",
-                  selected
+                  "flex flex-col gap-1.5 rounded-lg border p-3 transition-colors",
+                  locked
+                    ? "cursor-not-allowed border-dashed border-border opacity-55"
+                    : "cursor-pointer",
+                  !locked && selected
                     ? "border-foreground/40 bg-muted/50"
-                    : "border-border hover:bg-muted/25",
+                    : !locked && "border-border hover:bg-muted/25",
                 )}
               >
                 <span className="flex items-center gap-2">
@@ -169,6 +214,7 @@ export function NewExpertForm() {
                     name="tier"
                     value={option.value}
                     checked={selected}
+                    disabled={locked}
                     onChange={() => setTier(option.value)}
                     className="sr-only"
                   />
@@ -179,16 +225,29 @@ export function NewExpertForm() {
                     aria-hidden
                     className={cn(
                       "size-2 rounded-full ring-1 transition-colors",
-                      selected
+                      selected && !locked
                         ? "bg-foreground ring-foreground"
                         : "bg-transparent ring-muted-foreground/50",
                     )}
                   />
                   <span className="font-medium">{option.label}</span>
+                  {/* Price is the second thing anyone wants from this row and
+                      it used to live only on the settings page, two clicks
+                      away from the decision it informs. */}
+                  {cost !== undefined ? (
+                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">
+                      {cost} {cost === 1 ? "credit" : "credits"}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="text-xs leading-relaxed text-muted-foreground">
                   {option.detail}
                 </span>
+                {locked ? (
+                  <span className="text-xs text-muted-foreground/70">
+                    Not on the {plan!.planName} plan.
+                  </span>
+                ) : null}
               </label>
             );
           })}
@@ -267,13 +326,31 @@ export function NewExpertForm() {
         </p>
       ) : null}
 
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={pending || !topic.trim() || noneSelected}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Button
+          type="submit"
+          disabled={pending || !topic.trim() || noneSelected || !affordable}
+        >
           {pending ? <Loader2Icon className="animate-spin" /> : null}
           {pending ? "Starting build…" : "Start build"}
         </Button>
         <p className="text-sm text-muted-foreground">
-          Builds run in the background — you can leave this page.
+          {affordable ? (
+            <>
+              {selectedCost !== undefined
+                ? `Costs ${selectedCost} of your ${plan!.balance} credits. `
+                : null}
+              Builds run in the background — you can leave this page.
+            </>
+          ) : (
+            // Said before the click rather than discovered after it. The
+            // server enforces this either way; the form just stops pretending
+            // it doesn't know.
+            <>
+              This build needs {selectedCost} credits and you have{" "}
+              {plan!.balance}.
+            </>
+          )}
         </p>
       </div>
     </form>

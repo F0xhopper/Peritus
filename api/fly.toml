@@ -6,6 +6,14 @@ primary_region = "iad"
 
 [build]
 
+# Migrations run once per deploy, in their own machine, and a failure here aborts
+# the release before any new code serves traffic. Without this nothing applied
+# schema: `just migrate` is a local target, so every deploy silently assumed a
+# human had remembered to run it against production first, in the right order.
+# `apply.py` is idempotent — it skips what `_migrations` already records.
+[deploy]
+  release_command = "python migrations/apply.py"
+
 [processes]
   app = "peritus-server"
   worker = "peritus-worker"

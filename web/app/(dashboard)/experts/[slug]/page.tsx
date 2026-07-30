@@ -1,18 +1,25 @@
 import { notFound } from "next/navigation";
-import { BotIcon, LayersIcon, NetworkIcon, FileTextIcon } from "lucide-react";
+import { BotIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { AuditNav } from "@/components/audit/audit-nav";
-import { StatTile } from "@/components/experts/stat-tile";
-import { StatusBadge } from "@/components/experts/status-badge";
-import { TierBadge } from "@/components/experts/tier-badge";
-import { ExpertMenu } from "@/components/experts/expert-menu";
-import { ChatButton } from "@/components/chat/chat-button";
+import { ExpertProfileHeader } from "@/components/experts/expert-profile-header";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConceptList } from "@/components/experts/concept-list";
-import { PersonaAvatar } from "@/components/experts/persona-avatar";
-import { SourceManager } from "@/components/experts/source-manager";
-import { getExpert, getExpertSources } from "@/lib/api/data";
-import { personaLabel } from "@/lib/persona";
+import { PersonaCard } from "@/components/experts/persona-card";
+import { StatCard } from "@/components/audit/stat-card";
+import { getExpert, getCoverage } from "@/lib/api/data";
+import type { CoverageStrength } from "@/lib/api/types";
+
+const STRENGTH: Record<
+  CoverageStrength,
+  { label: string; variant: "default" | "secondary" | "outline" | "destructive" }
+> = {
+  strong: { label: "Strong", variant: "default" },
+  adequate: { label: "Adequate", variant: "secondary" },
+  thin: { label: "Thin", variant: "outline" },
+  absent: { label: "No sources", variant: "destructive" },
+};
 
 export default async function ExpertDetailPage({
   params,
@@ -20,105 +27,76 @@ export default async function ExpertDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const expert = await getExpert(slug);
+  const [expert, coverage] = await Promise.all([
+    getExpert(slug),
+    getCoverage(slug),
+  ]);
 
   if (!expert) {
     notFound();
   }
 
-  const sources = await getExpertSources(slug);
+  const concepts = coverage && !coverage.key_concepts_unavailable_reason
+    ? coverage.concepts
+    : null;
 
   return (
     <>
-      <PageHeader
-        icon={BotIcon}
-        title={expert.topic}
-        action={
-          <div className="flex items-center gap-2">
-            <StatusBadge status={expert.status} />
-            <TierBadge tier={expert.tier} />
-            <ChatButton slug={expert.name} status={expert.status} />
-            {/* Deleting from here leaves nothing to render, so it hands the
-                menu somewhere to land. */}
-            <ExpertMenu
-              slug={expert.name}
-              topic={expert.topic}
-              redirectTo="/experts"
-            />
-          </div>
-        }
-      />
+      <PageHeader icon={BotIcon} title={expert.topic} />
+
+      <ExpertProfileHeader expert={expert} />
 
       <AuditNav slug={expert.name} active="" />
 
-      <div className="grid gap-4 sm:grid-cols-3">
-        <StatTile icon={FileTextIcon} label="Sources" value={expert.source_count} />
-        <StatTile icon={LayersIcon} label="Chunks" value={expert.chunk_count} />
-        <StatTile icon={NetworkIcon} label="Graph nodes" value={expert.node_count} />
-      </div>
+      <PersonaCard name={expert.persona_name} bio={expert.persona_bio} />
 
-      <Card className="rounded-lg">
+      <Card>
         <CardHeader>
           <CardTitle className="text-sm text-muted-foreground">
-            Persona
+            Concepts
           </CardTitle>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {expert.persona_name ? (
+        <CardContent className="flex flex-col gap-4">
+          {concepts ? (
             <>
-              <div className="flex items-start gap-3">
-                <PersonaAvatar
-                  label={personaLabel(expert.persona_name) ?? expert.topic}
-                  size="lg"
-                />
-                <div className="flex min-w-0 flex-col gap-1">
-                  <span className="font-medium">
-                    {personaLabel(expert.persona_name)}
-                  </span>
-                  <p className="text-sm text-muted-foreground">
-                    {expert.persona_bio}
-                  </p>
-                </div>
+              {/* How well-supported each concept is, not just its name — the
+                  strength label is the fact a reader actually wants when
+                  scanning this list. */}
+              <div className="grid gap-4 sm:grid-cols-4">
+                <StatCard label="Strong" value={coverage!.summary.strong} />
+                <StatCard label="Adequate" value={coverage!.summary.adequate} />
+                <StatCard label="Thin" value={coverage!.summary.thin} />
+                <StatCard label="No sources" value={coverage!.summary.absent} />
               </div>
-              {/* The style block is the expert's actual system prompt, so it
-                  reads as instructions rather than prose — it stays on this
-                  page, but under its own label and away from the bio it was
-                  previously run together with. */}
-              <div className="flex flex-col gap-2">
-                <p className="text-eyebrow text-muted-foreground">Voice</p>
-                <p className="text-sm text-muted-foreground">
-                  {expert.persona_style}
-                </p>
-              </div>
-              {/* Uncapped and unclipped here: this is the page you open to
-                  read the whole list, so it wraps rather than truncating. */}
-              <div className="mt-1 flex flex-col gap-2">
-                <p className="text-eyebrow text-muted-foreground">
-                  Key concepts
-                </p>
-                <ConceptList
-                  concepts={expert.key_concepts}
-                  className="[&_li]:overflow-visible [&_li]:whitespace-normal"
-                />
-              </div>
+              <ul className="flex flex-col divide-y divide-border">
+                {concepts.map((c) => (
+                  <li
+                    key={c.concept}
+                    className="flex flex-wrap items-center justify-between gap-2 py-3 first:pt-0 last:pb-0"
+                  >
+                    <span className="font-medium">{c.concept}</span>
+                    <Badge
+                      variant={STRENGTH[c.strength].variant}
+                      className="font-normal"
+                    >
+                      {STRENGTH[c.strength].label}
+                    </Badge>
+                  </li>
+                ))}
+              </ul>
             </>
+          ) : expert.key_concepts.length > 0 ? (
+            <ConceptList
+              concepts={expert.key_concepts}
+              className="[&_li]:overflow-visible [&_li]:whitespace-normal"
+            />
           ) : (
             <p className="text-sm text-muted-foreground">
-              Persona not generated yet — available once the build reaches
-              &quot;ready&quot;.
+              No key concepts recorded yet.
             </p>
           )}
         </CardContent>
       </Card>
-
-      {/* Adding material is owner-only upstream, and a build rewrites the
-          corpus underneath an ingest — so the panel disables itself rather
-          than letting the user find out from a 409. */}
-      <SourceManager
-        slug={expert.name}
-        sources={sources}
-        buildInProgress={expert.status === "building" || expert.status === "queued"}
-      />
     </>
   );
 }

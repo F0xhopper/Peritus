@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import {
+  ArrowUpRightIcon,
   FileTextIcon,
   LinkIcon,
   Trash2Icon,
@@ -12,6 +13,15 @@ import {
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import type { CorpusSource, UploadAccepted } from "@/lib/api/types";
@@ -52,6 +62,11 @@ export function SourceManager({
   const [busy, setBusy] = React.useState(false);
   const [url, setUrl] = React.useState("");
   const [dragging, setDragging] = React.useState(false);
+  // Removing a source drops its chunks out of the corpus and cannot be undone
+  // short of a rebuild, so it asks first — the trash icon sits inside a row
+  // whose whole width is otherwise a link to the source.
+  const [pendingRemoval, setPendingRemoval] =
+    React.useState<CorpusSource | null>(null);
   const fileInput = React.useRef<HTMLInputElement>(null);
 
   const accepted = (result: UploadAccepted) => {
@@ -120,6 +135,7 @@ export function SourceManager({
     const res = await fetch(`/api/experts/${slug}/sources/${source.id}`, {
       method: "DELETE",
     });
+    setPendingRemoval(null);
     if (!res.ok) return void (await failed(res, "Could not remove that source."));
     toast.success(`Removed “${source.title}”`);
     router.refresh();
@@ -133,7 +149,7 @@ export function SourceManager({
     <Card className="rounded-lg">
       <CardHeader>
         <CardTitle className="text-sm text-muted-foreground">
-          Your sources
+          Sources
         </CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -209,19 +225,54 @@ export function SourceManager({
             title="Added by you"
             empty="Nothing yet."
             sources={uploads}
-            onRemove={remove}
+            onRemove={setPendingRemoval}
             highlight
           />
           <SourceList
             title={`Found by research (${found.length})`}
             empty="No sources yet."
             sources={found}
-            onRemove={remove}
+            onRemove={setPendingRemoval}
           />
         </div>
       </CardContent>
+
+      <Dialog
+        open={pendingRemoval !== null}
+        onOpenChange={(open) => !open && setPendingRemoval(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove this source?</DialogTitle>
+            <DialogDescription>
+              “{pendingRemoval?.title}” and its {pendingRemoval?.chunk_count}{" "}
+              indexed passages leave the corpus. Answers already given keep
+              their citations, but nothing new will be drawn from it.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <DialogClose render={<Button variant="outline" />}>Cancel</DialogClose>
+            <Button
+              variant="destructive"
+              onClick={() => pendingRemoval && void remove(pendingRemoval)}
+            >
+              Remove
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
+}
+
+/** Host only, `www.` dropped — the domain is the credibility signal a reader
+ * scans for, and the rest of the URL is noise in a row this tight. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "";
+  }
 }
 
 function SourceList({
@@ -254,21 +305,45 @@ function SourceList({
               ) : (
                 <FileTextIcon className="size-4 shrink-0 text-muted-foreground" />
               )}
-              <span className="min-w-0 flex-1 truncate" title={s.title}>
-                {s.url ? (
-                  <a
-                    href={s.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hover:underline"
+              {/* Every one of these was already a link and none of them looked
+                  like one: no underline until hover, no icon, no host. The
+                  corpus is the product's evidence, so "where did this come
+                  from" has to be answerable without hovering each row to find
+                  out which ones can even be opened. */}
+              {s.url ? (
+                // The arrow sits outside the truncating span, not inside it:
+                // in a list where most titles are long enough to clip, an icon
+                // riding at the end of the text is the first thing cut — which
+                // removes it from exactly the rows that need it most.
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-w-0 flex-1 items-center gap-1 rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <span
+                    className="min-w-0 truncate underline decoration-border underline-offset-2 group-hover:decoration-foreground"
+                    title={s.title}
                   >
                     {s.title}
-                  </a>
-                ) : (
-                  s.title
-                )}
-              </span>
-              <span className="shrink-0 text-xs text-muted-foreground">
+                  </span>
+                  <ArrowUpRightIcon
+                    aria-hidden
+                    className="size-3 shrink-0 text-muted-foreground"
+                  />
+                  <span className="sr-only">(opens in a new tab)</span>
+                </a>
+              ) : (
+                <span className="min-w-0 flex-1 truncate" title={s.title}>
+                  {s.title}
+                </span>
+              )}
+              {s.url ? (
+                <span className="hidden shrink-0 text-xs text-muted-foreground/70 sm:inline">
+                  {hostOf(s.url)}
+                </span>
+              ) : null}
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
                 {s.chunk_count} chunks
               </span>
               <Button

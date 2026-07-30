@@ -10,12 +10,38 @@ jobs:
   api:
     name: API (Python)
     runs-on: ubuntu-latest
+
+    # The DB-backed tests (job queue claim/heartbeat/reap, conversation
+    # persistence, credit arithmetic, expert visibility, source uploads) skip
+    # themselves when PERITUS_TEST_DATABASE_URL is unset. Without this service
+    # they skipped in CI too — 54 written tests, including every billing test,
+    # reporting green while never having run. pgvector's image is required, not
+    # plain postgres: the schema declares vector columns.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: peritus_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/peritus_test
+      PERITUS_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/peritus_test
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
 
       - name: Install package with dev tools
         run: pip install "./api[dev]"
@@ -24,12 +50,52 @@ jobs:
         working-directory: api
         run: ruff check src tests
 
+      # `just lint` runs ruff *and* mypy; CI ran only ruff, and the type errors
+      # that accumulated behind that gap included two real bugs.
+      - name: Typecheck
+        working-directory: api
+        run: mypy src
+
+      # Also exercises the migration runner itself on every push, which is the
+      # thing the deploy release_command now depends on.
+      - name: Apply migrations
+        working-directory: api
+        run: python migrations/apply.py
+
       - name: Test
         working-directory: api
         run: python -m pytest
 
       - name: Smoke-check the installed CLI
         run: peritus --help
+
+  web:
+    name: Web (Next.js)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install
+        working-directory: web
+        run: npm ci
+
+      - name: Lint
+        working-directory: web
+        run: npx eslint .
+
+      - name: Typecheck
+        working-directory: web
+        run: npx tsc --noEmit
+
+      - name: Build
+        working-directory: web
+        run: npx next build
 
   cli:
     name: CLI (Rust)

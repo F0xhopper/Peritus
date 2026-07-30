@@ -30,17 +30,24 @@ async def main() -> None:
     migrations_dir = Path(__file__).parent
     sql_files = sorted(migrations_dir.glob("*.sql"))
 
-    for f in sql_files:
-        if f.name in applied:
-            print(f"  skip  {f.name}")
-            continue
-        print(f"  apply {f.name}…")
-        sql = f.read_text()
-        await conn.execute(sql)
-        await conn.execute("INSERT INTO _migrations (filename) VALUES ($1)", f.name)
-        print(f"  done  {f.name}")
-
-    await conn.close()
+    try:
+        for f in sql_files:
+            if f.name in applied:
+                print(f"  skip  {f.name}")
+                continue
+            print(f"  apply {f.name}…")
+            sql = f.read_text()
+            # Applying the file and recording that it was applied are one unit.
+            # Split across two statements, a crash between them leaves a
+            # migration applied but unrecorded, so the next run re-applies it —
+            # fine for the `IF NOT EXISTS` files here, silently fatal for the
+            # first non-idempotent `ALTER TABLE` anyone adds.
+            async with conn.transaction():
+                await conn.execute(sql)
+                await conn.execute("INSERT INTO _migrations (filename) VALUES ($1)", f.name)
+            print(f"  done  {f.name}")
+    finally:
+        await conn.close()
     print("All migrations applied.")
 
 

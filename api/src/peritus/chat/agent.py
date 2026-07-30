@@ -7,11 +7,13 @@ route consume it, so the two paths cannot drift.
 """
 
 import copy
+import math
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 import asyncpg
+from anthropic.types import MessageParam, TextBlockParam
 
 from peritus.chat.grounding import (
     Passage,
@@ -293,7 +295,7 @@ def build_user_message(
     context_block: str,
     plan: QueryPlan | None = None,
     has_contradiction: bool = False,
-) -> dict:
+) -> MessageParam:
     """The single grounded-prompt shape sent to Claude for composition.
 
     Evidence first, then the question and how to answer it. The order is
@@ -323,7 +325,7 @@ def build_user_message(
     }
 
 
-def build_cached_system(persona_style: str | None, topic: str) -> list[dict]:
+def build_cached_system(persona_style: str | None, topic: str) -> list[TextBlockParam]:
     """System prompt as a block list with a prompt-cache breakpoint.
 
     The persona prompt is byte-identical across every turn (and every
@@ -338,13 +340,28 @@ def build_cached_system(persona_style: str | None, topic: str) -> list[dict]:
     }]
 
 
+def _trim_start(history_len: int) -> int:
+    """Index to start history at: 0, or a whole number of blocks in.
+
+    Quantising to ``CHAT_HISTORY_TRIM_BLOCK`` is what makes the retained prefix
+    stable across consecutive turns — see ``build_composition_messages``. Held
+    messages therefore range from ``MAX - BLOCK + 1`` to ``MAX``, never more.
+    """
+    cap = settings.CHAT_HISTORY_MAX_MESSAGES
+    if history_len <= cap:
+        return 0
+    block = max(1, settings.CHAT_HISTORY_TRIM_BLOCK)
+    # Smallest whole number of blocks that brings the window within the cap.
+    return math.ceil((history_len - cap) / block) * block
+
+
 def build_composition_messages(
     history: list[dict],
     question: str,
     context_block: str,
     plan: QueryPlan | None = None,
     has_contradiction: bool = False,
-) -> list[dict]:
+) -> list[MessageParam]:
     """Trim history, mark the cache breakpoint, and append the grounded question.
 
     History is capped at ``CHAT_HISTORY_MAX_MESSAGES`` (client input is
@@ -353,15 +370,24 @@ def build_composition_messages(
     reuses the previous turn's cached prefix — the whole prior conversation is
     then billed at ~0.1× instead of full input price.
 
+    That only holds if the *start* of the window stays put. Trimming to the last
+    N messages slides the window by one turn's worth every turn, so the prefix
+    differs every time and never hits cache — precisely once the conversation is
+    long enough for caching to be worth anything. Dropping in blocks of
+    ``CHAT_HISTORY_TRIM_BLOCK`` instead keeps the start fixed for several turns
+    at a time, at the cost of holding somewhat fewer than the cap in hand.
+
     Per-turn shaping (``plan``, ``has_contradiction``) only ever lands in the
     final message, which sits after the last breakpoint, so nothing here varies
     a cached prefix.
     """
-    trimmed = list(history[-settings.CHAT_HISTORY_MAX_MESSAGES:])
+    trimmed = list(history[_trim_start(len(history)):])
     while trimmed and trimmed[0].get("role") != "user":
         trimmed.pop(0)
 
-    messages = [dict(m) for m in trimmed]
+    # `history` arrives as untyped dicts (request body or Postgres), so its
+    # role/content shape is validated at the API boundary, not by the type system.
+    messages: list[MessageParam] = [cast(MessageParam, dict(m)) for m in trimmed]
     if messages:
         last = messages[-1]
         content = last.get("content")

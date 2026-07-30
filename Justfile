@@ -20,11 +20,35 @@ dev-solo:
 test:
     cd api && python -m pytest
 
+# The 54 DB-backed tests (job queue, conversations, credits, uploads, visibility)
+# skip unless PERITUS_TEST_DATABASE_URL points at a scratch pgvector database.
+# Never point it at a database you care about: the fixture TRUNCATEs.
+test-db url="postgresql://postgres:postgres@localhost:5432/peritus_test":
+    cd api && PERITUS_TEST_DATABASE_URL={{url}} DATABASE_URL={{url}} python migrations/apply.py
+    cd api && PERITUS_TEST_DATABASE_URL={{url}} python -m pytest
+
 lint:
     cd api && ruff check src tests && mypy src
 
 migrate:
     cd api && python migrations/apply.py
+
+# ── Web ──────────────────────────────────────────────────────────────────────
+
+web:
+    cd web && npm run dev
+
+# Exactly what the `web` CI job runs, so a green local run means a green CI run.
+lint-web:
+    cd web && npx eslint . && npx tsc --noEmit
+
+build-web:
+    cd web && npx next build
+
+# ── Everything ───────────────────────────────────────────────────────────────
+
+# Every check CI runs, except the DB-backed tests (see `test-db`) and Rust.
+check: lint test lint-web build-web
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
 

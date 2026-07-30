@@ -2,7 +2,12 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { MoreHorizontalIcon, PencilIcon, Trash2Icon } from "lucide-react";
+import {
+  MoreHorizontalIcon,
+  PencilIcon,
+  RotateCcwIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -61,6 +66,32 @@ export function ConversationMenu({
     }
   };
 
+  // "Restart" starts a fresh thread with the same expert rather than emptying
+  // this one. Nothing is destroyed: the transcript you were reading stays in
+  // the recents list, which is what someone who restarts a chat by accident
+  // needs. It is also the only shape the API supports — messages are
+  // append-only, so there is no "clear this conversation" to call.
+  const restart = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/experts/${expertSlug}/conversations`, {
+        method: "POST",
+      });
+      if (!res.ok) throw new Error((await res.json()).error ?? res.statusText);
+      const created = (await res.json()) as { id: string };
+      // push, not replace: back should return to the conversation this was
+      // started from, which is the whole reason it was left intact.
+      router.push(`/chats/${created.id}`);
+      router.refresh();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Could not start a new chat.",
+      );
+      setBusy(false);
+    }
+  };
+
   const remove = async () => {
     if (busy) return;
     setBusy(true);
@@ -84,6 +115,21 @@ export function ConversationMenu({
 
   return (
     <>
+      {/* Promoted out of the menu: starting over is the one thing people reach
+          for mid-conversation — when the thread has drifted, or the expert has
+          latched onto a misreading of the first question — and hunting for it
+          behind a "⋯" costs more than the pixel it saves. */}
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Restart — start a new chat with this expert"
+        title="Restart chat"
+        disabled={busy}
+        onClick={restart}
+      >
+        <RotateCcwIcon />
+      </Button>
+
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
@@ -93,6 +139,10 @@ export function ConversationMenu({
           <MoreHorizontalIcon />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem onClick={restart} disabled={busy}>
+            <RotateCcwIcon />
+            Restart chat
+          </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
               setDraft(title ?? "");

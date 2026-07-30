@@ -39,7 +39,7 @@ from peritus.chat.agent import (
     build_composition_messages,
 )
 from peritus.chat.audit_trail import audit_db_rows, build_audit_payload
-from peritus.chat.grounding import parse_cited_indices, used_citations
+from peritus.chat.grounding import parse_citations, used_citations
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
@@ -91,12 +91,23 @@ async def stream_expert_answer(
     # Resolve citations: only passages the answer actually cited, with the
     # passage numbers preserved so inline [n] matches the rendered list.
     answer_text = "".join(answer_parts)
-    cited = parse_cited_indices(answer_text, len(ctx.passages))
+    cited, dangling = parse_citations(answer_text, len(ctx.passages))
     sources = used_citations(ctx.passages, cited)
+    if dangling:
+        # A marker pointing past the passage list is the model inventing a
+        # reference. The tokens are already on the wire, so the prose cannot be
+        # repaired here — the client is told which markers resolve to nothing so
+        # it can render them as unlinked rather than as citations. Logged because
+        # the rate is a direct, otherwise-uncollected measure of grounding quality.
+        logger.warning(
+            "Answer cited %d passage(s) that do not exist (expert=%d, passages=%d): %s",
+            len(dangling), expert.id, len(ctx.passages), sorted(dangling),
+        )
     yield {
         "type": "sources",
         "citations": sources,
         "has_contradiction": ctx.has_contradiction,
+        "dangling_citations": sorted(dangling),
     }
 
     # Audit trail for this answer: what was retrieved, what reached the prompt,
@@ -106,7 +117,7 @@ async def stream_expert_answer(
     # for it may turn it into an error.
     try:
         graph_ready = (await get_readiness(pool, expert.id)).graph_expanded
-        payload = build_audit_payload(
+        audit_payload = build_audit_payload(
             trail=ctx.trail,
             passages=ctx.passages,
             cited=cited,
@@ -114,13 +125,13 @@ async def stream_expert_answer(
             has_contradiction=ctx.has_contradiction,
             graph_ready=graph_ready,
         )
-        header, rows = audit_db_rows(payload, expert.id, conversation_id, question)
+        header, rows = audit_db_rows(audit_payload, expert.id, conversation_id, question)
         audit_id = await AuditService(pool).record_answer_audit(header, rows)
         yield {
             "type": "retrieval_audit",
             "audit_id": audit_id,
             "persisted": audit_id is not None,
-            **payload,
+            **audit_payload,
         }
     except Exception:
         logger.warning("Retrieval audit unavailable for expert %d", expert.id, exc_info=True)

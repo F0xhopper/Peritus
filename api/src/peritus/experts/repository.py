@@ -497,7 +497,13 @@ def _readable_clause(
 
 
 def _row_to_expert(row: asyncpg.Record) -> Expert:
-    keys = row.keys()
+    # A set, not `row.keys()` directly: asyncpg returns a one-shot iterator
+    # there, so the first `in` check that misses walks it to exhaustion and
+    # every check after it reads False. That silently defaulted readiness,
+    # tier, config, owner_id and visibility on every row — an expert with a
+    # fully extracted concept graph came back as readiness='pending', which is
+    # what made the graph view claim "not analysed yet" for every expert.
+    keys = set(row.keys())
 
     # key_concepts stored as JSONB — decode from string if asyncpg doesn't auto-decode.
     _raw_concepts = row["key_concepts"] if "key_concepts" in keys else None

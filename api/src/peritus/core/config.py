@@ -93,6 +93,15 @@ class Settings:
     # both cost and abuse; the prompt cache makes retained history cheap.
     CHAT_HISTORY_MAX_MESSAGES: int = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "20"))
 
+    # How many messages are dropped at once when history exceeds the cap above.
+    # This exists for the prompt cache, not for the cap: trimming one message per
+    # turn moves the start of the window every turn, so the cached prefix is
+    # never byte-identical twice and a long conversation — the case with the most
+    # to save — pays full input price on every turn. Dropping in blocks holds the
+    # window's start still for BLOCK/2 turns, so those turns share a prefix.
+    # Larger blocks mean better cache hit rates and a coarser history cap.
+    CHAT_HISTORY_TRIM_BLOCK: int = int(os.getenv("CHAT_HISTORY_TRIM_BLOCK", "6"))
+
     # Per-user throttle on the two chat endpoints. Builds are gated by credits;
     # chat is free to the user but not to us — every message is a planning call,
     # a rerank, a coverage call and a composition. This is the only ceiling on

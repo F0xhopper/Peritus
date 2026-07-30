@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { Wordmark } from "@/components/brand/wordmark";
+import { Logo } from "@/components/brand/wordmark";
 
 const LINKS = [
   { href: "#product", label: "Capabilities" },
@@ -12,8 +12,8 @@ export function SiteNav() {
   return (
     <header className="sticky top-0 z-50 border-b border-border/60 bg-background/80 backdrop-blur">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-        <Link href="/">
-          <Wordmark />
+        <Link href="/" aria-label="Peritus — home">
+          <Logo markSize="sm" />
         </Link>
         {/* Navigation is something you scan and click, so it stays in the
             reading face alongside the buttons — only the wordmark beside it

@@ -64,6 +64,13 @@ class GraphRepository:
     ) -> tuple[int, int]:
         """Ingest a list of raw extraction dicts. Returns (node_count, edge_count).
 
+        Nodes are resolved by normalised label, both across the supplied
+        extraction batches and against the expert's existing nodes, so this is
+        safe to call repeatedly on a live graph: a concept already present is
+        deepened (chunk evidence unioned, longest description kept) rather than
+        duplicated. The counts returned are nodes and relations *touched*, which
+        for a first build is also the number created.
+
         When ``embedder`` is provided, node embeddings are computed once here and
         persisted so entity resolution and future semantic node search can reuse
         them. Embedding failure degrades to inserting without vectors.
@@ -84,56 +91,105 @@ class GraphRepository:
         # Vector codecs are installed once per connection by the pool's init
         # callback (infrastructure.database), not per call.
         async with self._pool.acquire() as conn, conn.transaction():
-            # Insert nodes, get back label→id mapping
+            # Resolve each extracted label against the nodes this expert already
+            # has. Without this, ingesting into a live graph (a source upload, or
+            # any second extraction pass) creates a rival copy of every concept
+            # the corpus already covers instead of deepening the existing one —
+            # and only the build pipeline runs the embedding-similarity cleanup
+            # afterwards, so the upload path accumulated duplicates permanently.
+            existing = await conn.fetch(
+                "SELECT id, lower(btrim(label)) AS key FROM expert_nodes WHERE expert_id = $1",
+                expert_id,
+            )
+            existing_ids = {r["key"]: r["id"] for r in existing}
+
             label_to_id: dict[str, int] = {}
             for i, (key, node) in enumerate(merged_nodes.items()):
-                row = await conn.fetchrow(
-                    """
-                    INSERT INTO expert_nodes
-                        (expert_id, node_type, label, description, properties, chunk_ids, embedding)
-                    VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
-                    RETURNING id
-                    """,
-                    expert_id,
-                    node["node_type"],
-                    node["label"],
-                    node["description"],
-                    json.dumps(node["properties"]),
-                    list(set(node["chunk_ids"])),
-                    embeddings[i] if embeddings else None,
-                )
-                label_to_id[key] = row["id"]
+                embedding = embeddings[i] if embeddings else None
+                chunk_ids = list(set(node["chunk_ids"]))
+                node_id = existing_ids.get(key)
+                if node_id is None:
+                    row = await conn.fetchrow(
+                        """
+                        INSERT INTO expert_nodes
+                            (expert_id, node_type, label, description,
+                             properties, chunk_ids, embedding)
+                        VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7)
+                        RETURNING id
+                        """,
+                        expert_id,
+                        node["node_type"],
+                        node["label"],
+                        node["description"],
+                        json.dumps(node["properties"]),
+                        chunk_ids,
+                        embedding,
+                    )
+                    node_id = row["id"]
+                else:
+                    # Union the chunk evidence and keep the longer description —
+                    # the same policy `merge_node_extractions` applies in memory.
+                    # A re-extraction that produced no embedding must not blank
+                    # the one already stored.
+                    await conn.execute(
+                        """
+                        UPDATE expert_nodes
+                        SET chunk_ids = ARRAY(
+                                SELECT DISTINCT x FROM unnest(chunk_ids || $2::integer[]) x
+                            ),
+                            description = CASE
+                                WHEN length($3) > length(coalesce(description, ''))
+                                THEN $3 ELSE description
+                            END,
+                            properties = coalesce(properties, '{}'::jsonb) || $4::jsonb,
+                            embedding = coalesce($5, embedding)
+                        WHERE id = $1
+                        """,
+                        node_id,
+                        chunk_ids,
+                        node["description"],
+                        json.dumps({
+                            k: v for k, v in node["properties"].items() if v is not None
+                        }),
+                        embedding,
+                    )
+                label_to_id[key] = node_id
 
-            # Insert edges using label→id mapping; duplicates across batches
-            # collapse onto the unique relation, keeping the strongest weight.
-            relations: set[tuple[int, int, str]] = set()
+            # Resolve every edge to node ids first, then write them in one
+            # round trip. Duplicates across batches collapse onto the unique
+            # relation, keeping the strongest weight.
+            strongest: dict[tuple[int, int, str], float] = {}
             for ext in extractions:
                 for edge in ext.get("edges", []):
                     if not edge.get("from_label") or not edge.get("to_label"):
                         logger.warning("Skipping edge with missing label: %r", edge)
                         continue
-                    from_key = edge["from_label"].lower().strip()
-                    to_key = edge["to_label"].lower().strip()
-                    if from_key not in label_to_id or to_key not in label_to_id:
-                        continue
-                    from_id, to_id = label_to_id[from_key], label_to_id[to_key]
-                    if from_id == to_id:
+                    from_id = label_to_id.get(edge["from_label"].lower().strip())
+                    to_id = label_to_id.get(edge["to_label"].lower().strip())
+                    # An edge naming a node no extraction produced, or a
+                    # self-loop, carries no information.
+                    if from_id is None or to_id is None or from_id == to_id:
                         continue
                     weight = min(max(float(edge.get("weight", 1.0)), 0.0), 1.0)
-                    edge_type = edge.get("edge_type", "builds_on")
-                    await conn.execute(
-                        """
-                        INSERT INTO expert_edges
-                            (expert_id, from_node_id, to_node_id, edge_type, weight)
-                        VALUES ($1, $2, $3, $4, $5)
-                        ON CONFLICT (expert_id, from_node_id, to_node_id, edge_type)
-                        DO UPDATE SET weight = GREATEST(expert_edges.weight, EXCLUDED.weight)
-                        """,
-                        expert_id, from_id, to_id, edge_type, weight,
-                    )
-                    relations.add((from_id, to_id, edge_type))
+                    relation = (from_id, to_id, edge.get("edge_type", "builds_on"))
+                    strongest[relation] = max(weight, strongest.get(relation, 0.0))
 
-        return len(merged_nodes), len(relations)
+            if strongest:
+                await conn.executemany(
+                    """
+                    INSERT INTO expert_edges
+                        (expert_id, from_node_id, to_node_id, edge_type, weight)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (expert_id, from_node_id, to_node_id, edge_type)
+                    DO UPDATE SET weight = GREATEST(expert_edges.weight, EXCLUDED.weight)
+                    """,
+                    [
+                        (expert_id, from_id, to_id, edge_type, weight)
+                        for (from_id, to_id, edge_type), weight in strongest.items()
+                    ],
+                )
+
+        return len(merged_nodes), len(strongest)
 
     async def get_top_nodes(self, expert_id: int, limit: int = 20) -> list[dict]:
         async with self._pool.acquire() as conn:
@@ -278,8 +334,11 @@ class GraphRepository:
 
             all_node_ids = list(visited_ids)
             node_rows = await conn.fetch(
-                "SELECT id, label, node_type, description FROM expert_nodes WHERE id = ANY($1)",
-                all_node_ids,
+                """
+                SELECT id, label, node_type, description
+                FROM expert_nodes WHERE expert_id = $1 AND id = ANY($2)
+                """,
+                expert_id, all_node_ids,
             )
             edge_rows = await conn.fetch(
                 """
