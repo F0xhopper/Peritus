@@ -54,6 +54,7 @@ from peritus.billing.service import EntitlementService
 from peritus.billing.settings import settings as billing_settings
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.experts.builder import FETCHER_NAMES
 from peritus.experts.domain import ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
 from peritus.infrastructure.database import get_pool
@@ -343,21 +344,49 @@ async def build_expert(
     repo = ExpertRepository(pool)
     jobs = JobRepository(pool)
     entitlements = _entitlements()
-    slug = _slugify(req.topic)
-    if not slug:
+
+    if req.sources is not None:
+        unknown = [s for s in req.sources if s not in FETCHER_NAMES]
+        if unknown or not req.sources:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown source type(s): {', '.join(unknown)}. "
+                    if unknown
+                    else "sources, when given, must name at least one source type. "
+                )
+                + f"Valid source types: {', '.join(FETCHER_NAMES)}",
+            )
+
+    base_slug = _slugify(req.topic)
+    if not base_slug:
         raise HTTPException(
             status_code=400,
             detail="Topic must contain at least one letter or number",
         )
 
-    expert = await repo.get_by_name(slug)
-    if expert is not None and await repo.get_owned_for_user(
-        slug, user.id, include_unowned=user.is_admin
-    ) is None:
-        # Expert slugs are globally unique, but this one belongs to another user
-        # (or is a catalog expert the caller merely has read access to). Hide its
-        # existence (404, not 403) rather than let them rebuild it.
-        raise HTTPException(status_code=404, detail="Expert not found")
+    # Slugs are globally unique but derived from the topic, so two users can
+    # legitimately want the same one. Walk base, base-2, base-3… until we hit
+    # either a slug the caller owns (their expert on this topic → rebuild) or a
+    # free slug (→ create). Another user's expert is silently stepped over — its
+    # existence is never revealed.
+    expert = None
+    slug = base_slug
+    for i in range(1, 51):
+        slug = base_slug if i == 1 else f"{base_slug}-{i}"
+        candidate = await repo.get_by_name(slug)
+        if candidate is None:
+            expert = None
+            break
+        if candidate.is_owned_by(user.id, include_unowned=user.is_admin):
+            expert = candidate
+            break
+    else:
+        raise HTTPException(
+            status_code=409,
+            detail="Too many experts already exist for this topic — rename it slightly",
+        )
+
     active = await jobs.get_active_job(expert.id, job_type=JobType.BUILD) if expert else None
 
     if active is not None:
@@ -367,18 +396,28 @@ async def build_expert(
         job = active
         logger.info("Attaching to in-flight build job %d for %r", job.id, slug)
     else:
-        tier = req.tier if isinstance(req.tier, ExpertTier) else ExpertTier(req.tier)
-        # Check before creating anything, so a denial leaves no orphaned rows.
         try:
+            tier = (
+                req.tier
+                if req.tier is not None
+                else await entitlements.resolve_tier(user.id, None, user.email)
+            )
+            # Check before creating anything, so a denial leaves no orphaned rows.
             await entitlements.authorize_build(user.id, tier, user.email)
         except EntitlementError as exc:
-            logger.info("Build denied for %s (%s): %s", user.id, tier.value, exc.code)
+            logger.info("Build denied for %s: %s", user.id, exc.code)
             raise _entitlement_http_error(exc) from None
 
         if expert is None:
             expert = await repo.create(
-                name=slug, topic=req.topic, tier=req.tier, owner_id=user.id
+                name=slug, topic=req.topic, tier=tier, owner_id=user.id
             )
+        elif expert.tier != tier:
+            # Rebuild at a different depth: the worker builds from the expert
+            # row, so tier and config must move with the request or the new
+            # build silently runs at the old depth.
+            await repo.update_tier(expert.id, tier)
+            await repo.update_status(expert.id, ExpertStatus.QUEUED)
         else:
             # Rebuild of a finished expert — the worker resets prior corpus state first.
             await repo.update_status(expert.id, ExpertStatus.QUEUED)
@@ -388,6 +427,17 @@ async def build_expert(
             source_filter=req.sources or None,
             max_attempts=settings.WORKER_MAX_ATTEMPTS,
         )
+        # First event in the durable log, so every client — including one that
+        # reconnects later — learns which expert this stream belongs to without
+        # re-deriving the slug client-side.
+        await jobs.append_event(job.id, "created", {
+            "type": "created",
+            "slug": expert.name,
+            "expert_id": expert.id,
+            "job_id": job.id,
+            "tier": tier.value,
+            "topic": expert.topic,
+        })
         # The authoritative charge. Re-checks the balance under a row lock, and
         # is idempotent per job id — so a double-submit that lands on the same
         # job never double-charges. If it fails here the job is cancelled rather

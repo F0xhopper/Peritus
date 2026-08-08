@@ -117,14 +117,14 @@ call**, which is where the free plan's signup grant lands — so call it early.
   "plan": {
     "name": "free", "display_name": "Free",
     "included_credits": 1,
-    "allowed_tiers": ["lite", "standard"],
+    "allowed_tiers": ["lite"],
     "description": "…"
   },
   "balance": 1, "granted": 1, "consumed": 0, "held": 0,
   "credits_enforced": true,
   "tiers": [
-    { "tier": "lite", "credit_cost": 1, "spend_cap_usd": 1.0, "included_in_plan": true },
-    { "tier": "pro", "credit_cost": 4, "spend_cap_usd": 6.0, "included_in_plan": false }
+    { "tier": "lite", "credit_cost": 1, "spend_cap_usd": 3.0, "included_in_plan": true },
+    { "tier": "pro", "credit_cost": 8, "spend_cap_usd": 12.0, "included_in_plan": false }
   ]
 }
 ```

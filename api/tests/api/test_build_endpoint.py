@@ -73,10 +73,13 @@ async def test_invalid_tier_rejected(client):
     assert resp.status_code == 422
 
 
-def test_default_tier_is_standard():
+def test_default_tier_is_unset_so_the_server_resolves_it():
+    """A bare topic names no tier: the route asks EntitlementService.resolve_tier
+    for the deepest tier the caller's plan allows and balance affords, so
+    `{"topic": ...}` alone is always a buildable request."""
     from peritus.api.schemas.experts import BuildRequest
     req = BuildRequest(topic="stoicism")
-    assert req.tier == ExpertTier.STANDARD
+    assert req.tier is None
 
 
 # ── build enqueues a job and streams the durable event log ──
@@ -227,3 +230,205 @@ async def test_tier_in_get_response(client):
 
     assert resp.status_code == 200
     assert resp.json()["tier"] == "lite"
+
+
+# ── topic-only creation: server resolves the tier ──
+
+@pytest.mark.asyncio
+async def test_topic_only_build_resolves_tier_from_plan(client):
+    """`{"topic": ...}` with no tier asks the entitlement service which tier
+    this account can actually build, instead of 402ing on a fixed default."""
+    expert = _make_expert(ExpertTier.LITE, name="stoicism")
+
+    with (
+        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+    ):
+        mock_repo = AsyncMock()
+        mock_repo.get_by_name = AsyncMock(return_value=None)
+        mock_repo.create = AsyncMock(return_value=expert)
+        MockRepo.return_value = mock_repo
+
+        mock_jobs = AsyncMock()
+        mock_jobs.enqueue = AsyncMock(return_value=_make_job())
+        mock_jobs.read_events = AsyncMock(return_value=[_done_event()])
+        MockJobs.return_value = mock_jobs
+
+        mock_entitlements = AsyncMock()
+        mock_entitlements.resolve_tier = AsyncMock(return_value=ExpertTier.LITE)
+        MockEntitlements.return_value = mock_entitlements
+
+        resp = await client.post("/experts/build", json={"topic": "stoicism"})
+
+    assert resp.status_code == 200
+    mock_entitlements.resolve_tier.assert_awaited_once()
+    mock_entitlements.authorize_build.assert_awaited_once_with(
+        "00000000-0000-0000-0000-000000000000", ExpertTier.LITE, "admin@test"
+    )
+    assert mock_jobs.enqueue.await_args.kwargs["tier"] == "lite"
+    assert mock_repo.create.await_args.kwargs["tier"] is ExpertTier.LITE
+
+
+@pytest.mark.asyncio
+async def test_explicit_tier_skips_resolution(client):
+    expert = _make_expert(ExpertTier.PRO, name="stoicism")
+
+    with (
+        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+    ):
+        mock_repo = AsyncMock()
+        mock_repo.get_by_name = AsyncMock(return_value=None)
+        mock_repo.create = AsyncMock(return_value=expert)
+        MockRepo.return_value = mock_repo
+
+        mock_jobs = AsyncMock()
+        mock_jobs.enqueue = AsyncMock(return_value=_make_job())
+        mock_jobs.read_events = AsyncMock(return_value=[_done_event()])
+        MockJobs.return_value = mock_jobs
+
+        mock_entitlements = AsyncMock()
+        MockEntitlements.return_value = mock_entitlements
+
+        resp = await client.post("/experts/build", json={"topic": "stoicism", "tier": "pro"})
+
+    assert resp.status_code == 200
+    mock_entitlements.resolve_tier.assert_not_awaited()
+    mock_entitlements.authorize_build.assert_awaited_once_with(
+        "00000000-0000-0000-0000-000000000000", ExpertTier.PRO, "admin@test"
+    )
+
+
+# ── slug collisions step over other users' experts instead of 404ing ──
+
+@pytest.mark.asyncio
+async def test_slug_collision_autosuffixes(client):
+    """Another user already owns 'stoicism': the build lands on 'stoicism-2'
+    rather than revealing (or 404ing on) the taken slug."""
+    theirs = _make_expert(name="stoicism")
+    theirs.owner_id = "11111111-1111-1111-1111-111111111111"
+    mine = _make_expert(ExpertTier.LITE, name="stoicism-2")
+    mine.owner_id = "00000000-0000-0000-0000-000000000000"
+
+    with (
+        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+    ):
+        mock_repo = AsyncMock()
+        mock_repo.get_by_name = AsyncMock(side_effect=[theirs, None])
+        mock_repo.create = AsyncMock(return_value=mine)
+        MockRepo.return_value = mock_repo
+
+        mock_jobs = AsyncMock()
+        mock_jobs.enqueue = AsyncMock(return_value=_make_job())
+        mock_jobs.read_events = AsyncMock(return_value=[_done_event()])
+        MockJobs.return_value = mock_jobs
+
+        mock_entitlements = AsyncMock()
+        mock_entitlements.resolve_tier = AsyncMock(return_value=ExpertTier.LITE)
+        MockEntitlements.return_value = mock_entitlements
+
+        resp = await client.post("/experts/build", json={"topic": "stoicism"})
+
+    assert resp.status_code == 200
+    assert mock_repo.create.await_args.kwargs["name"] == "stoicism-2"
+
+
+# ── source filter is validated at the door ──
+
+@pytest.mark.asyncio
+async def test_unknown_source_type_is_rejected(client):
+    with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
+        resp = await client.post(
+            "/experts/build", json={"topic": "stoicism", "sources": ["wikipedia", "tiktok"]}
+        )
+    assert resp.status_code == 400
+    assert "tiktok" in resp.json()["detail"]
+    assert "wikipedia" in resp.json()["detail"]  # valid names are listed back
+
+
+@pytest.mark.asyncio
+async def test_empty_source_list_is_rejected(client):
+    with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
+        resp = await client.post(
+            "/experts/build", json={"topic": "stoicism", "sources": []}
+        )
+    assert resp.status_code == 400
+
+
+# ── rebuild at a different tier moves tier + config with it ──
+
+@pytest.mark.asyncio
+async def test_rebuild_at_new_tier_updates_expert(client):
+    expert = _make_expert(ExpertTier.LITE, name="stoicism")
+    expert.owner_id = "00000000-0000-0000-0000-000000000000"
+
+    with (
+        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+    ):
+        mock_repo = AsyncMock()
+        mock_repo.get_by_name = AsyncMock(return_value=expert)
+        MockRepo.return_value = mock_repo
+
+        mock_jobs = AsyncMock()
+        mock_jobs.get_active_job = AsyncMock(return_value=None)
+        mock_jobs.enqueue = AsyncMock(return_value=_make_job())
+        mock_jobs.read_events = AsyncMock(return_value=[_done_event()])
+        MockJobs.return_value = mock_jobs
+
+        MockEntitlements.return_value = AsyncMock()
+
+        resp = await client.post(
+            "/experts/build", json={"topic": "stoicism", "tier": "standard"}
+        )
+
+    assert resp.status_code == 200
+    mock_repo.update_tier.assert_awaited_once_with(expert.id, ExpertTier.STANDARD)
+
+
+# ── the stream announces which expert it belongs to ──
+
+@pytest.mark.asyncio
+async def test_build_appends_created_event(client):
+    expert = _make_expert(ExpertTier.LITE, name="stoicism")
+
+    with (
+        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+    ):
+        mock_repo = AsyncMock()
+        mock_repo.get_by_name = AsyncMock(return_value=None)
+        mock_repo.create = AsyncMock(return_value=expert)
+        MockRepo.return_value = mock_repo
+
+        mock_jobs = AsyncMock()
+        mock_jobs.enqueue = AsyncMock(return_value=_make_job())
+        mock_jobs.read_events = AsyncMock(return_value=[_done_event()])
+        MockJobs.return_value = mock_jobs
+
+        mock_entitlements = AsyncMock()
+        mock_entitlements.resolve_tier = AsyncMock(return_value=ExpertTier.LITE)
+        MockEntitlements.return_value = mock_entitlements
+
+        resp = await client.post("/experts/build", json={"topic": "stoicism"})
+
+    assert resp.status_code == 200
+    created_calls = [
+        c for c in mock_jobs.append_event.await_args_list if c.args[1] == "created"
+    ]
+    assert len(created_calls) == 1
+    payload = created_calls[0].args[2]
+    assert payload["slug"] == "stoicism"
+    assert payload["expert_id"] == expert.id
+    assert payload["tier"] == "lite"

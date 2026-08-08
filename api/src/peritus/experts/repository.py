@@ -379,6 +379,24 @@ class ExpertRepository:
                 json.dumps(dataclasses.asdict(config)), expert_id,
             )
 
+    async def update_tier(self, expert_id: int, tier: ExpertTier) -> None:
+        """Move an expert to a new tier, with the config that tier implies.
+
+        Tier and config travel together: the builder reads depth off
+        ``expert.config``, so changing one without the other builds at a depth
+        the row no longer claims.
+        """
+        config = ExpertConfig.from_tier(tier)
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE experts
+                SET tier = $1, config = $2::jsonb, updated_at = NOW()
+                WHERE id = $3
+                """,
+                tier.value, json.dumps(dataclasses.asdict(config)), expert_id,
+            )
+
     async def reset_build_state(self, expert_id: int) -> None:
         """Clear derived corpus state so a (re)build starts from a clean slate.
 

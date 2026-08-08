@@ -64,6 +64,29 @@ class EntitlementService:
 
     # ── authorisation ───────────────────────────────────────────────────────
 
+    async def resolve_tier(
+        self, owner_id: str, requested: ExpertTier | None, email: str | None = None
+    ) -> ExpertTier:
+        """Pick the tier for a build that didn't name one.
+
+        An explicit request is honoured as-is (and judged by ``authorize_build``).
+        With no request, the deepest tier the caller's plan allows *and* their
+        balance can pay for wins — so a bare ``{"topic": ...}`` builds at the
+        best depth the account supports instead of 402ing on a fixed default.
+        When nothing is affordable, the plan's cheapest tier is returned so the
+        denial that follows names the smallest viable purchase, not the largest.
+        """
+        if requested is not None:
+            return requested
+        if not settings.CREDITS_ENFORCED:
+            return ExpertTier.STANDARD
+        state = await self.credit_state(owner_id, email)
+        allowed = state.plan.allowed_tiers or (ExpertTier.LITE,)
+        for tier in sorted(allowed, key=credit_cost, reverse=True):
+            if credit_cost(tier) <= state.balance:
+                return tier
+        return min(allowed, key=credit_cost)
+
     async def authorize_build(
         self, owner_id: str, tier: ExpertTier, email: str | None = None
     ) -> CreditState:

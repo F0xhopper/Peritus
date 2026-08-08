@@ -25,8 +25,14 @@ Storage is PostgreSQL + [pgvector](https://github.com/pgvector/pgvector). There 
 ### Build
 
 ```
-build "intermittent fasting and cardiometabolic risk"   (tier: lite · standard · pro)
+build "intermittent fasting and cardiometabolic risk"   (tier: auto · lite · standard · pro)
 ```
+
+A topic is a complete request: the server derives the slug (auto-suffixing on
+collision), resolves the deepest tier the account's plan and balance afford when
+none is given, plans the search strategy, and names the persona. The full
+walkthrough — queue, worker, every stage, readiness, and what happens when
+things fail — is in [docs/build-flow.md](docs/build-flow.md).
 
 1. **Plan**: Claude turns the topic into a tailored search query for each source fetcher and names the 5–8 core concepts the corpus must cover.
 2. **Discover**: every fetcher runs concurrently — Wikipedia, Project Gutenberg, ArXiv, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. Discovery deliberately over-searches (~3× the fetch budget) and a fast triage pass ranks candidates on title and snippet, so far more sources are considered than are ever downloaded. High-citation references from accepted ArXiv papers are snowballed in via Semantic Scholar.

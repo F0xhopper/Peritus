@@ -75,12 +75,15 @@ impl ApiClient {
 
     /// Start a build and stream its progress. Events carry their durable `seq` so a
     /// dropped connection can be resumed via [`build_events_stream`].
-    pub async fn build_stream(&self, topic: String, tier: String) -> Result<SeqStream<BuildEvent>> {
+    /// `tier: None` lets the server resolve the deepest tier the account affords.
+    pub async fn build_stream(
+        &self, topic: String, tier: Option<String>,
+    ) -> Result<SeqStream<BuildEvent>> {
         let req = BuildRequest { topic, tier };
         let resp = self.auth(self.client.post(format!("{}/experts/build", self.base_url)))
             .json(&req)
-            .send().await?
-            .error_for_status()?;
+            .send().await?;
+        let resp = stream_or_err(resp).await?;
         Ok(parse_sse_stream_with_seq(resp.bytes_stream()))
     }
 
@@ -89,26 +92,25 @@ impl ApiClient {
     pub async fn build_events_stream(&self, slug: &str, after: u64) -> Result<SeqStream<BuildEvent>> {
         let resp = self.auth(self.client.get(
             format!("{}/experts/{}/build/events?after={}", self.base_url, slug, after)))
-            .send().await?
-            .error_for_status()?;
+            .send().await?;
+        let resp = stream_or_err(resp).await?;
         Ok(parse_sse_stream_with_seq(resp.bytes_stream()))
     }
 
     /// Cancel the active build for an expert. The terminal 'cancelled' event
     /// arrives via the event stream, so callers only need to fire this.
     pub async fn cancel_build(&self, slug: &str) -> Result<()> {
-        self.auth(self.client.post(format!("{}/experts/{}/build/cancel", self.base_url, slug)))
+        let resp = self.auth(self.client.post(format!("{}/experts/{}/build/cancel", self.base_url, slug)))
             .timeout(REQUEST_TIMEOUT)
-            .send().await?
-            .error_for_status()?;
-        Ok(())
+            .send().await?;
+        expect_success(resp).await
     }
 
     pub async fn chat_stream(&self, slug: &str, req: ChatRequest) -> Result<SseStream<ChatEvent>> {
         let resp = self.auth(self.client.post(format!("{}/experts/{}/chat", self.base_url, slug)))
             .json(&req)
-            .send().await?
-            .error_for_status()?;
+            .send().await?;
+        let resp = stream_or_err(resp).await?;
         Ok(parse_sse_stream(resp.bytes_stream()))
     }
 
@@ -190,12 +192,42 @@ async fn expect_success(resp: reqwest::Response) -> Result<()> {
     }
 }
 
+/// Pass a streaming response through, or read its body and surface the server's
+/// error detail. `.error_for_status()` alone would throw the JSON body away —
+/// which is exactly where the server puts the message worth showing (a 402's
+/// credit shortfall, a 409's "expert is still building", a 429's retry advice).
+async fn stream_or_err(resp: reqwest::Response) -> Result<reqwest::Response> {
+    let status = resp.status();
+    if status.is_success() {
+        Ok(resp)
+    } else {
+        Err(error_from(resp, status).await.into())
+    }
+}
+
 async fn error_from(resp: reqwest::Response, status: reqwest::StatusCode) -> ApiError {
     let body = resp.text().await.unwrap_or_default();
-    // FastAPI errors are {"detail": "..."}; fall back to the raw body/status.
+    // FastAPI errors are {"detail": ...} where detail is either a plain string
+    // or a structured object ({"code", "message", "remedy", ...} — the
+    // entitlement denials). Prefer the human-readable message either way; fall
+    // back to the raw body/status.
     let detail = serde_json::from_str::<serde_json::Value>(&body)
         .ok()
-        .and_then(|v| v.get("detail").and_then(|d| d.as_str()).map(String::from))
+        .and_then(|v| {
+            let d = v.get("detail")?;
+            if let Some(s) = d.as_str() {
+                return Some(s.to_string());
+            }
+            let msg = d.get("message").and_then(|m| m.as_str())?;
+            let remedy = d
+                .get("remedy")
+                .and_then(|r| r.get("label"))
+                .and_then(|l| l.as_str());
+            Some(match remedy {
+                Some(label) => format!("{} ({})", msg, label),
+                None => msg.to_string(),
+            })
+        })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
             if body.is_empty() { status.to_string() } else { body }

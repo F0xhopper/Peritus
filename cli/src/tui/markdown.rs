@@ -213,12 +213,14 @@ fn render_table(lines: &mut Vec<Line<'static>>, rows: &[Vec<String>]) {
     let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
     if col_count == 0 { return; }
 
-    // Compute the minimum width needed for each column.
+    // Compute the minimum width needed for each column. Widths are in chars,
+    // not bytes — `{:<width$}` pads by chars, and byte-measuring non-ASCII
+    // cells (é, →, CJK) over-padded every column after them.
     let mut col_widths = vec![0usize; col_count];
     for row in rows {
         for (i, cell) in row.iter().enumerate() {
             if i < col_count {
-                col_widths[i] = col_widths[i].max(cell.len());
+                col_widths[i] = col_widths[i].max(cell.chars().count());
             }
         }
     }
@@ -227,7 +229,8 @@ fn render_table(lines: &mut Vec<Line<'static>>, rows: &[Vec<String>]) {
         let mut row_spans: Vec<Span<'static>> = Vec::new();
         let cell_count = row.len().min(col_count);
         for (i, cell) in row.iter().enumerate().take(cell_count) {
-            let padded = format!("{:<width$}", cell, width = col_widths[i]);
+            let pad = col_widths[i].saturating_sub(cell.chars().count());
+            let padded = format!("{}{}", cell, " ".repeat(pad));
             let style = if row_idx == 0 {
                 Theme::normal().add_modifier(Modifier::BOLD)
             } else {

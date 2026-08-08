@@ -23,7 +23,10 @@ pub enum Screen {
 }
 
 /// Result of a background expert-list refresh (optionally preceded by a delete).
-type RefreshResult = Result<Vec<ExpertSummary>, String>;
+/// The error carries whether it was a 401, so an expired session mid-run routes
+/// to Login instead of dying as a status toast.
+type RefreshError = (bool, String);
+type RefreshResult = Result<Vec<ExpertSummary>, RefreshError>;
 
 pub struct App {
     pub screen: Screen,
@@ -40,6 +43,9 @@ pub struct App {
     pub status_msg: Option<(String, std::time::Instant)>,
     pub tick: u64, // increments every render frame (~60fps)
     last_expert_poll: std::time::Instant,
+    // Throttle for the periodic session-refresh check. Supabase access tokens
+    // live ~1h; without this a TUI left open would start 401ing on everything.
+    last_session_check: std::time::Instant,
     // In-flight background refresh; API calls never block the render loop.
     refresh_rx: Option<oneshot::Receiver<RefreshResult>>,
     // Topic to select once the next refresh lands (e.g. after a build finishes).
@@ -64,6 +70,7 @@ impl App {
             status_msg: None,
             tick: 0,
             last_expert_poll: std::time::Instant::now(),
+            last_session_check: std::time::Instant::now(),
             refresh_rx: None,
             pending_select_topic: None,
         }
@@ -80,7 +87,9 @@ impl App {
         let (tx, rx) = oneshot::channel();
         self.refresh_rx = Some(rx);
         tokio::spawn(async move {
-            let _ = tx.send(api.list_experts().await.map_err(|e| e.to_string()));
+            let _ = tx.send(
+                api.list_experts().await.map_err(|e| (is_unauthorized(&e), e.to_string())),
+            );
         });
     }
 
@@ -92,8 +101,11 @@ impl App {
         self.set_status("Deleting…");
         tokio::spawn(async move {
             let result = match api.delete_expert(&slug).await {
-                Ok(()) => api.list_experts().await.map_err(|e| e.to_string()),
-                Err(e) => Err(format!("Delete failed: {}", e)),
+                Ok(()) => api
+                    .list_experts()
+                    .await
+                    .map_err(|e| (is_unauthorized(&e), e.to_string())),
+                Err(e) => Err((is_unauthorized(&e), format!("Delete failed: {}", e))),
             };
             let _ = tx.send(result);
         });
@@ -254,6 +266,12 @@ async fn handle_action(app: &mut App, action: AppAction) {
             }
             app.config_screen.handle(action.clone());
             if app.config_screen.saved {
+                // A saved config must actually name a server, or Home can never load.
+                if app.config_screen.config.server_url.trim().is_empty() {
+                    app.config_screen.saved = false;
+                    app.set_status("Server URL is required");
+                    return;
+                }
                 app.config = app.config_screen.config.clone();
                 let _ = app.config.save();
                 app.api = Arc::new(ApiClient::new(
@@ -344,23 +362,22 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 AppAction::Down | AppAction::Right => app.home.next(),
                 AppAction::Submit => {
                     if let Some(expert) = app.home.selected_expert().cloned() {
-                        match expert.status.as_str() {
-                            "ready" => {
-                                let resume = app.chat.as_ref()
-                                    .map(|c| c.expert_slug() == expert.name)
-                                    .unwrap_or(false);
-                                if !resume {
-                                    app.chat = Some(ChatScreen::new(expert.clone(), app.api.clone()));
-                                }
-                                app.screen = Screen::Chat;
+                        // Chat gates on readiness, not status: the server answers
+                        // from chat_ready onward — a full stage before the build
+                        // job finishes. ([b] still watches an in-flight build.)
+                        if expert.can_chat() {
+                            let resume = app.chat.as_ref()
+                                .map(|c| c.expert_slug() == expert.name)
+                                .unwrap_or(false);
+                            if !resume {
+                                app.chat = Some(ChatScreen::new(expert.clone(), app.api.clone()));
                             }
-                            "building" | "queued" => {
-                                app.open_build_for(expert.topic.clone(), expert.tier.clone());
-                            }
-                            _ => {
-                                // Failed: Enter rebuilds in place (same topic + tier).
-                                app.start_build(expert.topic.clone(), expert.tier.clone());
-                            }
+                            app.screen = Screen::Chat;
+                        } else if expert.status == "building" || expert.status == "queued" {
+                            app.open_build_for(expert.topic.clone(), expert.tier.clone());
+                        } else {
+                            // Failed: Enter rebuilds in place (same topic + tier).
+                            app.start_build(expert.topic.clone(), expert.tier.clone());
                         }
                     }
                 }
@@ -572,13 +589,30 @@ async fn tick_screens(app: &mut App) {
                     app.set_status("Ready to chat — press Enter");
                 }
             }
-            Ok(Err(e)) => {
+            Ok(Err((unauthorized, e))) => {
                 app.refresh_rx = None;
-                app.set_status(e);
+                if unauthorized {
+                    // Session expired mid-run and the refresh couldn't save it:
+                    // route to Login instead of toasting 401s forever.
+                    app.config.clear_session();
+                    let _ = app.config.save();
+                    app.login = LoginScreen::new(app.config.email.clone());
+                    app.screen = Screen::Login;
+                    app.set_status("Session expired — sign in again");
+                } else {
+                    app.set_status(e);
+                }
             }
             Err(oneshot::error::TryRecvError::Empty) => {}
             Err(oneshot::error::TryRecvError::Closed) => { app.refresh_rx = None; }
         }
+    }
+
+    // Refresh an expiring session proactively (~1h token lifetime). Checked on
+    // a coarse cadence; ensure_session itself no-ops unless expiry is near.
+    if app.last_session_check.elapsed().as_secs() >= 30 {
+        app.last_session_check = std::time::Instant::now();
+        ensure_session(app).await;
     }
 
     // Tick the build stream; capture done state before dropping the borrow.
@@ -591,8 +625,12 @@ async fn tick_screens(app: &mut App) {
     if build_done {
         let built_topic = app.build.as_ref().map(|b| b.topic().to_string());
         app.build = None;
-        app.screen = Screen::Home;
         app.pending_select_topic = built_topic;
+        // Only navigate if the user is actually watching the build — a finished
+        // background build must not yank them out of Chat or Config.
+        if app.screen == Screen::Build {
+            app.screen = Screen::Home;
+        }
         app.request_refresh();
         app.last_expert_poll = std::time::Instant::now();
     }

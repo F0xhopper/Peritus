@@ -28,7 +28,11 @@ async def db_pool():
         TEST_DB_URL, min_size=1, max_size=5, statement_cache_size=0, init=_init_connection
     )
     # Start each test from a clean slate; CASCADE clears sources/chunks/graph/jobs/events.
+    # Accounts must be truncated too: the credits tests provision the same owner
+    # id and assume its signup grant fires fresh each test — a leftover account
+    # row (with whatever plan/ledger the previous test left it on) breaks them.
     async with pool.acquire() as conn:
         await conn.execute("TRUNCATE experts RESTART IDENTITY CASCADE")
+        await conn.execute("TRUNCATE accounts RESTART IDENTITY CASCADE")
     yield pool
     await pool.close()

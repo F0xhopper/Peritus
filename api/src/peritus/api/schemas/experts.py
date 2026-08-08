@@ -85,8 +85,13 @@ class CatalogCategory(BaseModel):
 
 class BuildRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=300)
-    tier: ExpertTier = ExpertTier.STANDARD
+    # None = pick the deepest tier the caller's plan allows and balance affords
+    # (EntitlementService.resolve_tier), so `{"topic": ...}` alone always names
+    # a buildable tier. An explicit tier is honoured and judged as requested.
+    tier: ExpertTier | None = None
     # Optional fetcher allowlist (e.g. ["wikipedia", "arxiv"]); None = all fetchers.
+    # Validated against the builder's fetcher names — an unknown name is a 400,
+    # not a silently empty build.
     sources: list[str] | None = None
 
 

@@ -26,7 +26,9 @@ impl Theme {
     pub fn error()           -> Style { Style::default().fg(Self::ERROR) }
     pub fn dim()             -> Style { Style::default().fg(Self::DIM) }
     pub fn source()          -> Style { Style::default().fg(Self::SOURCE) }
-    pub fn selected_bg()     -> Style { Style::default() }
+    // Card style when selected. Must keep the foreground set: returning a bare
+    // Style::default() made selecting a card *remove* its text colour.
+    pub fn selected_bg()     -> Style { Style::default().fg(Self::FG).bg(Color::Rgb(28, 32, 48)) }
     pub fn title()           -> Style { Style::default().fg(Self::ACCENT).add_modifier(Modifier::BOLD) }
     pub fn selected_border() -> Style { Style::default().fg(Self::BORDER_SEL) }
     pub fn normal_border()   -> Style { Style::default().fg(Self::BORDER_DIM) }

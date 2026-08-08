@@ -30,6 +30,9 @@ pub struct Message {
     pub sources: Vec<SourceCitation>,
     /// The retrieval traversed a `contradicts` edge — sources disagree.
     pub has_contradiction: bool,
+    /// `[n]` markers in the answer that resolve to no real passage — the model
+    /// invented them, and they must not render as legitimate citations.
+    pub dangling: Vec<u32>,
 }
 
 pub struct ChatScreen {
@@ -40,6 +43,7 @@ pub struct ChatScreen {
     current_status: Option<String>,
     pending_sources: Vec<SourceCitation>,
     pending_contradiction: bool,
+    pending_dangling: Vec<u32>,
     input: TextInput,
     rx: Option<mpsc::Receiver<ChatEvent>>,
     scroll_offset: usize, // lines scrolled up from the bottom (0 = pinned to bottom)
@@ -55,6 +59,7 @@ impl ChatScreen {
             current_status: None,
             pending_sources: vec![],
             pending_contradiction: false,
+            pending_dangling: vec![],
             input: TextInput::new(),
             rx: None,
             scroll_offset: 0,
@@ -132,10 +137,12 @@ impl ChatScreen {
             content: question.clone(),
             sources: vec![],
             has_contradiction: false,
+            dangling: vec![],
         });
         self.input.clear();
         self.pending_sources.clear();
         self.pending_contradiction = false;
+        self.pending_dangling.clear();
         self.current_stream = Some(String::new());
         self.current_status = None;
         self.scroll_offset = 0; // snap to bottom on send
@@ -178,9 +185,10 @@ impl ChatScreen {
                     self.current_status = None; // status replaced by actual text
                     if let Some(b) = &mut self.current_stream { b.push_str(&text); }
                 }
-                ChatEvent::Sources { citations, has_contradiction } => {
+                ChatEvent::Sources { citations, has_contradiction, dangling_citations } => {
                     self.pending_sources = citations;
                     self.pending_contradiction = has_contradiction;
+                    self.pending_dangling = dangling_citations;
                 }
                 ChatEvent::Done => {
                     if let Some(text) = self.current_stream.take() {
@@ -189,6 +197,7 @@ impl ChatScreen {
                             content: text,
                             sources: std::mem::take(&mut self.pending_sources),
                             has_contradiction: std::mem::take(&mut self.pending_contradiction),
+                            dangling: std::mem::take(&mut self.pending_dangling),
                         });
                     }
                     self.current_status = None;
@@ -208,6 +217,7 @@ impl ChatScreen {
                         content,
                         sources: std::mem::take(&mut self.pending_sources),
                         has_contradiction: std::mem::take(&mut self.pending_contradiction),
+                        dangling: std::mem::take(&mut self.pending_dangling),
                     });
                     close_rx = true;
                 }
@@ -274,6 +284,16 @@ impl ChatScreen {
                             Span::styled(src.label.as_str(), Theme::source()),
                         ]));
                     }
+                }
+                if !msg.dangling.is_empty() {
+                    let nums = msg.dangling.iter()
+                        .map(|n| format!("[{}]", n))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    lines.push(Line::from(Span::styled(
+                        format!("⚠ {} resolve to no source — treat those claims with care", nums),
+                        Theme::warning().add_modifier(Modifier::ITALIC),
+                    )));
                 }
             }
             lines.push(Line::from("")); // spacer between messages

@@ -71,7 +71,11 @@ class UploadRepository:
         """
         async with self._pool.acquire() as conn:
             await conn.execute(
-                "UPDATE source_uploads SET content = NULL, text_content = NULL WHERE id = $1",
+                """
+                UPDATE source_uploads
+                SET content = NULL, text_content = NULL, cleared_at = NOW()
+                WHERE id = $1
+                """,
                 upload_id,
             )
 

@@ -41,6 +41,11 @@ from peritus.uploads.service import ingest_upload, summary_event
 
 logger = get_logger(__name__)
 
+# Ceiling on the poll backoff after repeated failures. A worker that has been
+# unable to reach Postgres for a while should keep checking on a slow cadence
+# rather than either hammering it or giving up on the queue entirely.
+_MAX_POLL_BACKOFF = 60.0
+
 
 class _JobCancelled(Exception):
     """Raised internally when a running job is cancelled or reaped mid-build."""
@@ -73,10 +78,24 @@ class BuildWorker:
 
     async def run(self) -> None:
         logger.info("BuildWorker %s started (concurrency=%d)", self.worker_id, self._concurrency)
+        consecutive_failures = 0
         try:
             while not self._stop.is_set():
-                await self._maybe_reap()
-                claimed_any = await self._fill_slots()
+                try:
+                    await self._maybe_reap()
+                    claimed_any = await self._fill_slots()
+                except Exception as exc:
+                    # The claim query talks to Postgres on every poll, and against
+                    # a transaction pooler (Supabase) a pooled connection can be
+                    # closed under us at any moment — asyncpg only finds out when
+                    # it next writes, raising ConnectionDoesNotExistError. That is
+                    # a routine event, not a reason to lose the process: an
+                    # unhandled raise here exits run(), exits worker_main(), and
+                    # takes every in-flight build down with it.
+                    consecutive_failures += 1
+                    await self._pause_after_failure(consecutive_failures, exc)
+                    continue
+                consecutive_failures = 0
                 if not claimed_any:
                     # Nothing to do — idle until the next poll or a stop signal.
                     with suppress(TimeoutError):
@@ -86,6 +105,32 @@ class BuildWorker:
         finally:
             await self._drain()
             logger.info("BuildWorker %s stopped", self.worker_id)
+
+    async def _pause_after_failure(self, consecutive_failures: int, exc: Exception) -> None:
+        """Back off after a failed poll, capped, and interruptible by shutdown.
+
+        Backoff matters because the common cause is the database being briefly
+        unreachable: retrying every WORKER_POLL_INTERVAL would spend an outage
+        hammering a dead endpoint and fill the log with identical traces. The cap
+        keeps a recovered database from waiting minutes to be noticed.
+        """
+        delay = min(
+            settings.WORKER_POLL_INTERVAL * (2 ** (consecutive_failures - 1)),
+            _MAX_POLL_BACKOFF,
+        )
+        # First failure logs the traceback, repeats log one line: a database that
+        # is down for a minute should not write the same stack fifty times.
+        if consecutive_failures == 1:
+            logger.warning(
+                "Build worker poll failed — retrying in %.0fs: %s", delay, exc, exc_info=True
+            )
+        else:
+            logger.warning(
+                "Build worker poll still failing (attempt %d) — retrying in %.0fs: %s",
+                consecutive_failures, delay, exc,
+            )
+        with suppress(TimeoutError):
+            await asyncio.wait_for(self._stop.wait(), timeout=delay)
 
     async def _fill_slots(self) -> bool:
         claimed_any = False
@@ -418,15 +463,32 @@ class BuildWorker:
 
         Deliberately *not* retryable. A retry would re-spend the same money on
         the same corpus and hit the same ceiling, so the job is failed outright
-        even with attempts remaining. The user is refunded in full — they have no
-        usable expert — and the overspend stays visible in build_usage_events.
+        even with attempts remaining. The user is refunded in full and the
+        overspend stays visible in build_usage_events.
+
+        One nuance: the cap can fire *after* the expert became chat-ready (the
+        enrichment stages spend real money too). A chattable corpus is a usable
+        product, so it is published as READY with the cap message on record —
+        marking it failed would hide a working expert behind a red badge.
         """
         message = str(exc)
         logger.error("Job %d aborted on spend cap: %s", job.id, message)
         with suppress(Exception):
             await BillingRepository(self._pool).mark_cap_exceeded(job.id)
+        expert = None
         with suppress(Exception):
-            await expert_repo.update_status(job.expert_id, ExpertStatus.FAILED, message)
+            expert = await expert_repo.get_by_id(job.expert_id)
+        if expert is not None and expert.is_chattable:
+            with suppress(Exception):
+                await expert_repo.update_status(
+                    job.expert_id,
+                    ExpertStatus.READY,
+                    f"{message} The expert answers from retrieval; "
+                    "graph/persona enrichment was cut short.",
+                )
+        else:
+            with suppress(Exception):
+                await expert_repo.update_status(job.expert_id, ExpertStatus.FAILED, message)
         with suppress(Exception):
             await self._jobs.append_event(job.id, "error", {
                 "type": "error",

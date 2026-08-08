@@ -14,11 +14,16 @@ use crate::tui::widgets::spinner;
 
 const CARD_WIDTH: u16 = 46;
 
+// "auto" is not sent to the server at all — the API resolves the deepest tier
+// the account's plan and credit balance afford. It is the default because a
+// topic alone should always be a buildable request.
 const TIERS: &[(&str, &str, &str)] = &[
-    ("lite",     "LITE",     "~10 sources · fast"),
-    ("standard", "STANDARD", "~20 sources · balanced"),
-    ("pro",      "PRO",      "~40 sources · deep"),
+    ("auto",     "AUTO",     "best your plan affords"),
+    ("lite",     "LITE",     "~15 sources · fast"),
+    ("standard", "STANDARD", "~30 sources · balanced"),
+    ("pro",      "PRO",      "~60 sources · deep"),
 ];
+const DEFAULT_TIER_IDX: usize = 0; // AUTO
 
 pub struct HomeScreen {
     pub experts: Vec<ExpertSummary>,
@@ -41,7 +46,7 @@ impl HomeScreen {
             input_active: false,
             confirm_delete: false,
             tier_select_active: false,
-            tier_selected: 1, // default to STANDARD
+            tier_selected: DEFAULT_TIER_IDX,
             pending_topic: None,
             input: TextInput::new(),
             submitted_build: None,
@@ -104,7 +109,7 @@ impl HomeScreen {
         let topic = self.input.take_trimmed();
         if !topic.is_empty() {
             self.pending_topic = Some(topic);
-            self.tier_selected = 1; // reset to STANDARD each time
+            self.tier_selected = DEFAULT_TIER_IDX; // reset each time
             self.tier_select_active = true;
         }
         self.input_active = false;
@@ -184,8 +189,12 @@ impl HomeScreen {
             let expert = &self.experts[idx];
 
             let x = cards_area.x + slot as u16 * CARD_WIDTH;
-            if x + CARD_WIDTH > cards_area.x + cards_area.width { break; }
-            let card_area = Rect::new(x, cards_area.y, CARD_WIDTH - 1, cards_area.height);
+            // Later cards must fit whole; the first card clamps to whatever
+            // width there is, so a narrow terminal still shows *something*.
+            if slot > 0 && x + CARD_WIDTH > cards_area.x + cards_area.width { break; }
+            let w = (CARD_WIDTH - 1).min((cards_area.x + cards_area.width).saturating_sub(x));
+            if w < 10 { break; }
+            let card_area = Rect::new(x, cards_area.y, w, cards_area.height);
 
             let card_build = build_info.filter(|b| b.topic == expert.topic);
             render_expert_card(f, card_area, expert, idx == self.selected, card_build, tick);
@@ -210,6 +219,7 @@ impl HomeScreen {
         // Footer hints / new-expert input
         let hint_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
         let selected_status = self.selected_expert().map(|e| e.status.as_str()).unwrap_or("");
+        let selected_chattable = self.selected_expert().map(|e| e.can_chat()).unwrap_or(false);
 
         let (footer_text, hint_style) = if self.input_active {
             (String::new(), Theme::dim())
@@ -218,9 +228,11 @@ impl HomeScreen {
                 .and_then(|e| e.persona_name.as_deref().or(Some(e.name.as_str())))
                 .unwrap_or("this expert");
             (format!("Delete \"{}\"?  [D] Confirm  [Esc] Cancel", name), Theme::error())
+        } else if (selected_status == "building" || selected_status == "queued") && selected_chattable {
+            ("[Enter] Chat now  [b] Watch Build  [n] New  [d] Delete  [q] Quit".to_string(), Theme::accent())
         } else if selected_status == "building" || selected_status == "queued" {
             ("[Enter/b] Watch Build  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::accent())
-        } else if selected_status == "failed" {
+        } else if selected_status == "failed" && !selected_chattable {
             ("[Enter] Rebuild  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
         } else {
             ("[n] New  [Enter] Chat  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
@@ -247,10 +259,15 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
     let display_name = expert.persona_name.as_deref().unwrap_or(expert.name.as_str());
 
     let (status_label, status_style) = match expert.status.as_str() {
-        "ready"    => ("✓ ready",    Theme::success()),
+        "ready" => ("✓ ready", Theme::success()),
+        // Chat-ready mid-build: the corpus is embedded and answers questions
+        // while the graph/persona stages are still running.
+        "building" | "queued" if expert.can_chat() => ("★ chat-ready", Theme::success()),
         "building" => ("● building", Theme::warning()),
         "queued"   => ("◌ queued",   Theme::warning()),
-        _          => ("✗ failed",   Theme::error()),
+        // e.g. a build that failed after the corpus was embedded: still usable.
+        _ if expert.can_chat() => ("△ usable", Theme::warning()),
+        _ => ("✗ failed", Theme::error()),
     };
 
     let border_style = if is_selected { Theme::selected_border() } else { Theme::normal_border() };
@@ -525,7 +542,7 @@ fn render_input_popup(f: &mut Frame, area: Rect, input: &TextInput) {
 }
 
 fn render_tier_popup(f: &mut Frame, area: Rect, topic: &str, selected: usize) {
-    let popup_w = 58u16.min(area.width.saturating_sub(4));
+    let popup_w = 76u16.min(area.width.saturating_sub(4));
     let popup = centered_rect(popup_w, 8, area);
     f.render_widget(Clear, popup);
     f.render_widget(
@@ -540,8 +557,8 @@ fn render_tier_popup(f: &mut Frame, area: Rect, topic: &str, selected: usize) {
     );
     let inner = Rect::new(popup.x + 2, popup.y + 1, popup.width.saturating_sub(4), popup.height.saturating_sub(2));
 
-    // Three tier columns
-    let col_w = (inner.width / 3).max(1);
+    // One column per tier
+    let col_w = (inner.width / TIERS.len() as u16).max(1);
     for (i, (_, label, desc)) in TIERS.iter().enumerate() {
         let is_sel = i == selected;
         let x = inner.x + i as u16 * col_w;

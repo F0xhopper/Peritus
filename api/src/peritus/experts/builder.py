@@ -123,6 +123,11 @@ _FETCHER_NAMES: tuple[str, ...] = (
     "thought_leaders",
     "pubmed",
 )
+
+# Public alias: the API layer validates BuildRequest.sources against this so an
+# unknown fetcher name is rejected at the door instead of producing an empty
+# discovery round minutes later.
+FETCHER_NAMES: tuple[str, ...] = _FETCHER_NAMES
 _MAX_QUERIES_PER_FETCHER = 3
 
 _FETCHER_PLAN_SCHEMA: dict[str, Any] = {
@@ -475,6 +480,16 @@ class ExpertBuilder:
             },
         )
 
+        # ── Best-effort enrichment ───────────────────────────────────────────
+        # From here on the expert already answers questions. A failure in graph
+        # extraction or persona generation must not fail — and via the worker's
+        # retry loop, *re-run* — a build whose corpus is fetched, validated,
+        # embedded and paid for. Each stage degrades independently: a graph
+        # failure leaves a chat-ready expert without graph expansion, a persona
+        # failure leaves a nameless one. Both are recoverable later without a
+        # rebuild (regenerate_persona; a future graph backfill), and both emit a
+        # `stage_degraded` event so the person watching knows what they got.
+
         # Stage 4: Graph extraction
         total_batches = math.ceil(len(all_chunks_for_graph) / settings.GRAPH_BATCH_SIZE)
         await _emit_event(
@@ -489,64 +504,103 @@ class ExpertBuilder:
                 on_event, {"type": "graph_batch_done", "labels": labels, "edges": edge_count}
             )
 
-        extractions = await extract_graph_from_chunks(
-            topic, chunks_only, ids_only, on_batch=_on_graph_batch
-        )
-        node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(
-            expert.id, extractions, embedder=embed_in_batches
-        )
+        node_count = edge_count = 0
+        graph_built = False
+        try:
+            extractions = await extract_graph_from_chunks(
+                topic, chunks_only, ids_only, on_batch=_on_graph_batch
+            )
+            node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(
+                expert.id, extractions, embedder=embed_in_batches
+            )
 
-        # Entity resolution: merge semantically duplicate graph nodes
-        await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "resolve"})
-        merged_count = await _resolve_entities(expert.id, self._graph_repo, on_event)
-        if merged_count:
-            await _emit_event(on_event, {"type": "entities_resolved", "merged": merged_count})
-            node_count = max(0, node_count - merged_count)
+            # Entity resolution: merge semantically duplicate graph nodes
+            await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "resolve"})
+            merged_count = await _resolve_entities(expert.id, self._graph_repo, on_event)
+            if merged_count:
+                await _emit_event(on_event, {"type": "entities_resolved", "merged": merged_count})
+                node_count = max(0, node_count - merged_count)
+            graph_built = True
+        except asyncio.CancelledError:
+            raise  # cancellation/shutdown is the worker's business, not a degrade
+        except Exception as exc:
+            logger.warning("Graph extraction failed for expert %d: %s", expert.id, exc)
+            await _emit_event(
+                on_event,
+                {
+                    "type": "stage_degraded",
+                    "stage": "graph",
+                    "message": (
+                        "Concept-graph extraction failed; the expert answers from "
+                        f"retrieval alone. ({exc})"
+                    ),
+                },
+            )
 
         await self._repo.update_counts(
             expert.id,
-            source_count=len(passed),
-            chunk_count=len(all_chunk_ids),
+            source_count=total_sources,
+            chunk_count=total_chunks,
             node_count=node_count,
             edge_count=edge_count,
             avg_quality=avg_quality,
         )
 
-        # ── Graph-ready ──────────────────────────────────────────────────────
-        # Retrieval transparently upgrades from here: the same chat request now
-        # finds anchor nodes for its hits, so passages arrive with neighbouring
-        # concepts, relationships, and contradiction flags. No client action.
-        await set_readiness(self._pool, expert.id, Readiness.GRAPH_READY)
-        await _emit_event(
-            on_event,
-            {
-                "type": "graph_ready",
-                "nodes": node_count,
-                "edges": edge_count,
-                "graph_expanded": True,
-            },
-        )
+        if graph_built:
+            # ── Graph-ready ──────────────────────────────────────────────────
+            # Retrieval transparently upgrades from here: the same chat request
+            # now finds anchor nodes for its hits, so passages arrive with
+            # neighbouring concepts, relationships, and contradiction flags. On
+            # a degraded graph the expert simply stays chat-ready.
+            await set_readiness(self._pool, expert.id, Readiness.GRAPH_READY)
+            await _emit_event(
+                on_event,
+                {
+                    "type": "graph_ready",
+                    "nodes": node_count,
+                    "edges": edge_count,
+                    "graph_expanded": True,
+                },
+            )
 
         await _emit_event(on_event, {"type": "stage", "stage": 5, "name": "persona"})
-        top_nodes = await self._graph_repo.get_top_nodes(expert.id, 20)
-        persona = await _generate_persona(topic, passed, top_nodes)
-        await self._repo.update_persona(
-            expert.id,
-            persona_name=persona["name"],
-            persona_bio=persona["bio"],
-            persona_style=persona["style"],
-        )
-        await _emit_event(on_event, {"type": "persona_ready", "name": persona["name"]})
+        persona_name: str | None = None
+        try:
+            top_nodes = await self._graph_repo.get_top_nodes(expert.id, 20)
+            persona = await _generate_persona(topic, passed, top_nodes)
+            await self._repo.update_persona(
+                expert.id,
+                persona_name=persona["name"],
+                persona_bio=persona["bio"],
+                persona_style=persona["style"],
+            )
+            persona_name = persona["name"]
+            await _emit_event(on_event, {"type": "persona_ready", "name": persona_name})
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Persona generation failed for expert %d: %s", expert.id, exc)
+            await _emit_event(
+                on_event,
+                {
+                    "type": "stage_degraded",
+                    "stage": "persona",
+                    "message": (
+                        "Persona generation failed; the expert answers without a "
+                        f"named voice and can be re-voiced later. ({exc})"
+                    ),
+                },
+            )
 
         return BuildResult(
             expert_id=expert.id,
-            source_count=len(passed),
+            source_count=total_sources,
             dropped_count=len(dropped),
-            chunk_count=len(all_chunk_ids),
+            chunk_count=total_chunks,
             node_count=node_count,
             edge_count=edge_count,
             avg_quality=avg_quality,
-            persona_name=persona["name"],
+            persona_name=persona_name,
         )
 
     async def _stage_discover(

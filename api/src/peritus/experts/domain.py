@@ -113,10 +113,17 @@ class TierEconomics:
 # cost of a healthy build at each tier, so they only fire on a genuine runaway
 # (a pathological corpus, a retry storm, a model price change). Override per
 # deployment with PERITUS_TIER_CAP_{LITE,STANDARD,PRO}_USD.
+#
+# Sizing: a measured healthy *interactive* lite build (18 sources, 576 chunks)
+# spends ≈ $1.60 — contextualisation ~$0.65, graph extraction ~$0.79, the rest
+# in validation/plan/triage/persona. First builds always run interactive (a
+# person is watching), so caps must clear the interactive cost with headroom,
+# not the half-price batched cost. The previous 1/3/8 caps sat *below* healthy
+# cost and killed every lite build mid-graph.
 _TIER_ECONOMICS: dict[ExpertTier, TierEconomics] = {
-    ExpertTier.LITE:     TierEconomics(credit_cost=1, spend_cap_usd=1.00),
-    ExpertTier.STANDARD: TierEconomics(credit_cost=3, spend_cap_usd=3.00),
-    ExpertTier.PRO:      TierEconomics(credit_cost=8, spend_cap_usd=8.00),
+    ExpertTier.LITE:     TierEconomics(credit_cost=1, spend_cap_usd=3.00),
+    ExpertTier.STANDARD: TierEconomics(credit_cost=3, spend_cap_usd=6.00),
+    ExpertTier.PRO:      TierEconomics(credit_cost=8, spend_cap_usd=12.00),
 }
 
 

@@ -6,6 +6,13 @@
 #
 # Commands use the project venv explicitly (../.venv/bin/...) so they work even
 # if the venv isn't activated in your shell.
+#
+# The API pins RUN_WORKER_IN_PROCESS=false rather than inheriting it: this file
+# already starts a worker, and a leftover `RUN_WORKER_IN_PROCESS=true` in .env
+# (which is what `just dev-solo` wants) would silently start a second one inside
+# the API. Two workers is not a correctness problem — SKIP LOCKED means they
+# cannot claim the same job — but it doubles the connection pools held against
+# the database and halves how long each survives a transaction pooler.
 
-api:    cd api && ../.venv/bin/uvicorn peritus.api.app:app --reload --host 0.0.0.0 --port 8000
+api:    cd api && RUN_WORKER_IN_PROCESS=false ../.venv/bin/uvicorn peritus.api.app:app --reload --host 0.0.0.0 --port 8000
 worker: cd api && ../.venv/bin/python -m peritus.jobs.runner

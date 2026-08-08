@@ -49,6 +49,9 @@ pub struct BuildScreen {
     /// Armed by the first [x]; the second [x] actually cancels.
     pub confirm_cancel: bool,
     cancel_sent: bool,
+    /// Written by the cancel task on failure, drained in tick() so a rejected
+    /// cancel un-latches instead of showing "Cancelling…" forever.
+    cancel_failed: Arc<std::sync::Mutex<Option<String>>>,
     start_time: std::time::Instant,
     stage: u8,
     stage_name: String,
@@ -71,6 +74,9 @@ pub struct BuildScreen {
     graph_total_edges: u64,
     // Persona
     persona_name: Option<String>,
+    // Set on the server's chat_ready event — the expert answers from here on,
+    // a full stage before the build finishes.
+    pub chat_ready: bool,
     // Activity log
     log_lines: VecDeque<LogEntry>,
     pub done: bool,
@@ -97,7 +103,9 @@ impl BuildScreen {
         let (tx, rx) = mpsc::channel::<BuildEvent>(256);
         let api_clone = api.clone();
         let topic_clone = topic.clone();
-        let tier_clone = tier.clone();
+        // "auto" means "let the server pick the deepest tier the account
+        // affords" — expressed on the wire by omitting the field.
+        let tier_clone = if tier == "auto" { None } else { Some(tier.clone()) };
         let cancel_clone = cancel.clone();
         let slug = crate::api::client::slugify(&topic);
         let slug_clone = slug.clone();
@@ -109,7 +117,10 @@ impl BuildScreen {
         tokio::spawn(async move {
             const BACKOFF: std::time::Duration = std::time::Duration::from_secs(2);
             const MAX_EMPTY_RECONNECTS: u32 = 5;
-            let slug = slug_clone;
+            // Starts as the client-side slugify guess; replaced by the server's
+            // authoritative slug from the `created` event (collisions
+            // auto-suffix, and Unicode topics can slugify differently here).
+            let mut slug = slug_clone;
             let mut last_seq: u64 = 0;
             let mut first = start_build;
             let mut empty_reconnects: u32 = 0;
@@ -129,6 +140,7 @@ impl BuildScreen {
                         if empty_reconnects > MAX_EMPTY_RECONNECTS {
                             let _ = tx.send(BuildEvent::Error {
                                 message: format!("Lost connection to build: {}", e),
+                                code: None, spent_usd: None, cap_usd: None,
                             }).await;
                             break 'outer;
                         }
@@ -148,6 +160,9 @@ impl BuildScreen {
                             Some(Ok(se)) => {
                                 got_event = true;
                                 if let Some(s) = se.seq { last_seq = s; }
+                                if let BuildEvent::Created { slug: server_slug, .. } = &se.event {
+                                    slug = server_slug.clone();
+                                }
                                 let is_terminal = se.event.is_terminal();
                                 let _ = tx.send(se.event).await;
                                 if is_terminal { terminal = true; break; }
@@ -169,6 +184,7 @@ impl BuildScreen {
                     if empty_reconnects > MAX_EMPTY_RECONNECTS {
                         let _ = tx.send(BuildEvent::Error {
                             message: "Build stream ended unexpectedly.".to_string(),
+                            code: None, spent_usd: None, cap_usd: None,
                         }).await;
                         break 'outer;
                     }
@@ -187,6 +203,7 @@ impl BuildScreen {
             api,
             confirm_cancel: false,
             cancel_sent: false,
+            cancel_failed: Arc::new(std::sync::Mutex::new(None)),
             start_time: std::time::Instant::now(),
             stage: 0,
             stage_name: String::new(),
@@ -203,6 +220,7 @@ impl BuildScreen {
             graph_total_nodes: 0,
             graph_total_edges: 0,
             persona_name: None,
+            chat_ready: false,
             log_lines: VecDeque::with_capacity(500),
             done: false,
             error: None,
@@ -225,9 +243,13 @@ impl BuildScreen {
         self.log("Cancelling build…", LogLevel::Info);
         let api = self.api.clone();
         let slug = self.slug.clone();
+        let failed = self.cancel_failed.clone();
         tokio::spawn(async move {
             if let Err(e) = api.cancel_build(&slug).await {
                 tracing::warn!("Cancel request failed for {}: {}", slug, e);
+                if let Ok(mut guard) = failed.lock() {
+                    *guard = Some(e.to_string());
+                }
             }
         });
     }
@@ -290,11 +312,54 @@ impl BuildScreen {
         self.graph_total_nodes = 0;
         self.graph_total_edges = 0;
         self.persona_name = None;
+        self.chat_ready = false;
     }
 
     pub async fn tick(&mut self) -> bool {
-        while let Ok(event) = self.rx.try_recv() {
+        // A rejected cancel (e.g. the build already finished — 409) must
+        // un-latch, or the footer shows "Cancelling…" forever.
+        let cancel_err = self.cancel_failed.lock().ok().and_then(|mut g| g.take());
+        if let Some(e) = cancel_err {
+            self.cancel_sent = false;
+            self.log(format!("Cancel failed: {}", e), LogLevel::Error);
+        }
+        loop {
+            let event = match self.rx.try_recv() {
+                Ok(event) => event,
+                Err(mpsc::error::TryRecvError::Empty) => break,
+                Err(mpsc::error::TryRecvError::Disconnected) => {
+                    // The event pump exited. It always sends a terminal event
+                    // first on normal paths — if we got neither, surface it
+                    // rather than spinning forever.
+                    if !self.done && self.error.is_none() {
+                        self.error = Some(
+                            "Build stream closed — the build may still be running on the \
+                             server; re-open it from Home with [b]".to_string(),
+                        );
+                    }
+                    break;
+                }
+            };
             match &event {
+                BuildEvent::Created { slug, tier } => {
+                    // The server's slug is authoritative (collisions auto-suffix),
+                    // and an auto build learns its resolved tier here.
+                    self.slug = slug.clone();
+                    if !tier.is_empty() && self.tier == "auto" {
+                        self.tier = tier.clone();
+                        self.log(format!("Tier resolved: {}", tier), LogLevel::Info);
+                    }
+                }
+                BuildEvent::ExecutionMode { mode, batched } => {
+                    if *batched {
+                        self.log(
+                            "Running batched (half price — stages may queue up to an hour)",
+                            LogLevel::Info,
+                        );
+                    } else if mode == "interactive" {
+                        self.log("Running live", LogLevel::Info);
+                    }
+                }
                 BuildEvent::BuildStarted { attempt, max_attempts } => {
                     if *attempt > 1 {
                         self.reset_progress();
@@ -332,14 +397,24 @@ impl BuildScreen {
                     for f in active   { self.fetchers.insert(f.clone(), FetcherState::Fetching); }
                     self.log(format!("Starting {} source fetchers", fetchers.len()), LogLevel::Info);
                 }
-                BuildEvent::FetcherDone { name, count, skipped } => {
+                BuildEvent::FetcherDone { name, count, skipped, reason } => {
                     let state = if *skipped { FetcherState::Skipped } else { FetcherState::Done(*count) };
                     self.fetchers.insert(name.clone(), state);
                     if *skipped {
-                        self.log(format!("{}: skipped", name), LogLevel::Info);
+                        let why = if reason.is_empty() { String::new() } else { format!(" ({})", reason) };
+                        self.log(format!("{}: skipped{}", name, why), LogLevel::Info);
                     } else {
                         self.log(format!("{}: {} sources", name, count), LogLevel::Success);
                     }
+                }
+                BuildEvent::TriageDone { candidates, ranked, budget } => {
+                    self.log(
+                        format!("Triage: {} candidates → {} ranked (budget {})", candidates, ranked, budget),
+                        LogLevel::Success,
+                    );
+                }
+                BuildEvent::FetchDone { fetched, budget } => {
+                    self.log(format!("Fetched {} of {} budgeted sources", fetched, budget), LogLevel::Success);
                 }
                 BuildEvent::SnowballDone { added } => {
                     self.log(format!("Snowball: +{} sources", added), LogLevel::Success);
@@ -359,6 +434,41 @@ impl BuildScreen {
                     self.validate_passed = *passed;
                     self.validate_dropped = *dropped;
                     self.log(format!("{} accepted, {} dropped", passed, dropped), LogLevel::Success);
+                }
+                BuildEvent::CoverageGaps { gaps } => {
+                    self.log(
+                        format!("Coverage gaps — re-searching: {}", gaps.join(", ")),
+                        LogLevel::Info,
+                    );
+                }
+                BuildEvent::GapfillDone { added, still_uncovered } => {
+                    if still_uncovered.is_empty() {
+                        self.log(format!("Gap-fill: +{} sources, all concepts covered", added), LogLevel::Success);
+                    } else {
+                        self.log(
+                            format!("Gap-fill: +{} sources; still uncovered: {}", added, still_uncovered.join(", ")),
+                            LogLevel::Info,
+                        );
+                    }
+                }
+                BuildEvent::CorpusWarning { message } => {
+                    self.log(format!("⚠ {}", trunc(message, 120)), LogLevel::Error);
+                }
+                BuildEvent::ChatReady { sources, chunks } => {
+                    self.chat_ready = true;
+                    self.log(
+                        format!("★ Chat-ready — {} sources, {} chunks. You can already chat while the graph builds.", sources, chunks),
+                        LogLevel::Success,
+                    );
+                }
+                BuildEvent::GraphReady { nodes, edges } => {
+                    self.log(format!("★ Graph ready — {} concepts, {} edges", nodes, edges), LogLevel::Success);
+                }
+                BuildEvent::StageDegraded { stage, message } => {
+                    self.log(format!("⚠ {} stage degraded: {}", stage, trunc(message, 100)), LogLevel::Error);
+                }
+                BuildEvent::ResolveProgress { merged } => {
+                    self.log(format!("Resolving duplicates… {} merged", merged), LogLevel::Info);
                 }
                 BuildEvent::SourceIngested { title, chunks } => {
                     let short = trunc(title, 44);
@@ -380,20 +490,37 @@ impl BuildScreen {
                     self.persona_name = Some(name.clone());
                     self.log(format!("Persona: {}", name), LogLevel::Success);
                 }
-                BuildEvent::Done { source_count, chunk_count, node_count } => {
+                BuildEvent::Done { source_count, chunk_count, node_count, edge_count, persona_name } => {
                     self.done = true;
+                    if let Some(name) = persona_name {
+                        self.persona_name = Some(name.clone());
+                    }
+                    let voice = self.persona_name.as_deref()
+                        .map(|n| format!("  ·  {}", n))
+                        .unwrap_or_default();
                     self.log(
-                        format!("Done — {} sources · {} chunks · {} concepts", source_count, chunk_count, node_count),
+                        format!(
+                            "Done — {} sources · {} chunks · {} concepts · {} edges{}",
+                            source_count, chunk_count, node_count, edge_count, voice,
+                        ),
                         LogLevel::Success,
                     );
                     return true;
                 }
-                BuildEvent::Error { message } => {
+                BuildEvent::Error { message, code, spent_usd, cap_usd } => {
                     // Keep the build screen up so the error is readable. tick() only
                     // returns true on success (Done), which is what drives the
                     // "Ready to chat" navigation in the app loop.
-                    self.error = Some(message.clone());
-                    self.log(format!("Error: {}", message), LogLevel::Error);
+                    let msg = if code.as_deref() == Some("spend_cap_exceeded") {
+                        format!(
+                            "Build stopped at its spend cap (${:.2} of ${:.2}) and was refunded",
+                            spent_usd.unwrap_or(0.0), cap_usd.unwrap_or(0.0),
+                        )
+                    } else {
+                        message.clone()
+                    };
+                    self.error = Some(msg.clone());
+                    self.log(format!("Error: {}", msg), LogLevel::Error);
                 }
                 BuildEvent::Cancelled { message } => {
                     let msg = if message.is_empty() { "Build cancelled" } else { message.as_str() };
@@ -402,18 +529,6 @@ impl BuildScreen {
                 }
                 BuildEvent::Unknown => {}
             }
-        }
-        // The event pump exited (it always sends a terminal/Error event first in
-        // normal paths) — if we somehow got neither, surface it rather than
-        // spinning forever.
-        if matches!(self.rx.try_recv(), Err(mpsc::error::TryRecvError::Disconnected))
-            && !self.done
-            && self.error.is_none()
-        {
-            self.error = Some(
-                "Build stream closed — the build may still be running on the server; \
-                 re-open it from Home with [b]".to_string(),
-            );
         }
         false
     }
@@ -746,9 +861,10 @@ impl BuildScreen {
             Paragraph::new(format!("{}  Cancelling…  ·  {}", spin, elapsed)).style(Theme::warning())
         } else {
             let spin = spinner::braille(tick);
+            let chat_hint = if self.chat_ready { "  ·  ★ chat-ready — [Esc] then Enter to chat now" } else { "" };
             Paragraph::new(format!(
-                "{}  {}  ·  {}  ·  [Esc] Home (build keeps running)  ·  [x] Cancel build",
-                spin, stage_description_for(self.stage), elapsed,
+                "{}  {}  ·  {}{}  ·  [Esc] Home (build keeps running)  ·  [x] Cancel build",
+                spin, stage_description_for(self.stage), elapsed, chat_hint,
             )).style(Theme::dim())
         };
         f.render_widget(widget, area);
