@@ -90,6 +90,30 @@ worker claims the job and runs the pipeline; disconnecting changes nothing, and
 reconnecting replays from a cursor.
 
 ```mermaid
+sequenceDiagram
+    autonumber
+    participant C as Client
+    participant A as API
+    participant Q as Postgres<br/>(jobs + events)
+    participant W as Worker
+    C->>A: POST /experts/build {"topic"}
+    A->>A: slugify · resolve tier · authorize
+    A->>Q: create expert · enqueue job · take credit hold
+    A-->>C: SSE tail of build_events (seq 0…)
+    W->>Q: claim job (FOR UPDATE SKIP LOCKED)
+    loop pipeline stages
+        W->>Q: append progress events · heartbeat 10s
+        Q-->>C: events stream through the tail
+    end
+    Note over C: laptop closes — build unaffected
+    C->>A: GET …/build/events?after=<seq>
+    A-->>C: replay from cursor, then continue live
+    W->>Q: terminal event: done | error | cancelled
+```
+
+The pipeline the worker runs:
+
+```mermaid
 flowchart TD
     subgraph corpus ["Corpus assembly — failure here fails the build (hold refunded)"]
         P["PLAN — Claude writes the research brief:<br/>per-fetcher queries + weights, key concepts, must-have works"]
@@ -182,6 +206,29 @@ turn's cached prefix.
 Everything above leaves marks, and the audit API is the read-only surface over
 them (`/experts/{slug}/…`, full contract in [audit-api.md](audit-api.md)):
 
+```mermaid
+flowchart LR
+    subgraph marks ["What the pipelines leave behind"]
+        EV[("build_events<br/>durable event log")]
+        SRC[("sources<br/>the ledger: kept + rejected,<br/>scores, rubric, drop reason,<br/>discovered_via, concepts")]
+        GRPH[("concept graph<br/>nodes + typed edges,<br/>incl. contradicts")]
+        TRAIL[("answer audits<br/>one trail per answer")]
+    end
+    subgraph surface ["Read-only audit surface"]
+        SF["screening-flow<br/>the funnel: identified → triaged →<br/>fetched → validated → included"]
+        CR["corpus-report (+ CSV/RIS export)<br/>every source considered"]
+        COV["coverage<br/>evidence strength per key concept"]
+        CON["contradictions<br/>where the corpus disagrees,<br/>resolved to passages"]
+        AA["answer-audits<br/>which passages an answer<br/>considered and cited"]
+    end
+    EV --> SF
+    SRC --> SF
+    SRC --> CR
+    SRC --> COV
+    GRPH --> CON
+    TRAIL --> AA
+```
+
 - **`corpus-report`** — every source considered, kept *and* rejected, with
   scores, rubric version, drop reason, and the search that produced it;
   exportable as CSV or RIS (what Covidence/Zotero import).
@@ -203,7 +250,18 @@ worse than a gap.
 
 Chat is free and ungated over anything the caller can read, including the
 public catalog. **Builds cost credits**, held at enqueue and refunded in full
-if the build produces nothing usable. Plans live in code
+if the build produces nothing usable.
+
+```mermaid
+flowchart LR
+    G["grant (+)<br/>signup · manual · plan"] --> B(("balance<br/>= SUM(delta)<br/>append-only ledger"))
+    B -->|"build enqueued"| H["hold (−)<br/>keyed by job id —<br/>idempotent under double-submit"]
+    H -->|"build produced<br/>a usable expert"| K["kept — the build is paid for,<br/>cost_usd recorded from metering"]
+    H -->|"failure · cancellation ·<br/>spend-cap abort"| R["refund (+) in full"]
+    R --> B
+```
+
+Plans live in code
 (`billing/domain.py`): Free (lite only, 1 signup credit), Starter (+standard),
 Lab (+pro, 1.5× spend caps). Denials are structured 402s the client switches
 on (`insufficient_credits` / `tier_not_in_plan`), each carrying a renderable

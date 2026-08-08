@@ -660,7 +660,7 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
 
     let area = f.area();
     let w = 62u16.min(area.width.saturating_sub(4));
-    let h = 24u16.min(area.height.saturating_sub(2));
+    let h = 30u16.min(area.height.saturating_sub(2));
     let x = area.width.saturating_sub(w) / 2;
     let y = area.height.saturating_sub(h) / 2;
     let rect = Rect::new(x, y, w, h);
@@ -689,7 +689,9 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
         Line::from(""),
         Line::from(Span::styled("Chat", Theme::title())),
         key("Enter", "Send message"),
-        key("Esc", "Back (conversation is kept)"),
+        key("Esc", "Stop streaming answer · back"),
+        key("Alt+↑↓", "Recall sent questions (Ctrl+P/N too)"),
+        key("Ctrl+L ×2", "Start a new conversation"),
         key("↑↓ PgUp/Dn", "Scroll · End jumps to bottom"),
         Line::from(""),
         Line::from(Span::styled("Text editing (all inputs)", Theme::title())),

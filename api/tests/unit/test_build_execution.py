@@ -145,3 +145,82 @@ async def test_policy_reaches_gather_claude_calls(batch_on):
         with build_execution(BuildExecution.BACKGROUND):
             await gather_claude_calls(params, description="triage")
         assert batch.called
+
+
+# ── per-result progress callback ─────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_live_on_result_fires_as_each_call_completes():
+    """On the live path the callback must stream — not lump after the gather.
+
+    Call 1's request blocks until call 0's result has been reported; if
+    on_result only fired after the whole set finished (the old behaviour),
+    this would deadlock, which the timeout turns into a failure.
+    """
+    first_reported = asyncio.Event()
+    reported: list[tuple[int, str]] = []
+
+    async def fake_create(**params):
+        i = params["i"]
+        if i == 1:
+            await asyncio.wait_for(first_reported.wait(), timeout=2)
+        return f"msg{i}"
+
+    async def on_result(i: int, msg) -> None:
+        reported.append((i, msg))
+        if i == 0:
+            first_reported.set()
+
+    client = AsyncMock()
+    client.messages.create.side_effect = fake_create
+    with patch(
+        "peritus.infrastructure.anthropic_batch.get_anthropic_client", return_value=client
+    ), build_execution(BuildExecution.INTERACTIVE):
+        results = await gather_claude_calls(
+            [{"i": 0}, {"i": 1}], live_concurrency=1, on_result=on_result
+        )
+
+    assert results == ["msg0", "msg1"]
+    assert reported == [(0, "msg0"), (1, "msg1")]
+
+
+@pytest.mark.asyncio
+async def test_on_result_receives_none_for_failed_calls_and_may_raise():
+    """A failed call reports None; a raising callback must not fail the set."""
+    reported: list[tuple[int, object]] = []
+
+    async def on_result(i: int, msg) -> None:
+        reported.append((i, msg))
+        raise RuntimeError("progress pipe broke")
+
+    client = AsyncMock()
+    client.messages.create.side_effect = Exception("api down")
+    with patch(
+        "peritus.infrastructure.anthropic_batch.get_anthropic_client", return_value=client
+    ), patch("peritus.infrastructure.anthropic_batch.asyncio.sleep", new=AsyncMock()), \
+        build_execution(BuildExecution.INTERACTIVE):
+        results = await gather_claude_calls([{"i": 0}], on_result=on_result)
+
+    assert results == [None]
+    assert reported == [(0, None)]
+
+
+@pytest.mark.asyncio
+async def test_batch_path_reports_every_result_after_harvest(batch_on):
+    """Batch mode can't stream, but the callback still fires once per input."""
+    reported: list[tuple[int, object]] = []
+
+    async def on_result(i: int, msg) -> None:
+        reported.append((i, msg))
+
+    msgs = [f"msg{i}" for i in range(5)]
+    with patch(
+        "peritus.infrastructure.anthropic_batch._run_batch",
+        new=AsyncMock(return_value=list(msgs)),
+    ), build_execution(BuildExecution.BACKGROUND):
+        results = await gather_claude_calls(
+            [{"i": i} for i in range(5)], on_result=on_result
+        )
+
+    assert results == msgs
+    assert reported == list(enumerate(msgs))

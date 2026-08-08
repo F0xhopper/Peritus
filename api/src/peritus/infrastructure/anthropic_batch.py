@@ -26,7 +26,7 @@ failed after retries. Callers map ``None`` to their stage-specific fallback.
 
 import asyncio
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Coroutine, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from enum import StrEnum
@@ -101,21 +101,32 @@ def should_batch(request_count: int) -> bool:
     )
 
 
+ResultCallback = Callable[[int, Any], Coroutine[Any, Any, None]]
+
+
 async def gather_claude_calls(
     params_list: list[dict[str, Any]],
     *,
     live_concurrency: int = 4,
     description: str = "claude-calls",
+    on_result: ResultCallback | None = None,
 ) -> list[Any | None]:
     """Run every ``messages.create(**params)`` in ``params_list``.
 
     Returns one entry per input, in order: the ``Message`` or ``None``.
+
+    ``on_result(index, message_or_none)`` is awaited exactly once per input.
+    On the live path it fires as each call completes, so callers can stream
+    progress while the set is still running; on the batch path everything
+    arrives when the batch ends, so the calls fire together after harvest.
+    A callback failure is logged and swallowed — progress reporting must never
+    fail the work it reports on.
     """
     if not params_list:
         return []
 
     if not should_batch(len(params_list)):
-        return await _run_live(params_list, live_concurrency)
+        return await _run_live(params_list, live_concurrency, on_result=on_result)
 
     try:
         results = await _run_batch(params_list, description)
@@ -124,9 +135,11 @@ async def gather_claude_calls(
             "Message batch %r failed outright (%s) — falling back to live calls",
             description, exc,
         )
-        return await _run_live(params_list, live_concurrency)
+        return await _run_live(params_list, live_concurrency, on_result=on_result)
 
-    # Live-retry only the items the batch could not complete.
+    # Live-retry only the items the batch could not complete. on_result is not
+    # passed through: it is invoked once per input below, after the merge, so
+    # retried items are not reported twice (and not under their retry index).
     missing = [i for i, r in enumerate(results) if r is None]
     if missing:
         logger.warning(
@@ -136,29 +149,44 @@ async def gather_claude_calls(
         retried = await _run_live([params_list[i] for i in missing], live_concurrency)
         for idx, msg in zip(missing, retried, strict=True):
             results[idx] = msg
+    if on_result:
+        for i, msg in enumerate(results):
+            await _report(on_result, i, msg)
     return results
+
+
+async def _report(on_result: ResultCallback, index: int, msg: Any) -> None:
+    try:
+        await on_result(index, msg)
+    except Exception:
+        logger.warning("on_result callback failed for item %d", index, exc_info=True)
 
 
 async def _run_live(
     params_list: list[dict[str, Any]],
     concurrency: int,
+    on_result: ResultCallback | None = None,
 ) -> list[Any | None]:
     client = get_anthropic_client()
     sem = asyncio.Semaphore(max(1, concurrency))
 
-    async def one(params: dict[str, Any]) -> Any | None:
+    async def one(index: int, params: dict[str, Any]) -> Any | None:
+        msg: Any | None = None
         async with sem:
             for attempt in range(_LIVE_ATTEMPTS):
                 try:
-                    return await client.messages.create(**params)
+                    msg = await client.messages.create(**params)
+                    break
                 except Exception as exc:
                     if attempt == _LIVE_ATTEMPTS - 1:
                         logger.warning("Live Claude call failed after retries: %s", exc)
-                        return None
-                    await asyncio.sleep(2 ** attempt)
-        return None
+                    else:
+                        await asyncio.sleep(2 ** attempt)
+        if on_result:
+            await _report(on_result, index, msg)
+        return msg
 
-    return list(await asyncio.gather(*(one(p) for p in params_list)))
+    return list(await asyncio.gather(*(one(i, p) for i, p in enumerate(params_list))))
 
 
 async def _run_batch(

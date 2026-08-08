@@ -95,7 +95,10 @@ async def extract_graph_from_chunks(
     """Extract graph data from chunks in batches. Returns raw extraction dicts.
 
     Calls run through the Message Batches API (half price) when enabled, else
-    as concurrent live calls.
+    as concurrent live calls. ``on_batch`` fires per batch as its result lands —
+    on the live path that is while the stage is still running, so progress
+    (e.g. the TUI's per-batch ticker) streams instead of arriving in one lump
+    at the end. Batch-API results all land together, so there it still lumps.
     """
     size = batch_size or settings.GRAPH_BATCH_SIZE
 
@@ -104,27 +107,30 @@ async def extract_graph_from_chunks(
         for i in range(0, len(chunks), size)
     ]
 
-    responses = await gather_claude_calls(
-        [_extract_params(topic, batch_chunks) for batch_chunks, _ in batches],
-        live_concurrency=3,
-        description="graph-extract",
-    )
+    parsed: dict[int, dict] = {}
 
-    extractions = []
-    for i, ((_, batch_ids), resp) in enumerate(zip(batches, responses, strict=True)):
+    async def _on_result(i: int, resp: Any) -> None:
         if resp is None:
             logger.warning("Graph extraction failed for batch %d", i)
-            continue
+            return
         try:
-            data = _parse_extract_response(resp, batch_ids)
+            data = _parse_extract_response(resp, batches[i][1])
         except Exception as exc:
             logger.warning("Graph extraction failed for batch %d: %s", i, exc)
-            continue
+            return
+        parsed[i] = data
         if on_batch:
             labels = [n["label"] for n in data.get("nodes", []) if n.get("label")]
             await on_batch(labels, len(data.get("edges", [])))
-        extractions.append(data)
-    return extractions
+
+    await gather_claude_calls(
+        [_extract_params(topic, batch_chunks) for batch_chunks, _ in batches],
+        live_concurrency=3,
+        description="graph-extract",
+        on_result=_on_result,
+    )
+
+    return [parsed[i] for i in sorted(parsed)]
 
 
 def _extract_params(topic: str, chunks: list[TextChunk]) -> dict[str, Any]:

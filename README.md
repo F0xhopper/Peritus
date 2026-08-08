@@ -37,6 +37,14 @@ none is given, plans the search strategy, and names the persona. The full
 walkthrough — queue, worker, every stage, readiness, and what happens when
 things fail — is in [docs/build-flow.md](docs/build-flow.md).
 
+```mermaid
+flowchart LR
+    T(["topic"]) --> P["plan"] --> D["discover<br/>11 fetchers, over-searched"] --> TR["triage"] --> F["fetch +<br/>snowball"] --> V["validate +<br/>gap-fill"] --> CE["chunk +<br/>embed"]
+    CE --> CR(["★ chat-ready"])
+    CR --> G["concept<br/>graph"] --> PE["persona"] --> DONE(["done"])
+    G -. "failure degrades,<br/>never destroys" .-> PE
+```
+
 1. **Plan**: Claude turns the topic into a tailored search query for each source fetcher and names the 5–8 core concepts the corpus must cover.
 2. **Discover**: every fetcher runs concurrently — Wikipedia, Project Gutenberg, ArXiv, OpenAlex (peer-reviewed scholarship in any discipline), PubMed, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. Discovery deliberately over-searches (3× the fetch budget, with a floor of 10 results per query) and a fast triage pass ranks candidates on title and snippet, so far more sources are considered than are ever downloaded. High-citation references of accepted scholarly sources — anything with an arXiv id or a DOI — are snowballed in via Semantic Scholar.
 3. **Validate**: Claude scores each source for quality and relevance against a versioned rubric (currently `v3-concepts-q5r6`, thresholds q≥5 and r≥6) and tags it with the key concepts it substantively covers. Sources below threshold are dropped, with the reason recorded.
@@ -73,6 +81,12 @@ RIS is there because a grey-literature source Peritus found has no bibliographic
 ### Chat
 
 Each question is answered through a grounded retrieval loop:
+
+```mermaid
+flowchart LR
+    Q(["question"]) --> PL["plan<br/>subqueries"] --> HS["hybrid search<br/>semantic ⊕ keyword,<br/>RRF-fused"] --> GE["graph<br/>expand"] --> CV["coverage<br/>check"] --> CX["numbered<br/>passages"] --> CO["grounded<br/>compose"] --> A(["cited answer"])
+    CV -. "gap → one<br/>follow-up pass" .-> HS
+```
 
 1. **Plan** subqueries from the question.
 2. **Hybrid search** every subquery in parallel: semantic (pgvector) fused with keyword (Postgres full-text) via reciprocal-rank fusion, then optionally reranked (Cohere cross-encoder, or a windowed LLM fallback).

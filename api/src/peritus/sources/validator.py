@@ -218,22 +218,18 @@ async def validate_sources(
         for i in range(0, len(sources), _VALIDATE_BATCH_SIZE)
     ]
 
-    # One Claude call per batch — routed through the Message Batches API
-    # (half price) when enabled, else concurrent live calls.
-    responses = await gather_claude_calls(
-        [_validate_params(topic, b, key_concepts) for b in batches],
-        live_concurrency=settings.VALIDATE_CONCURRENCY,
-        description="validate",
-    )
-
     _ERROR_VALIDATION = {
         "quality_score": 0.0, "relevance_score": 0.0,
         "content_type": "other", "source_tier": None, "difficulty": 1,
         "key_claims": [], "drop_reason": "validation error",
     }
 
-    all_pairs: list[tuple[RawSource, dict]] = []
-    for batch, resp in zip(batches, responses, strict=True):
+    # Pairs per batch index — batches complete out of order on the live path,
+    # and the returned lists must keep the input's source order.
+    batch_pairs: dict[int, list[tuple[RawSource, dict]]] = {}
+
+    async def _on_batch_result(i: int, resp: Any) -> None:
+        batch = batches[i]
         if resp is None:
             logger.warning("Batch validation failed (%d sources)", len(batch))
             raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
@@ -244,7 +240,7 @@ async def validate_sources(
                 logger.warning("Batch validation unparseable (%d sources): %s", len(batch), exc)
                 raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
 
-        for source, raw in zip(batch, raw_validations, strict=True):
+        for raw in raw_validations:
             # Write the coerced floats back: everything downstream (the drop
             # decision, the persisted row, the audit export) must see the same
             # number, not whatever type the model happened to emit.
@@ -253,16 +249,31 @@ async def validate_sources(
                 raw.get("relevance_score", 0), "relevance_score"
             )
             raw["drop"] = q < _PASS_THRESHOLD_Q or r < _PASS_THRESHOLD_R
-            if on_result:
+        # All pairs are recorded before any progress emission: a failing
+        # on_result may cost progress events, never validation results.
+        batch_pairs[i] = list(zip(batch, raw_validations, strict=True))
+        if on_result:
+            for source, raw in batch_pairs[i]:
                 await on_result({
                     "title": source.title,
                     "source_type": source.source_type.value,
-                    "q": q,
-                    "r": r,
+                    "q": raw["quality_score"],
+                    "r": raw["relevance_score"],
                     "passed": not raw["drop"],
                     "drop_reason": raw.get("drop_reason"),
                 })
-            all_pairs.append((source, raw))
+
+    # One Claude call per batch — routed through the Message Batches API
+    # (half price) when enabled, else concurrent live calls. Results are parsed
+    # (and per-source progress emitted) as each batch lands, not after the set.
+    await gather_claude_calls(
+        [_validate_params(topic, b, key_concepts) for b in batches],
+        live_concurrency=settings.VALIDATE_CONCURRENCY,
+        description="validate",
+        on_result=_on_batch_result,
+    )
+
+    all_pairs = [pair for i in sorted(batch_pairs) for pair in batch_pairs[i]]
 
     passed: list[ValidatedSource] = []
     dropped: list[DroppedSource] = []
