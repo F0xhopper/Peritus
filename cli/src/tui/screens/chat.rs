@@ -3,7 +3,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::Modifier,
+    style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
         Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
@@ -16,6 +16,7 @@ use futures_util::StreamExt;
 use crate::api::client::ApiClient;
 use crate::api::types::{ChatEvent, ChatMessage, ChatRequest, ExpertSummary, SourceCitation};
 use crate::tui::theme::Theme;
+use crate::tui::widgets::avatar;
 use crate::tui::widgets::input_box::TextInput;
 use crate::tui::widgets::spinner;
 
@@ -28,8 +29,6 @@ pub struct Message {
     pub role: String,
     pub content: String,
     pub sources: Vec<SourceCitation>,
-    /// The retrieval traversed a `contradicts` edge — sources disagree.
-    pub has_contradiction: bool,
     /// `[n]` markers in the answer that resolve to no real passage — the model
     /// invented them, and they must not render as legitimate citations.
     pub dangling: Vec<u32>,
@@ -42,7 +41,6 @@ pub struct ChatScreen {
     current_stream: Option<String>,
     current_status: Option<String>,
     pending_sources: Vec<SourceCitation>,
-    pending_contradiction: bool,
     pending_dangling: Vec<u32>,
     input: TextInput,
     rx: Option<mpsc::Receiver<ChatEvent>>,
@@ -58,7 +56,6 @@ impl ChatScreen {
             current_stream: None,
             current_status: None,
             pending_sources: vec![],
-            pending_contradiction: false,
             pending_dangling: vec![],
             input: TextInput::new(),
             rx: None,
@@ -136,12 +133,10 @@ impl ChatScreen {
             role: "user".into(),
             content: question.clone(),
             sources: vec![],
-            has_contradiction: false,
             dangling: vec![],
         });
         self.input.clear();
         self.pending_sources.clear();
-        self.pending_contradiction = false;
         self.pending_dangling.clear();
         self.current_stream = Some(String::new());
         self.current_status = None;
@@ -185,9 +180,8 @@ impl ChatScreen {
                     self.current_status = None; // status replaced by actual text
                     if let Some(b) = &mut self.current_stream { b.push_str(&text); }
                 }
-                ChatEvent::Sources { citations, has_contradiction, dangling_citations } => {
+                ChatEvent::Sources { citations, dangling_citations } => {
                     self.pending_sources = citations;
-                    self.pending_contradiction = has_contradiction;
                     self.pending_dangling = dangling_citations;
                 }
                 ChatEvent::Done => {
@@ -196,7 +190,6 @@ impl ChatScreen {
                             role: "assistant".into(),
                             content: text,
                             sources: std::mem::take(&mut self.pending_sources),
-                            has_contradiction: std::mem::take(&mut self.pending_contradiction),
                             dangling: std::mem::take(&mut self.pending_dangling),
                         });
                     }
@@ -216,7 +209,6 @@ impl ChatScreen {
                         role: "assistant".into(),
                         content,
                         sources: std::mem::take(&mut self.pending_sources),
-                        has_contradiction: std::mem::take(&mut self.pending_contradiction),
                         dangling: std::mem::take(&mut self.pending_dangling),
                     });
                     close_rx = true;
@@ -229,6 +221,11 @@ impl ChatScreen {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, tick: u64) {
         let expert_name = self.expert.persona_name.as_deref().unwrap_or(&self.expert.name);
+        // Same per-expert tone as the home-screen avatar, so the identity
+        // established by the card follows the expert into the conversation.
+        let expert_style = Style::default()
+            .fg(avatar::tone_for(expert_name))
+            .add_modifier(Modifier::BOLD);
 
         let block = Block::default()
             .title(format!(" ◈ {} — {} ", expert_name, self.expert.topic))
@@ -261,17 +258,14 @@ impl ChatScreen {
                     Span::styled(msg.content.as_str(), Theme::normal()),
                 ]));
             } else {
-                lines.push(Line::from(Span::styled(
-                    expert_name,
-                    Theme::accent2().add_modifier(Modifier::BOLD),
-                )));
+                lines.push(Line::from(Span::styled(expert_name, expert_style)));
                 lines.extend(markdown::render(&msg.content));
-                if msg.has_contradiction {
-                    lines.push(Line::from(Span::styled(
-                        "⚠ The sources disagree on parts of this — note the tensions above",
-                        Theme::warning().add_modifier(Modifier::ITALIC),
-                    )));
-                }
+                // The stream still reports `has_contradiction` per answer, but —
+                // matching the web UI — it no longer renders as a footnote. A flag
+                // raised on every answer touching two sources that disagree reads
+                // as a defect report on the answer rather than as a property of
+                // the literature, and the answers already say so in prose where
+                // it matters.
                 if !msg.sources.is_empty() {
                     lines.push(Line::from(Span::styled(
                         "Sources cited",
@@ -301,10 +295,7 @@ impl ChatScreen {
 
         // In-flight streaming bubble.
         if let Some(buf) = &self.current_stream {
-            lines.push(Line::from(Span::styled(
-                expert_name,
-                Theme::accent2().add_modifier(Modifier::BOLD),
-            )));
+            lines.push(Line::from(Span::styled(expert_name, expert_style)));
             if buf.is_empty() {
                 // No tokens yet — show the current pipeline status with a spinner.
                 let label = self.current_status.as_deref().unwrap_or("Thinking…");

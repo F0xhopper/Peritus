@@ -4,7 +4,7 @@
 
 Search the literature a database export misses — and keep a record you can defend.
 
-Give Peritus a topic. It plans a search strategy, runs it across nine kinds of source, scores every candidate for quality and relevance against a versioned rubric, and keeps the whole ledger: what was found, what was kept, what was dropped and why, which search turned each source up, and where the surviving sources contradict each other. The survivors are embedded into a concept graph you can then question, with a citation on every claim.
+Give Peritus a topic. It plans a search strategy, runs it across eleven kinds of source, scores every candidate for quality and relevance against a versioned rubric, and keeps the whole ledger: what was found, what was kept, what was dropped and why, which search turned each source up, and where the surviving sources contradict each other. The survivors are embedded into a concept graph you can then question, with a citation on every claim.
 
 The point is not the answer. The point is being able to show how the body of evidence behind it was assembled.
 
@@ -22,6 +22,9 @@ Storage is PostgreSQL + [pgvector](https://github.com/pgvector/pgvector). There 
 
 ## How it works
 
+A whole-system overview — architecture, the build pipeline, the chat retrieval
+flow, and the evidence record — lives in [docs/README.md](docs/README.md).
+
 ### Build
 
 ```
@@ -35,7 +38,7 @@ walkthrough — queue, worker, every stage, readiness, and what happens when
 things fail — is in [docs/build-flow.md](docs/build-flow.md).
 
 1. **Plan**: Claude turns the topic into a tailored search query for each source fetcher and names the 5–8 core concepts the corpus must cover.
-2. **Discover**: every fetcher runs concurrently — Wikipedia, Project Gutenberg, ArXiv, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. Discovery deliberately over-searches (~3× the fetch budget) and a fast triage pass ranks candidates on title and snippet, so far more sources are considered than are ever downloaded. High-citation references from accepted ArXiv papers are snowballed in via Semantic Scholar.
+2. **Discover**: every fetcher runs concurrently — Wikipedia, Project Gutenberg, ArXiv, OpenAlex (peer-reviewed scholarship in any discipline), PubMed, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. Discovery deliberately over-searches (3× the fetch budget, with a floor of 10 results per query) and a fast triage pass ranks candidates on title and snippet, so far more sources are considered than are ever downloaded. High-citation references of accepted scholarly sources — anything with an arXiv id or a DOI — are snowballed in via Semantic Scholar.
 3. **Validate**: Claude scores each source for quality and relevance against a versioned rubric (currently `v3-concepts-q5r6`, thresholds q≥5 and r≥6) and tags it with the key concepts it substantively covers. Sources below threshold are dropped, with the reason recorded.
 4. **Cover the gaps**: accepted sources are counted against the planned key concepts. Any concept with no coverage triggers a second, targeted round of searching and validation — so the corpus carries an argument for its own sufficiency rather than stopping when the budget runs out.
 5. **Chunk & embed**: survivors are chunked, given Anthropic-style contextual prefixes, and embedded with OpenAI `text-embedding-3-large` (3072-dim).

@@ -1,10 +1,11 @@
 import Link from "next/link";
 import {
   ArrowUpRightIcon,
+  CalendarIcon,
   FileTextIcon,
   MessageSquareIcon,
   SparklesIcon,
-  TagIcon,
+  StarIcon,
   TriangleAlertIcon,
 } from "lucide-react";
 import {
@@ -23,7 +24,7 @@ import { ConceptList } from "@/components/experts/concept-list";
 import { ExpertMenu } from "@/components/experts/expert-menu";
 import { InfoRow } from "@/components/experts/info-row";
 import { PersonaAvatar } from "@/components/experts/persona-avatar";
-import { formatCompact } from "@/lib/format";
+import { formatCompact, formatQuality, formatShortDate } from "@/lib/format";
 import { personaLabel } from "@/lib/persona";
 import type { ExpertSummary } from "@/lib/api/types";
 
@@ -137,6 +138,10 @@ export function ExpertCard({ expert }: { expert: ExpertSummary }) {
 
       <Separator />
 
+      {/* The concept count that used to sit here is gone — the list above
+          already shows the concepts and its "+N more" carries the count. Its
+          row went to the two fields that actually split same-topic twins:
+          corpus quality and when the expert was built. */}
       <CardContent className="flex flex-col gap-2">
         <InfoRow
           icon={FileTextIcon}
@@ -144,11 +149,16 @@ export function ExpertCard({ expert }: { expert: ExpertSummary }) {
           value={formatCompact(expert.source_count)}
         />
         <InfoRow
-          icon={TagIcon}
-          label="Concepts"
-          value={formatCompact(expert.key_concepts.length)}
+          icon={StarIcon}
+          label="Quality"
+          value={formatQuality(expert.avg_quality)}
         />
         <InfoRow icon={SparklesIcon} label="Tier" value={expert.tier} />
+        <InfoRow
+          icon={CalendarIcon}
+          label="Created"
+          value={formatShortDate(expert.created_at)}
+        />
       </CardContent>
     </Card>
   );

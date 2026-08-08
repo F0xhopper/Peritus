@@ -100,6 +100,16 @@ _SEARCH_OVERFETCH = 3
 _FETCH_CONCURRENCY = 6
 _TYPE_CAP_FACTOR = 2
 
+# Floor under the search phase, per query. Quotas scale down with tier, but the
+# costs that tiers exist to bound — full fetch, OCR, validation, chunking,
+# graph — are all capped by the fetch budget, not by how many candidates triage
+# looks at; a search-API call is free and triage is a Haiku pass over
+# title+snippet. Without the floor, a lite build's overfetch worked out to 1–2
+# results per query, so triage picked winners out of ~50 candidates and could
+# not afford to be choosy. Quality comes from selectivity, and selectivity
+# needs a pool worth selecting from.
+_MIN_RESULTS_PER_QUERY = 10
+
 _FETCHER_SOURCE_TYPES: dict[str, SourceType] = {
     "wikipedia": SourceType.WIKIPEDIA,
     "gutenberg": SourceType.GUTENBERG,
@@ -641,8 +651,7 @@ class ExpertBuilder:
             queries = fetcher_plans.get(name, {}).get("queries") or [topic]
             if name in _SINGLE_QUERY_FETCHERS:
                 queries = queries[:1]
-            search_quota = quota * _SEARCH_OVERFETCH
-            per_query = max(1, math.ceil(search_quota / len(queries)))
+            per_query = _search_breadth(quota, len(queries))
             nested = await asyncio.gather(
                 *[_safe_search(name, fetcher, query, per_query) for query in queries]
             )
@@ -1302,6 +1311,19 @@ async def _resolve_entities(
             expert_id,
         )
     return merge_count
+
+
+def _search_breadth(quota: int, query_count: int) -> int:
+    """Results to request per search query for a fetcher with this fetch quota.
+
+    Overfetch scales with the quota so a heavily-weighted fetcher hands triage
+    proportionally more to choose from, but never drops below
+    ``_MIN_RESULTS_PER_QUERY`` — see the note on that constant.
+    """
+    return max(
+        _MIN_RESULTS_PER_QUERY,
+        math.ceil(quota * _SEARCH_OVERFETCH / max(1, query_count)),
+    )
 
 
 def _is_skipped(name: str, results: list) -> tuple[bool, str]:

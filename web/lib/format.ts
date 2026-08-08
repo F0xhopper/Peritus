@@ -36,6 +36,20 @@ export function formatCompact(value: number): string {
     : `${Math.round(thousands)}k`;
 }
 
+/** Fixed-locale short date ("Jan 14, 2026") for expert cards. The locale is
+ * pinned because the card renders on the server and hydrates on the client:
+ * `undefined` would use each machine's locale and the two can disagree, which
+ * React reports as a hydration mismatch. */
+export function formatShortDate(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 /** Source quality is scored 0–10 by the validator (see
  * api/src/peritus/sources/validator.py), so the scale ships with the number —
  * a bare "8.4" reads like a fraction of 1. Matches the CLI's "x.x / 10". */

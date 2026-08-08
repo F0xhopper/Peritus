@@ -1,9 +1,11 @@
 """Candidate triage — ranks cheap search hits before paying full-fetch costs.
 
-Discovery over-searches (~3× the fetch budget), then a fast Claude pass scores
-every candidate's expected value against the research brief. Only the ranked
-winners get fully downloaded/OCR'd, so the pipeline considers far more
-candidates than it fetches.
+Discovery over-searches (several multiples of the fetch budget — 3× the
+per-fetcher quota with a floor of 10 results per query, see
+builder._search_breadth), then a fast Claude pass scores every candidate's
+expected value against the research brief. Only the ranked winners get fully
+downloaded/OCR'd, so the pipeline considers far more candidates than it
+fetches.
 
 The model score is combined with a **domain prior**. Title and snippet alone
 cannot distinguish a work from a summary of that work: "Meditations by Marcus

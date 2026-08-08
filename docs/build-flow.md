@@ -151,10 +151,10 @@ stateDiagram-v2
 ```mermaid
 flowchart TD
     T(["topic"]) --> P["0 · PLAN<br/>Claude writes the research brief:<br/>per-fetcher queries + weights,<br/>5–8 key concepts, must-have works"]
-    P --> D["1 · DISCOVER<br/>10 fetchers search concurrently at 3× budget:<br/>wikipedia · gutenberg · arxiv · pdf · youtube<br/>exa · web · reddit · thought-leaders · pubmed"]
-    D --> TR["1b · TRIAGE<br/>Haiku ranks candidates on title+snippet<br/>against the brief; junk drops before download"]
+    P --> D["1 · DISCOVER<br/>11 fetchers search concurrently, over-searching<br/>3× the fetch quota (floor 10 results/query):<br/>wikipedia · gutenberg · arxiv · openalex · pubmed<br/>pdf · youtube · exa · web · reddit · thought-leaders"]
+    D --> TR["1b · TRIAGE<br/>Haiku scores candidates on title+snippet<br/>against the brief, × a domain prior;<br/>junk drops before download"]
     TR --> F["1c · FETCH<br/>full content for winners, budget-bound,<br/>refilling from lower ranks on failure"]
-    F --> SB["1d · SNOWBALL<br/>high-citation references of accepted<br/>arXiv papers via Semantic Scholar"]
+    F --> SB["1d · SNOWBALL<br/>high-citation references of accepted<br/>scholarly sources (arXiv id or DOI)<br/>via Semantic Scholar"]
     SB --> V["2 · VALIDATE<br/>Claude scores quality + relevance per source<br/>against versioned rubric, tags covered concepts<br/>(q≥5, r≥6 — below drops, reason recorded)"]
     V --> G["2b · GAP-FILL<br/>key concepts with zero coverage get one<br/>targeted re-search + validation round"]
     G --> CE["3 · CHUNK + EMBED<br/>1500-char chunks, contextual prefixes,<br/>text-embedding-3-large → pgvector"]
@@ -174,12 +174,38 @@ Stage notes, in pipeline order (`experts/builder.py`):
   downstream. A failed plan degrades to raw-topic queries with equal weights
   rather than failing the build. The planner may zero out a source type
   (weight 0 = "would add noise here") unless the user's explicit `sources`
-  filter requested it.
-- **Discovery over-searches ~3×** the fetch budget because searching is cheap
-  and downloading is not; triage decides what deserves a full fetch. The fetch
-  budget scales with tier (`source_multiplier`: 0.5/1.0/2.0 on a base of 30).
-  Per-type caps stop one source type from flooding the corpus.
-- **Validation** writes the ledger: every source, kept or dropped, with
+  filter requested it. Fetchers are routed by kind: `arxiv` for STEM preprints,
+  `pubmed` for biomedical literature, and `openalex` as the scholarly channel
+  for *every other* discipline (humanities, social science, law, economics…) —
+  the prompt tells the planner to find the adjacent research field before
+  zeroing it, on the view that every topic has some scholarly literature.
+- **Discovery over-searches** the fetch budget because searching is cheap and
+  downloading is not; triage decides what deserves a full fetch. Each fetcher
+  requests 3× its fetch quota, spread across its planned queries, with a floor
+  of 10 results per query (`_search_breadth`) — the floor exists because on a
+  lite build the raw arithmetic gave triage only 1–2 candidates per query,
+  leaving it nothing to be selective *with*; search-API calls are free and the
+  costly stages (fetch, OCR, validation, chunking) are bounded by the fetch
+  budget, not the candidate pool. The fetch budget scales with tier
+  (`source_multiplier`: 0.5/1.0/2.0 on a base of 30). Per-type caps stop one
+  source type from flooding the corpus.
+- **Triage** combines the model's expected-value score with a **domain prior**
+  (`sources/triage.py`): title and snippet alone can't distinguish a work from
+  a summary of that work, so known hosts get a nudge — journals and archives up
+  (arxiv.org, nature.com, doi.org, europepmc.org…), content farms down.
+- **Snowball** follows the reference lists of accepted scholarly sources
+  through Semantic Scholar. Any accepted source with an arXiv id *or a DOI*
+  seeds it — so a corpus of history or economics papers snowballs exactly like
+  a physics one. Up to 3 seeds are expanded; references with ≥ 50 citations
+  qualify, and up to 3 are added: arXiv references come back as ar5iv full
+  text, everything else resolves by DOI through OpenAlex (open-access text or
+  abstract).
+- **Validation** applies the rubric with per-source-type hints: academic types
+  (arxiv, pubmed, openalex) are judged on methodology and evidence — an
+  abstract-only record can still pass if the abstract substantively states the
+  finding — while classic texts are judged on relevance and significance
+  rather than modern academic style.
+- The same pass **writes the ledger**: every source, kept or dropped, with
   `quality_score`, `relevance_score`, `drop_reason`, `validator_model`,
   `rubric_version`, `discovered_via` (`plan` / `snowball` /
   `gapfill:<concept>` / `upload`), and `covered_concepts`.
@@ -245,6 +271,7 @@ Provider dependence, for operators:
 | Anthropic | boot-required | plan degrades; triage falls back to neutral scores; validation failure = terminal; graph/persona degrade |
 | OpenAI (embeddings) | boot-required | nothing embeds → terminal; graph-node embeddings degrade silently |
 | Exa | optional | exa/youtube/thought-leaders fetchers skip, reason surfaced in events |
+| OpenAlex | optional, keyless | openalex fetcher and DOI snowball resolution skip. Set `OPENALEX_MAILTO` to join its faster "polite pool" — no key exists |
 | Mistral OCR | optional | pdf fetcher skips; PDF uploads rejected |
 | Cohere | optional | chat rerank falls back to windowed LLM rerank (chat path only) |
 
@@ -283,7 +310,7 @@ account, the server decides all of this by itself:
 | Tier | `lite` — deepest the free plan + 1 signup credit affords |
 | Search strategy | Planned per-fetcher queries + weights from the topic |
 | Syllabus | 5–8 key concepts the corpus must cover, gap-filled if missed |
-| Corpus | ~15 sources fetched from ~3× candidates, scored, ledgered |
+| Corpus | ~15 sources triaged out of a several-× candidate pool, scored, ledgered |
 | Persona | Named, with bio and teaching style, from the corpus digest |
 | Visibility | `private` (publish later via `PATCH /experts/{slug}/catalog`) |
 

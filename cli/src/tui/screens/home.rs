@@ -1,7 +1,7 @@
 use ratatui::{
     Frame,
     layout::{Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::Modifier,
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
@@ -9,6 +9,7 @@ use crate::api::types::ExpertSummary;
 use crate::events::AppAction;
 use crate::tui::theme::Theme;
 use crate::tui::screens::build::BuildCardInfo;
+use crate::tui::widgets::avatar;
 use crate::tui::widgets::input_box::TextInput;
 use crate::tui::widgets::spinner;
 
@@ -292,17 +293,16 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
 
     let sep: String = "─".repeat(content.width as usize);
 
-    // ── Top section: pixel-art avatar (left 8) + name/topic (right) ──────
+    // ── Top section: monogram avatar (left 8) + name/topic (right) ──────
     // Avatar is 8 chars wide; add 1-char gap before text column.
-    const AVATAR_W: u16 = 9;
+    const AVATAR_W: u16 = avatar::WIDTH + 1;
     let top_h = 3u16.min(content.height);
 
-    let avatar_lines = pixel_avatar_lines(is_selected);
-    for (i, line) in avatar_lines.into_iter().enumerate() {
+    for (i, line) in avatar::lines(display_name, is_selected).into_iter().enumerate() {
         if (i as u16) < top_h {
             f.render_widget(
                 Paragraph::new(line),
-                Rect::new(content.x, content.y + i as u16, 8, 1),
+                Rect::new(content.x, content.y + i as u16, avatar::WIDTH, 1),
             );
         }
     }
@@ -456,21 +456,6 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
         spans.push(Span::styled(format!("{} {}", icon, label), style));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), chunks[4]);
-}
-
-// ── Pixel-art avatar ─────────────────────────────────────────────────────────
-
-/// 8×3 block-character gem icon, coloured brighter when the card is selected.
-fn pixel_avatar_lines(is_selected: bool) -> Vec<Line<'static>> {
-    let rows  = ["░▒▓██▓▒░", "▒▓████▓▒", "░▒▓██▓▒░"];
-    let colors: [Color; 3] = if is_selected {
-        [Theme::ACCENT, Theme::ACCENT2, Theme::ACCENT]
-    } else {
-        [Theme::DIM, Theme::BORDER_DIM, Theme::DIM]
-    };
-    rows.iter().zip(colors.iter()).map(|(&s, &c)| {
-        Line::from(Span::styled(s, Style::default().fg(c)))
-    }).collect()
 }
 
 /// Format large numbers with K/M suffix so they fit neatly in the card.

@@ -1,3 +1,4 @@
+pub mod avatar;
 pub mod chat_history;
 pub mod expert_card;
 pub mod input_box;

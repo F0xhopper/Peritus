@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { UsersIcon, PlusIcon } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
-import { ExpertsGrid, sortExperts } from "@/components/experts/experts-grid";
+import { ExpertsBrowser } from "@/components/experts/experts-browser";
+import { ExpertsEmpty, sortExperts } from "@/components/experts/experts-grid";
 import { Button } from "@/components/ui/button";
 import { getExperts } from "@/lib/api/data";
 
@@ -22,7 +23,14 @@ export default async function ExpertsPage() {
           </Button>
         }
       />
-      <ExpertsGrid experts={sortExperts(experts)} />
+      {/* "No experts at all" is decided here rather than in the browser: it is
+          the only state where the search/filter shell has nothing to browse,
+          and the empty screen's build button is the whole page. */}
+      {experts.length === 0 ? (
+        <ExpertsEmpty />
+      ) : (
+        <ExpertsBrowser experts={sortExperts(experts)} />
+      )}
     </>
   );
 }

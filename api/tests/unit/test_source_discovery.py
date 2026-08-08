@@ -4,10 +4,12 @@ from unittest.mock import patch
 
 from peritus.experts.builder import (
     _MAX_QUERIES_PER_FETCHER,
+    _MIN_RESULTS_PER_QUERY,
     ExpertBuilder,
     _compute_coverage,
     _normalise_plan,
     _route_must_have_works,
+    _search_breadth,
 )
 from peritus.sources.domain import RawSource, SourceType, ValidatedSource
 from peritus.sources.fetchers.gutenberg import _title_matches
@@ -109,6 +111,24 @@ def test_build_fetchers_source_filter_overrides_zero_weight():
     assert list(fetchers) == ["gutenberg"]
     _, quota = fetchers["gutenberg"]
     assert quota == 4  # weight floored to 1 for explicitly requested fetchers
+
+
+# ── search breadth ────────────────────────────────────────────────────────────
+
+def test_search_breadth_floors_small_quotas():
+    # A lite-tier quota of 1 across 3 queries used to mean 1 result per query;
+    # the floor keeps the triage pool wide regardless of tier.
+    assert _search_breadth(1, 3) == _MIN_RESULTS_PER_QUERY
+    assert _search_breadth(2, 1) == _MIN_RESULTS_PER_QUERY
+
+
+def test_search_breadth_scales_with_quota():
+    # Overfetch still scales for big quotas: 20 × 3 ÷ 2 queries = 30 per query.
+    assert _search_breadth(20, 2) == 30
+
+
+def test_search_breadth_tolerates_zero_queries():
+    assert _search_breadth(5, 0) == max(_MIN_RESULTS_PER_QUERY, 15)
 
 
 # ── coverage ──────────────────────────────────────────────────────────────────

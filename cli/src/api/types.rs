@@ -176,9 +176,10 @@ pub struct SourceCitation {
 pub enum ChatEvent {
     Token { text: String },
     Status { message: String },
+    // The payload also carries `has_contradiction`; serde drops unlisted
+    // fields, and no client surface renders it any more (see chat.rs).
     Sources {
         citations: Vec<SourceCitation>,
-        #[serde(default)] has_contradiction: bool,
         // `[n]` markers the model invented that resolve to no real passage.
         // The server flags them so clients can mark them, not render them as
         // legitimate citations.
