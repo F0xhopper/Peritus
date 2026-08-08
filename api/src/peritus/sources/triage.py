@@ -136,6 +136,10 @@ _HOST_ADJUSTMENTS: tuple[tuple[str, float], ...] = (
     ("arxiv.org", 1.5),
     ("pubmed.ncbi.nlm.nih.gov", 2.0),
     ("ncbi.nlm.nih.gov", 1.5),
+    ("europepmc.org", 1.5),
+    # A DOI resolver URL is almost always a published scholarly work.
+    ("doi.org", 1.5),
+    ("openalex.org", 1.0),
     ("jstor.org", 1.5),
     ("nature.com", 2.0),
     ("science.org", 2.0),

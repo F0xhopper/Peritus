@@ -33,7 +33,7 @@ def test_normalise_plan_fills_defaults_for_missing_fetchers():
     plan = _normalise_plan({}, "stoicism")
     assert set(plan["fetcher_plans"]) == {
         "wikipedia", "gutenberg", "arxiv", "pdf",
-        "youtube", "exa", "web", "reddit", "thought_leaders", "pubmed",
+        "youtube", "exa", "web", "reddit", "thought_leaders", "pubmed", "openalex",
     }
     for fetcher_plan in plan["fetcher_plans"].values():
         assert fetcher_plan["queries"] == ["stoicism"]

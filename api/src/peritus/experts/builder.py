@@ -68,6 +68,8 @@ from peritus.sources.fetchers.arxiv import (
 )
 from peritus.sources.fetchers.exa import ExaFetcher
 from peritus.sources.fetchers.gutenberg import GutenbergFetcher
+from peritus.sources.fetchers.openalex import OpenAlexFetcher
+from peritus.sources.fetchers.openalex import fetch_by_doi as openalex_by_doi
 from peritus.sources.fetchers.pdf import PdfFetcher
 from peritus.sources.fetchers.pubmed import PubmedFetcher
 from peritus.sources.fetchers.reddit import RedditFetcher
@@ -85,7 +87,7 @@ EventCallback = Callable[[dict], Coroutine[Any, Any, None]]
 # Gap-fill: query-driven fetchers only — the identify-then-fetch fetchers
 # (gutenberg, thought_leaders) and noisy ones (reddit, youtube) don't take
 # well to narrow concept queries.
-_GAPFILL_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf", "pubmed")
+_GAPFILL_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf", "pubmed", "openalex")
 _GAPFILL_MAX_CONCEPTS = 4
 _GAPFILL_RESULTS_PER_QUERY = 2
 
@@ -109,6 +111,7 @@ _FETCHER_SOURCE_TYPES: dict[str, SourceType] = {
     "reddit": SourceType.REDDIT,
     "thought_leaders": SourceType.THOUGHT_LEADER,
     "pubmed": SourceType.PUBMED,
+    "openalex": SourceType.OPENALEX,
 }
 
 _FETCHER_NAMES: tuple[str, ...] = (
@@ -122,6 +125,7 @@ _FETCHER_NAMES: tuple[str, ...] = (
     "reddit",
     "thought_leaders",
     "pubmed",
+    "openalex",
 )
 
 # Public alias: the API layer validates BuildRequest.sources against this so an
@@ -207,12 +211,20 @@ _PLAN_SYSTEM = (
     "plan discovers are the ONLY material the expert will ever know, so plan for breadth "
     "(every major facet of the topic gets searched) and depth (primary and advanced "
     "material, not just introductions). Tune queries to each source type: arxiv gets "
-    "academic/theoretical angles, gutenberg gets classic public-domain primary texts, "
-    "pdf gets published papers, reddit gets practitioner discussion, youtube gets "
-    "lectures and talks, wikipedia gets encyclopedic overviews, exa and web get "
-    "high-quality articles and essays. Give weight 0 to source types that would add "
-    "noise for this topic (e.g. gutenberg for modern technology, arxiv for a "
-    "non-academic craft) and weight 2 to the ones that carry it.\n\n"
+    "STEM preprints (physics, math, CS), openalex gets peer-reviewed scholarship in "
+    "ANY discipline — it is the academic channel for humanities, social science, law, "
+    "economics, psychology, education, business and everything else arxiv and pubmed "
+    "don't reach — pubmed gets biomedical and clinical literature, gutenberg gets "
+    "classic public-domain primary texts, pdf gets open-access published papers, "
+    "thought_leaders finds the field's leading practitioners and their own writing, "
+    "reddit gets practitioner discussion, youtube gets lectures and talks, wikipedia "
+    "gets encyclopedic overviews, exa and web get high-quality articles and essays. "
+    "Give weight 0 to source types that would add noise for this topic (e.g. gutenberg "
+    "for modern technology, arxiv for a non-academic craft, pubmed for anything "
+    "non-biomedical) and weight 2 to the ones that carry it. Every topic has some "
+    "scholarly literature — a craft has ergonomics and materials-science studies, a "
+    "cuisine has food chemistry and anthropology — so before zeroing openalex, ask "
+    "what the adjacent research field is and query that.\n\n"
     "key_concepts must scale with how much ground the topic actually covers — this is "
     "a judgment call, not a quota. A narrow or single-threaded topic (one thinker, one "
     "event, one narrow technique) genuinely has fewer than 8 concepts worth naming as "
@@ -268,6 +280,7 @@ class ExpertBuilder:
             "reddit": (RedditFetcher(), 5),
             "thought_leaders": (ThoughtLeadersFetcher(), 3),
             "pubmed": (PubmedFetcher(), 2),
+            "openalex": (OpenAlexFetcher(), 3),
         }
 
         active: dict[str, tuple[Any, int]] = {}
@@ -1056,30 +1069,50 @@ def _route_must_have_works(plan: dict) -> None:
     fetcher_plan["weight"] = max(fetcher_plan["weight"], 1.0)
 
 
+# A reference this cited is canonical for the field, whatever the field is.
+_SNOWBALL_MIN_CITATIONS = 50
+_SNOWBALL_MAX_SEEDS = 3
+
+
+def _snowball_seeds(raw_sources: list[RawSource]) -> list[str]:
+    """Semantic Scholar paper ids for the sources whose references are worth
+    following: arXiv papers by arXiv id, anything else scholarly by DOI —
+    which is how pubmed and openalex finds join the snowball."""
+    seeds: list[str] = []
+    for s in raw_sources:
+        if s.source_type == SourceType.ARXIV and s.metadata.get("arxiv_id"):
+            seeds.append(f"arXiv:{s.metadata['arxiv_id']}")
+        elif s.metadata.get("doi"):
+            seeds.append(f"DOI:{s.metadata['doi']}")
+    return list(dict.fromkeys(seeds))
+
+
 async def _snowball_citations(
     raw_sources: list[RawSource],
     max_extra: int = 3,
 ) -> list[RawSource]:
-    """Follow high-citation references from discovered ArXiv papers via Semantic Scholar."""
+    """Follow high-citation references from discovered scholarly sources.
+
+    Seeds are any source with an arXiv id or a DOI, so a corpus of history or
+    economics papers snowballs exactly like a physics one. References that are
+    themselves on arXiv come back through ar5iv full text; everything else is
+    resolved by DOI through OpenAlex (open-access text or abstract).
+    """
     import arxiv as arxiv_lib  # type: ignore
 
-    arxiv_ids = [
-        s.metadata["arxiv_id"]
-        for s in raw_sources
-        if s.source_type == SourceType.ARXIV and s.metadata.get("arxiv_id")
-    ]
-    if not arxiv_ids:
+    seeds = _snowball_seeds(raw_sources)
+    if not seeds:
         return []
 
-    seen_ids = set(arxiv_ids)
+    seen_ids = {seed.split(":", 1)[1] for seed in seeds}
     seen_urls = {s.url for s in raw_sources}
     candidates: list[dict] = []
 
     async with httpx.AsyncClient(timeout=15, headers=ARXIV_HEADERS) as client:
-        for arxiv_id in arxiv_ids[:3]:
+        for seed in seeds[:_SNOWBALL_MAX_SEEDS]:
             try:
                 resp = await client.get(
-                    f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{arxiv_id}/references",
+                    f"https://api.semanticscholar.org/graph/v1/paper/{seed}/references",
                     params={
                         "fields": "title,citationCount,openAccessPdf,externalIds",
                         "limit": 20,
@@ -1091,18 +1124,25 @@ async def _snowball_citations(
                     cited = ref.get("citedPaper") or {}
                     ext_ids = cited.get("externalIds") or {}
                     ref_arxiv_id = ext_ids.get("ArXiv")
+                    ref_doi = ext_ids.get("DOI")
+                    ref_id = ref_arxiv_id or ref_doi
                     citation_count = cited.get("citationCount") or 0
-                    if ref_arxiv_id and ref_arxiv_id not in seen_ids and citation_count >= 50:
+                    if (
+                        ref_id
+                        and ref_id not in seen_ids
+                        and citation_count >= _SNOWBALL_MIN_CITATIONS
+                    ):
                         candidates.append(
                             {
                                 "arxiv_id": ref_arxiv_id,
+                                "doi": ref_doi,
                                 "title": cited.get("title", ""),
                                 "citations": citation_count,
                             }
                         )
-                        seen_ids.add(ref_arxiv_id)
+                        seen_ids.add(ref_id)
             except Exception as exc:
-                logger.debug("Semantic Scholar references failed for %s: %s", arxiv_id, exc)
+                logger.debug("Semantic Scholar references failed for %s: %s", seed, exc)
 
     if not candidates:
         return []
@@ -1111,50 +1151,79 @@ async def _snowball_citations(
     extra: list[RawSource] = []
 
     async with httpx.AsyncClient(timeout=30, headers=ARXIV_HEADERS, follow_redirects=True) as http:
-        for cand in candidates[:max_extra]:
-            aid = cand["arxiv_id"]
-            try:
-
-                def _lookup(a: str = aid) -> list:
-                    return list(arxiv_lib.Client().results(arxiv_lib.Search(id_list=[a])))
-
-                papers = await asyncio.to_thread(_lookup)
-                if not papers:
-                    continue
-                paper = papers[0]
-                url = paper.entry_id
-                if url in seen_urls:
-                    continue
-                full_text = await fetch_ar5iv(http, aid)
-                text = (
-                    full_text[:MAX_FULL_TEXT]
-                    if len(full_text) >= MIN_FULL_TEXT
-                    else f"{paper.title}\n\n{paper.summary}"
-                )
-                extra.append(
-                    RawSource(
-                        source_type=SourceType.ARXIV,
-                        url=url,
-                        title=paper.title,
-                        author=", ".join(str(a) for a in paper.authors[:3]),
-                        text=text,
-                        metadata={
-                            "arxiv_id": aid,
-                            "published": str(paper.published),
-                            "categories": paper.categories,
-                            "full_text": len(full_text) >= MIN_FULL_TEXT,
-                            "snowballed": True,
-                            "discovered_via": "snowball",
-                            "citations": cand["citations"],
-                        },
-                    )
-                )
-                seen_urls.add(url)
-                logger.info("Snowballed: %r (%d citations)", paper.title, cand["citations"])
-            except Exception as exc:
-                logger.debug("Snowball fetch failed for arXiv:%s: %s", aid, exc)
+        for cand in candidates:
+            if len(extra) >= max_extra:
+                break
+            source = await _snowball_fetch_one(http, cand, arxiv_lib)
+            if source is None or source.url in seen_urls:
+                continue
+            extra.append(source)
+            seen_urls.add(source.url)
+            logger.info("Snowballed: %r (%d citations)", source.title, cand["citations"])
 
     return extra
+
+
+async def _snowball_fetch_one(
+    http: httpx.AsyncClient,
+    cand: dict,
+    arxiv_lib,
+) -> RawSource | None:
+    """One snowball reference → a RawSource, via arXiv when possible, else DOI."""
+    aid = cand.get("arxiv_id")
+    if aid:
+        try:
+
+            def _lookup(a: str = aid) -> list:
+                return list(arxiv_lib.Client().results(arxiv_lib.Search(id_list=[a])))
+
+            papers = await asyncio.to_thread(_lookup)
+            if not papers:
+                return None
+            paper = papers[0]
+            full_text = await fetch_ar5iv(http, aid)
+            text = (
+                full_text[:MAX_FULL_TEXT]
+                if len(full_text) >= MIN_FULL_TEXT
+                else f"{paper.title}\n\n{paper.summary}"
+            )
+            return RawSource(
+                source_type=SourceType.ARXIV,
+                url=paper.entry_id,
+                title=paper.title,
+                author=", ".join(str(a) for a in paper.authors[:3]),
+                text=text,
+                metadata={
+                    "arxiv_id": aid,
+                    "published": str(paper.published),
+                    "categories": paper.categories,
+                    "full_text": len(full_text) >= MIN_FULL_TEXT,
+                    "snowballed": True,
+                    "discovered_via": "snowball",
+                    "citations": cand["citations"],
+                },
+            )
+        except Exception as exc:
+            logger.debug("Snowball fetch failed for arXiv:%s: %s", aid, exc)
+            return None
+
+    doi = cand.get("doi")
+    if not doi:
+        return None
+    try:
+        candidate = await openalex_by_doi(doi)
+        if candidate is None:
+            return None
+        source = await OpenAlexFetcher().fetch(candidate)
+        if source is None:
+            return None
+        source.metadata["snowballed"] = True
+        source.metadata["discovered_via"] = "snowball"
+        source.metadata["citations"] = cand["citations"]
+        return source
+    except Exception as exc:
+        logger.debug("Snowball fetch failed for DOI:%s: %s", doi, exc)
+        return None
 
 
 _RESOLVE_THRESHOLD = 0.93

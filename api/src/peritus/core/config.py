@@ -111,6 +111,8 @@ class Settings:
 
     # Source fetchers
     EXA_API_KEY: str = os.getenv("EXA_API_KEY", "")
+    # OpenAlex needs no key; an email opts requests into its faster "polite pool".
+    OPENALEX_MAILTO: str = os.getenv("OPENALEX_MAILTO", "")
 
     # Mistral OCR (PDF parsing)
     MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")

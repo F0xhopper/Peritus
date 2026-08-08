@@ -13,6 +13,7 @@ class SourceType(StrEnum):
     REDDIT = "reddit"
     THOUGHT_LEADER = "thought_leader"
     PUBMED = "pubmed"
+    OPENALEX = "openalex"
     # Supplied by the expert's owner rather than found by discovery. Kept as its
     # own type so per-type fetch caps, source-type counts, and the catalog can
     # tell hand-picked material from what the pipeline went looking for.

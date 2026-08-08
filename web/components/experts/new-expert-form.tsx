@@ -53,6 +53,8 @@ const FETCHER_LABELS: Record<Fetcher, string> = {
   web: "Web",
   reddit: "Reddit",
   thought_leaders: "Thought leaders",
+  pubmed: "PubMed",
+  openalex: "OpenAlex",
 };
 
 /** What a depth costs and whether this account can pick it. `null` credits (the

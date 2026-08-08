@@ -134,6 +134,8 @@ export const FETCHERS = [
   "web",
   "reddit",
   "thought_leaders",
+  "pubmed",
+  "openalex",
 ] as const;
 
 export type Fetcher = (typeof FETCHERS)[number];

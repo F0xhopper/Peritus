@@ -50,6 +50,16 @@ _SOURCE_TYPE_HINTS: dict[str, str] = {
         "This source is an academic paper. Apply rigorous standards: look for clear methodology, "
         "evidence quality, and citation depth."
     ),
+    "pubmed": (
+        "This source is a biomedical research paper. Apply rigorous standards: look for clear "
+        "methodology, evidence quality, and citation depth. An abstract-only record can still "
+        "pass if the abstract substantively states the finding."
+    ),
+    "openalex": (
+        "This source is a scholarly work. Apply rigorous standards: look for clear methodology "
+        "or argument, evidence quality, and citation depth. An abstract-only record can still "
+        "pass if the abstract substantively states the finding or argument."
+    ),
     "gutenberg": (
         "This source is a classic or historical text. Evaluate relevance and historical "
         "significance rather than expecting modern academic style."
