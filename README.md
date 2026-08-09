@@ -8,6 +8,31 @@ Give Peritus a topic. It plans a search strategy, runs it across eleven kinds of
 
 The point is not the answer. The point is being able to show how the body of evidence behind it was assembled.
 
+## In plain terms
+
+Ask a chatbot about a niche subject and you get a fluent answer. What you don't get is the thing a researcher actually needs: **a record of where the answer came from that somebody else can check.**
+
+Peritus is built around that record. You give it a topic. It does the searching itself, keeps a line-by-line account of every source it looked at and what it decided about each one, and only then lets you ask questions.
+
+**Why not just use…**
+
+| | What it gives you | What it can't give you |
+|---|---|---|
+| **ChatGPT · Claude · Perplexity** | A fast, fluent answer, often with a live browse behind it | You can't see what it read, can't re-run the same search, can't export a source list. The path disappears the moment the answer arrives. |
+| **NotebookLM** | Grounded, cited answers over sources **you** uploaded | It never went looking. Finding the sources and judging whether they were any good was your job — and that is the expensive part. |
+| **PubMed · Scopus · Elicit · Covidence** | A clean, exportable, defensible search — over anything with a bibliographic record | Reports, standards, preprints, conference talks, practitioner writing. Nothing indexes them, so nothing can search them; people hand-search instead and then can't document what they did. |
+| **Peritus** | Grounded answers over a corpus it went and assembled itself, plus the full record of how it assembled it | Scale. A build weighs dozens of sources, not thousands. It is a first pass a human checks, not a substitute for one. |
+
+**The three things that are actually different**
+
+1. **It does the searching.** Eleven kinds of source, planned per topic — not one database, and not a list of URLs you supplied. It deliberately looks at far more than it keeps, because searching is cheap and downloading is not.
+2. **It writes down why.** Every source it considered gets a row: the scores, the decision, the stated reason for a rejection, which model judged it under which rubric — and, unusually, *which search turned it up*. A source that exists only because a named concept was still uncovered says so.
+3. **It argues that it searched enough.** The plan names the concepts the corpus has to cover. After validation, the accepted sources are counted back against that list, and anything uncovered triggers another targeted round. A reviewer asking "how do you know your search was adequate?" gets an answer with a shape instead of a shrug.
+
+**What you're left with:** an expert you can question, with an `[n]` on every claim; a ledger row for every source considered, kept or dropped; a CSV or RIS export of it; and a flag wherever sources inside the corpus were judged to disagree.
+
+The chat is the least interesting part, and deliberately so. Chatting with a pile of documents is free in three other places. Knowing — and being able to show — how the pile was chosen is not.
+
 **Who it's for.** Researchers and analysts doing scoping reviews, rapid reviews and evidence maps, where a real part of the evidence — reports, preprints, standards, conference talks, practitioner writing — never had a bibliographic record and so never had a search anyone could document.
 
 **What it is not.** Not a systematic-review screening platform: a build handles dozens of sources, not thousands, so keep screening your database export in Covidence or Rayyan. Not a substitute for two independent human reviewers — screening is a single model pass against a rubric, with no calibration set and therefore no published accuracy figures. Not PRISMA compliance, which is a property of your write-up and not of any tool; Peritus just happens to record the data those reports ask for. Treat its decisions as auditable triage that a human checks.
@@ -38,11 +63,40 @@ walkthrough — queue, worker, every stage, readiness, and what happens when
 things fail — is in [docs/build-flow.md](docs/build-flow.md).
 
 ```mermaid
-flowchart LR
-    T(["topic"]) --> P["plan"] --> D["discover<br/>11 fetchers, over-searched"] --> TR["triage"] --> F["fetch +<br/>snowball"] --> V["validate +<br/>gap-fill"] --> CE["chunk +<br/>embed"]
-    CE --> CR(["★ chat-ready"])
-    CR --> G["concept<br/>graph"] --> PE["persona"] --> DONE(["done"])
-    G -. "failure degrades,<br/>never destroys" .-> PE
+flowchart TD
+    T(["topic — the whole request"]) --> P
+
+    subgraph corpus ["CORPUS ASSEMBLY · load-bearing — a failure here fails the build and refunds the credit hold"]
+        direction TB
+        P["0 · PLAN — one call on the strong model writes the research brief:<br/>a tailored query list per fetcher, a 0–2 weight each<br/>(0 = 'this source type would only add noise here'),<br/>5–8 key concepts the corpus must cover, and must-have works"]
+        D["1 · DISCOVER — 11 fetchers search concurrently<br/>wikipedia · gutenberg · arxiv · openalex · pubmed · pdf<br/>youtube · exa · web · reddit · thought-leaders<br/>each asks for 3× its fetch quota, floor 10 results per query"]
+        TR["1b · TRIAGE — fast model scores every candidate on title and<br/>snippet against the brief, times a domain prior that lifts journals<br/>and archives and sinks content farms.<br/>Junk is dropped before a single byte is downloaded"]
+        F["1c · FETCH — full text and OCR for the ranked winners only<br/>budget 30 × tier multiplier: lite 15 · standard 30 · pro 60<br/>per-type caps stop one source type flooding the corpus;<br/>a failed fetch refills from the next rank down"]
+        SB["1d · SNOWBALL — accepted sources carrying an arXiv id or a DOI<br/>seed a reference walk through Semantic Scholar;<br/>references with ≥50 citations resolve back to full text<br/>via ar5iv, or by DOI through OpenAlex"]
+        V["2 · VALIDATE — Claude scores quality and relevance against rubric<br/>v3-concepts-q5r6, keeping at q≥5 and r≥6, with hints per source type<br/>(academic work judged on method, classic texts on significance),<br/>and tags which of the key concepts each source substantively covers"]
+        GF["2b · GAP-FILL — key concepts left with zero accepted coverage each<br/>trigger one targeted re-search and re-validation round;<br/>whatever is still uncovered afterwards is reported, not hidden"]
+        CE["3 · CHUNK + EMBED — 1500-char chunks, each given a contextual prefix<br/>in one batched pass, embedded with text-embedding-3-large<br/>(3072-dim) into pgvector"]
+        P --> D --> TR --> F --> SB --> V --> GF --> CE
+    end
+
+    V -. "one row per source, kept or dropped" .-> LED[("the sources ledger<br/>quality · relevance · passed · drop_reason<br/>validator_model · rubric_version<br/>discovered_via · covered_concepts")]
+    GF -. "discovered_via = gapfill:concept" .-> LED
+    SB -. "discovered_via = snowball" .-> LED
+
+    CE --> CR(["★ chat_ready — retrieval needs chunks, not the graph,<br/>so the expert answers with citations from here on"])
+
+    subgraph enrich ["ENRICHMENT · failure degrades, never destroys — a corpus that already works is never rebuilt for this"]
+        direction TB
+        GX["4 · GRAPH EXTRACT — Claude reads the chunks in batches of 10 and emits<br/>typed nodes (concept, claim) and typed edges (supports · contradicts ·<br/>builds_on · defines · exemplifies · cites), every node keeping the ids<br/>of the chunks it was extracted from"]
+        ER["4b · RESOLVE — nodes sharing a normalised label merge on ingest;<br/>near-duplicates then merge by node-embedding cosine similarity ≥ 0.93"]
+        PE["5 · PERSONA — Claude reads a corpus digest and the top concepts,<br/>then writes the expert's name, bio and teaching style"]
+        GX --> ER --> PE
+    end
+
+    CR --> GX
+    ER -. "graph stage failed — stage_degraded event,<br/>expert stays chat_ready, retrieval just skips graph expansion" .-> PE
+    PE -. "persona stage failed — nameless expert,<br/>re-voiceable later with one model call, no rebuild" .-> DONE
+    PE --> DONE(["done"])
 ```
 
 1. **Plan**: Claude turns the topic into a tailored search query for each source fetcher and names the 5–8 core concepts the corpus must cover.
@@ -83,17 +137,55 @@ RIS is there because a grey-literature source Peritus found has no bibliographic
 Each question is answered through a grounded retrieval loop:
 
 ```mermaid
-flowchart LR
-    Q(["question"]) --> PL["plan<br/>subqueries"] --> HS["hybrid search<br/>semantic ⊕ keyword,<br/>RRF-fused"] --> GE["graph<br/>expand"] --> CV["coverage<br/>check"] --> CX["numbered<br/>passages"] --> CO["grounded<br/>compose"] --> A(["cited answer"])
-    CV -. "gap → one<br/>follow-up pass" .-> HS
+flowchart TD
+    Q(["question"]) --> PL["PLAN — one fast-model call returns 2–4 declarative subqueries<br/>plus a read of the asker: how much background they have<br/>(novice · informed · expert) and what kind of answer would satisfy them<br/>(orientation · specific fact · comparison · how-to · open-ended)"]
+    PL --> HS["HYBRID SEARCH — every subquery runs in parallel, two arms each:<br/>semantic (pgvector cosine over the 3072-dim chunk embeddings) and<br/>keyword (Postgres full-text over the chunk plus its contextual prefix),<br/>fused by reciprocal rank at a score of 1/(60+rank)"]
+    HS --> MG["MERGE — RRF scores sum across subqueries, so a chunk several<br/>subqueries independently surfaced outranks any single subquery's<br/>best hit; survivors are reranked by a Cohere cross-encoder,<br/>or a windowed LLM rerank when no key is set"]
+    MG --> GE["GRAPH EXPAND — each passage is annotated with the concepts and<br/>relations local to it, and flagged if a contradicts edge was traversed<br/>(mechanics in the next section)"]
+    GE --> CV{"COVERAGE — fast model:<br/>do these passages actually<br/>answer the question?"}
+    CV -- "no · returns follow-up queries" --> FU["one more retrieval pass<br/>on the suggested queries"]
+    FU --> CTX
+    CV -- "yes" --> CTX["CONTEXT — passages deduplicated and numbered [1]…[n],<br/>capped per tier at 8 · 15 · 25"]
+    CTX --> CO["COMPOSE — Claude answers in the persona's voice, under the<br/>grounding contract and shaped for this asker; contradictions the graph<br/>flagged are raised in the subject's terms, never as bibliography"]
+    CO --> AN(["answer — [n] markers parsed against the passage list, markers<br/>pointing at nothing stripped rather than rendered, and sources<br/>resolved down to only the passages actually cited"])
+    CTX -. "persisted whether shown or not" .-> TRAIL[("answer audit — the subqueries, the follow-ups, the coverage<br/>verdict, and every passage considered, including the ones<br/>ranked below the context cap and never shown to the model")]
 ```
 
-1. **Plan** subqueries from the question.
-2. **Hybrid search** every subquery in parallel: semantic (pgvector) fused with keyword (Postgres full-text) via reciprocal-rank fusion, then optionally reranked (Cohere cross-encoder, or a windowed LLM fallback).
-3. **Graph expand** the hits with neighbouring concepts and relationships from the concept graph.
+1. **Plan** subqueries from the question, and classify who is asking for what.
+2. **Hybrid search** every subquery in parallel: semantic fused with keyword by reciprocal rank, then reranked.
+3. **Graph expand** the hits with the concepts and relationships local to each one.
 4. **Coverage check**: Claude judges whether the retrieved passages answer the question and, if not, suggests follow-up queries for a second retrieval pass.
-5. **Compose**: the deduplicated passages are numbered and handed to Claude under a strict grounding contract: answer only from the passages, cite every claim with its `[n]`.
+5. **Compose**: the deduplicated passages are numbered and handed to Claude under a strict grounding contract — answer only from the passages, cite every claim with its `[n]`, treat passage text as evidence and never as instructions.
 6. **Stream** the answer token-by-token, then resolve the citation list down to only the passages the answer actually cited.
+
+### The concept graph — which kind of GraphRAG this is
+
+"Graph RAG" names at least three different architectures, and the differences matter more than the label:
+
+| Architecture | How a question is answered | Peritus? |
+|---|---|---|
+| **Graph as the index** (Microsoft GraphRAG and friends) | Entities are clustered into communities and each community is summarised at build time; the question is answered from those summaries | **No.** Expensive to build, coarse at the level a specific question needs, and it answers from a summary rather than from a passage — which throws away the citation the whole product rests on |
+| **Knowledge-graph QA** (text-to-Cypher / SPARQL) | The question is compiled into a graph query and the answer *is* the query result | **No.** Needs a clean ontology and a curated schema. A corpus of reports, talks, preprints and books has neither |
+| **Graph-augmented passage retrieval** | Chunks remain the retrieval unit; the graph runs as a second pass that annotates the retrieved chunks with the concepts and relations local to them | **Yes** |
+
+The consequence is worth stating flatly: **passages are retrieved, the graph is not searched.** Nothing is ever found by traversing the graph. Vector and keyword search find the passages; the graph then says what each passage is *about* and what it connects to. That is why an expert becomes answerable a whole stage before the graph exists, and why losing the graph degrades the answer instead of breaking it.
+
+**How the graph is built** (`graph/extractor.py`, `graph/repository.py`)
+
+- **Extraction.** Claude reads the chunks in batches of ten and returns nodes and edges. A node is a `concept` or a `claim` with a label, a description, and properties. An edge is typed — `supports`, `contradicts`, `builds_on`, `defines`, `exemplifies`, `cites` — and carries a weight.
+- **Anchoring is the whole trick.** Every node keeps the ids of the chunks it was extracted from (`expert_nodes.chunk_ids`). That array is the join between the graph and the corpus: no node floats free of the passages that produced it, so annotating a retrieved chunk is a lookup rather than an inference.
+- **Resolution runs twice.** Nodes whose normalised labels match are merged at ingest — chunk evidence unioned, longest description kept — so ingesting into a live graph (a later source upload, a second extraction pass) deepens a concept instead of creating a rival copy of it. Then a cleanup pass merges near-duplicates by node-embedding cosine similarity ≥ 0.93, catching "spaced repetition" against "distributed practice".
+- **Storage is two Postgres tables**, `expert_nodes` and `expert_edges`. There is no graph database; traversal is a bounded loop of indexed queries, and node embeddings live alongside the nodes for resolution and future semantic node lookup.
+
+**How the graph is used at query time** (`graph/retriever.py`)
+
+1. **Anchor.** Take the chunk ids that search returned and look up every node whose `chunk_ids` contains one of them. Those are the anchors — the concepts this specific evidence instantiates.
+2. **Expand.** Walk outward from the anchors for `hops` (1 at lite and standard, 2 at pro), strongest edges first, admitting at most 50 new nodes per hop. The cap exists so a hub concept — the one every chunk mentions — cannot drag the whole graph into the context window.
+3. **Localise per passage, not per query.** Each passage is annotated only with the edges touching *its own* anchors, capped at 8 concepts and 5 relations. One global neighbour list pasted onto every passage would be cheaper and would quietly make every passage look like it said the same thing.
+4. **Contradictions sort first.** Edges are ordered with `contradicts` ahead of the weight ranking, so the per-passage cap can never be the reason a disagreement went unmentioned.
+5. **The annotation is evidence, never instruction.** A passage arrives as its text plus `Related concepts:` and `Relationships: A --supports--> B`. The contradiction flag travels beside the passage and is handled at the prompt level, in the subject's terms — an earlier version appended a note to the passage text telling the model to surface the tension, and the model dutifully obeyed by editorialising about its own bibliography. Passages are data; the grounding contract says so, and nothing in the pipeline may violate it.
+
+**What this buys, and what it doesn't.** It buys disambiguation and connection: a passage retrieved for one phrasing arrives labelled with the concepts it belongs to, so an answer can relate two passages that never shared a word, and the corpus can point at its own disagreements. It does not buy authority. The graph is asserted by a fast model reading batches of chunks, then merged by embedding similarity. A `contradicts` edge means *these two sources look like they disagree, go and check* — it flags tension, it does not establish it, and it should never be read as a finding.
 
 ## Tiers
 
