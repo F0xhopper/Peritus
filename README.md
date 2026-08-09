@@ -2,19 +2,46 @@
 
 [![CI](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml/badge.svg)](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml)
 
-Search the literature a database export misses — and keep a record you can defend.
+**Peritus turns a topic into a small, vetted library — and then into an expert you can question.**
 
-Give Peritus a topic. It plans a search strategy, runs it across eleven kinds of source, scores every candidate for quality and relevance against a versioned rubric, and keeps the whole ledger: what was found, what was kept, what was dropped and why, which search turned each source up, and where the surviving sources contradict each other. The survivors are embedded into a concept graph you can then question, with a citation on every claim.
+It does the searching itself, judges every source it finds against a written standard, keeps only the ones that hold up, and records every decision it made along the way. The point is not the answer at the end. The point is being able to show how the evidence behind it was assembled.
 
-The point is not the answer. The point is being able to show how the body of evidence behind it was assembled.
+## What happens when you type a topic
 
-## In plain terms
+```mermaid
+flowchart LR
+    A(["you type<br/>a topic"]) --> B["work out what<br/>to look for"] --> C["search<br/>everywhere at once"] --> D["sift before<br/>downloading"] --> E["read each source<br/>and judge it"] --> F["notice what's missing<br/>and go back for it"] --> G(["ask it questions ·<br/>read the ledger ·<br/>export the record"])
+```
+
+1. **You give it a topic.** One line of text is the entire request. Peritus works out the depth to build at, the search strategy, and the expert's name by itself.
+2. **It works out what to look for.** Before searching anything, it writes a brief: which kinds of source are worth searching for *this* topic, what to search for in each of them, and the five to eight ideas the finished library has to cover. That last list matters — it becomes the standard Peritus holds itself to at the end.
+3. **It searches everywhere at once.** Eleven kinds of source run in parallel: encyclopaedias, out-of-copyright books, preprint servers, scholarly indexes, biomedical literature, PDFs from anywhere on the web, video transcripts, neural and ordinary web search, practitioner discussion, and a curated set of thought-leaders. It deliberately turns up several times more than it can afford to keep, because searching is cheap and downloading is not.
+4. **It sifts before it downloads.** Every result is scored on its title and snippet against the brief, adjusted by what kind of site it came from — journals and archives up, content farms down. Only the winners are actually fetched, so the expensive work (downloads, OCR, reading) is spent on material that already looks worth it.
+5. **It reads each source and judges it.** This is the part that makes it a library rather than a pile. Every downloaded source is scored out of ten for quality and out of ten for relevance against a written rubric, and tagged with which of the planned ideas it genuinely covers. Anything below the bar is dropped, and the reason is written down. Nothing gets in because it ranked well in a search; it gets in because it was judged and passed.
+6. **It notices what's missing and goes back for it.** The sources that survived are counted back against the list of ideas from step 2. Any idea nothing covers triggers a fresh, targeted search just for that idea. Whatever is still uncovered after that is reported rather than quietly ignored.
+7. **It makes the library answerable.** Surviving sources are split into passages, each given a short note about where it sits in its source, and indexed so they can be searched by meaning as well as by wording. From this moment you can ask questions.
+8. **Then it enriches.** It maps the ideas in the corpus into a concept graph — including where two sources appear to disagree — and writes the expert a name, a biography, and a way of speaking. If either fails, you keep the working library; nothing is torn down for the sake of the trimmings.
+
+It takes minutes rather than seconds, and it costs real money in model calls, because it is genuinely doing the reading.
+
+### What "judged" actually means
+
+Every source Peritus considered ends up as a row you can read back, whether it was kept or thrown away:
+
+| The question asked of it | What gets recorded |
+|---|---|
+| Is it any good? | A quality score, 0–10 |
+| Is it about this topic? | A relevance score, 0–10 |
+| Which of the planned ideas does it really cover? | The list of concepts it was tagged with |
+| Kept or dropped — and if dropped, why? | The decision and the stated reason |
+| Who judged it, against which standard? | The model, and the version of the rubric |
+| Which search turned it up? | The plan, a reference trail, or the specific gap it was sent to fill |
+
+That last row is the unusual one. Most tools can tell you what they included. Peritus can tell you *why it went looking for it in the first place* — including when a source exists only because a named idea was still uncovered.
+
+## Why not just use a chatbot?
 
 Ask a chatbot about a niche subject and you get a fluent answer. What you don't get is the thing a researcher actually needs: **a record of where the answer came from that somebody else can check.**
-
-Peritus is built around that record. You give it a topic. It does the searching itself, keeps a line-by-line account of every source it looked at and what it decided about each one, and only then lets you ask questions.
-
-**Why not just use…**
 
 | | What it gives you | What it can't give you |
 |---|---|---|
@@ -23,13 +50,7 @@ Peritus is built around that record. You give it a topic. It does the searching 
 | **PubMed · Scopus · Elicit · Covidence** | A clean, exportable, defensible search — over anything with a bibliographic record | Reports, standards, preprints, conference talks, practitioner writing. Nothing indexes them, so nothing can search them; people hand-search instead and then can't document what they did. |
 | **Peritus** | Grounded answers over a corpus it went and assembled itself, plus the full record of how it assembled it | Scale. A build weighs dozens of sources, not thousands. It is a first pass a human checks, not a substitute for one. |
 
-**The three things that are actually different**
-
-1. **It does the searching.** Eleven kinds of source, planned per topic — not one database, and not a list of URLs you supplied. It deliberately looks at far more than it keeps, because searching is cheap and downloading is not.
-2. **It writes down why.** Every source it considered gets a row: the scores, the decision, the stated reason for a rejection, which model judged it under which rubric — and, unusually, *which search turned it up*. A source that exists only because a named concept was still uncovered says so.
-3. **It argues that it searched enough.** The plan names the concepts the corpus has to cover. After validation, the accepted sources are counted back against that list, and anything uncovered triggers another targeted round. A reviewer asking "how do you know your search was adequate?" gets an answer with a shape instead of a shrug.
-
-**What you're left with:** an expert you can question, with an `[n]` on every claim; a ledger row for every source considered, kept or dropped; a CSV or RIS export of it; and a flag wherever sources inside the corpus were judged to disagree.
+**What you're left with:** an expert you can question, with a citation on every claim; a ledger row for every source considered, kept or dropped; a CSV or RIS export of it; and a flag wherever sources inside the corpus were judged to disagree.
 
 The chat is the least interesting part, and deliberately so. Chatting with a pile of documents is free in three other places. Knowing — and being able to show — how the pile was chosen is not.
 
