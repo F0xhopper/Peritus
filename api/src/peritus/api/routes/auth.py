@@ -8,6 +8,7 @@ knows login isn't required.
 
 import time
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
@@ -157,11 +158,29 @@ async def logout(
 
 @router.post("/refresh", response_model=Session)
 async def refresh(req: RefreshRequest) -> dict:
+    """Exchange a refresh token for a new session.
+
+    Transport failures are reported as 503, never 500. The distinction is the
+    client's only way to tell "this refresh token is dead, log out" from "we
+    could not reach the auth server, try again" — and clients act on it by
+    erasing the stored session. A DNS blip here once surfaced as an unhandled
+    500 and logged a user out mid-build, discarding a refresh token that was
+    still perfectly valid.
+    """
     _require_auth_configured()
     try:
         return await supabase_auth.refresh_session(req.refresh_token)
     except SupabaseAuthError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
+    except httpx.HTTPError as exc:
+        logger.warning(
+            "Session refresh could not reach Supabase (%s: %s)",
+            type(exc).__name__, exc,
+        )
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Auth provider unreachable — the session was not changed. Retry shortly.",
+        ) from exc
 
 
 @router.get("/me", response_model=MeResponse)

@@ -773,6 +773,12 @@ function reduce(prev: State, event: BuildEvent): State {
         `Triaged ${event.candidates} candidates → ${event.ranked} ranked (budget ${event.budget}).`,
       );
 
+    case "fetch_progress":
+      return log(
+        prev,
+        `Fetching sources: ${event.fetched}/${event.budget} retrieved (${event.attempted} tried).`,
+      );
+
     case "fetch_done":
       return log(prev, `Fetched ${event.fetched} of ${event.budget} sources.`);
 

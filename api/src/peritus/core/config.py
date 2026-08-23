@@ -113,6 +113,13 @@ class Settings:
     EXA_API_KEY: str = os.getenv("EXA_API_KEY", "")
     # OpenAlex needs no key; an email opts requests into its faster "polite pool".
     OPENALEX_MAILTO: str = os.getenv("OPENALEX_MAILTO", "")
+    # Wall-clock cap on one full fetch of one candidate. Every fetcher already
+    # sets httpx timeouts, but those are per-operation: a server that dribbles a
+    # byte before each read timeout never trips one, and the fetch hangs forever
+    # inside a stage that reports nothing until it finishes. This is the outer
+    # bound that makes a single bad URL cost one slot instead of the build. Sized
+    # above the slowest legitimate fetch — PDF OCR allows itself 120s.
+    SOURCE_FETCH_TIMEOUT: float = float(os.getenv("SOURCE_FETCH_TIMEOUT", "180"))
 
     # Mistral OCR (PDF parsing)
     MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")

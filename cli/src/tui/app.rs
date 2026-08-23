@@ -478,13 +478,23 @@ async fn ensure_session(app: &mut App) {
     if app.config.has_session() && app.config.access_expiring(60) {
         match app.api.refresh(&app.config.refresh_token).await {
             Ok(session) => apply_session(app, session),
-            Err(_) => {
+            // Only a positive rejection ends the session. Anything else — a 500,
+            // a timeout, DNS falling over — means we did not get an answer, not
+            // that the refresh token is bad. This arm used to be `Err(_)`, and a
+            // momentary DNS failure (surfacing as a 500 from /auth/refresh)
+            // erased a perfectly valid token from disk, turning every subsequent
+            // request into a 401. The check is cheap to repeat: it runs again on
+            // the next 30s tick, still inside the token's lifetime.
+            Err(e) if crate::api::client::is_auth_rejection(&e) => {
                 app.config.clear_session();
                 let _ = app.config.save();
                 app.api = Arc::new(ApiClient::new(
                     app.config.server_url.clone(),
                     app.config.bearer(),
                 ));
+            }
+            Err(e) => {
+                tracing::warn!("Session refresh could not complete, keeping session: {e}");
             }
         }
     }
@@ -499,10 +509,10 @@ fn apply_session(app: &mut App, session: Session) {
     app.config
         .set_session(session.access_token, session.refresh_token, expires_at, email);
     let _ = app.config.save();
-    app.api = Arc::new(ApiClient::new(
-        app.config.server_url.clone(),
-        app.config.bearer(),
-    ));
+    // Update the token through the existing client rather than building a new
+    // one. Tasks spawned earlier (build/chat streams) hold their own Arc to this
+    // client; replacing `app.api` would leave them on the old, expiring token.
+    app.api.set_token(app.config.bearer());
 }
 
 /// Load experts at startup, routing to the Login screen on 401.

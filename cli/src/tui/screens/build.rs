@@ -27,7 +27,10 @@ const STAGES: &[(&str, &str)] = &[
 ];
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum FetcherState { Waiting, Fetching, Done(u64), Skipped }
+// No `Waiting`: a fetcher is either running (`active` in discovery_started),
+// finished, or was never planned for this build — and that last case is Skipped,
+// not pending. Nothing sits in limbo waiting to start.
+pub enum FetcherState { Fetching, Done(u64), Skipped }
 
 pub struct BuildCardInfo {
     pub topic: String,
@@ -429,9 +432,16 @@ impl BuildScreen {
                     self.log(format!("{} concepts identified", key_concepts.len()), LogLevel::Success);
                 }
                 BuildEvent::DiscoveryStarted { fetchers, active } => {
-                    for f in fetchers { self.fetchers.insert(f.clone(), FetcherState::Waiting); }
+                    // `fetchers` is every fetcher that exists; `active` is the
+                    // subset this build's plan actually runs. The inactive ones
+                    // are decided, not pending — the planner gave them weight 0
+                    // (no public-domain books for the topic, say) and nothing
+                    // will ever send a fetcher_done for them. Seeding those as
+                    // Waiting left them spinning for the life of the build and
+                    // held the header one short forever ("10/11 fetchers done").
+                    for f in fetchers { self.fetchers.insert(f.clone(), FetcherState::Skipped); }
                     for f in active   { self.fetchers.insert(f.clone(), FetcherState::Fetching); }
-                    self.log(format!("Starting {} source fetchers", fetchers.len()), LogLevel::Info);
+                    self.log(format!("Starting {} source fetchers", active.len()), LogLevel::Info);
                 }
                 BuildEvent::FetcherDone { name, count, skipped, reason } => {
                     let state = if *skipped { FetcherState::Skipped } else { FetcherState::Done(*count) };
@@ -448,6 +458,16 @@ impl BuildScreen {
                     self.log(
                         format!("Triage: {} candidates → {} ranked (budget {})", candidates, ranked, budget),
                         LogLevel::Success,
+                    );
+                }
+                // Fills the funnel's "of N fetched" leg while the fetch is still
+                // running, so a long fetch stage is visibly moving rather than
+                // indistinguishable from a dead worker.
+                BuildEvent::FetchProgress { fetched, attempted, budget } => {
+                    self.fetched = Some((*fetched, *budget));
+                    self.log(
+                        format!("Fetching: {}/{} retrieved ({} tried)", fetched, budget, attempted),
+                        LogLevel::Info,
                     );
                 }
                 BuildEvent::FetchDone { fetched, budget } => {
@@ -756,10 +776,6 @@ impl BuildScreen {
 
         let items: Vec<ListItem> = self.fetchers.iter().map(|(name, state)| {
             ListItem::new(match state {
-                FetcherState::Waiting => Line::from(vec![
-                    Span::styled("○  ", Theme::dim()),
-                    Span::styled(name.as_str(), Theme::dim()),
-                ]),
                 FetcherState::Fetching => Line::from(vec![
                     Span::styled(format!("{}  ", spinner::dots(tick)), Theme::accent().add_modifier(Modifier::BOLD)),
                     Span::styled(name.as_str(), Theme::accent()),

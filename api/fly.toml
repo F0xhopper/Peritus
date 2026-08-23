@@ -39,4 +39,14 @@ primary_region = "iad"
 
 [[vm]]
   size = "shared-cpu-1x"
+  # 2GB, not the 256MB default that `size` alone implies. Measured on the live
+  # worker while completely idle: 207MB usable, 97MB resident, ~5MB free. A build
+  # then has to fit lxml parses of multi-megabyte pages, thirty sources of up to
+  # 200KB each, several hundred 3072-dim embeddings, and a graph extraction held
+  # whole before bulk insert — into the ~110MB left over. It does not fit, and
+  # the failure is not an OOM kill: the kernel reclaims instead, so the machine
+  # simply runs ~50x slower with nothing in the logs. Builds stalled for hours,
+  # heartbeats starved past WORKER_STALE_TIMEOUT, and jobs were reaped mid-flight
+  # while looking, from the outside, perfectly healthy.
+  memory_mb = 2048
   processes = ["worker"]

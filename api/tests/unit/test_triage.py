@@ -1,8 +1,11 @@
 """Unit tests for candidate triage ranking and the budgeted fetch-with-refill."""
 
+import asyncio
+
 import pytest
 
-from peritus.experts.builder import ExpertBuilder
+from peritus.core.config import settings
+from peritus.experts.builder import ExpertBuilder, _safe_fetch_candidate
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.triage import (
     TriagedCandidate,
@@ -134,6 +137,87 @@ async def test_fetch_with_refill_handles_exhausted_ranked_list():
     ranked = [_triaged("only", "https://x.test/1", 7.0)]
     results = await builder._fetch_with_refill(ranked, budget=5, caps={})
     assert len(results) == 1
+
+
+@pytest.mark.asyncio
+async def test_fetch_with_refill_reports_progress_between_waves():
+    """The fetch stage must never go dark.
+
+    Between `triage_done` and `fetch_done` this stage does all its network work
+    and used to emit nothing at all, so a wedged worker and a busy one looked
+    identical for as long as anyone watched. Every wave now reports.
+    """
+    builder = _builder_with_fake_fetchers()
+    events: list[dict] = []
+
+    async def on_event(e: dict) -> None:
+        events.append(e)
+
+    ranked = [_triaged(f"t{i}", f"https://x.test/{i}", 9 - i * 0.1) for i in range(12)]
+    results = await builder._fetch_with_refill(
+        ranked, budget=12, caps={SourceType.WEB: 99}, on_event=on_event,
+    )
+
+    progress = [e for e in events if e["type"] == "fetch_progress"]
+    assert len(progress) >= 2, "a multi-wave fetch must report more than once"
+    # Monotonic, and the last one agrees with what was actually returned.
+    assert [e["fetched"] for e in progress] == sorted(e["fetched"] for e in progress)
+    assert progress[-1]["fetched"] == len(results)
+    assert progress[-1]["attempted"] >= progress[-1]["fetched"]
+    assert all(e["budget"] == 12 for e in progress)
+
+
+@pytest.mark.asyncio
+async def test_safe_fetch_candidate_bounds_a_hanging_fetcher(monkeypatch):
+    """A fetcher that never returns costs one slot, not the build.
+
+    httpx's timeouts are per-operation, so a server that dribbles a byte before
+    every read deadline satisfies all of them indefinitely. Only a wall-clock cap
+    catches that, and without one the whole wave — and the stage — stops.
+    """
+    monkeypatch.setattr(settings, "SOURCE_FETCH_TIMEOUT", 0.05)
+
+    class _HangingFetcher:
+        async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+            await asyncio.sleep(3600)
+            raise AssertionError("unreachable")
+
+    result = await asyncio.wait_for(
+        _safe_fetch_candidate(_HangingFetcher(), _candidate("hangs", "https://slow.test")),
+        timeout=5,
+    )
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_with_refill_refills_past_a_hanging_candidate(monkeypatch):
+    """The abandoned slot goes to the next candidate down, like any other failure."""
+    monkeypatch.setattr(settings, "SOURCE_FETCH_TIMEOUT", 0.05)
+
+    class _MixedFetcher:
+        async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
+            if "hang" in candidate.url:
+                await asyncio.sleep(3600)
+            return RawSource(
+                source_type=candidate.source_type,
+                url=candidate.url,
+                title=candidate.title,
+                author=None,
+                text="x" * 1000,
+            )
+
+    builder = ExpertBuilder.__new__(ExpertBuilder)
+    builder._fetchers = {"web": (_MixedFetcher(), 3)}
+
+    ranked = [_triaged("hangs", "https://hang.test", 9.9)] + [
+        _triaged(f"t{i}", f"https://x.test/{i}", 8 - i * 0.1) for i in range(4)
+    ]
+    results = await asyncio.wait_for(
+        builder._fetch_with_refill(ranked, budget=3, caps={SourceType.WEB: 99}),
+        timeout=10,
+    )
+    assert len(results) == 3
+    assert "hangs" not in [r.title for r in results]
 
 
 # --- domain priors ---------------------------------------------------------

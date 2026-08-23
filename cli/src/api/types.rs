@@ -84,6 +84,9 @@ pub enum BuildEvent {
     DiscoveryStarted { fetchers: Vec<String>, active: Vec<String> },
     FetcherDone { name: String, count: u64, skipped: bool, #[serde(default)] reason: String },
     TriageDone { candidates: u64, ranked: u64, budget: u64 },
+    /// One per fetch wave. `attempted` counts candidates tried (failures
+    /// included); `fetched` counts those that yielded a source.
+    FetchProgress { fetched: u64, attempted: u64, budget: u64 },
     FetchDone { fetched: u64, budget: u64 },
     SnowballDone { added: u64 },
     // Validator scores are 0–10 (see validator.py's rubric).

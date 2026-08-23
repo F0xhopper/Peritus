@@ -4,6 +4,7 @@ search() identifies books and resolves them to Gutendex records (cheap metadata)
 the multi-hundred-KB text download happens in fetch(), only for triage winners.
 """
 
+import asyncio
 import difflib
 import re
 from typing import Any
@@ -21,6 +22,9 @@ logger = get_logger(__name__)
 _GUTENDEX = "https://gutendex.com/books/"
 _HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 _MAX_CHARS = 200_000
+# Wall-clock ceiling on the whole Gutendex resolution phase. Discovery waits on
+# every fetcher, so this is a cap on how long Gutenberg may delay the build.
+_SEARCH_BUDGET = 45.0
 
 _START_RE = re.compile(
     r"\*{3}\s*START OF (THE|THIS) PROJECT GUTENBERG EBOOK.+?\*{3}", re.IGNORECASE
@@ -75,17 +79,33 @@ class GutenbergFetcher:
         async with httpx.AsyncClient(
             timeout=30, headers=_HEADERS, follow_redirects=True
         ) as client:
-            for book_info in identified:
+            # Concurrent, and bounded. This loop used to run one book at a time,
+            # up to six books with up to two 30s Gutendex calls each — a 6-minute
+            # worst case, in a stage that gathers every fetcher and so cannot
+            # finish until the slowest one does. A real build spent 4m32s here
+            # and came back with nothing while every other fetcher was done in
+            # five seconds. Gutendex is a single small volunteer-run service;
+            # this is the one fetcher whose latency is worth defending against.
+            try:
+                per_book = await asyncio.wait_for(
+                    asyncio.gather(
+                        *[_lookup_book(client, b) for b in identified]
+                    ),
+                    timeout=_SEARCH_BUDGET,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Gutenberg: Gutendex lookups exceeded %.0fs for %r — returning nothing "
+                    "rather than holding up discovery",
+                    _SEARCH_BUDGET, query,
+                )
+                return []
+
+            # Selection stays sequential over the original order, so `seen_ids`
+            # and the max_results cap behave exactly as they did before.
+            for book_info, results in zip(identified, per_book, strict=True):
                 if len(candidates) >= max_results:
                     break
-                gutendex_query = book_info.get("search_query") or book_info["title"]
-                results = await _search_gutendex(client, gutendex_query, 5)
-                if not results and book_info.get("author"):
-                    results = await _search_gutendex(client, book_info["author"], 5)
-
-                # Gutendex search is loose (an author query matches any of their
-                # books) — only accept records whose title matches the book
-                # Claude actually asked for.
                 match = next(
                     (
                         r for r in results
@@ -180,6 +200,19 @@ async def _identify_books(topic: str) -> list[dict]:
         return []
 
 
+async def _lookup_book(client: httpx.AsyncClient, book_info: dict) -> list[dict]:
+    """Gutendex records for one identified book: the title query, then the author.
+
+    Gutendex search is loose — an author query matches every book they wrote —
+    so the caller still has to title-match what comes back.
+    """
+    gutendex_query = book_info.get("search_query") or book_info["title"]
+    results = await _search_gutendex(client, gutendex_query, 5)
+    if not results and book_info.get("author"):
+        results = await _search_gutendex(client, book_info["author"], 5)
+    return results
+
+
 async def _search_gutendex(client: httpx.AsyncClient, query: str, limit: int) -> list[dict]:
     try:
         resp = await client.get(
@@ -207,14 +240,21 @@ async def _download_text(client: httpx.AsyncClient, formats: dict) -> str:
 
     content_type = resp.headers.get("content-type", "")
     if "html" in content_type or url.endswith((".htm", ".html")):
-        soup = BeautifulSoup(resp.text, "lxml")
-        for tag in soup(["script", "style"]):
-            tag.decompose()
-        text = soup.get_text(separator="\n", strip=True)
+        # Off the loop: this is a whole book, routinely multi-megabyte, and
+        # parsing one inline blocks every other coroutine in the process —
+        # including the build worker's heartbeat.
+        text = await asyncio.to_thread(_html_to_text, resp.text)
     else:
         text = resp.text
 
     return _strip_gutenberg_boilerplate(text)
+
+
+def _html_to_text(html: str) -> str:
+    soup = BeautifulSoup(html, "lxml")
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
 
 
 _TITLE_STOPWORDS = frozenset({"the", "a", "an", "of", "and", "or", "on", "in", "to"})

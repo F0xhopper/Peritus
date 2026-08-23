@@ -44,6 +44,36 @@ _LIVE_ATTEMPTS = 3
 _TERMINAL_BATCH_ERRORS = ("invalid_request",)
 
 
+def is_terminal_provider_error(exc: BaseException) -> bool:
+    """Whether retrying this exception is provably pointless.
+
+    An exhausted credit balance and a rejected key both arrive as ordinary API
+    errors and were retried three times each, per call, across every stage —
+    then reported by each stage in its own vocabulary. A build once failed with
+    "All sources failed validation. Try a different topic or sources." when the
+    real message, which Anthropic supplied and the code discarded, was "Your
+    credit balance is too low to access the Anthropic API."
+    """
+    status = getattr(exc, "status_code", None)
+    if status in (401, 403):
+        return True
+    if status == 400:
+        body = getattr(exc, "body", None)
+        err = body.get("error") if isinstance(body, dict) else None
+        if isinstance(err, dict) and err.get("type") in ("invalid_request_error",):
+            return True
+    return False
+
+
+def provider_error_message(exc: BaseException) -> str:
+    """The provider's own wording, which is the only actionable part."""
+    body = getattr(exc, "body", None)
+    err = body.get("error") if isinstance(body, dict) else None
+    if isinstance(err, dict) and isinstance(err.get("message"), str):
+        return err["message"]
+    return str(exc) or type(exc).__name__
+
+
 class BuildExecution(StrEnum):
     """The cost/latency trade-off a single build has chosen.
 
@@ -68,6 +98,37 @@ _execution: ContextVar[BuildExecution] = ContextVar(
 )
 
 
+class ProviderStatus:
+    """Mutable per-build record of a terminal provider failure.
+
+    A *mutable holder* in the ContextVar rather than the exception itself,
+    because ``asyncio.gather`` runs each call in its own Task with a **copy** of
+    the context: a ``ContextVar.set`` inside one of them is invisible to the
+    caller. The copy shares this object by reference, so mutating it is seen.
+    """
+
+    __slots__ = ("terminal",)
+
+    def __init__(self) -> None:
+        self.terminal: BaseException | None = None
+
+
+_provider_status: ContextVar[ProviderStatus | None] = ContextVar(
+    "peritus_provider_status", default=None
+)
+
+
+def terminal_provider_error() -> BaseException | None:
+    """The terminal provider error seen during this build, if any.
+
+    Lets a stage distinguish "the model judged the inputs and rejected them"
+    from "the model was never reachable" — the two are indistinguishable at the
+    call site, since both surface as a ``None`` result.
+    """
+    status = _provider_status.get()
+    return status.terminal if status else None
+
+
 def current_execution() -> BuildExecution:
     """The execution policy in force for the current build/task."""
     return _execution.get()
@@ -75,11 +136,17 @@ def current_execution() -> BuildExecution:
 
 @contextmanager
 def build_execution(mode: BuildExecution) -> Iterator[None]:
-    """Declare the execution policy for everything run inside the block."""
+    """Declare the execution policy for everything run inside the block.
+
+    Also installs a fresh :class:`ProviderStatus`, so a terminal provider error
+    is scoped to this build and never leaks into a concurrent one.
+    """
     token = _execution.set(mode)
+    status_token = _provider_status.set(ProviderStatus())
     try:
         yield
     finally:
+        _provider_status.reset(status_token)
         _execution.reset(token)
 
 
@@ -126,16 +193,20 @@ async def gather_claude_calls(
         return []
 
     if not should_batch(len(params_list)):
-        return await _run_live(params_list, live_concurrency, on_result=on_result)
+        return await _run_live(
+            params_list, live_concurrency, on_result=on_result, description=description
+        )
 
     try:
         results = await _run_batch(params_list, description)
     except Exception as exc:
         logger.warning(
-            "Message batch %r failed outright (%s) — falling back to live calls",
-            description, exc,
+            "Message batch %r failed outright (%s: %s) — falling back to live calls",
+            description, type(exc).__name__, exc, exc_info=True,
         )
-        return await _run_live(params_list, live_concurrency, on_result=on_result)
+        return await _run_live(
+            params_list, live_concurrency, on_result=on_result, description=description
+        )
 
     # Live-retry only the items the batch could not complete. on_result is not
     # passed through: it is invoked once per input below, after the merge, so
@@ -146,7 +217,11 @@ async def gather_claude_calls(
             "Message batch %r: %d/%d items unfinished — retrying them live",
             description, len(missing), len(params_list),
         )
-        retried = await _run_live([params_list[i] for i in missing], live_concurrency)
+        retried = await _run_live(
+            [params_list[i] for i in missing],
+            live_concurrency,
+            description=f"{description}:batch-retry",
+        )
         for idx, msg in zip(missing, retried, strict=True):
             results[idx] = msg
     if on_result:
@@ -166,9 +241,27 @@ async def _run_live(
     params_list: list[dict[str, Any]],
     concurrency: int,
     on_result: ResultCallback | None = None,
+    description: str = "claude-calls",
 ) -> list[Any | None]:
+    """Run the set as live concurrent calls, retrying each up to _LIVE_ATTEMPTS.
+
+    Logging here is deliberately loud, because this is where a provider outage
+    becomes a silent `None` that every caller then reports in its own domain
+    vocabulary. A whole build once failed with "All sources failed validation.
+    Try a different topic" when the truth was that every call in this function
+    had failed: the only trace was one `%s`-formatted line with no stage name,
+    no exception type, and nothing at all from the two retries before it. So:
+    every failed attempt logs, with the stage and the exception type, and the
+    set logs an aggregate that makes a total outage impossible to misread.
+    """
     client = get_anthropic_client()
     sem = asyncio.Semaphore(max(1, concurrency))
+    model = str(params_list[0].get("model", "?")) if params_list else "?"
+    logger.info(
+        "Live Claude calls: %d request(s) for %r (model=%s, concurrency=%d)",
+        len(params_list), description, model, max(1, concurrency),
+    )
+    started = time.monotonic()
 
     async def one(index: int, params: dict[str, Any]) -> Any | None:
         msg: Any | None = None
@@ -176,17 +269,71 @@ async def _run_live(
             for attempt in range(_LIVE_ATTEMPTS):
                 try:
                     msg = await client.messages.create(**params)
+                    if attempt:
+                        logger.info(
+                            "Live Claude call %r[%d] succeeded on attempt %d/%d",
+                            description, index, attempt + 1, _LIVE_ATTEMPTS,
+                        )
                     break
                 except Exception as exc:
-                    if attempt == _LIVE_ATTEMPTS - 1:
-                        logger.warning("Live Claude call failed after retries: %s", exc)
-                    else:
+                    if is_terminal_provider_error(exc):
+                        # No amount of retrying fixes a rejected key or an empty
+                        # balance. Record it so the build can report the
+                        # provider's own message instead of guessing.
+                        status = _provider_status.get()
+                        if status is not None:
+                            status.terminal = exc
+                        logger.error(
+                            "Live Claude call %r[%d]: terminal provider error, not "
+                            "retrying — %s",
+                            description, index, provider_error_message(exc),
+                        )
+                        break
+                    # Every attempt, not just the last. A call that succeeds on
+                    # its third try is a provider degrading, and that is exactly
+                    # the signal worth having before it degrades all the way.
+                    last = attempt == _LIVE_ATTEMPTS - 1
+                    logger.warning(
+                        "Live Claude call %r[%d] attempt %d/%d failed: %s: %s%s",
+                        description, index, attempt + 1, _LIVE_ATTEMPTS,
+                        type(exc).__name__, exc,
+                        "" if last else f" — retrying in {2 ** attempt}s",
+                        exc_info=last,  # full traceback once, on the giving-up attempt
+                    )
+                    if not last:
                         await asyncio.sleep(2 ** attempt)
         if on_result:
             await _report(on_result, index, msg)
         return msg
 
-    return list(await asyncio.gather(*(one(i, p) for i, p in enumerate(params_list))))
+    results = list(await asyncio.gather(*(one(i, p) for i, p in enumerate(params_list))))
+
+    failed = sum(1 for r in results if r is None)
+    elapsed = time.monotonic() - started
+    if failed == len(results):
+        # The case that has to be unmissable: nothing got through, so whatever
+        # the caller reports next is about the provider, not about its inputs.
+        status = _provider_status.get()
+        terminal = status.terminal if status else None
+        logger.error(
+            "Live Claude calls %r: ALL %d call(s) failed (%.1fs, model=%s) — %s. "
+            "Downstream stage failures are provider errors, not bad input",
+            description, len(results), elapsed, model,
+            f"terminal provider error, not retried: {provider_error_message(terminal)}"
+            if terminal is not None
+            else f"each retried {_LIVE_ATTEMPTS}x",
+        )
+    elif failed:
+        logger.warning(
+            "Live Claude calls %r: %d/%d failed after retries (%.1fs)",
+            description, failed, len(results), elapsed,
+        )
+    else:
+        logger.info(
+            "Live Claude calls %r: %d/%d succeeded (%.1fs)",
+            description, len(results), len(results), elapsed,
+        )
+    return results
 
 
 async def _run_batch(
@@ -239,15 +386,27 @@ async def _run_batch(
         if entry.result.type == "succeeded":
             results[idx] = entry.result.message
         else:
+            # The per-item error carries the actual cause (rate limit, invalid
+            # request, overloaded). Logging only `result.type` reduced every one
+            # of those to the word "errored".
             logger.warning(
-                "Batch item %s in %s: %s", entry.custom_id, batch.id, entry.result.type,
+                "Batch item %s in %s (%r): %s — %s",
+                entry.custom_id, batch.id, description, entry.result.type,
+                getattr(entry.result, "error", None) or "no error detail",
             )
 
     done = sum(1 for r in results if r is not None)
-    logger.info(
-        "Message batch %s (%r) finished: %d/%d succeeded",
-        batch.id, description, done, len(params_list),
-    )
+    if not done:
+        logger.error(
+            "Message batch %s (%r): ALL %d item(s) failed — downstream stage "
+            "failures are provider errors, not bad input",
+            batch.id, description, len(params_list),
+        )
+    else:
+        logger.info(
+            "Message batch %s (%r) finished: %d/%d succeeded",
+            batch.id, description, done, len(params_list),
+        )
     return results
 
 

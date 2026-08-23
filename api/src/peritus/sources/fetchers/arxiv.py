@@ -81,19 +81,25 @@ def _extract_id(entry_id: str) -> str:
     return match.group(1) if match else entry_id.split("/")[-1]
 
 
+def _ar5iv_to_text(html: str) -> str:
+    soup = BeautifulSoup(html, "lxml")
+    for tag in soup(["script", "style", "nav", "header", "footer", "figure", "cite"]):
+        tag.decompose()
+    article = soup.find("article") or soup.find("main") or soup.find("body")
+    if not article:
+        return ""
+    return article.get_text(separator="\n", strip=True)
+
+
 async def fetch_ar5iv(client: httpx.AsyncClient, arxiv_id: str) -> str:
     """Fetch the HTML full-text rendering of a paper from ar5iv."""
     try:
         resp = await client.get(f"{_AR5IV}{arxiv_id}", timeout=20)
         if resp.status_code != 200:
             return ""
-        soup = BeautifulSoup(resp.text, "lxml")
-        for tag in soup(["script", "style", "nav", "header", "footer", "figure", "cite"]):
-            tag.decompose()
-        article = soup.find("article") or soup.find("main") or soup.find("body")
-        if not article:
-            return ""
-        return article.get_text(separator="\n", strip=True)
+        # Off the loop — a full paper rendering is large, and builds fetch these
+        # in concurrent waves alongside a heartbeat that must keep its cadence.
+        return await asyncio.to_thread(_ar5iv_to_text, resp.text)
     except Exception as exc:
         logger.debug("ar5iv fetch failed for %r: %s", arxiv_id, exc)
         return ""

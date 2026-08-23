@@ -1,3 +1,4 @@
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -33,7 +34,16 @@ pub struct ApiClient {
     client: Client,
     base_url: String,
     // Bearer credential: a Supabase access token, or the legacy static key.
-    token: String,
+    //
+    // Shared and mutable, not a plain String. Long-lived tasks (the build and
+    // chat streams) capture an `Arc<ApiClient>` when they spawn and outlive
+    // several token refreshes. With the credential copied in at construction,
+    // replacing `app.api` with a freshly built client on each refresh left
+    // those tasks holding the original token for their whole life — so every
+    // stream reconnect after the first expiry 401'd, and a long build appeared
+    // to die while the server was still happily building it. Refreshing through
+    // this cell means every holder, spawned tasks included, sees the new token.
+    token: Arc<RwLock<String>>,
 }
 
 impl ApiClient {
@@ -47,15 +57,28 @@ impl ApiClient {
         Self {
             client,
             base_url,
-            token,
+            token: Arc::new(RwLock::new(token)),
         }
     }
 
+    /// Swap in a newly refreshed access token. Visible immediately to every
+    /// clone of this client, including tasks already running.
+    pub fn set_token(&self, token: String) {
+        if let Ok(mut guard) = self.token.write() {
+            *guard = token;
+        }
+    }
+
+    fn token(&self) -> String {
+        self.token.read().map(|t| t.clone()).unwrap_or_default()
+    }
+
     fn auth(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-        if self.token.is_empty() {
+        let token = self.token();
+        if token.is_empty() {
             rb
         } else {
-            rb.header("Authorization", format!("Bearer {}", self.token))
+            rb.header("Authorization", format!("Bearer {}", token))
         }
     }
 
@@ -151,6 +174,23 @@ impl ApiClient {
 }
 
 /// True when an error came from an HTTP 401 (token missing/invalid/expired).
+/// True when the server positively rejected our credential, as opposed to the
+/// request never getting a verdict. Only this justifies discarding a session:
+/// a 500, a timeout or a DNS failure says nothing about whether the refresh
+/// token is still good, and throwing it away on one of those logs the user out
+/// over a momentary network blip.
+pub fn is_auth_rejection(err: &anyhow::Error) -> bool {
+    if let Some(re) = err.downcast_ref::<reqwest::Error>() {
+        return matches!(
+            re.status(),
+            Some(reqwest::StatusCode::UNAUTHORIZED) | Some(reqwest::StatusCode::FORBIDDEN)
+        );
+    }
+    err.downcast_ref::<ApiError>()
+        .map(|e| e.status == 401 || e.status == 403)
+        .unwrap_or(false)
+}
+
 pub fn is_unauthorized(err: &anyhow::Error) -> bool {
     if let Some(re) = err.downcast_ref::<reqwest::Error>() {
         return re.status() == Some(reqwest::StatusCode::UNAUTHORIZED);

@@ -11,6 +11,7 @@ endpoint, and allows 10 requests/second unauthenticated — where E-utilities
 allows 3 without an API key, and Peritus has no key to give it.
 """
 
+import asyncio
 import re
 
 import httpx
@@ -167,19 +168,25 @@ def _strip_markup(text: str) -> str:
     return _TAG_RE.sub(" ", text or "").replace("  ", " ").strip()
 
 
+def _jats_to_text(xml: str) -> str:
+    soup = BeautifulSoup(xml, "lxml-xml")
+    for tag in soup(list(_DROP_TAGS)):
+        tag.decompose()
+    body = soup.find("body")
+    if not body:
+        return ""
+    return _WS_RE.sub("\n\n", body.get_text(separator="\n", strip=True))
+
+
 async def fetch_full_text(client: httpx.AsyncClient, pmcid: str) -> str:
     """Fetch the JATS XML body of an open-access article and flatten it to text."""
     try:
         resp = await client.get(f"{_REST}/{pmcid}/fullTextXML", timeout=20)
         if resp.status_code != 200:
             return ""
-        soup = BeautifulSoup(resp.text, "lxml-xml")
-        for tag in soup(list(_DROP_TAGS)):
-            tag.decompose()
-        body = soup.find("body")
-        if not body:
-            return ""
-        return _WS_RE.sub("\n\n", body.get_text(separator="\n", strip=True))
+        # Off the loop — full-text JATS is big, and the parse is CPU-bound work
+        # that would otherwise stall the build worker's heartbeat.
+        return await asyncio.to_thread(_jats_to_text, resp.text)
     except Exception as exc:
         logger.debug("Europe PMC full text fetch failed for %r: %s", pmcid, exc)
         return ""

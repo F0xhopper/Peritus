@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
+from urllib.parse import urlparse
 
 import asyncpg
 
@@ -47,6 +48,55 @@ logger = get_logger(__name__)
 _MAX_POLL_BACKOFF = 60.0
 
 
+def _redact_host(url: str) -> str:
+    """The host a URL points at, with any credentials stripped."""
+    try:
+        host = urlparse(url).hostname or "?"
+    except ValueError:
+        return "?"
+    return host
+
+
+def _log_environment_banner() -> None:
+    """One block, at startup, saying what this worker actually is.
+
+    Every question worth asking of a misbehaving worker starts here: which
+    database is it on, which provider keys does it have, is it batching. All of
+    it is env-driven, so the answer differs per deployment and cannot be read
+    off the source. Diagnosing a stuck build previously meant inferring the
+    answers from `locked_by` strings and process listings.
+
+    Keys are reported as present/absent only — never logged, not even prefixes.
+    """
+    s = settings
+    logger.info(
+        "Worker environment: db=%s pool=%d-%d acquire_timeout=%.0fs cmd_timeout=%.0fs",
+        _redact_host(s.DATABASE_URL), s.DB_POOL_MIN_SIZE, s.DB_POOL_MAX_SIZE,
+        s.DB_ACQUIRE_TIMEOUT, s.DB_COMMAND_TIMEOUT,
+    )
+    logger.info(
+        "Worker environment: heartbeat=%.0fs stale_timeout=%.0fs poll=%.0fs "
+        "max_attempts=%d fetch_timeout=%.0fs",
+        s.WORKER_HEARTBEAT_INTERVAL, s.WORKER_STALE_TIMEOUT, s.WORKER_POLL_INTERVAL,
+        s.WORKER_MAX_ATTEMPTS, s.SOURCE_FETCH_TIMEOUT,
+    )
+    logger.info(
+        "Worker environment: plan_model=%s fast_model=%s anthropic_timeout=%.0fs "
+        "retries=%d batch_enabled=%s",
+        s.PLAN_MODEL, s.FAST_MODEL, s.ANTHROPIC_TIMEOUT, s.ANTHROPIC_MAX_RETRIES,
+        s.ANTHROPIC_BATCH_ENABLED,
+    )
+    keys = {
+        "anthropic": s.ANTHROPIC_API_KEY, "openai": s.OPENAI_API_KEY,
+        "exa": s.EXA_API_KEY, "mistral": s.MISTRAL_API_KEY, "cohere": s.COHERE_API_KEY,
+    }
+    logger.info(
+        "Worker environment: api keys set=[%s] MISSING=[%s]",
+        ", ".join(sorted(n for n, v in keys.items() if v)) or "none",
+        ", ".join(sorted(n for n, v in keys.items() if not v)) or "none",
+    )
+
+
 class _JobCancelled(Exception):
     """Raised internally when a running job is cancelled or reaped mid-build."""
 
@@ -70,6 +120,9 @@ class BuildWorker:
         self.worker_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
         self._stop = asyncio.Event()
         self._running: set[asyncio.Task[None]] = set()
+        # The job ids behind those tasks. The reaper consults this so it can
+        # never requeue work this process is demonstrably still doing.
+        self._running_job_ids: set[int] = set()
         self._reap_counter = 0.0
 
     def request_stop(self) -> None:
@@ -78,6 +131,7 @@ class BuildWorker:
 
     async def run(self) -> None:
         logger.info("BuildWorker %s started (concurrency=%d)", self.worker_id, self._concurrency)
+        _log_environment_banner()
         consecutive_failures = 0
         try:
             while not self._stop.is_set():
@@ -122,11 +176,11 @@ class BuildWorker:
         # is down for a minute should not write the same stack fifty times.
         if consecutive_failures == 1:
             logger.warning(
-                "Build worker poll failed — retrying in %.0fs: %s", delay, exc, exc_info=True
+                "Build worker poll failed — retrying in %.0fs: %r", delay, exc, exc_info=True
             )
         else:
             logger.warning(
-                "Build worker poll still failing (attempt %d) — retrying in %.0fs: %s",
+                "Build worker poll still failing (attempt %d) — retrying in %.0fs: %r",
                 consecutive_failures, delay, exc,
             )
         with suppress(TimeoutError):
@@ -144,7 +198,13 @@ class BuildWorker:
             )
             task = asyncio.create_task(self._run_job(job))
             self._running.add(task)
-            task.add_done_callback(self._running.discard)
+            self._running_job_ids.add(job.id)
+
+            def _finished(t: asyncio.Task[None], job_id: int = job.id) -> None:
+                self._running.discard(t)
+                self._running_job_ids.discard(job_id)
+
+            task.add_done_callback(_finished)
         return claimed_any
 
     async def _maybe_reap(self) -> None:
@@ -154,11 +214,30 @@ class BuildWorker:
             return
         self._reap_counter = 0.0
         try:
-            n = await self._jobs.reap_stale(settings.WORKER_STALE_TIMEOUT)
+            protected = set(self._running_job_ids)
+            n = await self._jobs.reap_stale(
+                settings.WORKER_STALE_TIMEOUT,
+                protect_job_ids=protected,
+            )
             if n:
-                logger.warning("Reaped %d stale build job(s)", n)
+                logger.warning(
+                    "Reaped %d stale build job(s) (stale_timeout=%.0fs, protected=%s)",
+                    n, settings.WORKER_STALE_TIMEOUT, sorted(protected) or "none",
+                )
+            else:
+                # Proof of life for the reaper itself. Its silence is otherwise
+                # indistinguishable from its absence — and a queue full of jobs
+                # stuck at 'running' looks identical either way.
+                logger.debug(
+                    "Reaper ran: nothing stale (stale_timeout=%.0fs, protected=%s)",
+                    settings.WORKER_STALE_TIMEOUT, sorted(protected) or "none",
+                )
         except Exception as exc:  # never let reaping kill the loop
-            logger.warning("Reaper failed: %s", exc)
+            # %r, not %s: the likeliest failure here is now a bounded-acquire
+            # TimeoutError, and str(TimeoutError()) is the empty string — the one
+            # log line that would explain a wedged pool would otherwise read
+            # "Reaper failed: ".
+            logger.warning("Reaper failed: %r", exc)
 
     async def _drain(self) -> None:
         """On shutdown, cancel in-flight builds and hand their jobs back to the queue."""
@@ -168,6 +247,34 @@ class BuildWorker:
         for task in list(self._running):
             task.cancel()
         await asyncio.gather(*list(self._running), return_exceptions=True)
+
+    # ── liveness ────────────────────────────────────────────────────────────
+
+    async def _beat(self, job_id: int) -> bool:
+        """One heartbeat attempt. False *only* when the job is provably not ours
+        any more (cancelled, or reaped by another worker) — never for a failure
+        to ask.
+
+        A beat can fail for reasons that have nothing to do with the job: the
+        Supabase transaction pooler drops pooled connections whenever it likes
+        (run() says as much), and a busy pool can time the acquire out. Those
+        must not be allowed to end a heartbeat loop. A loop that exits leaves the
+        build running with no liveness at all and no way to ever get it back —
+        the beat is not retried, so WORKER_STALE_TIMEOUT later the job is reaped
+        and retried from scratch, and after WORKER_MAX_ATTEMPTS of that the
+        expert is marked failed while its build is still, wastefully, running.
+        An unanswerable beat means "unknown", so assume alive and ask again on
+        the next tick: there are WORKER_STALE_TIMEOUT / WORKER_HEARTBEAT_INTERVAL
+        chances to get one through before anything is at risk.
+        """
+        try:
+            return await self._jobs.heartbeat(job_id, self.worker_id)
+        except Exception as exc:
+            logger.warning(
+                "Heartbeat for job %d failed, retrying in %.0fs: %r",
+                job_id, settings.WORKER_HEARTBEAT_INTERVAL, exc,
+            )
+            return True
 
     # ── single job execution ────────────────────────────────────────────────
 
@@ -206,8 +313,7 @@ class BuildWorker:
                     if build_task is not None:
                         build_task.cancel()
                     return
-                alive = await self._jobs.heartbeat(job.id, self.worker_id)
-                if not alive:
+                if not await self._beat(job.id):
                     cancelled = True
                     if build_task is not None:
                         build_task.cancel()
@@ -327,7 +433,7 @@ class BuildWorker:
             nonlocal cancelled
             while True:
                 await asyncio.sleep(settings.WORKER_HEARTBEAT_INTERVAL)
-                if not await self._jobs.heartbeat(job.id, self.worker_id):
+                if not await self._beat(job.id):
                     cancelled = True
                     if ingest_task is not None:
                         ingest_task.cancel()

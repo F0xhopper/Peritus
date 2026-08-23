@@ -228,16 +228,33 @@ async def validate_sources(
     # and the returned lists must keep the input's source order.
     batch_pairs: dict[int, list[tuple[RawSource, dict]]] = {}
 
+    # Batches that took the _ERROR_VALIDATION path — i.e. the model never
+    # judged them. Counted so the summary below can say whether a wipeout was
+    # the validator's verdict or the validator's absence.
+    errored_batches: set[int] = set()
+
     async def _on_batch_result(i: int, resp: Any) -> None:
         batch = batches[i]
         if resp is None:
-            logger.warning("Batch validation failed (%d sources)", len(batch))
+            errored_batches.add(i)
+            logger.warning(
+                "Validation batch %d/%d: no response after retries — scoring its %d "
+                "source(s) 0.0/0.0 with drop_reason='validation error'. This is NOT a "
+                "judgement about the sources; see the Claude call errors above.",
+                i + 1, len(batches), len(batch),
+            )
             raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
         else:
             try:
                 raw_validations = _parse_validate_response(resp, len(batch))
             except Exception as exc:
-                logger.warning("Batch validation unparseable (%d sources): %s", len(batch), exc)
+                errored_batches.add(i)
+                logger.warning(
+                    "Validation batch %d/%d: response unparseable (%s: %s) — scoring its "
+                    "%d source(s) 0.0/0.0 with drop_reason='validation error'",
+                    i + 1, len(batches), type(exc).__name__, exc, len(batch),
+                    exc_info=True,
+                )
                 raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
 
         for raw in raw_validations:
@@ -298,6 +315,23 @@ async def validate_sources(
                 ),
                 source_tier=_normalise_tier(result.get("source_tier")),
             ))
+
+    unjudged = sum(1 for d in dropped if d.drop_reason == "validation error")
+    if not passed and unjudged:
+        # The distinction the caller's error message could not make. "Everything
+        # scored below threshold" and "the validator never ran" both arrive here
+        # as an empty `passed`, and only one of them is about the sources.
+        logger.error(
+            "Validation produced NO passing sources for %r: %d/%d were never judged "
+            "(%d/%d batches errored). This is a provider/infrastructure failure, not a "
+            "verdict on the corpus — the sources were fetched fine.",
+            topic, unjudged, len(all_pairs), len(errored_batches), len(batches),
+        )
+    else:
+        logger.info(
+            "Validation for %r: %d passed, %d dropped (%d never judged, %d/%d batches errored)",
+            topic, len(passed), len(dropped), unjudged, len(errored_batches), len(batches),
+        )
     return passed, dropped
 
 

@@ -165,6 +165,9 @@ export type BuildEvent = { seq?: number } & (
   | { type: "discovery_started"; fetchers: string[]; active: string[] }
   | { type: "fetcher_done"; name: string; count: number; skipped: boolean; reason: string; queries: number }
   | { type: "triage_done"; candidates: number; ranked: number; budget: number }
+  // Emitted once per fetch wave. `attempted` counts candidates tried (including
+  // failures); `fetched` counts those that produced a source.
+  | { type: "fetch_progress"; fetched: number; attempted: number; budget: number }
   | { type: "fetch_done"; fetched: number; budget: number }
   // `q` is quality, `r` is relevance — both 0-10, both thresholded server-side
   // in sources/validator.py, which is what sets `passed`.

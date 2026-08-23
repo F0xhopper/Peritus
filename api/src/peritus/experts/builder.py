@@ -30,7 +30,9 @@ stage 4b — see :mod:`peritus.search.readiness`.
 import asyncio
 import json
 import math
+import time
 from collections.abc import Callable, Coroutine
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any
 
@@ -38,13 +40,18 @@ import asyncpg
 import httpx
 
 from peritus.core.config import settings
-from peritus.core.exceptions import BuildError
+from peritus.core.exceptions import BuildError, IncompleteBuildError
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
 from peritus.graph.repository import GraphRepository, node_embedding_text
-from peritus.infrastructure.anthropic_batch import BuildExecution, build_execution
+from peritus.infrastructure.anthropic_batch import (
+    BuildExecution,
+    build_execution,
+    provider_error_message,
+    terminal_provider_error,
+)
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.chunker import TextChunk
@@ -98,6 +105,11 @@ _GAPFILL_RESULTS_PER_QUERY = 2
 _BASE_FETCH_BUDGET = 30
 _SEARCH_OVERFETCH = 3
 _FETCH_CONCURRENCY = 6
+# In-stage retries for persona generation before the build is declared incomplete.
+_PERSONA_ATTEMPTS = 3
+# A single fetcher's search taking longer than this is worth a warning: discovery
+# waits on all of them, so one slow fetcher is the stage's duration.
+_SLOW_SEARCH_SECONDS = 30.0
 _TYPE_CAP_FACTOR = 2
 
 # Floor under the search phase, per query. Quotas scale down with tier, but the
@@ -348,6 +360,15 @@ class ExpertBuilder:
         plan = await _plan_research(topic)
         _route_must_have_works(plan)
         key_concepts = plan["key_concepts"]
+        if not key_concepts:
+            # Stop here rather than proceeding on the raw-topic fallback. The
+            # concepts are the syllabus: triage scores against them, validation
+            # scores against them, and gap-fill exists to close holes in them.
+            # A build without them cannot produce a ready expert, so running the
+            # rest is spending money on a foregone conclusion — one such attempt
+            # reached the graph stage and $1.70 before failing.
+            _raise_if_provider_down("Research planning")
+            raise IncompleteBuildError(["key concepts (research planning failed)"])
         await self._repo.update_key_concepts(expert.id, key_concepts)
         await _emit_event(
             on_event,
@@ -406,6 +427,12 @@ class ExpertBuilder:
             )
 
         if not passed:
+            # Before blaming the corpus, check whether the validator ever ran.
+            # An empty `passed` means either "the model judged everything below
+            # threshold" or "the model was unreachable", and only the first is
+            # about the topic. Telling someone with an empty credit balance to
+            # pick a different topic sends them to debug the wrong thing.
+            _raise_if_provider_down("Source validation")
             raise BuildError("All sources failed validation. Try a different topic or sources.")
 
         # Corpus composition, while the user is still watching the build. A
@@ -554,8 +581,9 @@ class ExpertBuilder:
                     "type": "stage_degraded",
                     "stage": "graph",
                     "message": (
-                        "Concept-graph extraction failed; the expert answers from "
-                        f"retrieval alone. ({exc})"
+                        "Concept-graph extraction failed. The corpus is retrievable, "
+                        "but an expert is not ready without its graph — this build "
+                        f"will be retried. ({exc})"
                     ),
                 },
             )
@@ -588,32 +616,56 @@ class ExpertBuilder:
 
         await _emit_event(on_event, {"type": "stage", "stage": 5, "name": "persona"})
         persona_name: str | None = None
-        try:
-            top_nodes = await self._graph_repo.get_top_nodes(expert.id, 20)
-            persona = await _generate_persona(topic, passed, top_nodes)
-            await self._repo.update_persona(
-                expert.id,
-                persona_name=persona["name"],
-                persona_bio=persona["bio"],
-                persona_style=persona["style"],
+        # Retried in place. The persona is one cheap call, and it is now required
+        # for the expert to be ready — so letting a single blip here condemn a
+        # finished corpus to a full rebuild would be absurdly expensive. The
+        # graph stage above is not retried this way: its calls already retry
+        # individually inside gather_claude_calls, and re-running all of it costs
+        # more than re-running the build.
+        for attempt in range(1, _PERSONA_ATTEMPTS + 1):
+            try:
+                top_nodes = await self._graph_repo.get_top_nodes(expert.id, 20)
+                persona = await _generate_persona(topic, passed, top_nodes)
+                await self._repo.update_persona(
+                    expert.id,
+                    persona_name=persona["name"],
+                    persona_bio=persona["bio"],
+                    persona_style=persona["style"],
+                )
+                persona_name = persona["name"]
+                await _emit_event(on_event, {"type": "persona_ready", "name": persona_name})
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "Persona generation attempt %d/%d failed for expert %d (%s: %s)",
+                    attempt, _PERSONA_ATTEMPTS, expert.id, type(exc).__name__, exc,
+                    exc_info=attempt == _PERSONA_ATTEMPTS,
+                )
+                if attempt < _PERSONA_ATTEMPTS:
+                    await asyncio.sleep(2 ** (attempt - 1))
+
+        # ── Completeness gate ────────────────────────────────────────────────
+        # An expert is "ready" only with all three: concepts, a concept graph,
+        # and a persona. Short of that the corpus stays exactly where it is —
+        # readiness is already recorded, so nothing is thrown away and chat still
+        # works — but the job does not report success, so the expert is never
+        # advertised as ready on a half-finished build. Raising here (rather than
+        # degrading, as these stages used to) routes through the worker's normal
+        # retry path.
+        missing: list[str] = []
+        if not graph_built or node_count <= 0:
+            missing.append("a concept graph")
+        if not persona_name:
+            missing.append("a persona/description")
+        if missing:
+            logger.error(
+                "Expert %d built %d source(s) and %d chunk(s) but is INCOMPLETE: "
+                "missing %s — not marking ready",
+                expert.id, total_sources, total_chunks, " and ".join(missing),
             )
-            persona_name = persona["name"]
-            await _emit_event(on_event, {"type": "persona_ready", "name": persona_name})
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("Persona generation failed for expert %d: %s", expert.id, exc)
-            await _emit_event(
-                on_event,
-                {
-                    "type": "stage_degraded",
-                    "stage": "persona",
-                    "message": (
-                        "Persona generation failed; the expert answers without a "
-                        f"named voice and can be re-voiced later. ({exc})"
-                    ),
-                },
-            )
+            raise IncompleteBuildError(missing)
 
         return BuildResult(
             expert_id=expert.id,
@@ -704,7 +756,7 @@ class ExpertBuilder:
             _FETCHER_SOURCE_TYPES[name]: quota * _TYPE_CAP_FACTOR
             for name, (_, quota) in self._fetchers.items()
         }
-        sources = await self._fetch_with_refill(ranked, fetch_budget, caps)
+        sources = await self._fetch_with_refill(ranked, fetch_budget, caps, on_event)
         await _emit_event(
             on_event,
             {
@@ -765,12 +817,20 @@ class ExpertBuilder:
         ranked: list[TriagedCandidate],
         budget: int,
         caps: dict[SourceType, int],
+        on_event: EventCallback | None = None,
     ) -> list[RawSource]:
         """Fetch full content for ranked candidates until the budget is met.
 
         Works down the ranked list in concurrent waves; failed fetches free
         their slot so lower-ranked candidates get a chance. Per-type caps are
         enforced on successful fetches.
+
+        A ``fetch_progress`` event goes out after every wave. This used to be the
+        build's one long silence — dozens of network fetches between
+        ``triage_done`` and ``fetch_done``, with nothing in between — which made
+        a dead worker and a working one look identical for as long as anyone
+        cared to watch. One event per wave bounds that silence to a single wave,
+        which SOURCE_FETCH_TIMEOUT in turn bounds in wall-clock time.
         """
         fetcher_by_type = {
             _FETCHER_SOURCE_TYPES[name]: fetcher for name, (fetcher, _) in self._fetchers.items()
@@ -778,6 +838,7 @@ class ExpertBuilder:
         results: list[RawSource] = []
         counts: dict[SourceType, int] = {}
         idx = 0
+        attempted = 0
         while len(results) < budget and idx < len(ranked):
             wave: list[SourceCandidate] = []
             while idx < len(ranked) and len(wave) < min(_FETCH_CONCURRENCY, budget - len(results)):
@@ -793,11 +854,21 @@ class ExpertBuilder:
             fetched = await asyncio.gather(
                 *[_safe_fetch_candidate(fetcher_by_type.get(c.source_type), c) for c in wave]
             )
+            attempted += len(wave)
             for candidate, source in zip(wave, fetched, strict=True):
                 if source is None:
                     counts[candidate.source_type] -= 1
                 else:
                     results.append(source)
+            await _emit_event(
+                on_event,
+                {
+                    "type": "fetch_progress",
+                    "fetched": len(results),
+                    "attempted": attempted,
+                    "budget": budget,
+                },
+            )
         return results
 
     async def _fill_coverage_gaps(
@@ -1004,7 +1075,12 @@ async def _plan_research(topic: str) -> dict:
         block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
         raw_plan = dict(block.input)
     except Exception as exc:
-        logger.warning("Research planning failed, falling back to raw topic: %s", exc)
+        logger.warning(
+            "Research planning failed (%s: %s) — falling back to raw topic. The build "
+            "continues DEGRADED: no key concepts, one query per fetcher instead of "
+            "several, and no coverage gap-fill.",
+            type(exc).__name__, exc, exc_info=True,
+        )
 
     plan = _normalise_plan(raw_plan, topic)
     logger.info(
@@ -1014,6 +1090,17 @@ async def _plan_research(topic: str) -> dict:
         ", ".join(f"{n}:{p['weight']:g}" for n, p in plan["fetcher_plans"].items()),
         "; ".join(w["title"] for w in plan["must_have_works"]),
     )
+    if not plan["key_concepts"]:
+        # Reachable without an exception too — a model can return a well-formed
+        # plan with an empty concept list. Either way every downstream stage that
+        # takes key_concepts (triage, validation, gap-fill) is now working blind,
+        # and until this line said so the only evidence was an empty list buried
+        # in the plan_ready event.
+        logger.warning(
+            "Research plan for %r has NO key concepts — triage, validation and "
+            "gap-fill will all run without a syllabus to score against",
+            topic,
+        )
     return plan
 
 
@@ -1337,20 +1424,57 @@ def _is_skipped(name: str, results: list) -> tuple[bool, str]:
 
 
 async def _safe_search(name: str, fetcher, query: str, max_results: int) -> list[SourceCandidate]:
+    started = time.monotonic()
     try:
-        return await fetcher.search(query, max_results)
+        results = await fetcher.search(query, max_results)
     except Exception as exc:
-        logger.warning("Fetcher %r search failed: %s", name, exc)
+        logger.warning(
+            "Fetcher %r search failed for %r after %.1fs (%s: %s)",
+            name, query, time.monotonic() - started, type(exc).__name__, exc,
+            exc_info=True,
+        )
         return []
+    elapsed = time.monotonic() - started
+    # Discovery gathers every fetcher, so the slowest one sets the stage's floor.
+    # Naming it at WARNING is what turns "discovery took five minutes" into
+    # "gutenberg took four and a half of them".
+    log = logger.warning if elapsed > _SLOW_SEARCH_SECONDS else logger.debug
+    log(
+        "Fetcher %r search %r: %d result(s) in %.1fs%s",
+        name, query, len(results), elapsed,
+        " — slow, this holds up the whole discovery stage"
+        if elapsed > _SLOW_SEARCH_SECONDS else "",
+    )
+    return results
 
 
 async def _safe_fetch_candidate(fetcher, candidate: SourceCandidate) -> RawSource | None:
+    """Fetch one candidate's full content, or None. Never raises, never hangs.
+
+    The wall-clock cap matters as much as the exception handling. Each fetcher
+    sets httpx timeouts, but httpx's are per-operation: a server that sends a
+    byte before every read deadline satisfies all of them forever. One such URL
+    inside a fetch wave stalls the wave, and the fetch stage is the longest
+    event-silent stretch of the build — so the symptom is a build that simply
+    stops, with a full progress bar and nothing to say why.
+    """
     if fetcher is None:
         return None
     try:
-        return await fetcher.fetch(candidate)
+        return await asyncio.wait_for(
+            fetcher.fetch(candidate), timeout=settings.SOURCE_FETCH_TIMEOUT
+        )
+    except TimeoutError:
+        logger.warning(
+            "Full fetch timed out after %.0fs for %s %r — abandoning candidate",
+            settings.SOURCE_FETCH_TIMEOUT, candidate.source_type.value, candidate.url,
+        )
+        return None
     except Exception as exc:
-        logger.warning("Full fetch failed for %r: %s", candidate.url, exc)
+        logger.warning(
+            "Full fetch failed for %s %r (%s: %s)",
+            candidate.source_type.value, candidate.url, type(exc).__name__, exc,
+        )
         return None
 
 
@@ -1593,6 +1717,83 @@ def _deduplicate_by_url[T: (RawSource, SourceCandidate)](items: list[T]) -> list
     return unique
 
 
+def _raise_if_provider_down(stage: str) -> None:
+    """Fail with the provider's own words when the LLM was never reachable.
+
+    A ``BuildError`` deliberately: the worker treats those as non-retryable, and
+    an empty credit balance or a rejected key will fail identically on every
+    attempt. Retrying costs three builds' worth of fetching to reach the same
+    place, and buries the one sentence that says how to fix it.
+    """
+    exc = terminal_provider_error()
+    if exc is None:
+        return
+    message = provider_error_message(exc)
+    logger.error("%s could not run — terminal provider error: %s", stage, message)
+    raise BuildError(f"{stage} could not run — the Anthropic API rejected every request: {message}")
+
+
 async def _emit_event(cb: EventCallback | None, event: dict) -> None:
+    _log_event(event)
     if cb:
         await cb(event)
+
+
+# Wall-clock of the stage currently running, so each stage boundary can report
+# how long the previous one took. A module-level single slot is enough: a build
+# runs its stages in sequence, and concurrent builds each get their own copy
+# through the same contextvar machinery the execution policy uses.
+_stage_started: ContextVar[tuple[str, float] | None] = ContextVar(
+    "peritus_stage_started", default=None
+)
+
+# Events worth a log line of their own. The rest (per-source validation, per-batch
+# graph progress) are high-volume and already visible in the durable event log —
+# logging those too would bury the ones that matter.
+_LOGGED_EVENTS = frozenset({
+    "stage", "plan_ready", "discovery_started", "triage_done", "fetch_done",
+    "validate_done", "coverage_gaps", "gapfill_done", "snowball_done",
+    "corpus_warning", "chat_ready", "graph_ready", "entities_resolved",
+    "persona_ready", "stage_degraded", "error", "cancelled", "done",
+})
+
+
+def _clip(value: Any, limit: int = 160) -> str:
+    text = str(value)
+    return text if len(text) <= limit else f"{text[:limit]}…(+{len(text) - limit} chars)"
+
+
+def _log_event(event: dict) -> None:
+    """Mirror significant build events into the process log.
+
+    The durable event log is per-job and only readable through the API, which is
+    exactly the wrong place to look when the question is "what was this worker
+    doing when it died". These lines put the build's shape into the same stream
+    as the errors, so a worker log alone tells the story.
+    """
+    kind = event.get("type")
+    if kind not in _LOGGED_EVENTS:
+        return
+
+    if kind == "stage":
+        now = time.monotonic()
+        previous = _stage_started.get()
+        if previous:
+            logger.info("Stage %r finished in %.1fs", previous[0], now - previous[1])
+        name = str(event.get("name", "?"))
+        _stage_started.set((name, now))
+        logger.info("── Stage %d: %s ──", event.get("stage", -1), name)
+        return
+
+    # Values are model output (concept lists, warning prose) and can run to
+    # hundreds of characters. Truncated per field so one verbose event cannot
+    # push a whole build's worth of real log lines off the screen.
+    detail = ", ".join(
+        f"{k}={_clip(v)}" for k, v in event.items() if k != "type"
+    )
+    if kind in ("error", "cancelled"):
+        logger.error("Build event %s: %s", kind, detail)
+    elif kind in ("stage_degraded", "corpus_warning"):
+        logger.warning("Build event %s: %s", kind, detail)
+    else:
+        logger.info("Build event %s: %s", kind, detail)

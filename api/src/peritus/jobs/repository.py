@@ -3,6 +3,7 @@ from typing import Any
 
 import asyncpg
 
+from peritus.core.config import settings
 from peritus.jobs.domain import BuildEventRow, BuildJob, JobStatus, JobType
 
 
@@ -94,8 +95,19 @@ class JobRepository:
     # ── worker lifecycle ────────────────────────────────────────────────────
 
     async def claim(self, worker_id: str) -> BuildJob | None:
-        """Atomically claim the next runnable job for this worker, or None."""
-        async with self._pool.acquire() as conn:
+        """Atomically claim the next runnable job for this worker, or None.
+
+        Bounded acquire, for the same reason as :meth:`heartbeat` — and with more
+        at stake. This and :meth:`reap_stale` are the *only* two things the
+        worker's poll loop does. An unbounded wait here does not slow the loop
+        down, it ends it: the loop is parked inside ``acquire()`` forever, so it
+        never claims again and, worse, never reaps again. A worker in that state
+        looks perfectly healthy from the outside — process up, no error, no CPU —
+        while every stale job in the queue sits at 'running' indefinitely because
+        the only thing that would have recovered them is asleep. Timing out turns
+        that silent death into a logged, retried poll.
+        """
+        async with self._pool.acquire(timeout=settings.DB_ACQUIRE_TIMEOUT) as conn:
             row = await conn.fetchrow(
                 """
                 UPDATE build_jobs
@@ -117,8 +129,15 @@ class JobRepository:
     async def heartbeat(self, job_id: int, worker_id: str) -> bool:
         """Bump the liveness beat. Returns False if the job is no longer ours or no
         longer running (cancelled or reaped) — the worker treats that as a stop signal.
+
+        The acquire is bounded, unlike most in this file. An unbounded wait here
+        is the worst kind: two concurrent builds can hold every connection in the
+        pool, and a beat that queues behind them is a beat that never lands —
+        WORKER_STALE_TIMEOUT later the reaper requeues a build that was running
+        perfectly well. Failing fast lets the caller log it and beat again on the
+        next tick, well inside the stale window.
         """
-        async with self._pool.acquire() as conn:
+        async with self._pool.acquire(timeout=settings.DB_ACQUIRE_TIMEOUT) as conn:
             result: str = await conn.execute(
                 """
                 UPDATE build_jobs SET heartbeat_at = NOW(), updated_at = NOW()
@@ -181,12 +200,32 @@ class JobRepository:
 
     # ── crash recovery / cancellation ───────────────────────────────────────
 
-    async def reap_stale(self, timeout_seconds: float) -> int:
+    async def reap_stale(
+        self, timeout_seconds: float, *, protect_job_ids: set[int] | None = None
+    ) -> int:
         """Recover jobs whose worker died: their heartbeat has gone stale. Requeue
         those with retries left; permanently fail the rest (and mark their experts
         failed). Returns the number of jobs reaped.
+
+        ``protect_job_ids`` are jobs the calling worker is running *right now*.
+        They are never reaped, however stale the beat looks. A stale heartbeat is
+        only ever *evidence* that a worker died, and it is evidence this caller
+        can directly contradict for its own jobs: it has the task in hand. Without
+        this a worker whose heartbeat stalled — a saturated pool, a dropped
+        pooled connection, a long event-silent stage — reaps its own live build,
+        re-claims it, and runs a second copy over the first (which is still
+        writing, and which the re-claim's reset_build_state wipes underneath).
+        Three rounds of that and the expert is marked failed while the original
+        build is still going. Other workers still reap it if this one truly dies.
         """
-        async with self._pool.acquire() as conn, conn.transaction():
+        protected = sorted(protect_job_ids or ())
+        # Bounded for the reason spelled out in claim(): the reaper is the queue's
+        # only recovery mechanism, and a reaper blocked on a connection recovers
+        # nothing while looking like it is running fine.
+        async with (
+            self._pool.acquire(timeout=settings.DB_ACQUIRE_TIMEOUT) as conn,
+            conn.transaction(),
+        ):
             requeued = await conn.fetch(
                 """
                     UPDATE build_jobs
@@ -195,9 +234,10 @@ class JobRepository:
                     WHERE status = 'running'
                       AND heartbeat_at < NOW() - make_interval(secs => $1)
                       AND attempts < max_attempts
+                      AND NOT (id = ANY($2::bigint[]))
                     RETURNING id
                     """,
-                float(timeout_seconds),
+                float(timeout_seconds), protected,
             )
             failed = await conn.fetch(
                 """
@@ -208,9 +248,10 @@ class JobRepository:
                     WHERE status = 'running'
                       AND heartbeat_at < NOW() - make_interval(secs => $1)
                       AND attempts >= max_attempts
+                      AND NOT (id = ANY($2::bigint[]))
                     RETURNING expert_id
                     """,
-                float(timeout_seconds),
+                float(timeout_seconds), protected,
             )
             for r in failed:
                 await conn.execute(
