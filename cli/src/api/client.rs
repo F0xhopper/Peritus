@@ -155,6 +155,15 @@ impl ApiClient {
         json_or_err(resp).await
     }
 
+    /// The corpus behind an expert. Ordered by the server; the caller renders
+    /// them as-is.
+    pub async fn list_sources(&self, slug: &str) -> Result<Vec<SourceOut>> {
+        let resp = self.auth(self.client.get(format!("{}/experts/{}/sources", self.base_url, slug)))
+            .timeout(REQUEST_TIMEOUT)
+            .send().await?;
+        json_or_err(resp).await
+    }
+
     pub async fn refresh(&self, refresh_token: &str) -> Result<Session> {
         let resp = self.client.post(format!("{}/auth/refresh", self.base_url))
             .json(&RefreshBody { refresh_token: refresh_token.to_string() })

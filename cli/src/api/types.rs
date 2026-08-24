@@ -68,6 +68,32 @@ pub struct ChatRequest {
     pub history: Vec<ChatMessage>,
 }
 
+/// One source in an expert's corpus. Mirrors `SourceOut` in
+/// api/src/peritus/api/schemas/sources.py. As with ExpertSummary, the whole
+/// payload is deserialized even though the overlay renders only part of it.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize)]
+pub struct SourceOut {
+    pub id: i64,
+    pub source_type: String,
+    pub url: Option<String>,
+    pub title: String,
+    pub author: Option<String>,
+    pub quality_score: Option<f64>,
+    pub content_type: Option<String>,
+    /// How the source entered the corpus. "upload" means the owner supplied it;
+    /// anything else is a fetcher name or a `gapfill:<concept>` marker.
+    pub discovered_via: Option<String>,
+    pub source_tier: Option<String>,
+    pub chunk_count: i64,
+}
+
+impl SourceOut {
+    pub fn is_user_supplied(&self) -> bool {
+        self.discovered_via.as_deref() == Some("upload")
+    }
+}
+
 // Field names/shapes must match the payloads written to build_events by
 // builder.py and worker.py — see api/src/peritus/experts/builder.py.
 #[derive(Debug, Clone, Deserialize)]

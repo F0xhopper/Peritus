@@ -5,7 +5,7 @@ use ratatui::DefaultTerminal;
 use tokio::sync::oneshot;
 
 use crate::api::client::{is_unauthorized, ApiClient};
-use crate::api::types::{ExpertSummary, Session};
+use crate::api::types::{ExpertSummary, Session, SourceOut};
 use crate::config::store::{now_unix, Config};
 use crate::events::{key_to_action, AppAction};
 use crate::tui::screens::{
@@ -27,6 +27,9 @@ pub enum Screen {
 /// to Login instead of dying as a status toast.
 type RefreshError = (bool, String);
 type RefreshResult = Result<Vec<ExpertSummary>, RefreshError>;
+/// (slug, sources-or-error). The slug travels with the result so a reply for an
+/// expert the user has navigated away from can be discarded.
+type SourcesResult = (String, Result<Vec<SourceOut>, String>);
 
 pub struct App {
     pub screen: Screen,
@@ -50,6 +53,8 @@ pub struct App {
     refresh_rx: Option<oneshot::Receiver<RefreshResult>>,
     // Topic to select once the next refresh lands (e.g. after a build finishes).
     pending_select_topic: Option<String>,
+    // In-flight sources fetch for the home overlay.
+    sources_rx: Option<oneshot::Receiver<SourcesResult>>,
 }
 
 impl App {
@@ -72,6 +77,7 @@ impl App {
             last_expert_poll: std::time::Instant::now(),
             last_session_check: std::time::Instant::now(),
             refresh_rx: None,
+            sources_rx: None,
             pending_select_topic: None,
         }
     }
@@ -90,6 +96,18 @@ impl App {
             let _ = tx.send(
                 api.list_experts().await.map_err(|e| (is_unauthorized(&e), e.to_string())),
             );
+        });
+    }
+
+    /// Fetch an expert's corpus for the home overlay, off the render loop.
+    fn request_sources(&mut self, slug: String) {
+        let api = self.api.clone();
+        let (tx, rx) = oneshot::channel();
+        self.sources_rx = Some(rx);
+        self.home.open_sources(slug.clone());
+        tokio::spawn(async move {
+            let result = api.list_sources(&slug).await.map_err(|e| e.to_string());
+            let _ = tx.send((slug, result));
         });
     }
 
@@ -304,6 +322,21 @@ async fn handle_action(app: &mut App, action: AppAction) {
         }
 
         Screen::Home => {
+            // The sources overlay owns navigation while it is open, so ↑↓ scroll
+            // the list instead of moving the card selection underneath it.
+            if app.home.sources_active {
+                match action {
+                    AppAction::Down => app.home.sources_scroll_down(),
+                    AppAction::Up => app.home.sources_scroll_up(),
+                    AppAction::Back | AppAction::Char('s') | AppAction::Char('q') => {
+                        app.home.close_sources();
+                    }
+                    AppAction::Quit => app.should_quit = true,
+                    _ => {}
+                }
+                return;
+            }
+
             // Confirm-delete intercepts D/Esc before normal navigation.
             if app.home.confirm_delete {
                 match action {
@@ -397,6 +430,12 @@ async fn handle_action(app: &mut App, action: AppAction) {
                         if expert.status == "building" || expert.status == "queued" {
                             app.open_build_for(expert.topic, expert.tier);
                         }
+                    }
+                }
+                AppAction::Char('s') => {
+                    if let Some(expert) = app.home.selected_expert() {
+                        let slug = expert.name.clone();
+                        app.request_sources(slug);
                     }
                 }
                 AppAction::Char('c') => {
@@ -615,6 +654,24 @@ async fn tick_screens(app: &mut App) {
             }
             Err(oneshot::error::TryRecvError::Empty) => {}
             Err(oneshot::error::TryRecvError::Closed) => { app.refresh_rx = None; }
+        }
+    }
+
+    // Collect an in-flight sources fetch for the home overlay. The screen drops
+    // a result whose slug is no longer the open one, so a slow reply for an
+    // expert the user has moved on from cannot overwrite the current list.
+    if let Some(rx) = &mut app.sources_rx {
+        match rx.try_recv() {
+            Ok((slug, Ok(sources))) => {
+                app.sources_rx = None;
+                app.home.set_sources(&slug, sources);
+            }
+            Ok((slug, Err(e))) => {
+                app.sources_rx = None;
+                app.home.set_sources_error(&slug, format!("Could not load sources: {e}"));
+            }
+            Err(oneshot::error::TryRecvError::Empty) => {}
+            Err(oneshot::error::TryRecvError::Closed) => { app.sources_rx = None; }
         }
     }
 

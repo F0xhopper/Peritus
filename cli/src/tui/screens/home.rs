@@ -5,7 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
 };
-use crate::api::types::ExpertSummary;
+use crate::api::types::{ExpertSummary, SourceOut};
 use crate::events::AppAction;
 use crate::tui::theme::Theme;
 use crate::tui::screens::build::BuildCardInfo;
@@ -37,6 +37,16 @@ pub struct HomeScreen {
     input: TextInput,
     submitted_build: Option<(String, String)>, // (topic, tier)
     scroll_offset: usize,
+    // ── sources overlay ──────────────────────────────────────────────────
+    // Fetched on demand rather than carried on ExpertSummary: a corpus is up to
+    // ~60 rows per expert, and the home list would pay for all of them on every
+    // refresh to show something only ever looked at one expert at a time.
+    pub sources_active: bool,
+    pub sources_slug: Option<String>,
+    sources: Vec<SourceOut>,
+    sources_loading: bool,
+    sources_error: Option<String>,
+    sources_scroll: usize,
 }
 
 impl HomeScreen {
@@ -52,7 +62,56 @@ impl HomeScreen {
             input: TextInput::new(),
             submitted_build: None,
             scroll_offset: 0,
+            sources_active: false,
+            sources_slug: None,
+            sources: vec![],
+            sources_loading: false,
+            sources_error: None,
+            sources_scroll: 0,
         }
+    }
+
+    /// Open the overlay in its loading state; the fetch result arrives later via
+    /// `set_sources`/`set_sources_error`.
+    pub fn open_sources(&mut self, slug: String) {
+        self.sources_active = true;
+        self.sources_slug = Some(slug);
+        self.sources.clear();
+        self.sources_error = None;
+        self.sources_loading = true;
+        self.sources_scroll = 0;
+    }
+
+    pub fn close_sources(&mut self) {
+        self.sources_active = false;
+        self.sources_slug = None;
+        self.sources.clear();
+        self.sources_error = None;
+        self.sources_loading = false;
+        self.sources_scroll = 0;
+    }
+
+    /// Late results for an expert the user has since navigated away from are
+    /// dropped: the slug they were requested for must still be the open one.
+    pub fn set_sources(&mut self, slug: &str, sources: Vec<SourceOut>) {
+        if self.sources_slug.as_deref() != Some(slug) { return; }
+        self.sources = sources;
+        self.sources_loading = false;
+        self.sources_error = None;
+    }
+
+    pub fn set_sources_error(&mut self, slug: &str, error: String) {
+        if self.sources_slug.as_deref() != Some(slug) { return; }
+        self.sources_loading = false;
+        self.sources_error = Some(error);
+    }
+
+    pub fn sources_scroll_down(&mut self) {
+        if self.sources_scroll + 1 < self.sources.len() { self.sources_scroll += 1; }
+    }
+
+    pub fn sources_scroll_up(&mut self) {
+        self.sources_scroll = self.sources_scroll.saturating_sub(1);
     }
 
     pub fn update_experts(&mut self, experts: Vec<ExpertSummary>) {
@@ -230,13 +289,13 @@ impl HomeScreen {
                 .unwrap_or("this expert");
             (format!("Delete \"{}\"?  [D] Confirm  [Esc] Cancel", name), Theme::error())
         } else if (selected_status == "building" || selected_status == "queued") && selected_chattable {
-            ("[Enter] Chat now  [b] Watch Build  [n] New  [d] Delete  [q] Quit".to_string(), Theme::accent())
+            ("[Enter] Chat now  [b] Build  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(), Theme::accent())
         } else if selected_status == "building" || selected_status == "queued" {
-            ("[Enter/b] Watch Build  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::accent())
+            ("[Enter/b] Watch Build  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(), Theme::accent())
         } else if selected_status == "failed" && !selected_chattable {
-            ("[Enter] Rebuild  [n] New  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
+            ("[Enter] Rebuild  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(), Theme::dim())
         } else {
-            ("[n] New  [Enter] Chat  [d] Delete  [←→] Scroll  [q] Quit".to_string(), Theme::dim())
+            ("[n] New  [Enter] Chat  [s] Sources  [d] Delete  [q] Quit".to_string(), Theme::dim())
         };
         f.render_widget(Paragraph::new(footer_text).style(hint_style), hint_area);
 
@@ -253,7 +312,109 @@ impl HomeScreen {
             let topic = self.pending_topic.as_deref().unwrap_or("");
             render_tier_popup(f, area, topic, self.tier_selected);
         }
+        if self.sources_active {
+            self.render_sources_popup(f, area);
+        }
     }
+
+    fn render_sources_popup(&self, f: &mut Frame, area: Rect) {
+        let popup_w = 78u16.min(area.width.saturating_sub(4));
+        let popup_h = 24u16.min(area.height.saturating_sub(2));
+        let popup = centered_rect(popup_w, popup_h, area);
+        f.render_widget(Clear, popup);
+
+        let title = match (self.sources_loading, self.sources.len()) {
+            (true, _) => " Sources · loading… ".to_string(),
+            (false, n) => format!(" Sources · {} ", n),
+        };
+        f.render_widget(
+            Block::default()
+                .title(title)
+                .title_style(Theme::accent().add_modifier(Modifier::BOLD))
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Theme::accent())
+                .style(Theme::normal()),
+            popup,
+        );
+        let inner = Rect::new(
+            popup.x + 1, popup.y + 1,
+            popup.width.saturating_sub(2), popup.height.saturating_sub(2),
+        );
+        let split = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(1), Constraint::Length(1)])
+            .split(inner);
+
+        let mut lines: Vec<Line> = Vec::new();
+        if let Some(err) = &self.sources_error {
+            lines.push(Line::from(Span::styled(err.clone(), Theme::error())));
+        } else if self.sources_loading {
+            lines.push(Line::from(Span::styled("Fetching the corpus…", Theme::dim())));
+        } else if self.sources.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "No sources yet — this expert has no corpus.", Theme::dim())));
+        } else {
+            // One row per source, windowed by sources_scroll. The list is the
+            // point of the overlay, so it gets every line except the footer.
+            let rows = split[0].height as usize;
+            let width = split[0].width as usize;
+            for src in self.sources.iter().skip(self.sources_scroll).take(rows) {
+                let mut spans = vec![
+                    // 15 columns: the width of "thought_leaders", the longest
+                    // fetcher name, so no source type is ever shown truncated.
+                    Span::styled(
+                        format!("{:<15} ", truncate(&src.source_type, 15)),
+                        if src.is_user_supplied() { Theme::success() } else { Theme::dim() },
+                    ),
+                ];
+                // Quality is what the validator scored it; absent for uploads,
+                // which bypass validation.
+                match src.quality_score {
+                    Some(q) => spans.push(Span::styled(format!("{:>4.1} ", q), Theme::normal())),
+                    None => spans.push(Span::styled("   · ", Theme::dim())),
+                }
+                spans.push(Span::styled(format!("{:>4}c ", src.chunk_count), Theme::dim()));
+                // Tier as a single letter: P/S/T for primary/secondary/tertiary.
+                // This is what corpus_tier_warning fires on — a corpus that is
+                // mostly T is summaries about the field rather than the field.
+                let (mark, style) = match src.source_tier.as_deref() {
+                    Some("primary") => ("P ", Theme::success()),
+                    Some("secondary") => ("S ", Theme::normal()),
+                    Some("tertiary") => ("T ", Theme::error()),
+                    _ => ("· ", Theme::dim()),
+                };
+                spans.push(Span::styled(mark, style));
+                let used: usize = 15 + 1 + 5 + 5 + 2;
+                spans.push(Span::styled(
+                    truncate(&src.title, width.saturating_sub(used)),
+                    Theme::normal(),
+                ));
+                lines.push(Line::from(spans));
+            }
+        }
+        f.render_widget(Paragraph::new(lines), split[0]);
+
+        let shown = self.sources.len().min(self.sources_scroll + split[0].height as usize);
+        let footer = if self.sources.is_empty() {
+            "[Esc] Close".to_string()
+        } else {
+            format!(
+                "{}–{} of {}   [↑↓] Scroll  [Esc] Close",
+                self.sources_scroll + 1, shown, self.sources.len(),
+            )
+        };
+        f.render_widget(Paragraph::new(Span::styled(footer, Theme::dim())), split[1]);
+    }
+}
+
+/// Clip to `max` columns, marking the cut with an ellipsis. Counts chars, not
+/// bytes — source titles routinely carry non-ASCII.
+fn truncate(s: &str, max: usize) -> String {
+    if max == 0 { return String::new(); }
+    if s.chars().count() <= max { return s.to_string(); }
+    let keep = max.saturating_sub(1);
+    s.chars().take(keep).collect::<String>() + "…"
 }
 
 fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is_selected: bool, build_info: Option<&BuildCardInfo>, tick: u64) {
