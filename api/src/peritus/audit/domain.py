@@ -15,12 +15,22 @@ from typing import Any
 
 # ── discovery provenance ────────────────────────────────────────────────────
 
-# sources.discovered_via values written by the build pipeline. 'gapfill' carries
-# a ``:<concept>`` suffix naming the concept whose absence triggered the search.
+# sources.discovered_via values written by the build pipeline. Two of them carry
+# a ``:<suffix>``, and the suffixes mean different things: 'gapfill:<concept>'
+# names the concept whose absence triggered the search, while
+# 'snowball:backward' / 'snowball:forward' name a citation direction. Only the
+# first is a concept, which is why ``parse_discovery_method`` returns one only
+# for gapfill.
 DISCOVERY_PLAN = "plan"
 DISCOVERY_SNOWBALL = "snowball"
 DISCOVERY_GAPFILL = "gapfill"
 DISCOVERY_UNKNOWN = "unknown"
+
+# Citation directions, as ``snowball:<direction>``. Backward is what an accepted
+# source cites; forward is what cites it — the work that superseded it, which no
+# planned query can find because it postdates the topic's own vocabulary.
+SNOWBALL_BACKWARD = "backward"
+SNOWBALL_FORWARD = "forward"
 
 KNOWN_DISCOVERY_METHODS = (DISCOVERY_PLAN, DISCOVERY_SNOWBALL, DISCOVERY_GAPFILL)
 
@@ -29,8 +39,12 @@ def parse_discovery_method(discovered_via: str | None) -> tuple[str, str | None]
     """Split ``sources.discovered_via`` into (method, concept).
 
     ``"gapfill:Stoic cosmopolitanism"`` -> ``("gapfill", "Stoic cosmopolitanism")``
+    ``"snowball:backward"``             -> ``("snowball", None)``
     ``"plan"``                          -> ``("plan", None)``
     ``None``                            -> ``("unknown", None)``
+
+    Only gapfill's suffix is a concept. Snowball's is a citation direction, and
+    reporting it as a concept would claim a gap-fill that never happened.
 
     ``None`` is not a defect in the data model: the column arrived in migration
     012, so sources ingested before it exist with no discovery provenance at
@@ -38,9 +52,14 @@ def parse_discovery_method(discovered_via: str | None) -> tuple[str, str | None]
     """
     if not discovered_via:
         return DISCOVERY_UNKNOWN, None
-    method, _, concept = discovered_via.partition(":")
+    method, _, suffix = discovered_via.partition(":")
     method = method.strip() or DISCOVERY_UNKNOWN
-    return method, (concept.strip() or None if concept else None)
+    if method != DISCOVERY_GAPFILL:
+        # 'snowball:backward' has a suffix, and it is a citation direction, not
+        # a concept. Returning it here would put "backward" in a
+        # gap_filled_for_concept field on every snowballed source.
+        return method, None
+    return method, (suffix.strip() or None if suffix else None)
 
 
 # ── coverage strength ───────────────────────────────────────────────────────

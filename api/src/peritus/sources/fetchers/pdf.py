@@ -11,7 +11,13 @@ import httpx
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.pdf_parser import parse_pdf_url
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.domain import (
+    Identifiers,
+    RawSource,
+    SourceCandidate,
+    SourceType,
+    resolved_identifiers,
+)
 
 logger = get_logger(__name__)
 
@@ -35,6 +41,12 @@ class PdfFetcher:
             if not pdf_url:
                 continue
             authors = ", ".join(a.get("name", "") for a in paper.get("authors", [])[:3]) or None
+            # Semantic Scholar is already asked for externalIds (see _SS_FIELDS)
+            # and used to throw them away, which meant the one fetcher that
+            # knows a paper's DOI, arXiv id and PMCID contributed no identity at
+            # all — and paid for OCR on papers Europe PMC serves free.
+            ids = identifiers_from_external(paper.get("externalIds"))
+            ids = ids.with_(s2_id=paper.get("paperId")) if paper.get("paperId") else ids
             candidates.append(SourceCandidate(
                 source_type=SourceType.PDF,
                 url=pdf_url,
@@ -44,26 +56,64 @@ class PdfFetcher:
                 metadata={
                     "semantic_scholar_id": paper.get("paperId"),
                     "year": paper.get("year"),
+                    "abstract": paper.get("abstract") or "",
+                    "oa_pdf_url": pdf_url,
+                    "is_open_access": True,
+                    **ids.to_dict(),
                 },
+                identifiers=ids,
             ))
         return candidates
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        if not await _is_pdf_url(candidate.url):
-            logger.debug("Skipping non-PDF URL: %s", candidate.url)
-            return None
-        text = await parse_pdf_url(candidate.url)
+        # Identity first, OCR second. Semantic Scholar hands over a paper's DOI,
+        # arXiv id and PMCID, and a large share of the open-access PDFs it finds
+        # are also served free as ar5iv HTML or Europe PMC JATS — better text
+        # than OCR produces, at no cost. Only when none of those exist does this
+        # fetcher do the thing it is named for.
+        from peritus.sources.fulltext import METHOD_OA_PDF, resolve_full_text
+
+        resolved = await resolve_full_text(resolved_identifiers(candidate))
+        if resolved is not None:
+            text, method = resolved.text, resolved.method
+        else:
+            if not await _is_pdf_url(candidate.url):
+                logger.debug("Skipping non-PDF URL: %s", candidate.url)
+                return None
+            text, method = await parse_pdf_url(candidate.url), METHOD_OA_PDF
         if len(text) < 500:
             return None
-        logger.info("PDF ingested: %r (%d chars)", candidate.title, len(text))
+
+        abstract = candidate.metadata.get("abstract") or candidate.snippet
+        # The abstract leads, as it does for every other scholarly fetcher, so
+        # the head of the text — the part the validator preview always sees — is
+        # the paper's own statement of its claim rather than a title page.
+        body = f"{candidate.title}\n\n{abstract}\n\n{text}" if abstract else text
+        logger.info("PDF ingested: %r (%d chars, %s)", candidate.title, len(text), method)
+        metadata = {**candidate.metadata, "full_text": True, "full_text_method": method}
         return RawSource(
             source_type=SourceType.PDF,
             url=candidate.url,
             title=candidate.title,
             author=candidate.author,
-            text=text[:_MAX_CHARS],
-            metadata=candidate.metadata,
+            text=body[:_MAX_CHARS],
+            metadata=metadata,
+            identifiers=candidate.identifiers,
         )
+
+
+def identifiers_from_external(external: dict | None) -> Identifiers:
+    """Semantic Scholar's ``externalIds`` block → typed identifiers.
+
+    Shared with snowballing, which reads the same block off the citation graph.
+    """
+    external = external or {}
+    return Identifiers.build(
+        doi=external.get("DOI"),
+        arxiv_id=external.get("ArXiv"),
+        pmid=external.get("PubMed"),
+        pmcid=external.get("PubMedCentral"),
+    )
 
 
 async def _is_pdf_url(url: str) -> bool:

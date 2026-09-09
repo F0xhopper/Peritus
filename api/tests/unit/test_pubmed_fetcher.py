@@ -276,8 +276,10 @@ async def test_fetch_prepends_abstract_to_open_access_full_text():
     assert LONG_ABSTRACT.strip() in source.text
     assert "Methods and results." in source.text
     assert source.metadata["full_text"] is True
-    # The abstract is not duplicated into metadata once it is inside the text.
-    assert "abstract" not in source.metadata
+    assert source.metadata["full_text_method"] == "europepmc_jats"
+    # The abstract stays on the source: the validator preview leads with it, and
+    # re-deriving it from a full text that also contains it is guesswork.
+    assert source.metadata["abstract"] == LONG_ABSTRACT
     assert source.source_type is pubmed.SOURCE_TYPE
 
 

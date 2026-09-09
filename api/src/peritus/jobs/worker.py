@@ -342,6 +342,11 @@ class BuildWorker:
                 await self._jobs.append_event(job.id, event["type"], event)
 
             builder = self._builder_factory(job.source_filter)
+            # Only used to name screening capture files, and only when capture
+            # is switched on — set after construction so the factory signature
+            # (which tests substitute) does not have to know about it.
+            if hasattr(builder, "_job_id"):
+                builder._job_id = job.id
             build_task = asyncio.create_task(builder.build(expert, on_event=on_event))
             try:
                 result: BuildResult = await build_task

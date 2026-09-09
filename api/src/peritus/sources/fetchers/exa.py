@@ -2,7 +2,8 @@ import asyncio
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.domain import Identifiers, RawSource, SourceCandidate, SourceType
+from peritus.sources.identifiers import identifiers_from_url
 
 logger = get_logger(__name__)
 
@@ -32,6 +33,9 @@ class ExaFetcher:
                 snippet = getattr(r, "text", None) or ""
                 if not r.url:
                     continue
+                # Exa lands on doi.org and arxiv.org constantly. Without this
+                # the same paper found by exa and by openalex are two sources.
+                doi, arxiv_id = identifiers_from_url(r.url)
                 candidates.append(SourceCandidate(
                     source_type=SourceType.EXA,
                     url=r.url,
@@ -39,6 +43,7 @@ class ExaFetcher:
                     author=None,
                     snippet=snippet,
                     metadata={"exa_id": r.id},
+                    identifiers=Identifiers.build(doi=doi, arxiv_id=arxiv_id),
                 ))
             return candidates
         except Exception as exc:
@@ -56,6 +61,7 @@ class ExaFetcher:
             author=candidate.author,
             text=text[:_MAX_CHARS],
             metadata=candidate.metadata,
+            identifiers=candidate.identifiers,
         )
 
 

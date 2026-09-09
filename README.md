@@ -56,7 +56,7 @@ The chat is the least interesting part, and deliberately so. Chatting with a pil
 
 **Who it's for.** Researchers and analysts doing scoping reviews, rapid reviews and evidence maps, where a real part of the evidence — reports, preprints, standards, conference talks, practitioner writing — never had a bibliographic record and so never had a search anyone could document.
 
-**What it is not.** Not a systematic-review screening platform: a build handles dozens of sources, not thousands, so keep screening your database export in Covidence or Rayyan. Not a substitute for two independent human reviewers — screening is a single model pass against a rubric, with no calibration set and therefore no published accuracy figures. Not PRISMA compliance, which is a property of your write-up and not of any tool; Peritus just happens to record the data those reports ask for. Treat its decisions as auditable triage that a human checks.
+**What it is not.** Not a systematic-review screening platform: a build handles dozens of sources, not thousands, so keep screening your database export in Covidence or Rayyan. Not a substitute for two independent human reviewers — screening is a model pass against a rubric, not two people reconciling. There is a harness for measuring screening against human labels (`python -m peritus.eval.screening`) and a place to publish the result, but no labelled set has been built yet, so **there is still no accuracy figure to quote**, and any that appears in the changelog of `docs/plans/corpus-quality.md` will name the rubric version and the models that produced it. Not PRISMA compliance, which is a property of your write-up and not of any tool; Peritus just happens to record the data those reports ask for. Treat its decisions as auditable triage that a human checks.
 
 Peritus is three components:
 
@@ -89,44 +89,53 @@ flowchart TD
 
     subgraph corpus ["CORPUS ASSEMBLY · load-bearing — a failure here fails the build and refunds the credit hold"]
         direction TB
-        P["0 · PLAN — one call on the strong model writes the research brief:<br/>a tailored query list per fetcher, a 0–2 weight each<br/>(0 = 'this source type would only add noise here'),<br/>5–8 key concepts the corpus must cover, and must-have works"]
-        D["1 · DISCOVER — 11 fetchers search concurrently<br/>wikipedia · gutenberg · arxiv · openalex · pubmed · pdf<br/>youtube · exa · web · reddit · thought-leaders<br/>each asks for 3× its fetch quota, floor 10 results per query"]
-        TR["1b · TRIAGE — fast model scores every candidate on title and<br/>snippet against the brief, times a domain prior that lifts journals<br/>and archives and sinks content farms.<br/>Junk is dropped before a single byte is downloaded"]
-        F["1c · FETCH — full text and OCR for the ranked winners only<br/>budget 30 × tier multiplier: lite 15 · standard 30 · pro 60<br/>per-type caps stop one source type flooding the corpus;<br/>a failed fetch refills from the next rank down"]
-        SB["1d · SNOWBALL — accepted sources carrying an arXiv id or a DOI<br/>seed a reference walk through Semantic Scholar;<br/>references with ≥50 citations resolve back to full text<br/>via ar5iv, or by DOI through OpenAlex"]
-        V["2 · VALIDATE — Claude scores quality and relevance against rubric<br/>v3-concepts-q5r6, keeping at q≥5 and r≥6, with hints per source type<br/>(academic work judged on method, classic texts on significance),<br/>and tags which of the key concepts each source substantively covers"]
-        GF["2b · GAP-FILL — key concepts left with zero accepted coverage each<br/>trigger one targeted re-search and re-validation round;<br/>whatever is still uncovered afterwards is reported, not hidden"]
+        P["0 · PLAN — one call on the strong model writes the research brief:<br/>a tailored query list per fetcher, a 0–2 weight each<br/>(0 = 'this source type would only add noise here'),<br/>5–8 key concepts the corpus must cover, and must-have works.<br/>Written once. Later rounds may add queries, never rewrite the brief"]
+        D["1 · SEARCH — round 0 runs all 11 fetchers concurrently<br/>wikipedia · gutenberg · arxiv · openalex · pubmed · pdf<br/>youtube · exa · web · reddit · thought-leaders<br/>each asks for 3× its fetch quota, floor 10 results per query"]
+        DD["1b · DE-DUPLICATE — by identifier (a shared DOI, arXiv id, PMID or<br/>PMCID is the same work, whatever the URL says), then by normalised URL.<br/>One paper found as a preprint, a journal DOI and an OA PDF<br/>stops being three sources paid for three times"]
+        TR["1c · TRIAGE — fast model scores every candidate on title and<br/>snippet against the brief, times a domain prior that lifts journals<br/>and archives and sinks content farms.<br/>Junk is dropped before a single byte is downloaded"]
+        F["1d · FETCH — full text for the ranked winners, ordered by triage score<br/>with cost breaking ties, works the plan named as canonical fetched first.<br/>One resolver picks the best text available:<br/>ar5iv HTML → Europe PMC JATS → OCR → landing page → abstract,<br/>so a paper Europe PMC serves free is never OCR'd for money.<br/>Stops at a count budget or at the tier's discovery budget in dollars"]
+        CD["1e · FINGERPRINT — a simhash over the fetched text catches the<br/>preprint-versus-published pair that shares no identifier at all.<br/>The duplicate is dropped with a stated reason, not silently"]
+        V["2 · VALIDATE — Claude scores quality and relevance against rubric<br/>v5-structured-q5r6, keeping at q≥5 and r≥6. It reads a record, not a<br/>slice: stated facts (length, how the text was obtained, whether there<br/>is a reference list), the abstract, the section headings, body samples.<br/>Scores near the threshold can be re-judged by a stronger model"]
+        CV["2b · MEASURE COVERAGE — each key concept against the tier's target:<br/>enough sources, from enough kinds of source, at least one not a summary.<br/>lite 1/1/no · standard 2/2/yes · pro 3/2/yes"]
+        LP{"targets met?<br/>rounds left? budget left?"}
+        FB["1a′ · SEARCH AGAIN — the concepts furthest from target become new<br/>queries written by reading the corpus that exists, in the field's own<br/>vocabulary — plus the citations of every accepted scholarly source,<br/>followed backwards AND forwards through Semantic Scholar and ranked<br/>by how many accepted sources agree on them"]
         CE["3 · CHUNK + EMBED — 1500-char chunks, each given a contextual prefix<br/>in one batched pass, embedded with text-embedding-3-large<br/>(3072-dim) into pgvector"]
-        P --> D --> TR --> F --> SB --> V --> GF --> CE
+        P --> D --> DD --> TR --> F --> CD --> V --> CV --> LP
+        LP -- "no — search again" --> FB
+        FB --> DD
+        LP -- "yes, or out of rounds / budget / new candidates" --> CE
     end
 
-    V -. "one row per source, kept or dropped" .-> LED[("the sources ledger<br/>quality · relevance · passed · drop_reason<br/>validator_model · rubric_version<br/>discovered_via · covered_concepts")]
-    GF -. "discovered_via = gapfill:concept" .-> LED
-    SB -. "discovered_via = snowball" .-> LED
+    V -. "one row per source, kept or dropped" .-> LED[("the sources ledger<br/>quality · relevance · passed · drop_reason<br/>validator_model · review_model · rubric_version<br/>doi · arxiv_id · full_text_method · text_chars<br/>discovered_via · covered_concepts · snowball_seed_urls")]
+    CD -. "drop_reason = duplicate of <url>" .-> LED
+    FB -. "discovered_via = snowball:backward / snowball:forward" .-> LED
+    LP -. "rounds, stop reason, final coverage" .-> BS[("experts.build_summary<br/>why the search stopped")]
 
     CE --> CR(["★ chat_ready — retrieval needs chunks, not the graph,<br/>so the expert answers with citations from here on"])
 
     subgraph enrich ["ENRICHMENT · failure degrades, never destroys — a corpus that already works is never rebuilt for this"]
         direction TB
-        GX["4 · GRAPH EXTRACT — Claude reads the chunks in batches of 10 and emits<br/>typed nodes (concept, claim) and typed edges (supports · contradicts ·<br/>builds_on · defines · exemplifies · cites), every node keeping the ids<br/>of the chunks it was extracted from"]
+        GX["4 · GRAPH EXTRACT — Claude reads the chunks in batches of 10 and emits<br/>claims, the concepts they are about, and the hierarchy between concepts<br/>(about · part_of), every node keeping the ids of the chunks it came from"]
         ER["4b · RESOLVE — nodes sharing a normalised label merge on ingest;<br/>near-duplicates then merge by node-embedding cosine similarity ≥ 0.93"]
+        RC["4c · RECONCILE — one call per concept, with the claims every source<br/>makes about it side by side: which pairs support, contradict or qualify<br/>each other, each with the point in dispute or the condition, stated"]
         PE["5 · PERSONA — Claude reads a corpus digest and the top concepts,<br/>then writes the expert's name, bio and teaching style"]
-        GX --> ER --> PE
+        GX --> ER --> RC --> PE
     end
 
     CR --> GX
-    ER -. "graph stage failed — stage_degraded event,<br/>expert stays chat_ready, retrieval just skips graph expansion" .-> PE
+    RC -. "graph stage failed — stage_degraded event,<br/>expert stays chat_ready, retrieval just skips graph expansion" .-> PE
     PE -. "persona stage failed — nameless expert,<br/>re-voiceable later with one model call, no rebuild" .-> DONE
     PE --> DONE(["done"])
 ```
 
-1. **Plan**: Claude turns the topic into a tailored search query for each source fetcher and names the 5–8 core concepts the corpus must cover.
-2. **Discover**: every fetcher runs concurrently — Wikipedia, Project Gutenberg, ArXiv, OpenAlex (peer-reviewed scholarship in any discipline), PubMed, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. Discovery deliberately over-searches (3× the fetch budget, with a floor of 10 results per query) and a fast triage pass ranks candidates on title and snippet, so far more sources are considered than are ever downloaded. High-citation references of accepted scholarly sources — anything with an arXiv id or a DOI — are snowballed in via Semantic Scholar.
-3. **Validate**: Claude scores each source for quality and relevance against a versioned rubric (currently `v3-concepts-q5r6`, thresholds q≥5 and r≥6) and tags it with the key concepts it substantively covers. Sources below threshold are dropped, with the reason recorded.
-4. **Cover the gaps**: accepted sources are counted against the planned key concepts. Any concept with no coverage triggers a second, targeted round of searching and validation — so the corpus carries an argument for its own sufficiency rather than stopping when the budget runs out.
-5. **Chunk & embed**: survivors are chunked, given Anthropic-style contextual prefixes, and embedded with OpenAI `text-embedding-3-large` (3072-dim).
-6. **Graph extract**: Claude reads the chunks in batches and extracts typed concept nodes and relationships (including `contradicts` edges, which mark where the corpus disagrees with itself). Semantically duplicate nodes are then merged via embedding similarity.
-7. **Persona**: Claude reads a digest of the accepted sources and the top concepts and writes a named expert persona: name, bio, and a concrete speaking/citation style.
+1. **Plan**: Claude turns the topic into a tailored search query for each source fetcher and names the 5–8 core concepts the corpus must cover. This brief is written once and is the standard the corpus is held to — later rounds add queries against it, and never rewrite it. A search allowed to redefine its own goal can always declare itself finished.
+2. **Search**: every fetcher runs concurrently — Wikipedia, Project Gutenberg, ArXiv, OpenAlex (peer-reviewed scholarship in any discipline), PubMed, PDFs (Mistral OCR), YouTube transcripts, Exa neural search, general web, Reddit, and curated thought-leaders. Discovery deliberately over-searches (3× the fetch budget, with a floor of 10 results per query) and a fast triage pass ranks candidates on title and snippet, so far more sources are considered than are ever downloaded.
+3. **De-duplicate, then fetch**: candidates sharing a DOI, arXiv id, PMID or PMCID are one work, however different their URLs — the same paper arriving as a preprint, a journal DOI and an open-access PDF used to be three sources, fetched, validated, chunked and embedded three times, then competing with itself at retrieval. What survives is fetched through one resolver that takes the best text available: ar5iv HTML, then Europe PMC's structured full text, then OCR, then a landing page, then the abstract — so a paper Europe PMC serves free is never OCR'd for money. A fingerprint over the fetched text then catches the preprint-versus-published pair that shares no identifier at all.
+4. **Validate**: Claude scores each source for quality and relevance against a versioned rubric (currently `v5-structured-q5r6`, thresholds q≥5 and r≥6) and tags it with the key concepts it substantively covers. What it reads is a record rather than an excerpt: how long the document is, how its text was obtained, whether it has a reference list, its abstract, its section headings, and samples of its body. Sources scored near the threshold — where the errors are — can be re-judged by a stronger model reading far more of the text, with both verdicts kept.
+5. **Measure, and search again**: accepted sources are measured against each key concept's target for the tier — enough sources, from enough different kinds of source, at least one of them not a summary. Where the corpus falls short, the search runs again: the weakest concepts become new queries written by *reading the corpus that already exists*, in the vocabulary the accepted sources actually use, and every accepted scholarly source is followed through its citations in both directions, ranked by how many of them agree on the same work. The loop stops when the targets are met, the tier's rounds run out, the discovery budget is spent, the source ceiling is reached, a round finds nothing new, or new results stop passing validation — and it records which of those happened. A corpus that stops short says so.
+6. **Chunk & embed**: survivors are chunked, given Anthropic-style contextual prefixes, and embedded with OpenAI `text-embedding-3-large` (3072-dim).
+7. **Graph extract**: Claude reads the chunks in batches and extracts the claims each source makes and the concepts they are about. Semantically duplicate nodes are then merged via embedding similarity, and a reconciliation pass puts the claims every source makes about a concept side by side to find where they support, contradict or qualify each other — the only point in the pipeline that sees more than one source at a time, and so the only one that can find a disagreement *between* sources.
+8. **Persona**: Claude reads a digest of the accepted sources and the top concepts and writes a named expert persona: name, bio, and a concrete speaking/citation style.
 
 ### The ledger
 
@@ -136,8 +145,12 @@ Every source the build considered is persisted in the `sources` table, kept or d
 |--------|-----------------|
 | `quality_score`, `relevance_score` | 0–10 each, from the validation pass |
 | `passed`, `drop_reason` | The decision, and the stated reason when it was a rejection |
-| `validator_model`, `rubric_version` | Which model judged it, under which rubric — so a decision can be re-read in context |
-| `discovered_via` | How it entered the corpus: `plan`, `snowball`, or `gapfill:<concept>` |
+| `validator_model`, `rubric_version` | Which model's verdict stands, under which rubric — so a decision can be re-read in context |
+| `review_model`, `first_pass_quality`, `first_pass_relevance` | Set when a borderline score was re-examined by a stronger model: that a second opinion happened, and what it changed |
+| `doi`, `arxiv_id`, `identifiers` | Which work this actually is. A DOI is what a reference manager keys on, and what makes two records of one paper recognisable as one paper |
+| `full_text_method`, `text_chars` | How much of the source was read, and how the text was obtained — `ar5iv`, `europepmc_jats`, `oa_pdf_ocr`, `oa_landing_html` or `abstract` |
+| `discovered_via` | How it entered the corpus: `plan`, `snowball:backward`, `snowball:forward`, `gapfill:<concept>`, or `upload` |
+| `snowball_seed_urls` | For a source found by following citations: which accepted sources led to it — the reference trail |
 | `covered_concepts` | Which of the planned key concepts it substantively covers |
 | `content_type`, `difficulty`, `key_claims` | Classification and up to five central claims |
 
@@ -151,7 +164,7 @@ The ledger is written on every build, streamed live as the build runs (each keep
 | `GET /experts/{slug}/corpus-report` | Corpus composition, concept coverage, and where the corpus contradicts itself |
 | `GET /experts/{slug}/corpus-report/export?format=csv\|ris` | The same ledger as CSV, or as RIS for import into Zotero / EndNote |
 
-RIS is there because a grey-literature source Peritus found has no bibliographic record to import from anywhere else — see [POSITIONING.md](POSITIONING.md) for where this is going next.
+RIS is there because a grey-literature source Peritus found has no bibliographic record to import from anywhere else.
 
 ### Chat
 
@@ -162,7 +175,7 @@ flowchart TD
     Q(["question"]) --> PL["PLAN — one fast-model call returns 2–4 declarative subqueries<br/>plus a read of the asker: how much background they have<br/>(novice · informed · expert) and what kind of answer would satisfy them<br/>(orientation · specific fact · comparison · how-to · open-ended)"]
     PL --> HS["HYBRID SEARCH — every subquery runs in parallel, two arms each:<br/>semantic (pgvector cosine over the 3072-dim chunk embeddings) and<br/>keyword (Postgres full-text over the chunk plus its contextual prefix),<br/>fused by reciprocal rank at a score of 1/(60+rank)"]
     HS --> MG["MERGE — RRF scores sum across subqueries, so a chunk several<br/>subqueries independently surfaced outranks any single subquery's<br/>best hit; survivors are reranked by a Cohere cross-encoder,<br/>or a windowed LLM rerank when no key is set"]
-    MG --> GE["GRAPH EXPAND — each passage is annotated with the concepts and<br/>relations local to it, and flagged if a contradicts edge was traversed<br/>(mechanics in the next section)"]
+    MG --> GE["GRAPH EXPAND — each passage is annotated with the concepts it is<br/>about, and with what the corpus disputes or qualifies about its claims<br/>(mechanics in the next section)"]
     GE --> CV{"COVERAGE — fast model:<br/>do these passages actually<br/>answer the question?"}
     CV -- "no · returns follow-up queries" --> FU["one more retrieval pass<br/>on the suggested queries"]
     FU --> CTX
@@ -193,7 +206,19 @@ The consequence is worth stating flatly: **passages are retrieved, the graph is 
 
 **How the graph is built** (`graph/extractor.py`, `graph/repository.py`)
 
-- **Extraction.** Claude reads the chunks in batches of ten and returns nodes and edges. A node is a `concept` or a `claim` with a label, a description, and properties. An edge is typed — `supports`, `contradicts`, `builds_on`, `defines`, `exemplifies`, `cites` — and carries a weight.
+- **The vocabulary is five types, and each is only well-formed between particular kinds of node.** A node is a `concept` (a term, an entity, a mechanism) or a `claim` (a proposition a source asserts, which another source could deny).
+
+  | Type | Between | Meaning |
+  |---|---|---|
+  | `contradicts` | claim → claim | the two propositions cannot both be true; carries the point in dispute |
+  | `supports` | claim → claim | a second source asserts, or gives evidence for, the same proposition |
+  | `qualifies` | claim → claim | true, but only under a condition, population, dose, period or scope the other omits |
+  | `about` | claim → concept | the concept a claim is a claim about — the index into the claims |
+  | `part_of` | concept → concept | hierarchy, the only concept-to-concept edge a batch of chunks can justify |
+
+  The endpoint rule is enforced at ingest, not merely declared: two concepts cannot contradict each other, only two propositions can, and an edge that breaks its rule is rejected and counted rather than written. The vocabulary this replaced was an ontology (`defines`, `builds_on`, `exemplifies`, `cites`) whose types had one consumer between them — a line of annotation under a passage — and whose `contradicts` sat between two concepts nearly half the time.
+- **Extraction reads one source at a time, so it no longer guesses at agreement.** Claude reads the chunks in batches of ten — which is almost always ten chunks of a single source — and returns claims, concepts, and the `about`/`part_of` edges between them. Whether two claims agree is a question about two sources, and a window that can only see one of them was answering it by guessing.
+- **Reconciliation is where the disagreements are found** (`graph/reconciler.py`). After entity resolution, the claims about a concept are gathered from every source that made one and put in front of the model in a single call, with each claim's source title and type beside it. It returns `supports`, `contradicts` and `qualifies` edges, each with a sentence stating what is disputed or what condition applies — an edge without one is rejected. The pass is bounded by claims-per-concept, not chunks squared.
 - **Anchoring is the whole trick.** Every node keeps the ids of the chunks it was extracted from (`expert_nodes.chunk_ids`). That array is the join between the graph and the corpus: no node floats free of the passages that produced it, so annotating a retrieved chunk is a lookup rather than an inference.
 - **Resolution runs twice.** Nodes whose normalised labels match are merged at ingest — chunk evidence unioned, longest description kept — so ingesting into a live graph (a later source upload, a second extraction pass) deepens a concept instead of creating a rival copy of it. Then a cleanup pass merges near-duplicates by node-embedding cosine similarity ≥ 0.93, catching "spaced repetition" against "distributed practice".
 - **Storage is two Postgres tables**, `expert_nodes` and `expert_edges`. There is no graph database; traversal is a bounded loop of indexed queries, and node embeddings live alongside the nodes for resolution and future semantic node lookup.
@@ -201,12 +226,12 @@ The consequence is worth stating flatly: **passages are retrieved, the graph is 
 **How the graph is used at query time** (`graph/retriever.py`)
 
 1. **Anchor.** Take the chunk ids that search returned and look up every node whose `chunk_ids` contains one of them. Those are the anchors — the concepts this specific evidence instantiates.
-2. **Expand.** Walk outward from the anchors for `hops` (1 at lite and standard, 2 at pro), strongest edges first, admitting at most 50 new nodes per hop. The cap exists so a hub concept — the one every chunk mentions — cannot drag the whole graph into the context window.
+2. **Expand.** Walk outward from the anchors for `hops` (1 at lite and standard, 2 at pro), best-evidenced edges first, admitting at most 50 new nodes per hop. The cap exists so a hub concept — the one every chunk mentions — cannot drag the whole graph into the context window.
 3. **Localise per passage, not per query.** Each passage is annotated only with the edges touching *its own* anchors, capped at 8 concepts and 5 relations. One global neighbour list pasted onto every passage would be cheaper and would quietly make every passage look like it said the same thing.
-4. **Contradictions sort first.** Edges are ordered with `contradicts` ahead of the weight ranking, so the per-passage cap can never be the reason a disagreement went unmentioned.
-5. **The annotation is evidence, never instruction.** A passage arrives as its text plus `Related concepts:` and `Relationships: A --supports--> B`. The contradiction flag travels beside the passage and is handled at the prompt level, in the subject's terms — an earlier version appended a note to the passage text telling the model to surface the tension, and the model dutifully obeyed by editorialising about its own bibliography. Passages are data; the grounding contract says so, and nothing in the pipeline may violate it.
+4. **Contradictions and qualifications sort first.** Edges are ordered with those two ahead of the evidence ranking, so the per-passage cap can never be the reason a disagreement went unmentioned. Ordering below that is `evidence` — how many distinct sources stand behind the edge's two endpoints, counted off the corpus. It replaced a model-asserted `weight` that sat above 0.8 three quarters of the time and therefore ordered nothing.
+5. **The annotation is evidence, never instruction.** A passage arrives as its text, the concepts it is `About:`, and — where the corpus disputes or narrows one of its claims — that point or condition as a sentence about the subject. The contradiction flag and its stated points travel beside the passage and are handled at the prompt level, so the answer can say what is disputed rather than only that something is; an earlier version appended a note to the passage text telling the model to surface the tension, and the model dutifully obeyed by editorialising about its own bibliography. Passages are data; the grounding contract says so, and nothing in the pipeline may violate it.
 
-**What this buys, and what it doesn't.** It buys disambiguation and connection: a passage retrieved for one phrasing arrives labelled with the concepts it belongs to, so an answer can relate two passages that never shared a word, and the corpus can point at its own disagreements. It does not buy authority. The graph is asserted by a fast model reading batches of chunks, then merged by embedding similarity. A `contradicts` edge means *these two sources look like they disagree, go and check* — it flags tension, it does not establish it, and it should never be read as a finding.
+**What this buys, and what it doesn't.** It buys disambiguation and connection: a passage retrieved for one phrasing arrives labelled with the concepts it belongs to, so an answer can relate two passages that never shared a word, and the corpus can point at its own disagreements — with the point of each one stated, and the sources on both sides resolvable down to passages. It does not buy authority. The graph is asserted by a fast model, then merged by embedding similarity. A `contradicts` edge means *these two claims look incompatible, go and check* — it flags tension, it does not establish it, and it should never be read as a finding.
 
 ## Tiers
 

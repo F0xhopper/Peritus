@@ -3,12 +3,19 @@
 Stages:
   0. PLAN    — Claude produces a research brief: per-fetcher queries + budget
                weights, key concepts the corpus must cover, must-have works
-  1. DISCOVER — three phases:
+  1-2. DISCOVER — an iterating loop, not a single pass. Each round runs:
        search: planned fetchers over-search (~3× budget) for cheap candidates
+       dedup:  identity → URL → (after fetch) content fingerprint
        triage: Haiku ranks candidates against the brief; junk and near-dups drop
        fetch:  top candidates get full content, refilling from lower ranks on failure
-  2. VALIDATE — Claude validates each raw source and tags which key concepts it covers
-  2b. GAP-FILL — key concepts no passing source covers get one targeted re-search
+       validate: Claude scores each source and tags the key concepts it covers
+       coverage: measure the corpus against the tier's per-concept targets
+     Round 0's queries come from the plan. Later rounds read the corpus that
+     exists — the concepts furthest from target become feedback queries in the
+     field's own vocabulary, and the accepted scholarly sources are snowballed
+     forwards and backwards through their citations. The loop stops when the
+     targets are met, the rounds run out, the discovery budget is spent, a round
+     finds nothing new, or acceptance collapses — and it says which.
   3. CHUNK + EMBED — chunk, contextualise, embed, store each validated source
                      ── the expert becomes chat-ready here ──
   4. GRAPH EXTRACT — Claude reads chunks in batches, extracts concept graph
@@ -25,6 +32,13 @@ to ~1h of queueing per batched stage). Every stage inherits it — see
 **Readiness.** Retrieval needs chunks, not the concept graph, so the expert is
 published as chat-ready at the end of stage 3 and upgraded to graph-ready after
 stage 4b — see :mod:`peritus.search.readiness`.
+
+**Budget.** Discovery is bounded twice: by a count of sources (a ceiling that
+rarely binds) and by an estimate of what the sources it has committed to will
+cost to ingest, against the tier's discovery budget. The count is a safety rail;
+the money is the real limit, because cost scales with characters and a corpus of
+sixty mixed sources and a corpus of a hundred and fifty open-access papers can
+cost the same.
 """
 
 import asyncio
@@ -34,21 +48,28 @@ import time
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 
 import asyncpg
-import httpx
 
+from peritus.billing.domain import discovery_budget_usd
+from peritus.billing.metering import current_meter
+from peritus.billing.pricing import estimated_ingest_cost_usd, estimated_ocr_pages
 from peritus.core.config import settings
 from peritus.core.exceptions import BuildError, IncompleteBuildError
 from peritus.core.logging import get_logger
+from peritus.experts.coverage import ConceptCoverage, CoverageReport, compute_coverage
 from peritus.experts.domain import Expert
+from peritus.experts.feedback import feedback_queries
 from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
+from peritus.graph.reconciler import reconcile_claims
 from peritus.graph.repository import GraphRepository, node_embedding_text
 from peritus.infrastructure.anthropic_batch import (
     BuildExecution,
     build_execution,
+    current_execution,
     provider_error_message,
     terminal_provider_error,
 )
@@ -57,6 +78,13 @@ from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_sources
 from peritus.search.readiness import Readiness, set_readiness
+from peritus.sources.capture import capture_for_screening
+from peritus.sources.dedup import (
+    SeenSet,
+    deduplicate_by_url,
+    deduplicate_candidates,
+    deduplicate_sources_by_content,
+)
 from peritus.sources.domain import (
     DroppedSource,
     RawSource,
@@ -64,19 +92,10 @@ from peritus.sources.domain import (
     SourceType,
     ValidatedSource,
 )
-from peritus.sources.fetchers.arxiv import (
-    HEADERS as ARXIV_HEADERS,
-)
-from peritus.sources.fetchers.arxiv import (
-    MAX_FULL_TEXT,
-    MIN_FULL_TEXT,
-    ArxivFetcher,
-    fetch_ar5iv,
-)
+from peritus.sources.fetchers.arxiv import ArxivFetcher
 from peritus.sources.fetchers.exa import ExaFetcher
 from peritus.sources.fetchers.gutenberg import GutenbergFetcher
 from peritus.sources.fetchers.openalex import OpenAlexFetcher
-from peritus.sources.fetchers.openalex import fetch_by_doi as openalex_by_doi
 from peritus.sources.fetchers.pdf import PdfFetcher
 from peritus.sources.fetchers.pubmed import PubmedFetcher
 from peritus.sources.fetchers.reddit import RedditFetcher
@@ -84,6 +103,13 @@ from peritus.sources.fetchers.thought_leaders import ThoughtLeadersFetcher
 from peritus.sources.fetchers.web import WebFetcher
 from peritus.sources.fetchers.wikipedia import WikipediaFetcher
 from peritus.sources.fetchers.youtube import YoutubeFetcher
+from peritus.sources.fulltext import (
+    PAID_METHODS,
+    FullTextHints,
+    default_method_for,
+    expected_method,
+)
+from peritus.sources.snowball import snowball
 from peritus.sources.triage import TriagedCandidate, rank_candidates, triage_candidates
 from peritus.sources.validator import RUBRIC_VERSION, validate_sources
 
@@ -91,18 +117,75 @@ logger = get_logger(__name__)
 
 EventCallback = Callable[[dict], Coroutine[Any, Any, None]]
 
-# Gap-fill: query-driven fetchers only — the identify-then-fetch fetchers
-# (gutenberg, thought_leaders) and noisy ones (reddit, youtube) don't take
-# well to narrow concept queries.
-_GAPFILL_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf", "pubmed", "openalex")
-_GAPFILL_MAX_CONCEPTS = 4
-_GAPFILL_RESULTS_PER_QUERY = 2
+# Fetchers a later discovery round may use. Query-driven only: the
+# identify-then-fetch fetchers (gutenberg, thought_leaders) answer a broad
+# "who matters here" question that a narrow concept query cannot ask, and the
+# noisy ones (reddit, youtube) return worse results the narrower the query gets.
+# Round 0 still runs all of them.
+_LOOP_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf", "pubmed", "openalex")
+# Weak concepts a single round tries to close. More than this and each gets too
+# little of the round's budget to reach a target.
+_LOOP_MAX_CONCEPTS = 4
+# A later round may add at most this share of the initial corpus, so no single
+# round can double the build.
+_LOOP_ROUND_BUDGET_SHARE = 0.5
+# Below this acceptance rate a round is telling you the search space is
+# exhausted: it fetched things, and validation wanted almost none of them.
+# Another round would be spend without return.
+_ACCEPTANCE_COLLAPSE = 0.2
+# Rounds smaller than this are not evidence of collapse, just small.
+_ACCEPTANCE_MIN_SAMPLE = 5
+
+# Why the loop stopped. Recorded in experts.build_summary and emitted on
+# `discovery_done`, because "the build stopped looking" is only a defensible
+# statement if it comes with the reason.
+STOP_TARGETS_MET = "targets_met"
+STOP_MAX_ROUNDS = "max_rounds"
+STOP_BUDGET_EXHAUSTED = "budget_exhausted"
+# The count ceiling, which is a different thing from the money running out and
+# must not be reported as it. A live PRO build stopped with "budget_exhausted"
+# while $4.71 of its $7.00 discovery budget was unspent — the count had simply
+# filled. Two limits sharing one reason makes the stop reason a false statement,
+# and the stop reason is the whole surface this loop publishes.
+STOP_SOURCE_LIMIT = "source_limit"
+STOP_NO_NEW_CANDIDATES = "no_new_candidates"
+STOP_ACCEPTANCE_COLLAPSED = "acceptance_collapsed"
+STOP_LOOP_DISABLED = "loop_disabled"
+
+# Rough text length by source type, for ordering the fetch queue by expected
+# cost *before* anything is downloaded. Deliberately coarse: the
+# ordering only needs to know that a paper is two orders of magnitude more
+# expensive to ingest than a forum thread, which these numbers say.
+_EXPECTED_CHARS: dict[SourceType, int] = {
+    SourceType.ARXIV: 60_000,
+    SourceType.PUBMED: 40_000,
+    SourceType.OPENALEX: 40_000,
+    SourceType.PDF: 60_000,
+    SourceType.GUTENBERG: 120_000,
+    SourceType.WIKIPEDIA: 25_000,
+    SourceType.EXA: 15_000,
+    SourceType.WEB: 10_000,
+    SourceType.THOUGHT_LEADER: 12_000,
+    SourceType.YOUTUBE: 25_000,
+    SourceType.REDDIT: 6_000,
+}
+_DEFAULT_EXPECTED_CHARS = 15_000
+# Floor under the cost divisor when ranking by value per dollar, so a free
+# 800-character page does not outrank a paper by dividing by almost nothing.
+_VALUE_COST_FLOOR = Decimal("0.01")
 
 # Two-phase discovery: the tier multiplier scales the final corpus budget;
 # searching is cheap so candidates are gathered at _SEARCH_OVERFETCH× budget
 # and triage picks which ones are worth full downloads. Per-type caps keep a
 # single source type from flooding the corpus even if it triages well.
-_BASE_FETCH_BUDGET = 30
+# The count budget is a ceiling, not the budget. Since the discovery loop
+# spends against an estimate of ingest cost in dollars, a count that binds first
+# defeats the point — on a live PRO build round 0 used 56 of a 60-source count
+# and left round 1 able to add four sources while $4.75 of its money budget was
+# still unspent. Doubled so the money is what actually stops the search, which
+# is what makes "sixty mixed sources" and "a hundred and fifty open-access
+# papers" cost the same. Per-tier ceilings become 30 / 60 / 120.
+_BASE_FETCH_BUDGET = 60
 _SEARCH_OVERFETCH = 3
 _FETCH_CONCURRENCY = 6
 # In-stage retries for persona generation before the build is declared incomplete.
@@ -110,7 +193,24 @@ _PERSONA_ATTEMPTS = 3
 # A single fetcher's search taking longer than this is worth a warning: discovery
 # waits on all of them, so one slow fetcher is the stage's duration.
 _SLOW_SEARCH_SECONDS = 30.0
-_TYPE_CAP_FACTOR = 2
+# No single source type may take more than this multiple of its *planned share*
+# of the corpus. The plan's per-fetcher weights already decide how much of the
+# search each type gets; this is the backstop that stops one type dominating the
+# result anyway, and triage decides everything in between.
+#
+# It replaces a fixed `quota × 2`, which was sized for a 30-source budget and
+# became the real limit once the budget grew: on a live STANDARD build, four of
+# the six productive types hit their cap at 43 sources while the count ceiling
+# (60) and the money budget ($1.58 of $3.00) were both untouched. A cap that
+# does not scale with the budget makes budgeting by cost decorative.
+#
+# Because the caps sum to `headroom × budget`, they constrain the *mix* and
+# never the total — which is the division of labour intended: the money says how
+# much corpus, the caps say how varied it has to be.
+_TYPE_CAP_HEADROOM = 2.0
+# Floor, so a fetcher with a small quota can still contribute a few sources on a
+# small build rather than being capped at one.
+_TYPE_CAP_MIN = 4
 
 # Floor under the search phase, per query. Quotas scale down with tier, but the
 # costs that tiers exist to bound — full fetch, OCR, validation, chunking,
@@ -274,15 +374,25 @@ class ExpertBuilder:
         pool: asyncpg.Pool,
         source_filter: list[str] | None = None,
         execution: BuildExecution | None = None,
+        job_id: int | None = None,
     ) -> None:
         """``execution=None`` resolves per build (see :func:`resolve_execution`);
         pass a mode explicitly to force one — e.g. a scheduled refresh that should
-        always take the half-price path regardless of what the expert looks like."""
+        always take the half-price path regardless of what the expert looks like.
+
+        ``job_id`` is only used to name screening capture files (see
+        :mod:`peritus.sources.capture`); the builder does not otherwise know or
+        care that it is running under a job."""
         self._pool = pool
         self._repo = ExpertRepository(pool)
         self._graph_repo = GraphRepository(pool)
         self._source_filter = source_filter
         self._execution = execution
+        self._job_id = job_id
+        # Sources dropped by content fingerprinting rather than by the
+        # validator. Held here so they reach the ledger as explicit drops with a
+        # reason instead of disappearing between fetching and validation.
+        self._content_duplicates: list[DroppedSource] = []
 
     def _build_fetchers(
         self,
@@ -385,46 +495,12 @@ class ExpertBuilder:
             weights,
         )
 
-        # Stage 1: Discover (search → triage → budgeted fetch)
-        fetch_budget = max(5, round(_BASE_FETCH_BUDGET * expert.config.source_multiplier))
-        await _emit_event(on_event, {"type": "stage", "stage": 1, "name": "discover"})
-        raw_sources = await self._stage_discover(topic, plan, fetch_budget, on_event)
-
-        # Citation snowballing: follow high-citation references from ArXiv sources
-        extra = await _snowball_citations(raw_sources)
-        if extra:
-            await _emit_event(on_event, {"type": "snowball_done", "added": len(extra)})
-            raw_sources.extend(extra)
-
-        # Dedup by normalised URL before paying validation costs
-        raw_sources = _deduplicate_by_url(raw_sources)
-
-        if not raw_sources:
-            raise BuildError("No sources discovered. Check API keys and network access.")
-
-        # Stage 2: Validate
-        await _emit_event(
-            on_event, {"type": "stage", "stage": 2, "name": "validate", "total": len(raw_sources)}
-        )
-        passed, dropped = await validate_sources(
-            topic,
-            raw_sources,
-            key_concepts,
-            on_result=lambda r: _emit_event(on_event, {"type": "source_validated", **r}),
-        )
-        await _emit_event(
-            on_event, {"type": "validate_done", "passed": len(passed), "dropped": len(dropped)}
-        )
-
-        # Stage 2b: Gap-fill — re-search key concepts no passing source covers
-        if passed and key_concepts:
-            passed, dropped = await self._fill_coverage_gaps(
-                topic,
-                key_concepts,
-                passed,
-                dropped,
-                on_event,
-            )
+        # Stages 1–2: the discovery loop (search → dedup → triage → fetch →
+        # validate → coverage, repeated until the targets are met or the money
+        # or the rounds run out).
+        outcome = await self._run_discovery(expert, topic, plan, on_event)
+        passed, dropped = outcome.passed, outcome.dropped
+        await self._repo.update_build_summary(expert.id, outcome.summary())
 
         if not passed:
             # Before blaming the corpus, check whether the validator ever ran.
@@ -570,6 +646,23 @@ class ExpertBuilder:
             if merged_count:
                 await _emit_event(on_event, {"type": "entities_resolved", "merged": merged_count})
                 node_count = max(0, node_count - merged_count)
+
+            # Reconciliation: which claims support, contradict or qualify which.
+            # Deliberately after entity resolution — it groups claims by the
+            # concept they are `about`, and before the merge that concept is
+            # still several near-duplicate nodes, each holding one source's view
+            # of it. It is also the only pass that sees more than one source at
+            # a time, which is why the per-batch extractor no longer guesses at
+            # these relations at all.
+            await _emit_event(on_event, {"type": "stage", "stage": 4, "name": "reconcile"})
+            relation_count = await _reconcile_claims(
+                expert.topic, expert.id, self._graph_repo, on_event
+            )
+            edge_count += relation_count
+
+            # Edge ordering is evidence counted off the corpus, not a weight the
+            # model asserted, so it is computed here once the graph is final.
+            await self._graph_repo.recompute_edge_evidence(expert.id)
             graph_built = True
         except asyncio.CancelledError:
             raise  # cancellation/shutdown is the worker's business, not a degrade
@@ -678,41 +771,325 @@ class ExpertBuilder:
             persona_name=persona_name,
         )
 
-    async def _stage_discover(
+    # ── the discovery loop ──────────────────────────────────────────────────
+
+    async def _run_discovery(
+        self,
+        expert: Expert,
+        topic: str,
+        plan: dict,
+        on_event: EventCallback | None,
+    ) -> "DiscoveryOutcome":
+        """Search, screen and validate until the corpus meets its targets.
+
+        Round 0 is the plan's own queries over every active fetcher — the same
+        single pass discovery has always run. Every round after it reads the
+        corpus that exists: the concepts furthest from target become feedback
+        queries in the field's own vocabulary, and the round's accepted
+        scholarly sources are snowballed through their citations.
+
+        The loop never re-plans. Round 0's brief — its key concepts and
+        must-have works — is the standard the corpus is held to, and later
+        rounds may only add queries against it. A loop allowed to rewrite its
+        own syllabus can always declare itself finished.
+        """
+        config = expert.config
+        target = config.coverage_target()
+        key_concepts: list[str] = plan["key_concepts"]
+        must_have_titles = [w["title"] for w in plan["must_have_works"]]
+
+        base_budget = max(5, round(_BASE_FETCH_BUDGET * config.source_multiplier))
+        budget_usd = Decimal(str(discovery_budget_usd(expert.tier, cap_usd=self._cap_usd())))
+        batched = (
+            current_execution() is BuildExecution.BACKGROUND
+            and settings.ANTHROPIC_BATCH_ENABLED
+        )
+        max_rounds = target.max_rounds if discovery_loop_enabled() else 0
+
+        _log_previous_build(expert, batched)
+
+        # Caps are computed once, from the whole build's ceiling, and their counts
+        # persist across rounds — a cap applied per round would let a type take
+        # its full share again in every one of them, which is the flooding the
+        # cap exists to prevent.
+        caps = _type_caps(self._fetchers, base_budget)
+        type_counts: dict[SourceType, int] = {}
+
+        seen = SeenSet()
+        passed: list[ValidatedSource] = []
+        dropped: list[DroppedSource] = []
+        coverage = compute_coverage(key_concepts, passed, target)
+        committed_usd = Decimal(0)
+        remaining_count = base_budget
+        stop_reason = STOP_MAX_ROUNDS if max_rounds else STOP_LOOP_DISABLED
+        round_n = 0
+        # Rounds that actually fetched and validated something. Distinct from
+        # ``round_n``, which is the index of the round being *set up* — a round
+        # that finds no new candidates and breaks before running must not be
+        # reported as a round that ran.
+        rounds_run = 0
+
+        while True:
+            if round_n == 0:
+                queries_by_fetcher = {
+                    name: list(plan["fetcher_plans"].get(name, {}).get("queries") or [topic])
+                    for name in self._fetchers
+                }
+                extra_candidates: list[SourceCandidate] = []
+                round_budget = base_budget
+                weakest: list[ConceptCoverage] = []
+            else:
+                weakest = coverage.weakest(_LOOP_MAX_CONCEPTS)
+                queries_by_fetcher, extra_candidates = await self._plan_round(
+                    topic, weakest, passed, seen, config, on_event, round_n
+                )
+                round_budget = min(
+                    remaining_count,
+                    math.ceil(_LOOP_ROUND_BUDGET_SHARE * base_budget),
+                )
+                if not queries_by_fetcher and not extra_candidates:
+                    stop_reason = STOP_NO_NEW_CANDIDATES
+                    break
+
+            # A stage event per round, not once for the whole loop: the meter
+            # attributes spend to whichever stage was last announced, and
+            # round N's triage happens after round N-1's `validate`.
+            await _emit_event(
+                on_event, {"type": "stage", "stage": 1, "name": "discover", "round": round_n}
+            )
+            await _emit_event(
+                on_event,
+                {
+                    "type": "round_started",
+                    "round": round_n,
+                    "budget": round_budget,
+                    "budget_usd": float(budget_usd),
+                    "targets": target.as_dict(),
+                    "weakest": [c.concept for c in weakest],
+                },
+            )
+
+            raw_sources, round_cost = await self._discovery_round(
+                topic,
+                plan,
+                queries_by_fetcher,
+                must_have_titles,
+                round_budget,
+                budget_usd - committed_usd,
+                seen,
+                extra_candidates,
+                caps,
+                type_counts,
+                on_event,
+                round_n,
+                batched,
+            )
+            committed_usd += round_cost
+            remaining_count -= len(raw_sources)
+
+            if not raw_sources:
+                stop_reason = (
+                    STOP_NO_NEW_CANDIDATES if round_n else stop_reason
+                )
+                if round_n == 0:
+                    raise BuildError(
+                        "No sources discovered. Check API keys and network access."
+                    )
+                break
+
+            round_passed, round_dropped = await self._validate_round(
+                expert, topic, raw_sources, key_concepts, on_event, round_n
+            )
+            passed.extend(round_passed)
+            dropped.extend(round_dropped)
+            for source in raw_sources:
+                seen.add_source(source)
+
+            # Give back the budget reserved for sources validation rejected.
+            # The estimate is made at fetch time, when nothing is known about
+            # which sources will survive, so it necessarily covers everything
+            # fetched — but only the accepted ones are ever ingested. Holding
+            # the rejected ones' cost against the budget stops the loop about a
+            # rejection-rate early: on a live STANDARD build it reserved $3.04
+            # of a $3.00 budget for 60 fetched sources when the 48 that passed
+            # were the only ones that would ever cost anything to ingest.
+            ingested_cost = sum(
+                _ingest_estimate(vs.raw, batched) for vs in round_passed
+            )
+            committed_usd -= round_cost - ingested_cost
+
+            rounds_run += 1
+            coverage = compute_coverage(key_concepts, passed, target)
+            spent_usd = _metered_spend()
+            await _emit_event(
+                on_event,
+                {
+                    "type": "coverage_report",
+                    "round": round_n,
+                    "spent_usd": float(spent_usd),
+                    "committed_usd": float(committed_usd),
+                    "budget_usd": float(budget_usd),
+                    **coverage.as_dict(),
+                },
+            )
+
+            # ── stop conditions, in the order they become knowable ───────────
+            acceptance = len(round_passed) / len(raw_sources)
+            if coverage.met and key_concepts:
+                stop_reason = STOP_TARGETS_MET
+                break
+            if round_n >= max_rounds:
+                stop_reason = STOP_LOOP_DISABLED if max_rounds == 0 else STOP_MAX_ROUNDS
+                break
+            if spent_usd + committed_usd >= budget_usd:
+                stop_reason = STOP_BUDGET_EXHAUSTED
+                break
+            if remaining_count <= 0:
+                stop_reason = STOP_SOURCE_LIMIT
+                break
+            if (
+                len(raw_sources) >= _ACCEPTANCE_MIN_SAMPLE
+                and acceptance < _ACCEPTANCE_COLLAPSE
+            ):
+                # The search space is exhausted: this round fetched real
+                # sources and validation wanted almost none of them. Another
+                # round buys more of the same.
+                stop_reason = STOP_ACCEPTANCE_COLLAPSED
+                break
+            round_n += 1
+
+        outcome = DiscoveryOutcome(
+            passed=passed,
+            dropped=dropped + self._content_duplicates,
+            coverage=coverage,
+            rounds=rounds_run,
+            stop_reason=stop_reason,
+            spent_usd=float(_metered_spend()),
+            committed_usd=float(committed_usd),
+            budget_usd=float(budget_usd),
+        )
+        await _emit_event(on_event, {"type": "discovery_done", **outcome.summary()})
+        return outcome
+
+    def _cap_usd(self) -> float | None:
+        """The hard spend cap this build is running under, if the meter knows it."""
+        meter = current_meter()
+        if meter is None or meter.cap_usd is None:
+            return None
+        return float(meter.cap_usd)
+
+    async def _plan_round(
+        self,
+        topic: str,
+        weakest: list[ConceptCoverage],
+        passed: list[ValidatedSource],
+        seen: SeenSet,
+        config,
+        on_event: EventCallback | None,
+        round_n: int,
+    ) -> tuple[dict[str, list[str]], list[SourceCandidate]]:
+        """Queries and citation candidates for a follow-up round."""
+        queries_by_fetcher: dict[str, list[str]] = {}
+        if weakest:
+            per_concept = await feedback_queries(topic, weakest, passed)
+            flat: list[str] = []
+            for concept in weakest:
+                for query in per_concept.get(concept.concept, []):
+                    if query not in flat:
+                        flat.append(query)
+            loop_fetchers = [n for n in self._fetchers if n in _LOOP_FETCHERS]
+            queries_by_fetcher = {name: list(flat) for name in loop_fetchers}
+            await _emit_event(
+                on_event,
+                {
+                    "type": "feedback_queries",
+                    "round": round_n,
+                    "concepts": [c.concept for c in weakest],
+                    "queries": flat,
+                    "fetchers": loop_fetchers,
+                },
+            )
+
+        # Snowball from what the corpus has already accepted. Seeded from every
+        # accepted scholarly source, not just this round's, so a two-hop tier
+        # reaches the references of references without extra machinery.
+        candidates: list[SourceCandidate] = []
+        if config.snowball_max_per_round > 0 and round_n <= config.snowball_hops:
+            try:
+                candidates = await snowball(
+                    passed, seen, max_candidates=config.snowball_max_per_round
+                )
+            except Exception as exc:
+                logger.warning("Snowball failed in round %d: %s", round_n, exc)
+                candidates = []
+            if candidates:
+                await _emit_event(
+                    on_event,
+                    {
+                        "type": "snowball_done",
+                        "round": round_n,
+                        "added": len(candidates),
+                        "backward": sum(
+                            1 for c in candidates
+                            if c.metadata.get("discovered_via") == "snowball:backward"
+                        ),
+                        "forward": sum(
+                            1 for c in candidates
+                            if c.metadata.get("discovered_via") == "snowball:forward"
+                        ),
+                    },
+                )
+        return queries_by_fetcher, candidates
+
+    async def _discovery_round(
         self,
         topic: str,
         plan: dict,
-        fetch_budget: int,
+        queries_by_fetcher: dict[str, list[str]],
+        must_have_titles: list[str],
+        budget: int,
+        budget_usd: Decimal,
+        seen: SeenSet,
+        extra_candidates: list[SourceCandidate],
+        caps: dict[SourceType, int],
+        type_counts: dict[SourceType, int],
         on_event: EventCallback | None,
-    ) -> list[RawSource]:
-        fetcher_plans = plan["fetcher_plans"]
-        active = set(self._fetchers.keys())
+        round_n: int,
+        batched: bool,
+    ) -> tuple[list[RawSource], Decimal]:
+        """One round: search → dedup → triage → budgeted fetch → content dedup.
 
-        await _emit_event(
-            on_event,
-            {
-                "type": "discovery_started",
-                "fetchers": list(_FETCHER_NAMES),
-                "active": list(active),
-            },
-        )
+        Returns the fetched sources and the estimated ingest cost the round
+        committed to, which is what the loop spends against its budget.
+        """
+        active = set(queries_by_fetcher)
+        if round_n == 0:
+            await _emit_event(
+                on_event,
+                {
+                    "type": "discovery_started",
+                    "fetchers": list(_FETCHER_NAMES),
+                    "active": list(active),
+                },
+            )
 
         _SINGLE_QUERY_FETCHERS = {"thought_leaders"}
 
         async def _search_one(name: str, fetcher, quota: int) -> list[SourceCandidate]:
-            queries = fetcher_plans.get(name, {}).get("queries") or [topic]
+            queries = queries_by_fetcher.get(name) or [topic]
             if name in _SINGLE_QUERY_FETCHERS:
                 queries = queries[:1]
             per_query = _search_breadth(quota, len(queries))
             nested = await asyncio.gather(
                 *[_safe_search(name, fetcher, query, per_query) for query in queries]
             )
-            candidates = _deduplicate_by_url([c for batch in nested for c in batch])
+            candidates = deduplicate_by_url([c for batch in nested for c in batch])
             skipped, reason = _is_skipped(name, candidates)
             await _emit_event(
                 on_event,
                 {
                     "type": "fetcher_done",
+                    "round": round_n,
                     "name": name,
                     "count": len(candidates),
                     "skipped": skipped,
@@ -726,14 +1103,24 @@ class ExpertBuilder:
             *[
                 _search_one(name, fetcher, quota)
                 for name, (fetcher, quota) in self._fetchers.items()
+                if name in active
             ]
         )
-        candidates = _deduplicate_by_url([c for batch in candidate_lists for c in batch])
-        if not candidates:
-            return []
+        pooled = [c for batch in candidate_lists for c in batch] + list(extra_candidates)
+        if not pooled:
+            return [], Decimal(0)
 
-        # Phase 2: triage — rank all candidates against the research brief
-        must_have_titles = [w["title"] for w in plan["must_have_works"]]
+        # Identity → URL, against everything the build has already considered.
+        # This is where the same paper found as an arXiv preprint, a journal DOI
+        # and a Semantic Scholar OA PDF becomes one candidate rather than three.
+        candidates, dedup = deduplicate_candidates(pooled, seen)
+        await _emit_event(
+            on_event, {"type": "dedup_done", "round": round_n, **dedup.as_event()}
+        )
+        if not candidates:
+            return [], Decimal(0)
+
+        # Triage — the same brief every round; only the queries change.
         triaged = await triage_candidates(
             topic,
             plan["key_concepts"],
@@ -741,31 +1128,99 @@ class ExpertBuilder:
             candidates,
         )
         ranked = rank_candidates(triaged)
+        for item in ranked:
+            seen.add_candidate(item.candidate)
         await _emit_event(
             on_event,
             {
                 "type": "triage_done",
+                "round": round_n,
                 "candidates": len(candidates),
                 "ranked": len(ranked),
-                "budget": fetch_budget,
+                "budget": budget,
             },
         )
 
-        # Phase 3: full fetch for the winners, refilling on failure
-        caps = {
-            _FETCHER_SOURCE_TYPES[name]: quota * _TYPE_CAP_FACTOR
-            for name, (_, quota) in self._fetchers.items()
-        }
-        sources = await self._fetch_with_refill(ranked, fetch_budget, caps, on_event)
+        sources, committed = await self._fetch_with_refill(
+            ranked, budget, caps, type_counts, budget_usd, batched, on_event, round_n
+        )
+
+        # Content fingerprinting, on text that now exists. This is the
+        # preprint-versus-published case that identity misses when one side has
+        # no DOI: two records, no shared id, the same document.
+        sources, duplicates = deduplicate_sources_by_content(sources, seen)
+        for source, of_url in duplicates:
+            # Visible as a drop with a reason, not silently gone. A source that
+            # disappears between fetching and validation is exactly the kind of
+            # hole the screening ledger exists to close.
+            self._content_duplicates.append(
+                DroppedSource(
+                    raw=source,
+                    quality_score=0.0,
+                    relevance_score=0.0,
+                    drop_reason=f"duplicate of {of_url}",
+                )
+            )
         await _emit_event(
             on_event,
             {
                 "type": "fetch_done",
+                "round": round_n,
                 "fetched": len(sources),
-                "budget": fetch_budget,
+                "content_duplicates": len(duplicates),
+                "budget": budget,
+                "estimated_ingest_usd": float(committed),
             },
         )
-        return sources
+        return sources, committed
+
+    async def _validate_round(
+        self,
+        expert: Expert,
+        topic: str,
+        raw_sources: list[RawSource],
+        key_concepts: list[str],
+        on_event: EventCallback | None,
+        round_n: int,
+    ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
+        """Validate one round's sources, capturing them first when asked to.
+
+        The capture wraps the call rather than living inside the validator, so
+        every path that validates — round 0, a later round, a future re-screen —
+        is captured by construction.
+        """
+        await _emit_event(
+            on_event,
+            {
+                "type": "stage",
+                "stage": 2,
+                "name": "validate",
+                "round": round_n,
+                "total": len(raw_sources),
+            },
+        )
+        capture_for_screening(expert, self._job_id, raw_sources, topic, key_concepts, round_n)
+        passed, dropped = await validate_sources(
+            topic,
+            raw_sources,
+            key_concepts,
+            on_result=lambda r: _emit_event(
+                on_event, {"type": "source_validated", "round": round_n, **r}
+            ),
+            on_reviewed=lambda r: _emit_event(
+                on_event, {"type": "source_reviewed", "round": round_n, **r}
+            ),
+        )
+        await _emit_event(
+            on_event,
+            {
+                "type": "validate_done",
+                "round": round_n,
+                "passed": len(passed),
+                "dropped": len(dropped),
+            },
+        )
+        return passed, dropped
 
     async def _load_upload_chunks(
         self, expert_id: int
@@ -817,11 +1272,27 @@ class ExpertBuilder:
         ranked: list[TriagedCandidate],
         budget: int,
         caps: dict[SourceType, int],
+        counts: dict[SourceType, int] | None = None,
+        budget_usd: Decimal = Decimal(0),
+        batched: bool = False,
         on_event: EventCallback | None = None,
-    ) -> list[RawSource]:
-        """Fetch full content for ranked candidates until the budget is met.
+        round_n: int = 0,
+    ) -> tuple[list[RawSource], Decimal]:
+        """Fetch full content for ranked candidates until a budget is met.
 
-        Works down the ranked list in concurrent waves; failed fetches free
+        Two budgets bind here, and the money one is the real one. The count is a
+        ceiling that keeps a pathological round from running forever; the
+        estimated ingest cost of what has been fetched is what actually stops
+        the wave, because a 120,000-character monograph and a 2,000-character
+        blog post are one unit each to a count and two orders of magnitude apart
+        in what they cost to ingest.
+
+        Order is by triage score, with estimated cost as the tiebreaker and a
+        reserved front rank for works the pipeline has independent evidence
+        about — see :func:`_fetch_sort_key`, which explains why ordering by
+        value per dollar emptied a Thomism corpus of Aquinas.
+
+        Works down the ordered list in concurrent waves; failed fetches free
         their slot so lower-ranked candidates get a chance. Per-type caps are
         enforced on successful fetches.
 
@@ -835,14 +1306,25 @@ class ExpertBuilder:
         fetcher_by_type = {
             _FETCHER_SOURCE_TYPES[name]: fetcher for name, (fetcher, _) in self._fetchers.items()
         }
+        ordered = sorted(ranked, key=lambda t: _fetch_sort_key(t, batched))
         results: list[RawSource] = []
-        counts: dict[SourceType, int] = {}
+        # Shared with the caller across rounds when one is passed; a lone caller
+        # (a test) gets a fresh tally.
+        counts = {} if counts is None else counts
+        committed = Decimal(0)
         idx = 0
         attempted = 0
-        while len(results) < budget and idx < len(ranked):
+        while len(results) < budget and idx < len(ordered):
+            if budget_usd > 0 and committed >= budget_usd:
+                logger.info(
+                    "Round %d stopped fetching at %d source(s): committed $%.3f of a "
+                    "$%.3f estimated-ingest budget",
+                    round_n, len(results), float(committed), float(budget_usd),
+                )
+                break
             wave: list[SourceCandidate] = []
-            while idx < len(ranked) and len(wave) < min(_FETCH_CONCURRENCY, budget - len(results)):
-                candidate = ranked[idx].candidate
+            while idx < len(ordered) and len(wave) < min(_FETCH_CONCURRENCY, budget - len(results)):
+                candidate = ordered[idx].candidate
                 idx += 1
                 cap = caps.get(candidate.source_type, budget)
                 if counts.get(candidate.source_type, 0) >= cap:
@@ -860,109 +1342,19 @@ class ExpertBuilder:
                     counts[candidate.source_type] -= 1
                 else:
                     results.append(source)
+                    committed += _ingest_estimate(source, batched)
             await _emit_event(
                 on_event,
                 {
                     "type": "fetch_progress",
+                    "round": round_n,
                     "fetched": len(results),
                     "attempted": attempted,
                     "budget": budget,
+                    "estimated_ingest_usd": float(committed),
                 },
             )
-        return results
-
-    async def _fill_coverage_gaps(
-        self,
-        topic: str,
-        key_concepts: list[str],
-        passed: list[ValidatedSource],
-        dropped: list[DroppedSource],
-        on_event: EventCallback | None,
-    ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
-        """One targeted re-search for key concepts no passing source covers.
-
-        Without this, a fetcher outage or an aggressive validation round silently
-        produces an expert with blind spots on its own syllabus.
-        """
-        coverage = _compute_coverage(key_concepts, passed)
-        gaps = [c for c in key_concepts if coverage[c] == 0][:_GAPFILL_MAX_CONCEPTS]
-        if not gaps:
-            return passed, dropped
-
-        gap_fetchers = {
-            name: fetcher
-            for name, (fetcher, _) in self._fetchers.items()
-            if name in _GAPFILL_FETCHERS
-        }
-        if not gap_fetchers:
-            return passed, dropped
-
-        await _emit_event(on_event, {"type": "coverage_gaps", "gaps": gaps})
-
-        async def _gap_fetch(name: str, fetcher, concept: str) -> list[RawSource]:
-            # Targeted and tiny — search and fetch directly, no triage round-trip.
-            candidates = await _safe_search(
-                name,
-                fetcher,
-                f"{topic} {concept}",
-                _GAPFILL_RESULTS_PER_QUERY,
-            )
-            fetched = await asyncio.gather(
-                *[
-                    _safe_fetch_candidate(fetcher, c)
-                    for c in candidates[:_GAPFILL_RESULTS_PER_QUERY]
-                ]
-            )
-            results = [src for src in fetched if src is not None]
-            for src in results:
-                src.metadata.setdefault("discovered_via", f"gapfill:{concept}")
-            return results
-
-        nested = await asyncio.gather(
-            *[
-                _gap_fetch(name, fetcher, concept)
-                for concept in gaps
-                for name, fetcher in gap_fetchers.items()
-            ]
-        )
-
-        seen_urls = {vs.url.rstrip("/").lower() for vs in passed}
-        seen_urls |= {ds.raw.url.rstrip("/").lower() for ds in dropped}
-        extra_raw = [
-            src
-            for src in _deduplicate_by_url([s for batch in nested for s in batch])
-            if src.url.rstrip("/").lower() not in seen_urls
-        ]
-
-        added = 0
-        if extra_raw:
-            extra_passed, extra_dropped = await validate_sources(
-                topic,
-                extra_raw,
-                key_concepts,
-                on_result=lambda r: _emit_event(on_event, {"type": "source_validated", **r}),
-            )
-            passed = passed + extra_passed
-            dropped = dropped + extra_dropped
-            added = len(extra_passed)
-
-        remaining = _compute_coverage(key_concepts, passed)
-        still_uncovered = [c for c in gaps if remaining[c] == 0]
-        await _emit_event(
-            on_event,
-            {
-                "type": "gapfill_done",
-                "added": added,
-                "still_uncovered": still_uncovered,
-            },
-        )
-        if still_uncovered:
-            logger.info(
-                "Coverage gaps remain after gap-fill for %r: %s",
-                topic,
-                ", ".join(still_uncovered),
-            )
-        return passed, dropped
+        return results, committed
 
     async def _persist_sources(
         self,
@@ -970,11 +1362,18 @@ class ExpertBuilder:
         passed: list[ValidatedSource],
         dropped: list[DroppedSource],
     ) -> list[int]:
-        """Write all sources to DB. Returns DB IDs for passed sources only."""
+        """Write all sources to DB. Returns DB IDs for passed sources only.
+
+        ``validator_model`` comes off each row's own verdict rather than from
+        settings: with a borderline-band reviewer running, two models judge
+        different sources in one build, and a column filled in from
+        configuration would attribute both to whichever model the config names.
+        """
         passed_ids: list[int] = []
-        validator_model = settings.FAST_MODEL
         async with self._pool.acquire() as conn, conn.transaction():
             for vs in passed:
+                ids = vs.identifiers
+                meta = vs.raw.metadata
                 row = await conn.fetchrow(
                     """
                         INSERT INTO sources
@@ -982,8 +1381,13 @@ class ExpertBuilder:
                              quality_score, relevance_score, content_type,
                              difficulty, key_claims, passed,
                              validator_model, rubric_version,
-                             covered_concepts, discovered_via, source_tier)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12,$13::jsonb,$14,$15)
+                             covered_concepts, discovered_via, source_tier,
+                             doi, arxiv_id, identifiers,
+                             full_text_method, text_chars,
+                             review_model, first_pass_quality, first_pass_relevance,
+                             snowball_seed_urls)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,true,$11,$12,$13::jsonb,
+                                $14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24::jsonb)
                         RETURNING id
                         """,
                     expert_id,
@@ -996,23 +1400,39 @@ class ExpertBuilder:
                     vs.content_type,
                     vs.difficulty,
                     json.dumps(vs.key_claims),
-                    validator_model,
+                    vs.validator_model or settings.FAST_MODEL,
                     RUBRIC_VERSION,
                     json.dumps(vs.covered_concepts),
-                    vs.raw.metadata.get("discovered_via", "plan"),
+                    meta.get("discovered_via", "plan"),
                     # NULL when the validator didn't classify it — see migration 020.
                     vs.source_tier,
+                    ids.doi,
+                    ids.arxiv_id,
+                    json.dumps(ids.to_dict()) if not ids.is_empty() else None,
+                    meta.get("full_text_method"),
+                    len(vs.text),
+                    vs.review_model,
+                    vs.first_pass_quality,
+                    vs.first_pass_relevance,
+                    json.dumps(meta["snowball_seed_urls"])
+                    if meta.get("snowball_seed_urls") else None,
                 )
                 passed_ids.append(row["id"])
 
             for ds in dropped:
+                ids = ds.identifiers
+                meta = ds.raw.metadata
                 await conn.execute(
                     """
                         INSERT INTO sources
                             (expert_id, source_type, url, title, author,
                              quality_score, relevance_score, passed, drop_reason,
-                             validator_model, rubric_version, discovered_via)
-                        VALUES ($1,$2,$3,$4,$5,$6,$7,false,$8,$9,$10,$11)
+                             validator_model, rubric_version, discovered_via,
+                             doi, arxiv_id, identifiers,
+                             full_text_method, text_chars,
+                             review_model, first_pass_quality, first_pass_relevance)
+                        VALUES ($1,$2,$3,$4,$5,$6,$7,false,$8,$9,$10,$11,
+                                $12,$13,$14::jsonb,$15,$16,$17,$18,$19)
                         """,
                     expert_id,
                     ds.raw.source_type.value,
@@ -1022,12 +1442,190 @@ class ExpertBuilder:
                     ds.quality_score,
                     ds.relevance_score,
                     ds.drop_reason,
-                    validator_model,
+                    ds.validator_model or settings.FAST_MODEL,
                     RUBRIC_VERSION,
-                    ds.raw.metadata.get("discovered_via", "plan"),
+                    meta.get("discovered_via", "plan"),
+                    ids.doi,
+                    ids.arxiv_id,
+                    json.dumps(ids.to_dict()) if not ids.is_empty() else None,
+                    meta.get("full_text_method"),
+                    len(ds.raw.text),
+                    ds.review_model,
+                    ds.first_pass_quality,
+                    ds.first_pass_relevance,
                 )
 
         return passed_ids
+
+
+@dataclass
+class DiscoveryOutcome:
+    """What the discovery loop produced, and why it stopped.
+
+    Stored on ``experts.build_summary`` and emitted as ``discovery_done``. The
+    stop reason is the part that matters: "the corpus has 34 sources" is not a
+    claim anyone can check, and "the corpus met its coverage targets in two
+    rounds" or "the corpus stopped at the discovery budget with two concepts
+    short" both are.
+    """
+
+    passed: list[ValidatedSource]
+    dropped: list[DroppedSource]
+    coverage: CoverageReport
+    rounds: int
+    stop_reason: str
+    spent_usd: float
+    committed_usd: float
+    budget_usd: float
+
+    def summary(self) -> dict:
+        return {
+            "rounds": self.rounds,
+            "stop_reason": self.stop_reason,
+            "accepted": len(self.passed),
+            "rejected": len(self.dropped),
+            "spent_usd": round(self.spent_usd, 4),
+            "estimated_ingest_usd": round(self.committed_usd, 4),
+            "budget_usd": round(self.budget_usd, 4),
+            "rubric_version": RUBRIC_VERSION,
+            "coverage": self.coverage.as_dict(),
+        }
+
+
+def _type_caps(fetchers: dict, budget: int) -> dict[SourceType, int]:
+    """The most of each source type one corpus may contain.
+
+    A type's cap is :data:`_TYPE_CAP_HEADROOM` times its *planned share* of the
+    budget — the share the research plan's own per-fetcher weights imply. So the
+    caps scale with the budget instead of being fixed at a number sized for a
+    30-source build, and they sum to ``headroom × budget``, which means they
+    shape the mix of the corpus and never cap its size. Deciding size is the
+    money's job.
+    """
+    quotas = {
+        _FETCHER_SOURCE_TYPES[name]: quota for name, (_, quota) in fetchers.items()
+    }
+    total = sum(quotas.values()) or 1
+    return {
+        source_type: max(
+            _TYPE_CAP_MIN,
+            math.ceil(budget * (quota / total) * _TYPE_CAP_HEADROOM),
+        )
+        for source_type, quota in quotas.items()
+    }
+
+
+def _log_previous_build(expert: Expert, batched: bool) -> None:
+    """Note what the last build of this expert concluded, before starting over.
+
+    A stub, deliberately. A rebuild currently wipes the corpus and runs round 0
+    blind, which means it re-discovers everything the previous build already
+    established and re-pays for all of it — and in BACKGROUND mode each round
+    queues its own Message Batch on top. The fix is a rebuild that starts from
+    the stored summary and reports what is *new* since the last build, which is
+    the "living review" follow-on in docs/plans/corpus-quality.md. Until then
+    this at least puts the previous conclusion in the log next to the new one,
+    so the two can be compared without querying the database.
+    """
+    summary = getattr(expert, "build_summary", None)
+    if not isinstance(summary, dict) or not summary:
+        return
+    logger.info(
+        "Rebuilding %r: the previous build ran %s round(s) and stopped with %r, "
+        "accepting %s source(s)%s. This build starts from nothing — the corpus was "
+        "wiped — so that work is being redone.",
+        expert.name,
+        summary.get("rounds"),
+        summary.get("stop_reason"),
+        summary.get("accepted"),
+        " (and this one batches each round separately)" if batched else "",
+    )
+
+
+def discovery_loop_enabled() -> bool:
+    """Whether this build may run more than one discovery round.
+
+    ``auto`` (the default) turns the loop on for interactive builds and off for
+    batched ones: in BACKGROUND mode each round's validation is its own Message
+    Batch that can queue for up to an hour, so three rounds of a PRO build could
+    take most of a day for a saving nobody is waiting on.
+    """
+    configured = settings.DISCOVERY_LOOP
+    if configured in ("true", "1", "yes", "on"):
+        return True
+    if configured in ("false", "0", "no", "off"):
+        return False
+    if configured != "auto":
+        logger.warning("Unknown DISCOVERY_LOOP=%r — falling back to 'auto'", configured)
+    return current_execution() is not BuildExecution.BACKGROUND
+
+
+def _metered_spend() -> Decimal:
+    """What this build has actually spent so far, per the meter. 0 with no meter."""
+    meter = current_meter()
+    return Decimal(str(meter.spent_usd)) if meter is not None else Decimal(0)
+
+
+def _ingest_estimate(source: RawSource, batched: bool) -> Decimal:
+    """Forecast of what ingesting this fetched source will cost."""
+    pages = (
+        estimated_ocr_pages(len(source.text))
+        if source.metadata.get("full_text_method") in PAID_METHODS
+        else 0
+    )
+    return estimated_ingest_cost_usd(len(source.text), pages, batch=batched)
+
+
+def _prefetch_cost_estimate(candidate: SourceCandidate, batched: bool) -> Decimal:
+    """Forecast of a candidate's ingest cost *before* it is fetched.
+
+    Length is a per-source-type prior (see :data:`_EXPECTED_CHARS`) rather than
+    a measurement, which is the best that can be done before the download. It
+    only has to be right about the order of magnitude, because all it decides is
+    the order of the fetch queue.
+    """
+    chars = _EXPECTED_CHARS.get(candidate.source_type, _DEFAULT_EXPECTED_CHARS)
+    method = expected_method(
+        candidate.identifiers, FullTextHints.from_candidate(candidate)
+    )
+    pages = estimated_ocr_pages(chars) if method in PAID_METHODS else 0
+    return estimated_ingest_cost_usd(chars, pages, batch=batched)
+
+
+def _fetch_sort_key(triaged: TriagedCandidate, batched: bool) -> tuple[int, float, float]:
+    """The order the fetch stage works through its ranked candidates.
+
+    Quality first, cost as the tiebreaker — **not** value per dollar.
+
+    Ordering by ``score / cost`` is what phase 6.C of the plan asked for, and it
+    is wrong in a way that only shows up in the finished corpus: cost scales
+    with length, the longest texts are the primary sources, so the rule
+    systematically strips a corpus of the material it most needs. Measured on a
+    live build of "Thomism": a Reddit thread scoring 4 outranked the Summa
+    Theologica scoring 9 by seven to one, Project Gutenberg's three hits were
+    buried below the fetch budget, and the finished expert contained no work by
+    Aquinas at all — while the research plan had correctly named the Summa a
+    must-have and weighted gutenberg at 2.0. The corpus came out 17 tertiary to
+    2 primary.
+
+    So the primary key is the triage score, which is the judgement about worth,
+    and cost only separates candidates the scoring could not tell apart. That
+    still buys what cost-awareness was for: between two equally-rated papers the
+    one with free full text is fetched first and OCR is paid for last.
+
+    Rank 0 is reserved for candidates the pipeline has independent evidence
+    about — a work the research plan named as canonical, or one that two or more
+    accepted sources both cite. Those are fetched before anything else, at any
+    price, because a corpus missing them is wrong in a way no saving repairs.
+
+    Scores are rounded to whole points first: the model's scale is not precise
+    to a tenth, and without rounding the gap between a 7.2 and a 7.0 would
+    decide the order ahead of a real difference in cost.
+    """
+    if triaged.candidate.metadata.get("fetch_priority"):
+        return (0, 0.0, 0.0)
+    cost = max(_prefetch_cost_estimate(triaged.candidate, batched), _VALUE_COST_FLOOR)
+    return (1, -round(triaged.score), float(cost))
 
 
 def resolve_execution(expert: Expert) -> BuildExecution:
@@ -1165,161 +1763,41 @@ def _route_must_have_works(plan: dict) -> None:
     fetcher_plan["weight"] = max(fetcher_plan["weight"], 1.0)
 
 
-# A reference this cited is canonical for the field, whatever the field is.
-_SNOWBALL_MIN_CITATIONS = 50
-_SNOWBALL_MAX_SEEDS = 3
+async def _reconcile_claims(
+    topic: str,
+    expert_id: int,
+    graph_repo: GraphRepository,
+    on_event: EventCallback | None = None,
+) -> int:
+    """Relate the claims different sources make about the same concept.
 
-
-def _snowball_seeds(raw_sources: list[RawSource]) -> list[str]:
-    """Semantic Scholar paper ids for the sources whose references are worth
-    following: arXiv papers by arXiv id, anything else scholarly by DOI —
-    which is how pubmed and openalex finds join the snowball."""
-    seeds: list[str] = []
-    for s in raw_sources:
-        if s.source_type == SourceType.ARXIV and s.metadata.get("arxiv_id"):
-            seeds.append(f"arXiv:{s.metadata['arxiv_id']}")
-        elif s.metadata.get("doi"):
-            seeds.append(f"DOI:{s.metadata['doi']}")
-    return list(dict.fromkeys(seeds))
-
-
-async def _snowball_citations(
-    raw_sources: list[RawSource],
-    max_extra: int = 3,
-) -> list[RawSource]:
-    """Follow high-citation references from discovered scholarly sources.
-
-    Seeds are any source with an arXiv id or a DOI, so a corpus of history or
-    economics papers snowballs exactly like a physics one. References that are
-    themselves on arXiv come back through ar5iv full text; everything else is
-    resolved by DOI through OpenAlex (open-access text or abstract).
+    Best-effort inside a stage that is itself best-effort: a graph with claims,
+    concepts and an index between them is already useful, so a failure here
+    leaves that standing rather than degrading the whole stage and sending the
+    build back through the worker's retry loop.
     """
-    import arxiv as arxiv_lib  # type: ignore
-
-    seeds = _snowball_seeds(raw_sources)
-    if not seeds:
-        return []
-
-    seen_ids = {seed.split(":", 1)[1] for seed in seeds}
-    seen_urls = {s.url for s in raw_sources}
-    candidates: list[dict] = []
-
-    async with httpx.AsyncClient(timeout=15, headers=ARXIV_HEADERS) as client:
-        for seed in seeds[:_SNOWBALL_MAX_SEEDS]:
-            try:
-                resp = await client.get(
-                    f"https://api.semanticscholar.org/graph/v1/paper/{seed}/references",
-                    params={
-                        "fields": "title,citationCount,openAccessPdf,externalIds",
-                        "limit": 20,
-                    },
-                )
-                if resp.status_code != 200:
-                    continue
-                for ref in resp.json().get("data", []):
-                    cited = ref.get("citedPaper") or {}
-                    ext_ids = cited.get("externalIds") or {}
-                    ref_arxiv_id = ext_ids.get("ArXiv")
-                    ref_doi = ext_ids.get("DOI")
-                    ref_id = ref_arxiv_id or ref_doi
-                    citation_count = cited.get("citationCount") or 0
-                    if (
-                        ref_id
-                        and ref_id not in seen_ids
-                        and citation_count >= _SNOWBALL_MIN_CITATIONS
-                    ):
-                        candidates.append(
-                            {
-                                "arxiv_id": ref_arxiv_id,
-                                "doi": ref_doi,
-                                "title": cited.get("title", ""),
-                                "citations": citation_count,
-                            }
-                        )
-                        seen_ids.add(ref_id)
-            except Exception as exc:
-                logger.debug("Semantic Scholar references failed for %s: %s", seed, exc)
-
-    if not candidates:
-        return []
-
-    candidates.sort(key=lambda x: x["citations"], reverse=True)
-    extra: list[RawSource] = []
-
-    async with httpx.AsyncClient(timeout=30, headers=ARXIV_HEADERS, follow_redirects=True) as http:
-        for cand in candidates:
-            if len(extra) >= max_extra:
-                break
-            source = await _snowball_fetch_one(http, cand, arxiv_lib)
-            if source is None or source.url in seen_urls:
-                continue
-            extra.append(source)
-            seen_urls.add(source.url)
-            logger.info("Snowballed: %r (%d citations)", source.title, cand["citations"])
-
-    return extra
-
-
-async def _snowball_fetch_one(
-    http: httpx.AsyncClient,
-    cand: dict,
-    arxiv_lib,
-) -> RawSource | None:
-    """One snowball reference → a RawSource, via arXiv when possible, else DOI."""
-    aid = cand.get("arxiv_id")
-    if aid:
-        try:
-
-            def _lookup(a: str = aid) -> list:
-                return list(arxiv_lib.Client().results(arxiv_lib.Search(id_list=[a])))
-
-            papers = await asyncio.to_thread(_lookup)
-            if not papers:
-                return None
-            paper = papers[0]
-            full_text = await fetch_ar5iv(http, aid)
-            text = (
-                full_text[:MAX_FULL_TEXT]
-                if len(full_text) >= MIN_FULL_TEXT
-                else f"{paper.title}\n\n{paper.summary}"
-            )
-            return RawSource(
-                source_type=SourceType.ARXIV,
-                url=paper.entry_id,
-                title=paper.title,
-                author=", ".join(str(a) for a in paper.authors[:3]),
-                text=text,
-                metadata={
-                    "arxiv_id": aid,
-                    "published": str(paper.published),
-                    "categories": paper.categories,
-                    "full_text": len(full_text) >= MIN_FULL_TEXT,
-                    "snowballed": True,
-                    "discovered_via": "snowball",
-                    "citations": cand["citations"],
-                },
-            )
-        except Exception as exc:
-            logger.debug("Snowball fetch failed for arXiv:%s: %s", aid, exc)
-            return None
-
-    doi = cand.get("doi")
-    if not doi:
-        return None
     try:
-        candidate = await openalex_by_doi(doi)
-        if candidate is None:
-            return None
-        source = await OpenAlexFetcher().fetch(candidate)
-        if source is None:
-            return None
-        source.metadata["snowballed"] = True
-        source.metadata["discovered_via"] = "snowball"
-        source.metadata["citations"] = cand["citations"]
-        return source
+        groups = await graph_repo.claims_by_concept(expert_id)
+        if not groups:
+            return 0
+        relations = await reconcile_claims(topic, groups)
+        inserted = await graph_repo.insert_relations(expert_id, relations)
+    except asyncio.CancelledError:
+        raise
     except Exception as exc:
-        logger.debug("Snowball fetch failed for DOI:%s: %s", doi, exc)
-        return None
+        logger.warning("Claim reconciliation failed for expert %d: %s", expert_id, exc)
+        return 0
+
+    if inserted:
+        await _emit_event(
+            on_event,
+            {"type": "claims_reconciled", "concepts": len(groups), "relations": inserted},
+        )
+    logger.info(
+        "Reconciled %d concept(s) into %d claim relation(s) for expert %d",
+        len(groups), inserted, expert_id,
+    )
+    return inserted
 
 
 _RESOLVE_THRESHOLD = 0.93
@@ -1461,9 +1939,12 @@ async def _safe_fetch_candidate(fetcher, candidate: SourceCandidate) -> RawSourc
     if fetcher is None:
         return None
     try:
-        return await asyncio.wait_for(
+        source = await asyncio.wait_for(
             fetcher.fetch(candidate), timeout=settings.SOURCE_FETCH_TIMEOUT
         )
+        if source is not None:
+            _stamp_retrieval_method(source)
+        return source
     except TimeoutError:
         logger.warning(
             "Full fetch timed out after %.0fs for %s %r — abandoning candidate",
@@ -1476,6 +1957,21 @@ async def _safe_fetch_candidate(fetcher, candidate: SourceCandidate) -> RawSourc
             candidate.source_type.value, candidate.url, type(exc).__name__, exc,
         )
         return None
+
+
+def _stamp_retrieval_method(source: RawSource) -> None:
+    """Record how this source's text was obtained, for fetchers that don't.
+
+    The scholarly fetchers go through the full-text resolver and record the step
+    it took. The rest have exactly one way of getting text, so the value is
+    known — and leaving it NULL would say "unknown" about a retrieval that was
+    never in doubt, both in the ledger and in the preview the validator reads.
+    """
+    if source.metadata.get("full_text_method"):
+        return
+    method = default_method_for(source.source_type.value)
+    if method:
+        source.metadata["full_text_method"] = method
 
 
 _PERSONA_TOOL: dict[str, Any] = {
@@ -1685,19 +2181,6 @@ def corpus_tier_warning(passed: list[ValidatedSource]) -> dict | None:
     }
 
 
-def _compute_coverage(
-    key_concepts: list[str],
-    passed: list[ValidatedSource],
-) -> dict[str, int]:
-    """How many passing sources cover each key concept."""
-    coverage = {c: 0 for c in key_concepts}
-    for vs in passed:
-        for concept in vs.covered_concepts:
-            if concept in coverage:
-                coverage[concept] += 1
-    return coverage
-
-
 def _avg_quality(passed: list[ValidatedSource]) -> float | None:
     if not passed:
         return None
@@ -1751,9 +2234,11 @@ _stage_started: ContextVar[tuple[str, float] | None] = ContextVar(
 # graph progress) are high-volume and already visible in the durable event log —
 # logging those too would bury the ones that matter.
 _LOGGED_EVENTS = frozenset({
-    "stage", "plan_ready", "discovery_started", "triage_done", "fetch_done",
-    "validate_done", "coverage_gaps", "gapfill_done", "snowball_done",
+    "stage", "plan_ready", "discovery_started", "round_started",
+    "feedback_queries", "dedup_done", "triage_done", "fetch_done",
+    "validate_done", "coverage_report", "discovery_done", "snowball_done",
     "corpus_warning", "chat_ready", "graph_ready", "entities_resolved",
+    "claims_reconciled",
     "persona_ready", "stage_degraded", "error", "cancelled", "done",
 })
 

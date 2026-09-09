@@ -99,8 +99,8 @@ async def test_grounded_cited_context_without_a_graph():
     assert "[2] Enchiridion — Arxiv" in block
     assert "Virtue is the sole good." in block
     # Nothing graph-shaped leaks into the prompt while the graph is missing.
-    assert "Related concepts" not in block
-    assert "Relationships" not in block
+    assert "About:" not in block
+    assert "Disputed in this corpus" not in block
 
 
 @pytest.mark.asyncio
@@ -108,21 +108,36 @@ async def test_graph_upgrade_is_transparent_to_the_same_call():
     """Same retrieval call, graph now present: passages gain concepts + relations."""
     retriever = GraphRetriever(MagicMock())
     retriever._repo.get_nodes_for_chunks = AsyncMock(
-        return_value=[{"id": 7, "label": "Virtue", "description": "The sole good", "chunk_ids": [1]}]
+        return_value=[{
+            "id": 7, "label": "Virtue is the sole good", "node_type": "claim",
+            "description": "The sole good", "chunk_ids": [1],
+        }]
     )
     retriever._repo.get_neighbours = AsyncMock(
         return_value=(
             [
-                {"id": 7, "label": "Virtue", "description": "The sole good"},
-                {"id": 8, "label": "Indifferents", "description": "Neither good nor bad"},
+                {"id": 7, "label": "Virtue is the sole good", "node_type": "claim",
+                 "description": "The sole good"},
+                {"id": 8, "label": "Externals can be good", "node_type": "claim",
+                 "description": "Health and wealth are goods"},
+                {"id": 9, "label": "Virtue", "node_type": "concept",
+                 "description": "Excellence of character"},
             ],
             [
                 {
                     "from_node_id": 7,
                     "to_node_id": 8,
                     "edge_type": "contradicts",
-                    "weight": 0.9,
-                }
+                    "evidence": 2,
+                    "properties": {"point": "whether anything besides virtue is good"},
+                },
+                {
+                    "from_node_id": 7,
+                    "to_node_id": 9,
+                    "edge_type": "about",
+                    "evidence": 2,
+                    "properties": {},
+                },
             ],
         )
     )
@@ -131,8 +146,10 @@ async def test_graph_upgrade_is_transparent_to_the_same_call():
     block, passages = build_grounded_context(enriched, max_passages=15)
 
     assert len(passages) == 1  # same passage, same number — citations don't shift
-    assert "Related concepts" in block
-    assert "Virtue --contradicts--> Indifferents" in block
+    assert "About:" in block
+    # The dispute reaches the prompt as a sentence about the subject, not as
+    # graph notation the model has to interpret.
+    assert "whether anything besides virtue is good" in block
     assert enriched[0].has_contradiction is True
 
 

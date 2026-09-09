@@ -19,6 +19,7 @@ from peritus.core.exceptions import IngestionError
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.graph.extractor import extract_graph_from_chunks
+from peritus.graph.reconciler import reconcile_claims
 from peritus.graph.repository import GraphRepository
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.embeddings import embed_in_batches
@@ -248,11 +249,26 @@ async def _extend_graph(
     covers deepens that concept rather than creating a rival copy of it. Only
     exact (case- and whitespace-normalised) label matches resolve here; merging
     near-duplicates needs embedding similarity and stays a build-time pass.
+
+    Returns (nodes touched, relations written).
     """
+    repo = GraphRepository(pool)
     extractions = await extract_graph_from_chunks(expert.topic, chunks, chunk_ids)
-    return await GraphRepository(pool).bulk_insert_from_extractions(
+    nodes, edges = await repo.bulk_insert_from_extractions(
         expert.id, extractions, embedder=embed_in_batches
     )
+
+    # Then relate the new document's claims to what the corpus already claims.
+    # Scoped to the concepts this document touched — every claim about them, from
+    # every source, but nothing about concepts the upload never mentioned. This
+    # is where an uploaded paper that disagrees with the corpus becomes visible;
+    # extraction alone could never see it, because it reads one source at a time.
+    groups = await repo.claims_by_concept(expert.id, touching_chunk_ids=chunk_ids)
+    relations = await reconcile_claims(expert.topic, groups)
+    edges += await repo.insert_relations(expert.id, relations)
+
+    await repo.recompute_edge_evidence(expert.id)
+    return nodes, edges
 
 
 async def _bump_counts(pool: asyncpg.Pool, expert_id: int) -> None:

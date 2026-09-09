@@ -261,6 +261,9 @@ class RetrievedContext:
     context_block: str
     passages: list[Passage]
     has_contradiction: bool
+    # What the corpus disputes, one sentence per disagreement, in the subject's
+    # terms. Defaulted so every existing constructor call stays valid.
+    contradiction_points: list[str] = field(default_factory=list)
     # Optional so every existing constructor call stays valid; the streaming
     # path always populates it.
     trail: RetrievalTrail | None = None
@@ -290,11 +293,24 @@ _CONTRADICTION_NOTE = (
 )
 
 
+def _contradiction_block(points: list[str]) -> str:
+    """The heads-up, with what is actually in dispute where the graph knows it.
+
+    A bare flag tells the model that something is contested and leaves it to
+    guess what — which is how an answer ends up hedging the wrong sentence. Each
+    point is one sentence about the subject, written at extraction time under
+    the same rule the note restates: name the dispute, never the bibliography.
+    """
+    stated = "\n".join(f"  • {p}" for p in points[:3])
+    return f"{_CONTRADICTION_NOTE}\n\nWhat is disputed:\n{stated}" if stated else _CONTRADICTION_NOTE
+
+
 def build_user_message(
     question: str,
     context_block: str,
     plan: QueryPlan | None = None,
     has_contradiction: bool = False,
+    contradiction_points: list[str] | None = None,
 ) -> MessageParam:
     """The single grounded-prompt shape sent to Claude for composition.
 
@@ -308,7 +324,10 @@ def build_user_message(
     ``sources`` event and the whole audit trail are all keyed to those markers.
     """
     plan = plan or QueryPlan.fallback(question)
-    contradiction = f"{_CONTRADICTION_NOTE}\n\n" if has_contradiction else ""
+    contradiction = (
+        f"{_contradiction_block(contradiction_points or [])}\n\n"
+        if has_contradiction else ""
+    )
     return {
         "role": "user",
         "content": (
@@ -361,6 +380,7 @@ def build_composition_messages(
     context_block: str,
     plan: QueryPlan | None = None,
     has_contradiction: bool = False,
+    contradiction_points: list[str] | None = None,
 ) -> list[MessageParam]:
     """Trim history, mark the cache breakpoint, and append the grounded question.
 
@@ -397,8 +417,19 @@ def build_composition_messages(
                 "text": content,
                 "cache_control": {"type": "ephemeral"},
             }]
-    messages.append(build_user_message(question, context_block, plan, has_contradiction))
+    messages.append(build_user_message(
+        question, context_block, plan, has_contradiction, contradiction_points
+    ))
     return messages
+
+
+def _dedupe(values) -> list[str]:
+    """Order-preserving dedupe — two passages often carry the same dispute."""
+    seen: list[str] = []
+    for v in values:
+        if v not in seen:
+            seen.append(v)
+    return seen
 
 
 def _build_trail(
@@ -535,6 +566,9 @@ class ChatAgent:
             context_block=context_block,
             passages=indexed,
             has_contradiction=any(e.has_contradiction for e in enriched),
+            contradiction_points=_dedupe(
+                p for e in enriched for p in e.contradiction_points
+            ),
             trail=trail,
             plan=plan,
         ))
@@ -559,6 +593,7 @@ class ChatAgent:
         client = get_anthropic_client()
         messages = build_composition_messages(
             history, question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+            ctx.contradiction_points,
         )
         resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.CLAUDE_MODEL,

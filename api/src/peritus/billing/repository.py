@@ -366,6 +366,35 @@ class BillingRepository:
                 job_id,
             )
 
+    async def discovery_estimate(self, job_id: int) -> dict:
+        """What the discovery loop budgeted and forecast, from its build summary.
+
+        Read off ``experts.build_summary`` rather than the event log so it
+        survives event pruning, and joined through the job so the answer belongs
+        to the same build the usage numbers do.
+        """
+        async with self._pool.acquire() as conn:
+            raw = await conn.fetchval(
+                """
+                SELECT e.build_summary
+                FROM build_jobs j JOIN experts e ON e.id = j.expert_id
+                WHERE j.id = $1
+                """,
+                job_id,
+            )
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except ValueError:
+                raw = None
+        summary = raw if isinstance(raw, dict) else {}
+        return {
+            "rounds": summary.get("rounds"),
+            "stop_reason": summary.get("stop_reason"),
+            "discovery_budget_usd": summary.get("budget_usd"),
+            "estimated_ingest_usd": summary.get("estimated_ingest_usd"),
+        }
+
     async def job_usage_breakdown(self, job_id: int) -> dict:
         """Per-stage and per-provider spend for one build job."""
         async with self._pool.acquire() as conn:

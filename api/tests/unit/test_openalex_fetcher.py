@@ -7,8 +7,8 @@ Every test is offline: the OpenAlex REST calls are served by a stub
 from unittest.mock import patch
 
 import httpx
-import pytest
 
+from peritus.sources import fulltext
 from peritus.sources.domain import SourceCandidate
 from peritus.sources.fetchers import openalex
 from peritus.sources.fetchers.openalex import (
@@ -21,8 +21,9 @@ from peritus.sources.fetchers.openalex import (
     _to_candidate,
     fetch_by_doi,
 )
+from peritus.sources.fulltext import METHOD_LANDING, FullText
 
-_WORDS = "the ottoman land code reshaped provincial property relations and taxation".split()
+_WORDS = ["the", "ottoman", "land", "code", "reshaped", "provincial", "property", "relations", "and", "taxation"]
 LONG_INVERTED = {
     word: list(range(i, MIN_ABSTRACT, len(_WORDS)))
     for i, word in enumerate(_WORDS)
@@ -186,7 +187,10 @@ async def test_fetch_falls_back_to_abstract_when_no_full_text():
     assert source is not None
     assert source.text.startswith(candidate.title)
     assert source.metadata["full_text"] is False
-    assert "abstract" not in source.metadata
+    assert source.metadata["full_text_method"] == "abstract"
+    # The abstract is kept on the source: the validator preview leads with it,
+    # and re-deriving it from the text would be guesswork.
+    assert source.metadata["abstract"] == candidate.metadata["abstract"]
 
 
 async def test_fetch_uses_landing_page_text_when_long_enough():
@@ -197,14 +201,16 @@ async def test_fetch_uses_landing_page_text_when_long_enough():
     long_text = "A full scholarly argument. " * 200
     assert len(long_text) >= MIN_FULL_TEXT
 
-    async def _fake_oa_text(cand):
-        return long_text
+    async def _fake_resolve(ids, hints):
+        assert hints.oa_landing_url == "https://example.org/paper"
+        return FullText(long_text, METHOD_LANDING)
 
-    with patch.object(openalex, "_fetch_open_access_text", _fake_oa_text):
+    with patch.object(fulltext, "resolve_full_text", _fake_resolve):
         source = await OpenAlexFetcher().fetch(candidate)
 
     assert source is not None
     assert source.metadata["full_text"] is True
+    assert source.metadata["full_text_method"] == METHOD_LANDING
     assert long_text[:50] in source.text
     # The abstract is prepended ahead of the body.
     assert source.text.index(candidate.metadata["abstract"][:40]) < source.text.index(long_text[:40])

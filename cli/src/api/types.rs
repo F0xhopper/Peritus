@@ -94,6 +94,39 @@ impl SourceOut {
     }
 }
 
+/// One key concept measured against the tier's coverage target. `shortfall` is
+/// 0 when the target is met and grows with the distance from it, which is how
+/// the loop ranks what to search for next.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+pub struct ConceptCoverage {
+    pub concept: String,
+    #[serde(default)]
+    pub sources: u64,
+    #[serde(default)]
+    pub source_types: Vec<String>,
+    #[serde(default)]
+    pub met: bool,
+    #[serde(default)]
+    pub shortfall: i64,
+}
+
+/// Why discovery stopped searching, in the words a person watching a build
+/// needs. Mirrors the STOP_* constants in api/src/peritus/experts/builder.py;
+/// an unrecognised reason is returned verbatim rather than hidden.
+pub fn stop_reason_text(reason: &str) -> String {
+    match reason {
+        "targets_met" => "every key concept reached its coverage target".into(),
+        "max_rounds" => "the round limit for this tier was reached".into(),
+        "budget_exhausted" => "the discovery budget was spent".into(),
+        "source_limit" => "the source limit for this tier was reached".into(),
+        "no_new_candidates" => "the last round found nothing new".into(),
+        "acceptance_collapsed" => "new results stopped passing validation".into(),
+        "loop_disabled" => "this build ran a single search pass".into(),
+        other => other.to_string(),
+    }
+}
+
 // Field names/shapes must match the payloads written to build_events by
 // builder.py and worker.py — see api/src/peritus/experts/builder.py.
 #[derive(Debug, Clone, Deserialize)]
@@ -108,16 +141,87 @@ pub enum BuildEvent {
     Stage { stage: u8, name: String, #[serde(default)] total: u64, #[serde(default)] total_batches: u64 },
     PlanReady { key_concepts: Vec<String> },
     DiscoveryStarted { fetchers: Vec<String>, active: Vec<String> },
-    FetcherDone { name: String, count: u64, skipped: bool, #[serde(default)] reason: String },
-    TriageDone { candidates: u64, ranked: u64, budget: u64 },
+    /// Discovery iterates: round 0 searches the research plan, later rounds
+    /// target the concepts furthest from their coverage target. Every per-round
+    /// event carries `round`, and it defaults to 0 so a build from before the
+    /// loop shipped still parses.
+    RoundStarted {
+        #[serde(default)] round: u64,
+        #[serde(default)] budget: u64,
+        #[serde(default)] budget_usd: f64,
+        #[serde(default)] weakest: Vec<String>,
+    },
+    FeedbackQueries {
+        #[serde(default)] round: u64,
+        #[serde(default)] concepts: Vec<String>,
+        #[serde(default)] queries: Vec<String>,
+    },
+    /// Candidates removed as duplicates before anything was downloaded.
+    DedupDone {
+        #[serde(default)] round: u64,
+        #[serde(default)] candidates: u64,
+        #[serde(default)] identity_merged: u64,
+        #[serde(default)] url_merged: u64,
+        #[serde(default)] seen_skipped: u64,
+        #[serde(default)] kept: u64,
+    },
+    FetcherDone {
+        name: String,
+        count: u64,
+        skipped: bool,
+        #[serde(default)] reason: String,
+        #[serde(default)] round: u64,
+    },
+    TriageDone { candidates: u64, ranked: u64, budget: u64, #[serde(default)] round: u64 },
     /// One per fetch wave. `attempted` counts candidates tried (failures
     /// included); `fetched` counts those that yielded a source.
-    FetchProgress { fetched: u64, attempted: u64, budget: u64 },
-    FetchDone { fetched: u64, budget: u64 },
-    SnowballDone { added: u64 },
+    FetchProgress { fetched: u64, attempted: u64, budget: u64, #[serde(default)] round: u64 },
+    FetchDone {
+        fetched: u64,
+        budget: u64,
+        #[serde(default)] round: u64,
+        #[serde(default)] content_duplicates: u64,
+    },
+    SnowballDone {
+        added: u64,
+        #[serde(default)] round: u64,
+        #[serde(default)] backward: u64,
+        #[serde(default)] forward: u64,
+    },
     // Validator scores are 0–10 (see validator.py's rubric).
     SourceValidated { title: String, passed: bool, #[serde(default)] q: f64, #[serde(default)] r: f64 },
-    ValidateDone { passed: u64, dropped: u64 },
+    /// A borderline first-pass verdict re-examined by a stronger model, whose
+    /// score replaces it. `first_q`/`first_r` are null when the first pass
+    /// errored rather than scored.
+    SourceReviewed {
+        title: String,
+        passed: bool,
+        #[serde(default)] q: f64,
+        #[serde(default)] r: f64,
+        #[serde(default)] first_q: Option<f64>,
+        #[serde(default)] first_r: Option<f64>,
+        #[serde(default)] reversed: bool,
+    },
+    ValidateDone { passed: u64, dropped: u64, #[serde(default)] round: u64 },
+    /// The corpus measured against this tier's per-concept coverage targets,
+    /// once per round.
+    CoverageReport {
+        #[serde(default)] round: u64,
+        #[serde(default)] met: bool,
+        #[serde(default)] concepts: Vec<ConceptCoverage>,
+        #[serde(default)] spent_usd: f64,
+        #[serde(default)] budget_usd: f64,
+    },
+    /// Terminal for discovery, not for the build. `stop_reason` says whether
+    /// the search finished or gave up, and why.
+    DiscoveryDone {
+        #[serde(default)] rounds: u64,
+        #[serde(default)] stop_reason: String,
+        #[serde(default)] accepted: u64,
+        #[serde(default)] rejected: u64,
+        #[serde(default)] spent_usd: f64,
+        #[serde(default)] budget_usd: f64,
+    },
     CoverageGaps { gaps: Vec<String> },
     GapfillDone { added: u64, #[serde(default)] still_uncovered: Vec<String> },
     CorpusWarning { message: String },
@@ -282,6 +386,90 @@ mod tests {
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(gapfill).unwrap(),
             BuildEvent::GapfillDone { added: 6, .. }
+        ));
+    }
+
+    // The discovery loop's events, pinned to the payloads builder.py writes.
+    // The TUI's funnel sums across rounds, so `round` has to survive parsing —
+    // a build whose later rounds silently defaulted to 0 would report only its
+    // last round's numbers.
+    #[test]
+    fn discovery_loop_events_parse_with_their_round() {
+        let started = r#"{"type":"round_started","round":1,"budget":15,"budget_usd":3.0,
+            "targets":{"min_sources":2,"min_source_types":2,"require_non_tertiary":true,"max_rounds":2},
+            "weakest":["apatheia"]}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(started).unwrap(),
+            BuildEvent::RoundStarted { round: 1, budget: 15, .. }
+        ));
+
+        let dedup = r#"{"type":"dedup_done","round":1,"candidates":40,"identity_merged":3,
+            "url_merged":2,"seen_skipped":9,"kept":26}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(dedup).unwrap(),
+            BuildEvent::DedupDone { round: 1, identity_merged: 3, seen_skipped: 9, .. }
+        ));
+
+        let validate = r#"{"type":"validate_done","round":2,"passed":7,"dropped":4}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(validate).unwrap(),
+            BuildEvent::ValidateDone { round: 2, passed: 7, dropped: 4 }
+        ));
+
+        let done = r#"{"type":"discovery_done","rounds":2,"stop_reason":"targets_met",
+            "accepted":21,"rejected":13,"spent_usd":1.2,"estimated_ingest_usd":0.9,
+            "budget_usd":3.0,"rubric_version":"v5-structured-q5r6","coverage":{}}"#;
+        match serde_json::from_str::<BuildEvent>(done).unwrap() {
+            BuildEvent::DiscoveryDone { rounds, stop_reason, accepted, .. } => {
+                assert_eq!(rounds, 2);
+                assert_eq!(accepted, 21);
+                assert_eq!(stop_reason_text(&stop_reason), "every key concept reached its coverage target");
+            }
+            other => panic!("expected DiscoveryDone, got {:?}", other),
+        }
+    }
+
+    // Builds from before the loop emit these without a `round`, and must keep
+    // parsing — the funnel treats a missing round as round 0.
+    #[test]
+    fn pre_loop_events_still_parse_without_round() {
+        let triage = r#"{"type":"triage_done","candidates":50,"ranked":30,"budget":30}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(triage).unwrap(),
+            BuildEvent::TriageDone { round: 0, candidates: 50, .. }
+        ));
+        let snowball = r#"{"type":"snowball_done","added":3}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(snowball).unwrap(),
+            BuildEvent::SnowballDone { added: 3, round: 0, backward: 0, forward: 0 }
+        ));
+    }
+
+    #[test]
+    fn source_reviewed_carries_both_verdicts() {
+        let raw = r#"{"type":"source_reviewed","title":"On Being and Essence","source_type":"web",
+            "first_q":5.5,"first_r":5.5,"q":7.0,"r":8.0,"passed":true,"reversed":true,
+            "review_model":"claude-sonnet-5"}"#;
+        match serde_json::from_str::<BuildEvent>(raw).unwrap() {
+            BuildEvent::SourceReviewed { first_q, q, reversed, passed, .. } => {
+                assert_eq!(first_q, Some(5.5));
+                assert_eq!(q, 7.0);
+                assert!(reversed && passed);
+            }
+            other => panic!("expected SourceReviewed, got {:?}", other),
+        }
+    }
+
+    // An errored first pass has no scores to report; null must not become 0.0,
+    // which would read as "the model scored it zero".
+    #[test]
+    fn source_reviewed_tolerates_a_first_pass_that_never_scored() {
+        let raw = r#"{"type":"source_reviewed","title":"x","source_type":"web",
+            "first_q":null,"first_r":null,"q":6.0,"r":7.0,"passed":true,"reversed":false,
+            "review_model":"claude-sonnet-5"}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(raw).unwrap(),
+            BuildEvent::SourceReviewed { first_q: None, first_r: None, .. }
         ));
     }
 

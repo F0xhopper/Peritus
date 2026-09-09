@@ -132,3 +132,126 @@ def embedding_cost_usd(model: str, tokens: int) -> Decimal:
     """Cost of an embedding call. Embeddings bill input tokens only."""
     price = price_for(model)
     return (Decimal(tokens) * price.input_per_mtok) / _MILLION
+
+
+# ── Estimating what a source will cost before deciding to keep it ────────────
+#
+# The meter reports actual spend, but only after the fact, and the expensive
+# step — ingestion — happens *after* discovery has already committed to a
+# corpus. So the discovery loop needs a forecast rather than a measurement.
+#
+# What ingestion actually costs, per source:
+#   chunks             = text_chars / CHUNK_SIZE_CHARS
+#   per chunk          one contextualisation call (FAST_MODEL): a
+#                       CONTEXT_MAX_CHARS window plus the chunk in, a short
+#                       prefix out; and one embedding of the chunk
+#   per GRAPH_BATCH_SIZE chunks   one graph-extraction call (GRAPH_MODEL) whose
+#                       input is those chunks' full text
+#   plus OCR, priced per page, for sources that took a paid full-text path
+#
+# Everything except OCR scales with characters, which is the point: a count
+# budget treats a 2,000-character blog post and a 120,000-character monograph as
+# one unit each, and they differ in cost by two orders of magnitude.
+
+# Characters per token, English prose. The tokenizer is not available offline
+# and an exact count is not worth a network call for an estimate — this is the
+# standard approximation and it is applied consistently on both sides.
+CHARS_PER_TOKEN = Decimal("4")
+
+# Output sizes, from the prompts that produce them: a contextual prefix is a
+# sentence or two; a graph extraction batch returns a nodes/edges structure.
+_CONTEXT_OUTPUT_TOKENS = Decimal("90")
+_GRAPH_OUTPUT_TOKENS = Decimal("700")
+
+# Mistral OCR list price, USD per page. Pages are estimated from characters
+# because nothing counts them before the document is parsed.
+OCR_USD_PER_PAGE = Decimal("0.001")
+CHARS_PER_OCR_PAGE = Decimal("3000")
+
+# Calibration status: ONE data point, and it says these constants are LOW.
+#
+# 2026-09-08, a STANDARD build of "Thomism": 48 accepted sources, 1,374 chunks.
+# The chunk model itself is exact — it predicted 138 graph batches and the build
+# ran 138. But the forecast for those sources was $2.45 against $4.73 of
+# post-discovery spend, and while that comparison is unfair (post-discovery
+# also covers entity resolution, claim reconciliation over 112 concepts, and
+# persona, none of which this function models or is meant to), the gap is too
+# large to be only those. Treat the current output as a floor.
+#
+# Under-forecasting is the dangerous direction: the discovery loop spends
+# against this number, so a low estimate means a build commits to more corpus
+# than its budget covers.
+#
+# Why the attribution is not sharper: the measurement above came from a bespoke
+# script that drove ExpertBuilder directly, and BuildMeter's per-stage
+# attribution is set by the *worker* forwarding progress events
+# (BuildMeter.observe_event), so every dollar landed in the "other" bucket. To
+# calibrate properly, run the build through `peritus-worker` and read
+# `GET /experts/{slug}/build/usage`, which returns this forecast beside the
+# metered contextualisation and graph-extraction cost, and their signed error.
+# Three such builds, then set the constants and the date here.
+CALIBRATED_AT: str | None = None
+
+
+def _tokens(chars: int | Decimal) -> Decimal:
+    return Decimal(chars) / CHARS_PER_TOKEN
+
+
+def estimated_ocr_pages(text_chars: int) -> int:
+    """Pages a document of this length is likely to have been OCR'd from."""
+    if text_chars <= 0:
+        return 0
+    return int((Decimal(text_chars) / CHARS_PER_OCR_PAGE).to_integral_value(rounding="ROUND_CEILING"))
+
+
+def estimated_ingest_cost_usd(
+    text_chars: int,
+    ocr_pages: int = 0,
+    batch: bool = False,
+) -> Decimal:
+    """Forecast of what ingesting one source of this size will cost, in USD.
+
+    ``batch`` should reflect the build's execution policy: a background build
+    runs its contextualisation and graph extraction through the Message Batches
+    API at half price, and a forecast that ignored that would stop the discovery
+    loop at half the corpus it can afford.
+    """
+    from peritus.core.config import settings as core_settings
+
+    if text_chars <= 0:
+        return Decimal(0) + _ocr_cost(ocr_pages)
+
+    chunk_size = max(1, core_settings.CHUNK_SIZE_CHARS)
+    chunks = Decimal(max(1, -(-text_chars // chunk_size)))
+
+    total = Decimal(0)
+
+    if core_settings.CONTEXT_ENABLED:
+        # Each contextualisation call sees a window of the document plus the
+        # chunk itself; the window dominates and is capped.
+        window_chars = min(core_settings.CONTEXT_MAX_CHARS, text_chars)
+        per_call_input = _tokens(window_chars + chunk_size)
+        total += chunks * message_cost_usd(
+            core_settings.FAST_MODEL,
+            input_tokens=int(per_call_input),
+            output_tokens=int(_CONTEXT_OUTPUT_TOKENS),
+            batch=batch,
+        )
+
+    total += embedding_cost_usd(core_settings.EMBED_MODEL, int(_tokens(text_chars)))
+
+    graph_batches = Decimal(
+        max(1, -(-int(chunks) // max(1, core_settings.GRAPH_BATCH_SIZE)))
+    )
+    total += graph_batches * message_cost_usd(
+        core_settings.GRAPH_MODEL,
+        input_tokens=int(_tokens(text_chars) / graph_batches),
+        output_tokens=int(_GRAPH_OUTPUT_TOKENS),
+        batch=batch,
+    )
+
+    return total + _ocr_cost(ocr_pages)
+
+
+def _ocr_cost(pages: int) -> Decimal:
+    return OCR_USD_PER_PAGE * Decimal(max(0, pages))

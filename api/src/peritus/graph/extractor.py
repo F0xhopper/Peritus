@@ -1,4 +1,13 @@
-"""Claude graph extractor — reads batches of chunks and extracts concept nodes + typed edges."""
+"""Claude graph extractor — reads batches of chunks and extracts nodes + index edges.
+
+One batch is ten consecutive chunks, which almost always sit inside a single
+source. That is why this pass no longer asserts relationships *between claims*:
+whether two claims support, contradict or qualify each other is a question about
+two sources, and a window that can only see one of them was answering it by
+guessing. Extraction produces claims, the concepts they are about, and the
+hierarchy between concepts; :mod:`peritus.graph.reconciler` runs afterwards,
+once per concept, with the claims from every source in front of it.
+"""
 
 from collections.abc import Callable, Coroutine
 from typing import Any
@@ -12,7 +21,10 @@ logger = get_logger(__name__)
 
 _TOOL: dict[str, Any] = {
     "name": "extract_graph",
-    "description": "Extract concept nodes and typed relationships from source chunks.",
+    "description": (
+        "Extract the claims a source makes, the concepts they are about, and the "
+        "hierarchy between those concepts."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -21,13 +33,23 @@ _TOOL: dict[str, Any] = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "label": {"type": "string", "description": "Short canonical name."},
+                        "label": {
+                            "type": "string",
+                            "description": (
+                                "For a concept, a short canonical name (2–5 words). For a "
+                                "claim, the proposition itself, stated as one short sentence "
+                                "that can be true or false."
+                            ),
+                        },
                         "node_type": {"type": "string", "enum": ["concept", "claim"]},
                         "description": {"type": "string"},
                         "difficulty": {"type": "integer", "description": "1–5"},
                         "content_type": {
                             "type": "string",
-                            "enum": ["definition", "theorem", "example", "argument", "counterargument"],
+                            "enum": [
+                                "definition", "theorem", "example",
+                                "argument", "counterargument",
+                            ],
                         },
                         "confidence": {
                             "type": ["number", "null"],
@@ -51,9 +73,13 @@ _TOOL: dict[str, Any] = {
                         "to_label": {"type": "string"},
                         "edge_type": {
                             "type": "string",
-                            "enum": ["supports", "contradicts", "builds_on", "defines", "exemplifies", "cites"],
+                            "enum": ["about", "part_of"],
+                            "description": (
+                                "about: from a claim to a concept the claim is about. "
+                                "part_of: from a narrower concept to the broader concept "
+                                "that contains it."
+                            ),
                         },
-                        "weight": {"type": "number", "description": "0.0–1.0 strength."},
                     },
                     "required": ["from_label", "to_label", "edge_type"],
                 },
@@ -64,10 +90,18 @@ _TOOL: dict[str, Any] = {
 }
 
 _SYSTEM = (
-    "You are a knowledge graph extractor. Given text chunks from a source, identify the key "
-    "concepts and claims, then describe the typed relationships between them. "
-    "Be specific and precise — extract only nodes clearly supported by the text. "
-    "Use canonical, concise labels (2–5 words). Prefer fewer, high-quality nodes over many vague ones."
+    "You are a knowledge graph extractor. Given text chunks from a source, extract two "
+    "kinds of node.\n\n"
+    "A CLAIM is a proposition the source asserts — something that could be true or false, "
+    "and that another source could disagree with. Label it with the proposition itself, in "
+    "one short sentence ('Varroa suppresses host immune response'), never as a topic.\n\n"
+    "A CONCEPT is a thing claims are about: a term, an entity, a mechanism. Label it with a "
+    "canonical noun phrase of 2–5 words.\n\n"
+    "Then connect them. Every claim gets at least one `about` edge to a concept it concerns. "
+    "Use `part_of` only where one concept is genuinely contained by a broader one.\n\n"
+    "Do not assert whether claims agree or disagree — you are reading one source and cannot "
+    "see the others. Extract only what this text supports, and prefer fewer, sharper nodes "
+    "over many vague ones."
 )
 
 
@@ -158,6 +192,28 @@ _REQUIRED_NODE_KEYS = ("label", "node_type", "description")
 _REQUIRED_EDGE_KEYS = ("from_label", "to_label", "edge_type")
 
 
+def _complete(entries: Any, required: tuple[str, ...] | list[str], kind: str) -> list[dict]:
+    """Entries that are objects and carry every required key.
+
+    A truncated tool call arrives missing its trailing fields; a malformed one
+    arrives as something that is not an object at all. Both are unusable and
+    neither should cost the batch, so both are dropped with a count.
+    """
+    if not isinstance(entries, list):
+        logger.warning("Graph extraction returned %s as %s, not a list", kind, type(entries).__name__)
+        return []
+    valid = [
+        e for e in entries
+        if isinstance(e, dict) and all(e.get(k) for k in required)
+    ]
+    if len(valid) != len(entries):
+        logger.warning(
+            "Dropped %d unusable %s(s) — truncated JSON or a non-object entry",
+            len(entries) - len(valid), kind,
+        )
+    return valid
+
+
 def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
     if resp.stop_reason == "max_tokens":
         logger.warning(
@@ -168,22 +224,11 @@ def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
         raise ValueError("Graph extraction response contained no tool_use block")
     data = dict(block.input)
 
-    nodes = data.get("nodes", [])
-    valid_nodes = [n for n in nodes if all(n.get(k) for k in _REQUIRED_NODE_KEYS)]
-    if len(valid_nodes) != len(nodes):
-        logger.warning(
-            "Dropped %d incomplete node(s), likely from truncated JSON",
-            len(nodes) - len(valid_nodes),
-        )
-    data["nodes"] = valid_nodes
-
-    edges = data.get("edges", [])
-    valid_edges = [e for e in edges if all(e.get(k) for k in _REQUIRED_EDGE_KEYS)]
-    if len(valid_edges) != len(edges):
-        logger.warning(
-            "Dropped %d incomplete edge(s), likely from truncated JSON",
-            len(edges) - len(valid_edges),
-        )
-    data["edges"] = valid_edges
+    # Both lists are filtered rather than trusted. A truncated tool call arrives
+    # missing its trailing fields, and a malformed one arrives with a bare
+    # string where an object should be — the second was observed on a real build
+    # and raised out of the batch, costing all ten of its chunks.
+    data["nodes"] = _complete(data.get("nodes", []), _REQUIRED_NODE_KEYS, "node")
+    data["edges"] = _complete(data.get("edges", []), _REQUIRED_EDGE_KEYS, "edge")
 
     return attach_chunk_db_ids(data, chunk_db_ids)

@@ -117,18 +117,24 @@ The pipeline the worker runs:
 flowchart TD
     subgraph corpus ["Corpus assembly — failure here fails the build (hold refunded)"]
         P["PLAN — Claude writes the research brief:<br/>per-fetcher queries + weights, key concepts, must-have works"]
-        D["DISCOVER — 11 fetchers search concurrently:<br/>wikipedia · gutenberg · arxiv · openalex · pubmed · pdf<br/>youtube · exa · web · reddit · thought-leaders<br/>(3× the fetch quota per fetcher, floor 10 results/query)"]
+        D["SEARCH — 11 fetchers search concurrently:<br/>wikipedia · gutenberg · arxiv · openalex · pubmed · pdf<br/>youtube · exa · web · reddit · thought-leaders<br/>(3× the fetch quota per fetcher, floor 10 results/query)"]
+        DD["DE-DUPLICATE — identity (shared DOI / arXiv / PMID / PMCID),<br/>then normalised URL, against everything already considered"]
         TR["TRIAGE — fast model scores title+snippet against the brief,<br/>× a domain prior; junk drops before anything is downloaded"]
-        F["FETCH — full text / OCR for the ranked winners,<br/>budget-bound, refilling from lower ranks on failure"]
-        SB["SNOWBALL — high-citation references of accepted scholarly<br/>sources (arXiv id or DOI) via Semantic Scholar + OpenAlex"]
+        F["FETCH — one resolver takes the best text available<br/>(ar5iv → Europe PMC → OCR → landing page → abstract),<br/>ordered by triage score, cost breaking ties;<br/>bounded by a count AND a budget"]
+        CD["FINGERPRINT — a simhash over the fetched text catches the<br/>preprint/published pair that shares no identifier"]
         V["VALIDATE — Claude scores quality + relevance per source against<br/>the versioned rubric (q≥5, r≥6); every verdict lands in the ledger"]
-        G["GAP-FILL — planned concepts with zero accepted coverage<br/>get one targeted re-search + validation round"]
+        CV["MEASURE COVERAGE — each key concept against the tier's target:<br/>min sources · min source types · at least one non-tertiary"]
+        LP{"targets met? rounds,<br/>budget, candidates left?"}
+        FB["SEARCH AGAIN — weakest concepts become queries written from<br/>the corpus's own vocabulary; accepted scholarly sources followed<br/>backwards AND forwards through their citations"]
         CE["CHUNK + EMBED — 1500-char chunks with contextual prefixes,<br/>text-embedding-3-large → pgvector"]
-        P --> D --> TR --> F --> SB --> V --> G --> CE
+        P --> D --> DD --> TR --> F --> CD --> V --> CV --> LP
+        LP -- "no" --> FB
+        FB --> DD
+        LP -- "yes, or out of rounds / budget / candidates" --> CE
     end
     CE --> CR(["★ chat_ready — the expert now answers with citations"])
     subgraph enrich ["Enrichment — failure degrades, never destroys"]
-        GX["GRAPH — Claude extracts typed concept nodes + edges<br/>(including contradicts); near-duplicate nodes merged by<br/>embedding similarity ≥ .93"]
+        GX["GRAPH — Claude extracts claims + the concepts they are about;<br/>near-duplicate nodes merged by embedding similarity ≥ .93;<br/>then one call per concept relates the claims across sources<br/>(supports · contradicts · qualifies)"]
         PE["PERSONA — Claude reads a corpus digest and writes<br/>the expert's name, bio, and teaching style"]
         GX --> PE
     end
@@ -162,7 +168,7 @@ flowchart TD
     Q(["question"]) --> PL["PLAN — one fast-model call:<br/>2–4 declarative subqueries, plus a read of the asker<br/>(background level, question type, answer directive)"]
     PL --> HS["HYBRID SEARCH — per subquery, in parallel:<br/>semantic arm (pgvector cosine) ⊕ keyword arm (Postgres FTS),<br/>fused by reciprocal rank (1/(60+rank))"]
     HS --> MG["MERGE — RRF scores SUM across subqueries,<br/>so a chunk several subqueries agree on outranks<br/>any single subquery's best hit; optional rerank"]
-    MG --> GE["GRAPH EXPAND — each hit annotated with neighbouring<br/>concepts and typed edges; a traversed contradicts edge<br/>flags the answer"]
+    MG --> GE["GRAPH EXPAND — each hit annotated with the concepts it is<br/>about, and with what the corpus disputes or qualifies about<br/>its claims; a contradiction flags the answer"]
     GE --> CV{"COVERAGE — fast model:<br/>do these passages actually<br/>answer the question?"}
     CV -- "no" --> FU["one follow-up retrieval pass<br/>on its suggested queries"] --> CTX
     CV -- "yes" --> CTX["CONTEXT — deduplicated, numbered [n] passages,<br/>capped per tier; every passage considered is recorded<br/>in the retrieval trail, shown or not"]
@@ -211,7 +217,7 @@ flowchart LR
     subgraph marks ["What the pipelines leave behind"]
         EV[("build_events<br/>durable event log")]
         SRC[("sources<br/>the ledger: kept + rejected,<br/>scores, rubric, drop reason,<br/>discovered_via, concepts")]
-        GRPH[("concept graph<br/>nodes + typed edges,<br/>incl. contradicts")]
+        GRPH[("concept graph<br/>claims + concepts, five edge types,<br/>incl. contradicts + qualifies")]
         TRAIL[("answer audits<br/>one trail per answer")]
     end
     subgraph surface ["Read-only audit surface"]
@@ -236,7 +242,9 @@ flowchart LR
   validated → included, with its two sources of truth deliberately shown
   unreconciled.
 - **`coverage`** — evidence strength per planned key concept, including the
-  gap-fill narrative and off-plan concepts.
+  re-search narrative and off-plan concepts. `screening-flow`'s `discovery`
+  block says how many search rounds ran, what each found, and — the part worth
+  reading — why the search stopped.
 - **`contradictions`** — where sources in this corpus were judged to disagree,
   resolved to passages. `computed: false` means *not analysed yet*, never "no
   contradictions found".

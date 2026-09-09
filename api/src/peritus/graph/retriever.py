@@ -1,14 +1,20 @@
-"""Graph retriever — enrich search results with concept neighbor context."""
+"""Graph retriever — enrich search results with the concepts and disputes local to them."""
 
 from dataclasses import dataclass, field
 
 import asyncpg
 
+from peritus.graph.domain import EdgeType
 from peritus.graph.repository import GraphRepository
 from peritus.search.domain import SearchResult
 
 _MAX_CONCEPTS_PER_RESULT = 8
 _MAX_EDGES_PER_RESULT = 5
+
+# The two relations a passage's annotation is worth spending lines on. Both say
+# something about the state of the evidence; `supports`, `about` and `part_of`
+# are the index the graph is built on, not news about this passage.
+_REPORTABLE = (EdgeType.CONTRADICTS, EdgeType.QUALIFIES)
 
 
 @dataclass
@@ -17,6 +23,12 @@ class EnrichedResult:
     related_concepts: list[dict] = field(default_factory=list)
     relationships: list[dict] = field(default_factory=list)
     has_contradiction: bool = False
+    #: The stated point of each contradiction touching this passage's claims,
+    #: in the subject's terms. Carried separately from the context block so the
+    #: prompt can say what is disputed rather than only that something is.
+    contradiction_points: list[str] = field(default_factory=list)
+    #: The condition each `qualifies` edge attaches to a claim here.
+    qualifications: list[str] = field(default_factory=list)
 
     @property
     def text(self) -> str:
@@ -38,16 +50,24 @@ class EnrichedResult:
         ``has_contradiction`` still propagates — it is handled at the prompt
         level in ``chat/agent.py``, in the subject's terms rather than the
         bibliography's.
+
+        What the graph contributes here is what it can defend: the concepts this
+        passage is about, and — where the corpus disputes or narrows one of its
+        claims — the point or condition, written as a sentence about the
+        subject. The old annotation was graph notation (``A --supports--> B``)
+        that the model had to interpret and that no eval ever showed it read.
         """
         lines = [self.text[:800]]
         if self.related_concepts:
-            lines.append("\nRelated concepts:")
+            lines.append("\nAbout:")
             for c in self.related_concepts:
                 lines.append(f"  • {c['label']}: {c.get('description', '')}")
-        if self.relationships:
-            lines.append("\nRelationships:")
-            for e in self.relationships:
-                lines.append(f"  {e['from_label']} --{e['edge_type']}--> {e['to_label']}")
+        if self.contradiction_points:
+            lines.append("\nDisputed in this corpus:")
+            lines.extend(f"  • {point}" for point in self.contradiction_points)
+        if self.qualifications:
+            lines.append("\nQualified elsewhere in this corpus:")
+            lines.extend(f"  • {condition}" for condition in self.qualifications)
         return "\n".join(lines)
 
 
@@ -97,24 +117,28 @@ class GraphRetriever:
                 e for e in edges
                 if e["from_node_id"] in local_anchor_ids or e["to_node_id"] in local_anchor_ids
             ),
-            # Contradictions are the signal the product surfaces — keep them
-            # ahead of the weight ranking so the cap never hides one.
-            key=lambda e: (e["edge_type"] != "contradicts", -e["weight"]),
+            # Contradictions and qualifications are what the product surfaces —
+            # keep them ahead of the evidence ranking so the cap never hides one.
+            key=lambda e: (e["edge_type"] not in _REPORTABLE, -(e["evidence"] or 0)),
         )
 
-        has_contradiction = any(e["edge_type"] == "contradicts" for e in local_edges)
+        has_contradiction = any(
+            e["edge_type"] == EdgeType.CONTRADICTS for e in local_edges
+        )
         local_edges = local_edges[:_MAX_EDGES_PER_RESULT]
 
         # Concepts for this passage: its anchors first, then the neighbours its
-        # strongest edges reach, in edge order.
+        # best-evidenced edges reach, in edge order.
         concept_ids: list[int] = sorted(local_anchor_ids)
         for e in local_edges:
             for nid in (e["from_node_id"], e["to_node_id"]):
                 if nid not in concept_ids:
                     concept_ids.append(nid)
         related_concepts = [
-            node_by_id[nid] for nid in concept_ids[:_MAX_CONCEPTS_PER_RESULT]
-            if nid in node_by_id
+            node
+            for nid in concept_ids[:_MAX_CONCEPTS_PER_RESULT]
+            if (node := node_by_id.get(nid)) is not None
+            and node.get("node_type") != "claim"
         ]
 
         relationships = [
@@ -122,7 +146,8 @@ class GraphRetriever:
                 "from_label": node_by_id.get(e["from_node_id"], {}).get("label", "?"),
                 "to_label": node_by_id.get(e["to_node_id"], {}).get("label", "?"),
                 "edge_type": e["edge_type"],
-                "weight": e["weight"],
+                "evidence": e.get("evidence") or 0,
+                "properties": e.get("properties") or {},
             }
             for e in local_edges
         ]
@@ -132,4 +157,23 @@ class GraphRetriever:
             related_concepts=related_concepts,
             relationships=relationships,
             has_contradiction=has_contradiction,
+            contradiction_points=_stated(local_edges, EdgeType.CONTRADICTS, "point"),
+            qualifications=_stated(local_edges, EdgeType.QUALIFIES, "condition"),
         )
+
+
+def _stated(edges: list[dict], edge_type: EdgeType, key: str) -> list[str]:
+    """The point or condition each edge of this type states, deduplicated.
+
+    An edge of either type is rejected at ingest without one, so anything
+    reaching here has a sentence to show; the guard is for graphs built before
+    that rule existed.
+    """
+    seen: list[str] = []
+    for e in edges:
+        if e["edge_type"] != edge_type:
+            continue
+        stated = (e.get("properties") or {}).get(key)
+        if isinstance(stated, str) and stated.strip() and stated.strip() not in seen:
+            seen.append(stated.strip())
+    return seen

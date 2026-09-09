@@ -4,7 +4,8 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.domain import Identifiers, RawSource, SourceCandidate, SourceType
+from peritus.sources.identifiers import identifiers_from_url
 
 logger = get_logger(__name__)
 
@@ -15,17 +16,7 @@ _HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Peritus/1.0)"}
 class WebFetcher:
     async def search(self, query: str, max_results: int = 4) -> list[SourceCandidate]:
         hits = await _ddg_search(query, max_results)
-        return [
-            SourceCandidate(
-                source_type=SourceType.WEB,
-                url=hit["url"],
-                title=hit["title"] or hit["url"],
-                author=None,
-                snippet=hit["snippet"],
-                metadata={},
-            )
-            for hit in hits
-        ]
+        return [_to_candidate(hit) for hit in hits]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
         async with httpx.AsyncClient(
@@ -45,7 +36,23 @@ class WebFetcher:
             author=None,
             text=text,
             metadata=candidate.metadata,
+            identifiers=candidate.identifiers,
         )
+
+
+def _to_candidate(hit: dict) -> SourceCandidate:
+    # A general web search reaches doi.org and arxiv.org routinely; reading the
+    # identity out of the URL is free and is the only identity these hits have.
+    doi, arxiv_id = identifiers_from_url(hit["url"])
+    return SourceCandidate(
+        source_type=SourceType.WEB,
+        url=hit["url"],
+        title=hit["title"] or hit["url"],
+        author=None,
+        snippet=hit["snippet"],
+        metadata={},
+        identifiers=Identifiers.build(doi=doi, arxiv_id=arxiv_id),
+    )
 
 
 # Parsing runs off the event loop.
@@ -93,7 +100,13 @@ async def _ddg_search(query: str, limit: int) -> list[dict]:
         return []
 
 
-def _parse_page(html: str, url: str) -> tuple[str, str]:
+# A plain web page's default ceiling. The full-text resolver raises it for an
+# open-access landing page, which is a whole paper rather than an article and is
+# read on the same terms as one fetched from a publisher's PDF.
+DEFAULT_MAX_CHARS = 50_000
+
+
+def _parse_page(html: str, url: str, max_chars: int = DEFAULT_MAX_CHARS) -> tuple[str, str]:
     soup = BeautifulSoup(html, "lxml")
 
     for tag in soup(["script", "style", "nav", "header", "footer", "aside"]):
@@ -104,10 +117,21 @@ def _parse_page(html: str, url: str) -> tuple[str, str]:
     # Prefer <article> or <main>, fall back to <body>
     container = soup.find("article") or soup.find("main") or soup.find("body")
     text = container.get_text(separator="\n", strip=True) if container else ""
-    return text[:50_000], title
+    return text[:max_chars], title
 
 
-async def _fetch_page(client: httpx.AsyncClient, url: str) -> tuple[str, str]:
+async def _fetch_page(
+    client: httpx.AsyncClient, url: str, max_chars: int = DEFAULT_MAX_CHARS
+) -> tuple[str, str]:
     resp = await client.get(url)
     resp.raise_for_status()
-    return await asyncio.to_thread(_parse_page, resp.text, url)
+    return await asyncio.to_thread(_parse_page, resp.text, url, max_chars)
+
+
+async def fetch_page_text(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
+    """Page text for a URL, with its own client. Raises on transport failure."""
+    async with httpx.AsyncClient(
+        timeout=20, follow_redirects=True, headers=_HEADERS
+    ) as client:
+        text, _title = await _fetch_page(client, url, max_chars)
+    return text

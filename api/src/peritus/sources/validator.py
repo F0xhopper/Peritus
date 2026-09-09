@@ -1,4 +1,26 @@
-"""Claude source validator — validates sources in batches of 5, one API call per batch."""
+"""Claude source validator — a cheap first pass over everything, a careful
+second pass over the sources whose verdict is actually in doubt.
+
+**Why two passes.** The bulk of a candidate set is obviously in or obviously
+out, and a fast model reading a structured preview settles those correctly and
+for very little money. The sources that decide whether a corpus is good are the
+ones near the threshold, and those were being settled by the same glance. So the
+first pass runs unchanged in shape — batches of five on ``FAST_MODEL`` — and
+anything landing in the borderline band is asked again, one source per call, on
+the strong model with a much larger preview. Expected volume is 15–25% of
+sources; the second pass costs a fraction of what ingesting them costs.
+
+**Whose verdict stands.** Whichever model judged the source last. That model id
+is written onto the result (and from there onto ``sources.validator_model``)
+rather than read from configuration at persist time — with two models judging
+different sources in one build, a column filled in from settings would attribute
+both to whichever model the config happened to name.
+
+**Errors fail open, not closed.** An unparseable batch used to drop all five of
+its sources as ``validation error`` — a fifth of a lite corpus lost to one bad
+response. Those sources now go through the single-source path instead, and only
+drop if that fails too.
+"""
 
 from typing import Any
 
@@ -6,6 +28,7 @@ from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
 from peritus.sources.domain import DroppedSource, RawSource, ValidatedSource
+from peritus.sources.preview import build_preview, build_review_preview
 
 logger = get_logger(__name__)
 
@@ -13,14 +36,19 @@ logger = get_logger(__name__)
 # corpus stays on-topic and the credential means something.
 _PASS_THRESHOLD_Q = 5.0
 _PASS_THRESHOLD_R = 6.0
-# Sample multiple regions instead of judging a source by its opening (often front
-# matter / abstract). Stamped on the credential as the rubric version.
-_PREVIEW_WINDOW_CHARS = 800
-# Bumped from v3-concepts-q5r6 when source_tier joined the rubric. The version is
-# stamped on every validated source, so changing what the rubric asks for without
-# bumping it would silently mix two rubrics under one label and corrupt the
-# provenance record.
-RUBRIC_VERSION = "v4-tiered-q5r6"
+
+# The borderline band: either side of each threshold. A source inside it is one
+# the first pass could plausibly have got wrong in either direction, which is
+# exactly where a second opinion is worth its price — and outside it, where the
+# tails are cheap and right, asking again buys nothing.
+REVIEW_BAND_Q = (4.0, 6.0)
+REVIEW_BAND_R = (5.0, 7.0)
+
+# Bumped from v4-tiered-q5r6 when the preview became a structured record
+# (sources/preview.py) rather than three fixed windows of raw text. The rubric's
+# thresholds did not move, but what the model is shown did, and screening runs
+# must be able to tell the two apart — the version is stamped on every source.
+RUBRIC_VERSION = "v5-structured-q5r6"
 _VALIDATE_BATCH_SIZE = 5
 
 # What a tier means, in the validator's words and the build's. A corpus can score
@@ -79,7 +107,23 @@ _SYSTEM = (
     "Also classify how close each source sits to the subject itself: "
     f"{_TIER_DESCRIPTION} "
     "Tier is a description, not a score — a first-rate literature review is "
-    "still secondary, and a mediocre original paper is still primary."
+    "still secondary, and a mediocre original paper is still primary.\n\n"
+    "Each source is presented as a record: stated facts about the document "
+    "(length, how its text was obtained, whether it has a reference list, where "
+    "it was found), its abstract when one exists, its section headings, and "
+    "samples of its body. Treat the stated facts as true — they come from the "
+    "pipeline, not from the text — and use the samples to judge what the "
+    "document actually argues. A short text is not automatically weak and a "
+    "long one is not automatically strong; judge the substance."
+)
+
+_REVIEW_SYSTEM = (
+    _SYSTEM + "\n\n"
+    "This source was scored close to the accept/reject threshold on a first, "
+    "fast pass, and you are being asked for a considered second opinion on it "
+    "alone, with more of its text. Your verdict replaces the first one. Do not "
+    "anchor on the fact that it was borderline: judge it on what you are shown, "
+    "and be willing to place it clearly on either side."
 )
 
 _BATCH_TOOL: dict[str, Any] = {
@@ -149,17 +193,16 @@ _BATCH_TOOL: dict[str, Any] = {
     },
 }
 
+_ERROR_VALIDATION: dict[str, Any] = {
+    "quality_score": 0.0, "relevance_score": 0.0,
+    "content_type": "other", "source_tier": None, "difficulty": 1,
+    "key_claims": [], "covered_concepts": [], "drop_reason": "validation error",
+}
 
-def _build_preview(text: str) -> str:
-    """Sample head, middle, and tail so a source is judged on more than its opening."""
-    n = len(text)
-    if n <= _PREVIEW_WINDOW_CHARS * 3:
-        return text
-    head = text[:_PREVIEW_WINDOW_CHARS]
-    mid_start = (n // 2) - (_PREVIEW_WINDOW_CHARS // 2)
-    middle = text[mid_start: mid_start + _PREVIEW_WINDOW_CHARS]
-    tail = text[-_PREVIEW_WINDOW_CHARS:]
-    return f"{head}\n\n[…]\n\n{middle}\n\n[…]\n\n{tail}"
+
+def review_model() -> str:
+    """The model that gives the second opinion. Defaults to the strong model."""
+    return settings.VALIDATE_REVIEW_MODEL or settings.CLAUDE_MODEL
 
 
 def _match_concepts(raw: list, key_concepts: list[str]) -> list[str]:
@@ -206,23 +249,50 @@ def _coerce_score(raw, field: str) -> float:
         return 0.0
 
 
+def _finalise(raw: dict, model: str) -> dict:
+    """Coerce one raw validation into the shape the rest of the module relies on."""
+    q = raw["quality_score"] = _coerce_score(raw.get("quality_score", 0), "quality_score")
+    r = raw["relevance_score"] = _coerce_score(raw.get("relevance_score", 0), "relevance_score")
+    raw["drop"] = q < _PASS_THRESHOLD_Q or r < _PASS_THRESHOLD_R
+    raw["model"] = model
+    return raw
+
+
+def _in_band(value: float, band: tuple[float, float]) -> bool:
+    low, high = band
+    return low <= value < high
+
+
+def needs_second_opinion(result: dict) -> bool:
+    """Whether this first-pass verdict is close enough to the line to re-examine.
+
+    A source that was never judged at all (an errored batch) also qualifies:
+    routing it here is what turns a provider blip into one extra call instead of
+    a silently discarded source.
+    """
+    if result.get("drop_reason") in ("validation error", "missing validation"):
+        # The model did not judge this source — it errored, or returned
+        # something that was not a verdict. Either way that is a fact about the
+        # response, not about the source, and dropping on it would discard a
+        # fetched source over a formatting failure.
+        return True
+    return _in_band(result["quality_score"], REVIEW_BAND_Q) or _in_band(
+        result["relevance_score"], REVIEW_BAND_R
+    )
+
+
 async def validate_sources(
     topic: str,
     sources: list[RawSource],
     key_concepts: list[str] | None = None,
     on_result=None,
+    on_reviewed=None,
 ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
     key_concepts = key_concepts or []
     batches = [
         sources[i: i + _VALIDATE_BATCH_SIZE]
         for i in range(0, len(sources), _VALIDATE_BATCH_SIZE)
     ]
-
-    _ERROR_VALIDATION = {
-        "quality_score": 0.0, "relevance_score": 0.0,
-        "content_type": "other", "source_tier": None, "difficulty": 1,
-        "key_claims": [], "drop_reason": "validation error",
-    }
 
     # Pairs per batch index — batches complete out of order on the live path,
     # and the returned lists must keep the input's source order.
@@ -238,9 +308,9 @@ async def validate_sources(
         if resp is None:
             errored_batches.add(i)
             logger.warning(
-                "Validation batch %d/%d: no response after retries — scoring its %d "
-                "source(s) 0.0/0.0 with drop_reason='validation error'. This is NOT a "
-                "judgement about the sources; see the Claude call errors above.",
+                "Validation batch %d/%d: no response after retries — its %d source(s) "
+                "go to the single-source review path rather than being dropped. This "
+                "is NOT a judgement about the sources; see the Claude call errors above.",
                 i + 1, len(batches), len(batch),
             )
             raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
@@ -250,22 +320,14 @@ async def validate_sources(
             except Exception as exc:
                 errored_batches.add(i)
                 logger.warning(
-                    "Validation batch %d/%d: response unparseable (%s: %s) — scoring its "
-                    "%d source(s) 0.0/0.0 with drop_reason='validation error'",
+                    "Validation batch %d/%d: response unparseable (%s: %s) — its %d "
+                    "source(s) go to the single-source review path",
                     i + 1, len(batches), type(exc).__name__, exc, len(batch),
                     exc_info=True,
                 )
                 raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
 
-        for raw in raw_validations:
-            # Write the coerced floats back: everything downstream (the drop
-            # decision, the persisted row, the audit export) must see the same
-            # number, not whatever type the model happened to emit.
-            q = raw["quality_score"] = _coerce_score(raw.get("quality_score", 0), "quality_score")
-            r = raw["relevance_score"] = _coerce_score(
-                raw.get("relevance_score", 0), "relevance_score"
-            )
-            raw["drop"] = q < _PASS_THRESHOLD_Q or r < _PASS_THRESHOLD_R
+        raw_validations = [_finalise(raw, settings.FAST_MODEL) for raw in raw_validations]
         # All pairs are recorded before any progress emission: a failing
         # on_result may cost progress events, never validation results.
         batch_pairs[i] = list(zip(batch, raw_validations, strict=True))
@@ -291,16 +353,22 @@ async def validate_sources(
     )
 
     all_pairs = [pair for i in sorted(batch_pairs) for pair in batch_pairs[i]]
+    reviewed = await _second_opinion(topic, all_pairs, key_concepts, on_reviewed)
 
     passed: list[ValidatedSource] = []
     dropped: list[DroppedSource] = []
     for source, result in all_pairs:
+        first = result.get("first_pass") or {}
         if result["drop"]:
             dropped.append(DroppedSource(
                 raw=source,
                 quality_score=result["quality_score"],
                 relevance_score=result["relevance_score"],
                 drop_reason=result["drop_reason"] or "below threshold",
+                validator_model=result.get("model"),
+                review_model=result.get("review_model"),
+                first_pass_quality=first.get("quality_score"),
+                first_pass_relevance=first.get("relevance_score"),
             ))
         else:
             passed.append(ValidatedSource(
@@ -314,6 +382,10 @@ async def validate_sources(
                     result.get("covered_concepts", []), key_concepts,
                 ),
                 source_tier=_normalise_tier(result.get("source_tier")),
+                validator_model=result.get("model"),
+                review_model=result.get("review_model"),
+                first_pass_quality=first.get("quality_score"),
+                first_pass_relevance=first.get("relevance_score"),
             ))
 
     unjudged = sum(1 for d in dropped if d.drop_reason == "validation error")
@@ -323,23 +395,117 @@ async def validate_sources(
         # as an empty `passed`, and only one of them is about the sources.
         logger.error(
             "Validation produced NO passing sources for %r: %d/%d were never judged "
-            "(%d/%d batches errored). This is a provider/infrastructure failure, not a "
-            "verdict on the corpus — the sources were fetched fine.",
+            "(%d/%d batches errored, and the review pass could not rescue them). This "
+            "is a provider/infrastructure failure, not a verdict on the corpus — the "
+            "sources were fetched fine.",
             topic, unjudged, len(all_pairs), len(errored_batches), len(batches),
         )
     else:
         logger.info(
-            "Validation for %r: %d passed, %d dropped (%d never judged, %d/%d batches errored)",
-            topic, len(passed), len(dropped), unjudged, len(errored_batches), len(batches),
+            "Validation for %r: %d passed, %d dropped (%d never judged, %d/%d batches "
+            "errored, %d reviewed on %s)",
+            topic, len(passed), len(dropped), unjudged, len(errored_batches),
+            len(batches), reviewed, review_model(),
         )
     return passed, dropped
 
 
+async def _second_opinion(
+    topic: str,
+    pairs: list[tuple[RawSource, dict]],
+    key_concepts: list[str],
+    on_reviewed=None,
+) -> int:
+    """Re-judge the borderline (and never-judged) sources in place.
+
+    Mutates the result dicts in ``pairs``: the reviewer's verdict replaces the
+    first pass's, and the first pass's scores are kept under ``first_pass`` so
+    the ledger can show that a decision was re-examined and what changed.
+    Returns how many were reviewed.
+    """
+    if not settings.VALIDATE_SECOND_OPINION:
+        return 0
+    candidates = [(i, s, r) for i, (s, r) in enumerate(pairs) if needs_second_opinion(r)]
+    if not candidates:
+        return 0
+
+    model = review_model()
+    logger.info(
+        "Second opinion on %d/%d borderline source(s) using %s",
+        len(candidates), len(pairs), model,
+    )
+
+    reviewed = 0
+    results: dict[int, dict] = {}
+
+    async def _on_review(n: int, resp: Any) -> None:
+        index, source, first = candidates[n]
+        if resp is None:
+            return
+        try:
+            raw = _parse_validate_response(resp, 1)[0]
+        except Exception as exc:
+            logger.warning(
+                "Second-opinion response unparseable for %r (%s: %s) — keeping the "
+                "first pass's verdict",
+                source.title, type(exc).__name__, exc,
+            )
+            return
+        results[index] = _finalise(raw, model)
+
+    await gather_claude_calls(
+        [
+            _validate_params(topic, [source], key_concepts, review=True)
+            for _index, source, _first in candidates
+        ],
+        live_concurrency=settings.VALIDATE_CONCURRENCY,
+        description="validate-review",
+        on_result=_on_review,
+    )
+
+    for index, source, first in candidates:
+        verdict = results.get(index)
+        if verdict is None:
+            continue
+        was_error = first.get("drop_reason") == "validation error"
+        verdict["review_model"] = model
+        verdict["first_pass"] = (
+            None if was_error
+            else {
+                "quality_score": first["quality_score"],
+                "relevance_score": first["relevance_score"],
+            }
+        )
+        reversed_ = (not was_error) and first["drop"] != verdict["drop"]
+        pairs[index] = (source, verdict)
+        reviewed += 1
+        if reversed_:
+            logger.info(
+                "Second opinion reversed %r: q %.1f→%.1f, r %.1f→%.1f (%s → %s)",
+                source.title, first["quality_score"], verdict["quality_score"],
+                first["relevance_score"], verdict["relevance_score"],
+                "drop" if first["drop"] else "keep",
+                "drop" if verdict["drop"] else "keep",
+            )
+        if on_reviewed:
+            await on_reviewed({
+                "title": source.title,
+                "source_type": source.source_type.value,
+                "first_q": None if was_error else first["quality_score"],
+                "first_r": None if was_error else first["relevance_score"],
+                "q": verdict["quality_score"],
+                "r": verdict["relevance_score"],
+                "passed": not verdict["drop"],
+                "reversed": reversed_,
+                "review_model": model,
+            })
+    return reviewed
+
+
 def _source_context(s: RawSource) -> str:
-    """Extra per-source lines: author, plus expected-author check for leader content."""
+    """Extra per-source lines the preview cannot carry: the type hint, and the
+    expected-author check for thought-leader content."""
     lines = []
-    if s.author:
-        lines.append(f"Author: {s.author}")
     hint = _SOURCE_TYPE_HINTS.get(s.source_type.value)
     if hint:
         lines.append(f"Note: {hint}")
@@ -356,14 +522,14 @@ def _validate_params(
     topic: str,
     batch: list[RawSource],
     key_concepts: list[str],
+    review: bool = False,
 ) -> dict[str, Any]:
-    """Request params for one validation batch (consumed by gather_claude_calls)."""
+    """Request params for one validation call (consumed by gather_claude_calls)."""
+    preview = build_review_preview if review else build_preview
     sources_block = "\n\n".join(
         f"<source_{i}>\n"
-        f"Type: {s.source_type.value}\n"
-        f"Title: {s.title}\n"
         f"{_source_context(s)}"
-        f"\n{_build_preview(s.text)}\n"
+        f"{preview(s)}\n"
         f"</source_{i}>"
         for i, s in enumerate(batch)
     )
@@ -374,9 +540,9 @@ def _validate_params(
         if key_concepts else ""
     )
     return {
-        "model": settings.FAST_MODEL,
-        "max_tokens": 512 * len(batch),
-        "system": _SYSTEM,
+        "model": review_model() if review else settings.FAST_MODEL,
+        "max_tokens": 512 * len(batch) + (512 if review else 0),
+        "system": _REVIEW_SYSTEM if review else _SYSTEM,
         "tools": [_BATCH_TOOL],
         "tool_choice": {"type": "tool", "name": "validate_sources"},
         "messages": [{
@@ -385,19 +551,49 @@ def _validate_params(
                 f"Topic: {topic}\n\n"
                 f"{concepts_block}"
                 f"{sources_block}\n\n"
-                f"Validate all {len(batch)} sources above."
+                + (
+                    "Give your considered verdict on this source."
+                    if review
+                    else f"Validate all {len(batch)} sources above."
+                )
             ),
         }],
     }
 
 
+_MISSING_VALIDATION: dict[str, Any] = {
+    "quality_score": 0.0, "relevance_score": 0.0,
+    "content_type": "other", "source_tier": None, "difficulty": 1,
+    "key_claims": [], "covered_concepts": [], "drop_reason": "missing validation",
+}
+
+
 def _parse_validate_response(resp: Any, batch_len: int) -> list[dict]:
+    """Exactly ``batch_len`` validation dicts, whatever the model returned.
+
+    The tool schema asks for an array of objects and a model can still return an
+    array containing a bare string — observed live, on a real build. Every entry
+    is therefore checked rather than trusted: one malformed element used to
+    raise out of the batch's result handler and cost all five of its sources,
+    which is the same fail-closed behaviour the errored-batch path exists to
+    prevent.
+
+    A malformed entry becomes a "missing validation", which
+    :func:`needs_second_opinion` treats as unjudged — so the source is re-asked
+    properly instead of being dropped for the model's formatting.
+    """
     block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    validations = list(block.input.get("validations", []))
+    raw = block.input.get("validations", [])
+    validations: list[dict] = []
+    for entry in raw if isinstance(raw, list) else []:
+        if isinstance(entry, dict):
+            validations.append(entry)
+        else:
+            logger.warning(
+                "Validation entry was %s, not an object: %r — treating it as missing",
+                type(entry).__name__, str(entry)[:120],
+            )
+            validations.append(dict(_MISSING_VALIDATION))
     while len(validations) < batch_len:
-        validations.append({
-            "quality_score": 0.0, "relevance_score": 0.0,
-            "content_type": "other", "source_tier": None, "difficulty": 1,
-            "key_claims": [], "drop_reason": "missing validation",
-        })
+        validations.append(dict(_MISSING_VALIDATION))
     return validations[:batch_len]

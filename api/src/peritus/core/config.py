@@ -142,6 +142,39 @@ class Settings:
     # Source validation concurrency limit
     VALIDATE_CONCURRENCY: int = int(os.getenv("VALIDATE_CONCURRENCY", "5"))
 
+    # ── Validation: second opinion at the margin ─────────────────────────────
+    # Sources scored inside the borderline band (see sources/validator.py) get a
+    # second, single-source call on a stronger model with a much larger preview,
+    # and that verdict stands. Ships off by default: the plan this implements
+    # (docs/plans/corpus-quality.md, phase 7) calls for measuring agreement with
+    # and without it on the screening golden set before flipping the default,
+    # and turning it on is a one-line change once those numbers exist.
+    VALIDATE_SECOND_OPINION: bool = (
+        os.getenv("VALIDATE_SECOND_OPINION", "false").lower() == "true"
+    )
+    # Empty = use CLAUDE_MODEL. Named separately so the reviewer can be pinned
+    # while chat's model moves, since the rubric version is tied to the pair.
+    VALIDATE_REVIEW_MODEL: str = os.getenv("VALIDATE_REVIEW_MODEL", "")
+
+    # ── Discovery loop ───────────────────────────────────────────────────────
+    # Whether discovery may run more than one round, searching again for the key
+    # concepts its corpus covers least well until the tier's coverage targets are
+    # met or the budget runs out (see experts/coverage.py). Off leaves the
+    # single-round behaviour with one gap-fill-shaped round after it.
+    #
+    # Default on for INTERACTIVE builds and off for BACKGROUND ones: each round
+    # of a batched build queues its own Message Batch for up to an hour, so a
+    # three-round PRO build could take most of a day. Set explicitly to "true" or
+    # "false" to override for every execution mode.
+    DISCOVERY_LOOP: str = os.getenv("DISCOVERY_LOOP", "auto").strip().lower()
+
+    # Optional directory for screening captures. When set, every source that
+    # reaches validation is written to <dir>/<expert_slug>/<job_id>.jsonl before
+    # it is judged, which is the only way to rebuild a screening fixture later:
+    # the sources table stores no text and a dropped source has no chunks.
+    # Off by default — it writes whole documents to disk.
+    SCREENING_CAPTURE_DIR: str = os.getenv("SCREENING_CAPTURE_DIR", "")
+
     # Graph extraction batch size (chunks per Claude call). Kept small because full
     # chunk text is now sent (not a 400-char preview) — large batches truncate the
     # tool_use JSON and the whole batch is lost.

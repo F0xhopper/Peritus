@@ -526,19 +526,35 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
         .split(area);
 
     f.render_widget(Paragraph::new(Span::styled(sep, Theme::dim())), chunks[0]);
-    let mut stats = vec![
-        Span::styled(fmt_count(expert.node_count), Theme::normal()),
-        Span::styled(" concepts", Theme::dim()),
-        Span::styled("  ·  ", Theme::dim()),
-        Span::styled(fmt_count(expert.source_count), Theme::normal()),
-        Span::styled(" sources", Theme::dim()),
-    ];
-    if let Some(q) = expert.avg_quality {
-        stats.push(Span::styled("  ·  ", Theme::dim()));
-        stats.push(Span::styled(format!("Q {:.1}", q), Theme::normal()));
-        stats.push(Span::styled(" avg", Theme::dim()));
-    }
-    f.render_widget(Paragraph::new(Line::from(stats)), chunks[1]);
+
+    // An expert whose build has not produced a corpus must say so rather than
+    // print zeros. This card is reached by any expert the TUI is not actively
+    // streaming a build for, so a queued, failed or half-finished one lands
+    // here too — and "0 concepts · 0 sources" reads as "this expert is empty"
+    // when the truth is "this expert was never built". Worse, the card then
+    // lists the planned key concepts directly underneath, so it contradicts
+    // itself on the same screen.
+    let stats_line = match unbuilt_reason(expert) {
+        Some(reason) => Line::from(Span::styled(reason, Theme::dim().add_modifier(Modifier::ITALIC))),
+        None => {
+            let mut stats = vec![
+                Span::styled(fmt_count(expert.node_count), Theme::normal()),
+                // "concepts" here is the extracted graph, not the planned
+                // syllabus listed below — hence "graph concepts".
+                Span::styled(" graph concepts", Theme::dim()),
+                Span::styled("  ·  ", Theme::dim()),
+                Span::styled(fmt_count(expert.source_count), Theme::normal()),
+                Span::styled(" sources", Theme::dim()),
+            ];
+            if let Some(q) = expert.avg_quality {
+                stats.push(Span::styled("  ·  ", Theme::dim()));
+                stats.push(Span::styled(format!("Q {:.1}", q), Theme::normal()));
+                stats.push(Span::styled(" avg", Theme::dim()));
+            }
+            Line::from(stats)
+        }
+    };
+    f.render_widget(Paragraph::new(stats_line), chunks[1]);
     f.render_widget(Paragraph::new(Span::styled(sep, Theme::dim())), chunks[2]);
 
     let mut body_lines: Vec<Line> = Vec::new();
@@ -550,6 +566,16 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
             body_lines.push(Line::from(""));
         }
     }
+    if !expert.key_concepts.is_empty() {
+        // Named, because these are what the research plan set out to cover —
+        // not the concepts the graph extracted, which the stats line counts.
+        // Without the label a card can read "0 graph concepts" above a list of
+        // seven concepts and look simply wrong.
+        body_lines.push(Line::from(Span::styled(
+            if unbuilt_reason(expert).is_some() { "Planned to cover:" } else { "Covers:" },
+            Theme::dim(),
+        )));
+    }
     for concept in &expert.key_concepts {
         body_lines.push(Line::from(vec![
             Span::styled("· ", Theme::accent()),
@@ -557,6 +583,25 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
         ]));
     }
     f.render_widget(Paragraph::new(body_lines).wrap(Wrap { trim: true }), chunks[3]);
+}
+
+/// Why this expert has no corpus to report, or `None` when it has one.
+///
+/// Readiness rather than status is the test: an expert becomes answerable when
+/// its chunks are embedded, a full stage before its build job finishes, so a
+/// `chat_ready` expert with a running job has a real corpus and should show it.
+/// The reverse — `pending` readiness — means nothing was ever embedded, whatever
+/// the job says.
+fn unbuilt_reason(expert: &ExpertSummary) -> Option<&'static str> {
+    if expert.chunk_count > 0 || expert.readiness != "pending" {
+        return None;
+    }
+    Some(match expert.status.as_str() {
+        "queued" => "queued — not built yet",
+        "building" => "building — no corpus yet",
+        "failed" => "build failed — no corpus",
+        _ => "no corpus — this build never finished",
+    })
 }
 
 fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, content_w: u16, tick: u64) {
@@ -743,4 +788,52 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     let x = area.x + area.width.saturating_sub(width) / 2;
     let y = area.y + area.height.saturating_sub(height) / 2;
     Rect::new(x, y, width.min(area.width), height.min(area.height))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn expert(status: &str, readiness: &str, chunks: u64) -> ExpertSummary {
+        serde_json::from_str(&format!(
+            r#"{{"id":1,"name":"x","topic":"x","status":"{status}","readiness":"{readiness}",
+                "persona_name":null,"persona_bio":null,"persona_style":null,"avg_quality":null,
+                "key_concepts":["a","b"],"source_count":0,"chunk_count":{chunks},
+                "node_count":0,"edge_count":0,"created_at":"2026-01-01T00:00:00Z"}}"#
+        ))
+        .unwrap()
+    }
+
+    // The card these guard is reached by every expert the TUI is not actively
+    // streaming a build for — so a queued or failed one lands there too, and
+    // rendering its zeros made it read as a finished expert with an empty
+    // corpus while listing seven planned concepts directly underneath.
+
+    #[test]
+    fn an_expert_that_was_never_built_says_so_instead_of_showing_zeros() {
+        assert_eq!(unbuilt_reason(&expert("queued", "pending", 0)), Some("queued — not built yet"));
+        assert_eq!(unbuilt_reason(&expert("building", "pending", 0)), Some("building — no corpus yet"));
+        assert_eq!(unbuilt_reason(&expert("failed", "pending", 0)), Some("build failed — no corpus"));
+    }
+
+    #[test]
+    fn a_finished_expert_reports_its_counts() {
+        assert_eq!(unbuilt_reason(&expert("ready", "graph_ready", 500)), None);
+    }
+
+    #[test]
+    fn readiness_decides_it_not_job_status() {
+        // An expert becomes answerable a full stage before its job finishes, so
+        // a chat-ready expert with a still-running build has a real corpus and
+        // must show it rather than claiming to have none.
+        assert_eq!(unbuilt_reason(&expert("building", "chat_ready", 200)), None);
+    }
+
+    #[test]
+    fn chunks_alone_are_enough_even_if_readiness_lags() {
+        // Embedded chunks are the corpus. If readiness somehow lags behind
+        // them, believe the chunks — the alternative is telling someone their
+        // corpus does not exist while it answers their questions.
+        assert_eq!(unbuilt_reason(&expert("building", "pending", 200)), None);
+    }
 }

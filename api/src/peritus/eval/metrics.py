@@ -13,6 +13,14 @@ section auditing what the corpus lacked — scored ~1.0 on every one of them whi
 being close to useless to the person who asked. Optimising against them alone
 actively rewards the failure.
 
+*Screening* metrics (``screening_precision_recall``, ``cohen_kappa``,
+``concept_jaccard``) ask a different question entirely: not whether an answer is
+good, but whether the *corpus selection* was. They compare the validator's
+keep/drop decisions against human labels, which is the only way to tell a rubric
+change that improved screening from one that merely changed it. Kappa rather
+than raw agreement, because a rubric that keeps 90% of everything agrees with a
+human 90% of the time while exercising no judgement at all.
+
 *Helpfulness* metrics (``citation_density``, ``source_narration_hits``,
 ``helpfulness_score``) ask whether an answer is **worth reading**. The first two
 are deterministic and free, which is the point: they catch the exact regression
@@ -257,3 +265,90 @@ def answer_quality(
         "narration_penalty": n_pen,
         "overall": round(judged * d_pen * n_pen, 4),
     }
+
+
+# ---------------------------------------------------------------------------
+# Screening — was the corpus selected, or merely collected?
+# ---------------------------------------------------------------------------
+
+
+def screening_precision_recall(
+    predicted: list[bool], actual: list[bool]
+) -> dict[str, float | int]:
+    """Precision, recall and F1 of the ``keep`` decision against human labels.
+
+    ``predicted`` is what the validator decided, ``actual`` what a human said.
+    Both are keep=True.
+
+    The two errors are not symmetric and the pair of numbers is what says which
+    one a rubric change traded away. Low precision means junk in the corpus, and
+    the expert answers confidently from bad material. Low recall means good
+    sources thrown away, which is invisible in the product — nobody sees the
+    paper that was not kept — and is the failure a single accuracy number hides.
+    """
+    if len(predicted) != len(actual):
+        raise ValueError("predicted and actual must be the same length")
+    tp = sum(1 for p, a in zip(predicted, actual, strict=True) if p and a)
+    fp = sum(1 for p, a in zip(predicted, actual, strict=True) if p and not a)
+    fn = sum(1 for p, a in zip(predicted, actual, strict=True) if not p and a)
+    tn = sum(1 for p, a in zip(predicted, actual, strict=True) if not p and not a)
+    precision = tp / (tp + fp) if (tp + fp) else 0.0
+    recall = tp / (tp + fn) if (tp + fn) else 0.0
+    f1 = (
+        2 * precision * recall / (precision + recall)
+        if (precision + recall)
+        else 0.0
+    )
+    total = tp + fp + fn + tn
+    return {
+        "precision": round(precision, 4),
+        "recall": round(recall, 4),
+        "f1": round(f1, 4),
+        "accuracy": round((tp + tn) / total, 4) if total else 0.0,
+        "true_positives": tp,
+        "false_positives": fp,
+        "false_negatives": fn,
+        "true_negatives": tn,
+        "n": total,
+    }
+
+
+def cohen_kappa(predicted: list[bool], actual: list[bool]) -> float:
+    """Agreement above chance, in [-1, 1].
+
+    The number to publish. Raw agreement flatters any rubric whose class balance
+    matches the labeller's: a validator that kept everything would agree with a
+    human 80% of the time on a set that is 80% keeps, while making no decisions
+    at all. Kappa subtracts exactly that.
+
+    Returns 0.0 when chance agreement is total — every label identical on both
+    sides — since "above chance" is then undefined and claiming perfect
+    agreement would be the flattering reading.
+    """
+    if len(predicted) != len(actual):
+        raise ValueError("predicted and actual must be the same length")
+    n = len(predicted)
+    if n == 0:
+        return 0.0
+    observed = sum(1 for p, a in zip(predicted, actual, strict=True) if p == a) / n
+    p_keep = sum(predicted) / n
+    a_keep = sum(actual) / n
+    expected = p_keep * a_keep + (1 - p_keep) * (1 - a_keep)
+    if expected >= 1.0:
+        return 0.0
+    return round((observed - expected) / (1 - expected), 4)
+
+
+def concept_jaccard(predicted: list[str], actual: list[str]) -> float:
+    """Overlap between the concepts the validator tagged and the ones a human did.
+
+    Coverage-driven gap-filling and the whole discovery loop key on these tags,
+    so a validator that scores a source correctly but mis-tags what it covers
+    sends the next round looking for the wrong thing. Two empty sets agree.
+    """
+    left = {c.casefold().strip() for c in predicted if c and c.strip()}
+    right = {c.casefold().strip() for c in actual if c and c.strip()}
+    if not left and not right:
+        return 1.0
+    union = left | right
+    return round(len(left & right) / len(union), 4) if union else 1.0

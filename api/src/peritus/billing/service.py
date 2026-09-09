@@ -220,4 +220,46 @@ class EntitlementService:
         return await self._repo.list_accounts(limit)
 
     async def usage_for_job(self, job_id: int) -> dict:
-        return await self._repo.job_usage_breakdown(job_id)
+        """Metered spend for one build, with the discovery estimator's error.
+
+        The estimator decides what the discovery loop can afford *before* any of
+        it is ingested, so it has to be checkable afterwards. Putting the
+        forecast next to the measurement is what makes recalibration possible;
+        without it, an estimator that is 40% low is indistinguishable from a
+        corpus that turned out cheap.
+        """
+        usage = await self._repo.job_usage_breakdown(job_id)
+        if not usage:
+            return usage
+        estimate = await self._repo.discovery_estimate(job_id)
+        actual_ingest = sum(
+            row["cost_usd"]
+            for row in usage.get("by_stage", [])
+            if row["stage"] in ("contextualization", "graph_extraction")
+        )
+        usage["discovery"] = {
+            **estimate,
+            "actual_ingest_usd": round(actual_ingest, 6),
+            "estimator_error": _estimator_error(
+                estimate.get("estimated_ingest_usd"), actual_ingest
+            ),
+            "note": (
+                "estimated_ingest_usd is the forecast the discovery loop spent "
+                "against, made at fetch time from each source's character count. "
+                "actual_ingest_usd is the metered cost of contextualisation, "
+                "embedding and graph extraction. The gap between them is the "
+                "estimator's calibration error — see billing/pricing.py."
+            ),
+        }
+        return usage
+
+
+def _estimator_error(estimated: float | None, actual: float) -> float | None:
+    """Relative error of the discovery forecast, or None with nothing to compare.
+
+    Signed: positive means the estimator over-forecast, which is the safe
+    direction — the loop bought less corpus than it could have afforded.
+    """
+    if estimated is None or actual <= 0:
+        return None
+    return round((estimated - actual) / actual, 4)

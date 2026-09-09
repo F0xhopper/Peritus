@@ -1,7 +1,14 @@
 """Unit tests for the pure evaluation metrics and citation parsing."""
 
+import pytest
+
 from peritus.chat.grounding import Passage, parse_cited_indices, used_citation_labels
 from peritus.eval import metrics
+from peritus.eval.metrics import (
+    cohen_kappa,
+    concept_jaccard,
+    screening_precision_recall,
+)
 
 
 def _passage(i: int, source_id: int = 0) -> Passage:
@@ -181,3 +188,82 @@ def test_answer_quality_without_judge_still_reports_shape():
     assert shape["helpfulness"] == 0.0
     assert shape["narration_hits"] >= 4
     assert shape["citation_density"] > 0
+
+
+# ── screening metrics ────────────────────────────────────────────────────────
+#
+# These measure the corpus *selection*, not the answers. They exist so that a
+# rubric change can be shown to have improved screening rather than merely
+# changed it — which is otherwise unknowable, because the only visible signal
+# after such a change is that the corpus looks different.
+
+
+def test_precision_and_recall_name_the_two_different_errors():
+    """Not symmetric, and the pair is what says which one a change traded away.
+
+    Low precision puts junk in the corpus, where it is at least visible. Low
+    recall throws away good sources, and nobody ever sees the paper that was
+    not kept.
+    """
+    #        kept:  ✓    ✗     ✓     ✗
+    predicted = [True, True, False, False]
+    actual    = [True, False, True, False]
+    result = screening_precision_recall(predicted, actual)
+
+    assert result["precision"] == 0.5, "one of the two it kept should not have been"
+    assert result["recall"] == 0.5, "it threw away one it should have kept"
+    assert result["true_positives"] == 1
+    assert result["false_positives"] == 1
+    assert result["false_negatives"] == 1
+    assert result["true_negatives"] == 1
+    assert result["n"] == 4
+
+
+def test_precision_and_recall_are_zero_rather_than_undefined_on_empty_classes():
+    assert screening_precision_recall([], [])["precision"] == 0.0
+    # Kept nothing: precision has no denominator, and 0.0 is the honest reading.
+    assert screening_precision_recall([False, False], [True, True])["precision"] == 0.0
+
+
+def test_precision_and_recall_reject_mismatched_lengths():
+    with pytest.raises(ValueError):
+        screening_precision_recall([True], [True, False])
+
+
+def test_kappa_refuses_to_credit_a_validator_that_makes_no_decisions():
+    """The number to publish, and the reason it is that number.
+
+    A validator that keeps everything agrees with a human 80% of the time on a
+    set that is 80% keeps, while exercising no judgement at all. Raw agreement
+    calls that a good screener; kappa calls it zero.
+    """
+    keeps_everything = [True] * 10
+    human = [True] * 8 + [False] * 2
+
+    agreement = sum(p == a for p, a in zip(keeps_everything, human, strict=True)) / 10
+    assert agreement == 0.8
+    assert cohen_kappa(keeps_everything, human) == 0.0
+
+
+def test_kappa_is_one_for_perfect_agreement_and_negative_for_anti_agreement():
+    assert cohen_kappa([True, False, True, False], [True, False, True, False]) == 1.0
+    assert cohen_kappa([True, False, True, False], [False, True, False, True]) < 0
+
+
+def test_kappa_on_an_empty_or_degenerate_set_is_zero_not_one():
+    """Chance agreement is total when every label is identical on both sides, so
+    "above chance" is undefined — and claiming perfect agreement would be the
+    flattering reading of no evidence."""
+    assert cohen_kappa([], []) == 0.0
+    assert cohen_kappa([True] * 5, [True] * 5) == 0.0
+
+
+def test_concept_jaccard_is_case_insensitive_and_treats_two_empties_as_agreement():
+    """Coverage-driven search keys on these tags, so a validator that scores a
+    source right but mis-tags what it covers sends the next round looking for
+    the wrong thing."""
+    assert concept_jaccard(["Analogy", " participation "], ["analogy", "participation"]) == 1.0
+    assert concept_jaccard(["analogy"], ["participation"]) == 0.0
+    assert concept_jaccard(["analogy", "esse"], ["analogy"]) == 0.5
+    assert concept_jaccard([], []) == 1.0
+    assert concept_jaccard(["analogy"], []) == 0.0

@@ -281,8 +281,14 @@ async def triage_candidates(
             # A must-have work found by search should never lose the triage —
             # applied last, so a canonical text hosted somewhere unglamorous
             # still survives its domain's prior.
+            #
+            # Marked as well as scored. A score can be traded away by whatever
+            # the fetch stage divides it by; a flag says what is actually meant,
+            # which is "the research plan named this work, do not come back
+            # without it".
             if _matches_must_have(candidate.title, must_have_titles):
                 score = max(score, 9.0)
+                candidate.metadata["fetch_priority"] = True
             triaged.append(TriagedCandidate(candidate=candidate, score=score))
     return triaged
 

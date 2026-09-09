@@ -1,6 +1,10 @@
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from peritus.experts.coverage import CoverageTarget
 
 
 class ExpertStatus(StrEnum):
@@ -49,10 +53,41 @@ class ExpertConfig:
     coverage_extra_k: int
     max_context_passages: int
     max_response_tokens: int
+    # ── Coverage targets: what "this concept is covered" means at this tier ──
+    # These belong here rather than in TierEconomics because they are a
+    # *retrieval* property — how deeply the expert can answer on each part of
+    # its syllabus — and because ExpertConfig is what the builder already reads.
+    # Snapshotted into experts.config at create time like everything else here,
+    # so raising a tier's target does not silently re-grade existing experts.
+    #
+    # Defaulted so a row written before this field existed still deserialises;
+    # the defaults are STANDARD's, which is what those rows were built as unless
+    # their multiplier says otherwise.
+    coverage_min_sources: int = 2
+    coverage_min_source_types: int = 2
+    coverage_require_non_tertiary: bool = True
+    # Discovery rounds *after* the first. 1 is today's behaviour: one pass, then
+    # one targeted round for what it missed.
+    discovery_max_rounds: int = 2
+    # Snowball references followed per round, and how many hops deep. Two hops
+    # means an accepted snowball find seeds the next round's snowball, which the
+    # discovery loop gives for free.
+    snowball_max_per_round: int = 10
+    snowball_hops: int = 1
 
     @classmethod
     def from_tier(cls, tier: ExpertTier) -> "ExpertConfig":
         return _TIER_DEFAULTS[tier]
+
+    def coverage_target(self) -> "CoverageTarget":
+        from peritus.experts.coverage import CoverageTarget
+
+        return CoverageTarget(
+            min_sources=self.coverage_min_sources,
+            min_source_types=self.coverage_min_source_types,
+            require_non_tertiary=self.coverage_require_non_tertiary,
+            max_rounds=self.discovery_max_rounds,
+        )
 
 
 _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
@@ -64,6 +99,14 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_extra_k=3,
         max_context_passages=8,
         max_response_tokens=1024,
+        # LITE keeps the old shape exactly: one concept-covering source of any
+        # kind, one extra round. Its cost profile must not move.
+        coverage_min_sources=1,
+        coverage_min_source_types=1,
+        coverage_require_non_tertiary=False,
+        discovery_max_rounds=1,
+        snowball_max_per_round=3,
+        snowball_hops=1,
     ),
     ExpertTier.STANDARD: ExpertConfig(
         source_multiplier=1.0,
@@ -73,6 +116,12 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_extra_k=5,
         max_context_passages=15,
         max_response_tokens=2048,
+        coverage_min_sources=2,
+        coverage_min_source_types=2,
+        coverage_require_non_tertiary=True,
+        discovery_max_rounds=2,
+        snowball_max_per_round=10,
+        snowball_hops=1,
     ),
     ExpertTier.PRO: ExpertConfig(
         source_multiplier=2.0,
@@ -82,6 +131,12 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_extra_k=10,
         max_context_passages=25,
         max_response_tokens=4096,
+        coverage_min_sources=3,
+        coverage_min_source_types=2,
+        coverage_require_non_tertiary=True,
+        discovery_max_rounds=3,
+        snowball_max_per_round=20,
+        snowball_hops=2,
     ),
 }
 
@@ -99,10 +154,16 @@ class TierEconomics:
     ``spend_cap_usd`` — hard ceiling on real provider spend for one build at this
         tier. Enforced by the meter at runtime; a build that crosses it is
         aborted and the credit hold is refunded in full (see billing/service.py).
+    ``discovery_budget_usd`` — soft target the discovery loop spends *towards*,
+        counting money already metered plus its own estimate of what the sources
+        it has committed to will cost to ingest. Not a ceiling and not enforced
+        by the meter: it is the loop's stop condition, deliberately well under
+        the hard cap so graph extraction, reconciliation and persona still fit.
     """
 
     credit_cost: int
     spend_cap_usd: float
+    discovery_budget_usd: float
 
 
 # The price ladder. Credit costs are roughly proportional to the source
@@ -120,10 +181,16 @@ class TierEconomics:
 # person is watching), so caps must clear the interactive cost with headroom,
 # not the half-price batched cost. The previous 1/3/8 caps sat *below* healthy
 # cost and killed every lite build mid-graph.
+#
+# Discovery budgets: a measured healthy lite build spends ≈$1.60 in total, of
+# which roughly half is graph extraction and persona — stages that run *after*
+# discovery has finished choosing. The numbers below leave that half free at
+# every tier, so a loop that spends its whole discovery budget still completes.
+# Override per deployment with PERITUS_TIER_DISCOVERY_{LITE,STANDARD,PRO}_USD.
 _TIER_ECONOMICS: dict[ExpertTier, TierEconomics] = {
-    ExpertTier.LITE:     TierEconomics(credit_cost=1, spend_cap_usd=3.00),
-    ExpertTier.STANDARD: TierEconomics(credit_cost=3, spend_cap_usd=6.00),
-    ExpertTier.PRO:      TierEconomics(credit_cost=8, spend_cap_usd=12.00),
+    ExpertTier.LITE:     TierEconomics(credit_cost=1, spend_cap_usd=3.00, discovery_budget_usd=1.25),
+    ExpertTier.STANDARD: TierEconomics(credit_cost=3, spend_cap_usd=6.00, discovery_budget_usd=3.00),
+    ExpertTier.PRO:      TierEconomics(credit_cost=8, spend_cap_usd=12.00, discovery_budget_usd=7.00),
 }
 
 
@@ -171,6 +238,10 @@ class Expert:
     edge_count: int = 0
     avg_quality: float | None = None
     key_concepts: list[str] = field(default_factory=list)
+    # What the last discovery loop did and why it stopped (migration 025).
+    # Survives the corpus wipe a rebuild performs, so a rebuild can say what the
+    # previous build concluded — see builder._log_previous_build.
+    build_summary: dict | None = None
     source_type_counts: dict[str, int] = field(default_factory=dict)  # computed, not stored
     catalog: CatalogMeta = field(default_factory=CatalogMeta)
     # Retrieval readiness (migration 018): pending | chat_ready | graph_ready.

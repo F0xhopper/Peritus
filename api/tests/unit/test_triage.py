@@ -89,7 +89,7 @@ async def test_fetch_with_refill_stops_at_budget():
     ranked = [
         _triaged(f"t{i}", f"https://x.test/{i}", 9 - i * 0.1) for i in range(10)
     ]
-    results = await builder._fetch_with_refill(ranked, budget=4, caps={SourceType.WEB: 99})
+    results, _committed = await builder._fetch_with_refill(ranked, budget=4, caps={SourceType.WEB: 99})
     assert len(results) == 4
     # Highest-ranked candidates win the budget.
     assert [r.title for r in results] == ["t0", "t1", "t2", "t3"]
@@ -108,7 +108,7 @@ async def test_fetch_with_refill_replaces_failures_from_lower_ranks():
     ranked = [failing] + [
         _triaged(f"t{i}", f"https://x.test/{i}", 8 - i * 0.1) for i in range(4)
     ]
-    results = await builder._fetch_with_refill(ranked, budget=3, caps={SourceType.WEB: 99})
+    results, _committed = await builder._fetch_with_refill(ranked, budget=3, caps={SourceType.WEB: 99})
     assert len(results) == 3
     assert "fails" not in [r.title for r in results]
 
@@ -123,7 +123,7 @@ async def test_fetch_with_refill_enforces_per_type_caps():
         _triaged(f"exa{i}", f"https://e.test/{i}", 5 - i * 0.1, SourceType.EXA)
         for i in range(5)
     ]
-    results = await builder._fetch_with_refill(
+    results, _committed = await builder._fetch_with_refill(
         ranked, budget=6, caps={SourceType.WEB: 2, SourceType.EXA: 99},
     )
     web_count = sum(1 for r in results if r.source_type == SourceType.WEB)
@@ -135,7 +135,7 @@ async def test_fetch_with_refill_enforces_per_type_caps():
 async def test_fetch_with_refill_handles_exhausted_ranked_list():
     builder = _builder_with_fake_fetchers()
     ranked = [_triaged("only", "https://x.test/1", 7.0)]
-    results = await builder._fetch_with_refill(ranked, budget=5, caps={})
+    results, _committed = await builder._fetch_with_refill(ranked, budget=5, caps={})
     assert len(results) == 1
 
 
@@ -154,7 +154,7 @@ async def test_fetch_with_refill_reports_progress_between_waves():
         events.append(e)
 
     ranked = [_triaged(f"t{i}", f"https://x.test/{i}", 9 - i * 0.1) for i in range(12)]
-    results = await builder._fetch_with_refill(
+    results, _committed = await builder._fetch_with_refill(
         ranked, budget=12, caps={SourceType.WEB: 99}, on_event=on_event,
     )
 
@@ -212,7 +212,7 @@ async def test_fetch_with_refill_refills_past_a_hanging_candidate(monkeypatch):
     ranked = [_triaged("hangs", "https://hang.test", 9.9)] + [
         _triaged(f"t{i}", f"https://x.test/{i}", 8 - i * 0.1) for i in range(4)
     ]
-    results = await asyncio.wait_for(
+    results, _committed = await asyncio.wait_for(
         builder._fetch_with_refill(ranked, budget=3, caps={SourceType.WEB: 99}),
         timeout=10,
     )
@@ -269,3 +269,73 @@ def test_domain_adjustment_is_total_on_bad_input():
     assert domain_adjustment("") == 0.0
     assert domain_adjustment("not a url") == 0.0
     assert domain_adjustment("gutenberg.org/ebooks/1") > 0  # scheme-less still parses
+
+
+# ── fetch ordering ──────────────────────────────────────────────────────────
+#
+# The regression these pin was found in a finished corpus, not in the code. A
+# STANDARD build of "Thomism" produced 48 sources containing no work by Aquinas,
+# 17 tertiary to 2 primary, while its research plan had correctly named the
+# Summa Theologica a must-have and weighted Project Gutenberg at 2.0. The cause
+# was ordering the fetch queue by `triage_score / estimated_cost`: cost scales
+# with length, the longest texts are the primary sources, and so the rule
+# removed exactly the material the corpus most needed.
+
+
+def _ordered(*items):
+    from peritus.experts.builder import _fetch_sort_key
+
+    return [t.candidate.title for t in sorted(items, key=lambda t: _fetch_sort_key(t, False))]
+
+
+def _c(source_type, score, title, priority=False):
+    t = _triaged(title, "https://x.test/" + title.replace(" ", "-"), score)
+    t.candidate.source_type = source_type
+    if priority:
+        t.candidate.metadata["fetch_priority"] = True
+    return t
+
+
+def test_a_primary_text_is_not_outranked_by_a_forum_post_for_being_long():
+    """The exact inversion that emptied a Thomism corpus of Aquinas."""
+    summa = _c(SourceType.GUTENBERG, 9.0, "Summa Theologica")
+    reddit = _c(SourceType.REDDIT, 4.0, "a Reddit thread")
+    assert _ordered(reddit, summa)[0] == "Summa Theologica"
+
+
+def test_quality_decides_the_order_and_cost_only_breaks_ties():
+    """Cost-awareness was for choosing between comparable candidates — free full
+    text before paid OCR — not for choosing what the corpus is made of."""
+    cheap_low = _c(SourceType.WEB, 5.0, "a mediocre web page")
+    dear_high = _c(SourceType.GUTENBERG, 8.0, "a classic text")
+    assert _ordered(cheap_low, dear_high) == ["a classic text", "a mediocre web page"]
+
+    # Equal score: the cheaper one goes first, which is the phase 2.C behaviour.
+    paper = _c(SourceType.OPENALEX, 7.0, "a journal paper")
+    book = _c(SourceType.GUTENBERG, 7.0, "a long book")
+    assert _ordered(book, paper) == ["a journal paper", "a long book"]
+
+
+def test_a_must_have_work_is_fetched_before_anything_else():
+    """The score-9 override exists so a work the plan named cannot be lost. It
+    is a flag as well as a score, because a score can be divided away."""
+    must_have = _c(SourceType.GUTENBERG, 9.0, "Summa Theologica", priority=True)
+    excellent = _c(SourceType.OPENALEX, 10.0, "a superb cheap paper")
+    assert _ordered(excellent, must_have)[0] == "Summa Theologica"
+
+
+def test_triage_marks_a_must_have_work_not_merely_scores_it():
+    from peritus.sources.triage import _matches_must_have
+
+    assert _matches_must_have("Summa Theologica", ["Summa Theologica"])
+    # And the marking is what the fetch stage keys on, so it must survive onto
+    # the candidate rather than living only in the score.
+    marked = _c(SourceType.GUTENBERG, 9.0, "Summa Theologica", priority=True)
+    assert marked.candidate.metadata["fetch_priority"] is True
+
+
+def test_scores_are_bucketed_so_noise_does_not_beat_a_real_cost_difference():
+    """A 7.2 and a 7.0 are the same judgement; the cheaper one should win."""
+    noisy_dear = _c(SourceType.GUTENBERG, 7.2, "a long book")
+    clean_cheap = _c(SourceType.WEB, 7.0, "a cheap article")
+    assert _ordered(noisy_dear, clean_cheap) == ["a cheap article", "a long book"]

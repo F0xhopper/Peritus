@@ -57,7 +57,13 @@ stay true under pagination.
 ### Provenance completeness
 
 Columns arrived over several migrations (`validator_model`/`rubric_version` in 009,
-`covered_concepts`/`discovered_via` in 012). Older sources have nulls. The corpus report's
+`covered_concepts`/`discovered_via` in 012, `source_tier` in 020, and identity plus
+full-text and review provenance — `doi`, `arxiv_id`, `identifiers`, `full_text_method`,
+`text_chars`, `review_model`, `first_pass_quality`, `first_pass_relevance`,
+`snowball_seed_urls` — in 025). Older sources have nulls, and **nothing is backfilled**:
+a build from before migration 025 genuinely did not record its sources' DOIs or how their
+text was fetched, and a backfilled guess would put a fabrication into the provenance
+record. `rubric_version` says which rubric produced a row. The corpus report's
 `provenance` block reports exactly which fields are incomplete, so a partial record is
 visible rather than silently thin.
 
@@ -95,12 +101,12 @@ evidence that the included ones were selected.
 
   "thresholds": {
     "quality_min": 5, "relevance_min": 6,
-    "current_rubric_version": "v3-concepts-q5r6",
+    "current_rubric_version": "v5-structured-q5r6",
     "note": "These are the floors the CURRENT code applies. Rows stamped with a different rubric_version were judged under different rules…"
   },
 
   "rubric_versions": [
-    { "rubric_version": "v3-concepts-q5r6", "validator_model": "claude-haiku-4-5-20251001",
+    { "rubric_version": "v5-structured-q5r6", "validator_model": "claude-haiku-4-5-20251001",
       "sources": 47, "accepted": 21, "first_seen": "…", "last_seen": "…" }
   ],
 
@@ -149,11 +155,19 @@ evidence that the included ones were selected.
       "source_type": "web", "content_type": "commentary", "difficulty": 2,
       "quality_score": 3.0, "relevance_score": 4.5,
       "drop_reason": "Secondary commentary; no primary data.",
-      "validator_model": "claude-haiku-4-5-20251001",
-      "rubric_version": "v3-concepts-q5r6",
+      "source_tier": "tertiary",
+      "doi": "10.1234/example", "arxiv_id": null,
+      "identifiers": { "doi": "10.1234/example", "pmid": "31234567" },
+      "full_text_method": "abstract", "text_chars": 1840,
+      "validator_model": "claude-sonnet-5",
+      "review_model": "claude-sonnet-5",
+      "first_pass_quality": 5.5, "first_pass_relevance": 5.5,
+      "reviewed": true,
+      "rubric_version": "v5-structured-q5r6",
       "discovered_via": "gapfill:measurement error",
       "discovery_method": "gapfill",
       "gap_filled_for_concept": "measurement error",
+      "snowball_seed_urls": [],
       "covered_concepts": [], "key_claims": [],
       "passage_count": 0,
       "created_at": "…"
@@ -164,7 +178,25 @@ evidence that the included ones were selected.
 
 **`drop_reason` is `null` on accepted rows.** `discovery_method` and
 `gap_filled_for_concept` are parsed from `discovered_via` for convenience — prefer them
-over string-splitting client-side.
+over string-splitting client-side. Only `gapfill` carries a concept in its suffix;
+`snowball:backward` and `snowball:forward` carry a citation direction, and
+`gap_filled_for_concept` is `null` for both.
+
+**`validator_model` is whose verdict stands, not who looked first.** When `reviewed` is
+true, a borderline first-pass score was re-examined by a stronger model reading far more
+of the source, and `first_pass_quality` / `first_pass_relevance` are what that changed.
+A reviewed row is not a less reliable row — it is the one place in the ledger where a
+decision was made twice.
+
+**`full_text_method` says how much of the source was actually read**, which is the first
+question a reviewer asks about a corpus and which nothing recorded before migration 025:
+`ar5iv` · `europepmc_jats` · `oa_pdf_ocr` · `arxiv_pdf_ocr` · `oa_landing_html` ·
+`abstract`. A source with `"full_text_method": "abstract"` was judged, and is answering
+questions, on its abstract alone.
+
+**Duplicates appear as rejections with a stated reason.** A source dropped by content
+fingerprinting has `drop_reason` of the form `duplicate of <url>` and scores of 0 — it was
+never judged on merit, and reading its zeros as a quality verdict would be wrong.
 
 ### `by_search` is the differentiating view
 
@@ -254,9 +286,67 @@ which is the corpus itself and is authoritative. Where they disagree, both are s
       "reported_by_build_log": 43,
       "build_log_note": "The build log's validate_done event covers the first validation round only; gap-fill sources are validated separately…"
     }
+  },
+
+  "discovery": {
+    "rounds_run": 2,
+    "stop_reason": "targets_met",
+    "stop_reason_meaning": "Every key concept reached this tier's coverage target…",
+    "rubric_version": "v5-structured-q5r6",
+    "budget": {
+      "discovery_budget_usd": 3.0,
+      "metered_spend_at_stop_usd": 1.42,
+      "estimated_ingest_usd": 0.91,
+      "note": "The discovery budget is a soft target the search spends towards, not the build's hard spend cap…"
+    },
+    "coverage_targets": { "min_sources": 2, "min_source_types": 2, "require_non_tertiary": true, "max_rounds": 2 },
+    "coverage_met": true,
+    "final_coverage": [
+      { "concept": "…", "sources": 3, "source_types": ["openalex", "web"], "tiers": ["primary", "secondary"], "met": true, "shortfall": 0 }
+    ],
+    "duplicates_removed": {
+      "by_identifier": 6, "by_url": 11, "already_seen_in_an_earlier_round": 9,
+      "by_content_fingerprint": 2,
+      "note": "…by identifier is certain; by content fingerprint is the only one of the three that can be wrong…"
+    },
+    "rounds": [
+      {
+        "round": 0, "targeted_concepts": [], "queries": [],
+        "candidates_identified": 143, "screened_at_triage": 131, "passed_triage": 60,
+        "retrieved_full_text": 28, "snowballed_candidates": null,
+        "accepted": 21, "rejected": 7, "acceptance_rate": 0.75
+      },
+      {
+        "round": 1,
+        "targeted_concepts": ["measurement error"],
+        "queries": ["differential misclassification cardiometabolic cohort", "…"],
+        "candidates_identified": 40, "screened_at_triage": 26, "passed_triage": 14,
+        "retrieved_full_text": 9, "snowballed_candidates": 6,
+        "accepted": 6, "rejected": 3, "acceptance_rate": 0.667
+      }
+    ],
+    "note": "Round 0 searches the research plan's own queries. Every later round reads the corpus that exists…"
   }
 }
 ```
+
+### `discovery` is where a corpus argues for its own sufficiency
+
+`stop_reason` is the field to read. "This corpus has 34 sources" is not a claim anyone can
+check; "the search met its coverage targets after two rounds" and "it stopped at the
+discovery budget with two concepts still short" both are. Only `targets_met` means the
+search finished rather than ran out — the other five say what it ran out of.
+
+`rounds[].queries` is the search strategy of every round after the first, written down
+verbatim. Those queries are generated by reading the accepted corpus, not by the plan, so
+they are the only record of *why* the later searches looked where they did.
+
+Two sources of truth, deliberately not reconciled: `rounds` comes from the build event
+log, which can be pruned; the top-level fields fall back to `experts.build_summary`, which
+the build writes and which survives. Where both exist they should agree, and showing both
+is what makes a disagreement visible. A build that predates the discovery loop returns
+`"rounds_run": null` with an `unavailable_reason` and reports its single gap-fill round
+under `gap_fill` as before.
 
 **`ranked_not_fetched` is not an exclusion for cause.** Do not present it as one — it is
 mostly budget exhaustion and cannot be separated from per-type caps or failed downloads.
@@ -318,8 +408,9 @@ Where sources in this corpus were judged to disagree, resolved down to passages.
 { "computed": false, "readiness": "chat_ready", "contradictions": [], "…": "…" }
 ```
 
-Contradictions come from the concept graph, extracted a full stage **after** the corpus
-becomes searchable. An expert can be answering questions while its graph is still empty.
+Contradictions come from the reconciliation pass over the concept graph, which runs a full
+stage **after** the corpus becomes searchable. An expert can be answering questions while
+its graph is still empty.
 
 **`computed: false` with an empty list means "not analysed yet" — never render it as "no
 contradictions found".** For a product whose claim is that it shows where sources disagree,
@@ -334,18 +425,30 @@ When `computed: true`:
   "computed": true,
   "readiness": "graph_ready",
   "summary": {
-    "contradictions": 6, "concepts_involved": 9,
+    "contradictions": 6, "claims_involved": 9,
     "relationships_total": 214, "share_of_relationships": 0.028,
     "cross_source_on_page": 4, "within_source_on_page": 1, "undetermined_on_page": 1
   },
-  "relationship_mix": [ { "edge_type": "contradicts", "count": 6, "mean_weight": 0.72 } ],
-  "note": "A contradiction is an edge a language model extracted while reading the corpus, between two concept nodes. The passages on each side are the passages those concepts were extracted from — they are the evidence to check, not a proof that the two sources disagree…",
+  "relationship_mix": [ { "edge_type": "contradicts", "count": 6, "mean_evidence": 2.1 } ],
+  "note": "A contradiction is a judgement a language model made between two claims the corpus makes, with the claims from every source in front of it, and `point` is what it says is in dispute…",
   "page": { "…": "…", "passages_per_side": 2, "excerpt_chars": 600 },
   "contradictions": [
-    { "kind": "cross_source", "…": "both concept nodes; per-side passages with source citations" }
+    {
+      "kind": "cross_source",
+      "point": "whether Varroa alone causes collapse without viral co-infection",
+      "evidence": 3,
+      "…": "the claim on each side; per-side passages with source citations"
+    }
   ]
 }
 ```
+
+Both ends of a contradiction are **claims**, always. Two concepts can differ; only two
+propositions can be incompatible, and an edge with a concept on either end is rejected at
+ingest (migration 024 removed the ones already stored). `point` is one sentence saying what
+is disputed, in the subject's terms — null only on edges extracted before it was required.
+`evidence` counts the distinct sources behind the two sides' passages; it is not a
+confidence, and nothing in this response is.
 
 `kind` ∈ `cross_source` | `within_source` | `undetermined`. Only `cross_source` is two
 sources disagreeing; `within_source` is one source in tension with itself. Label them

@@ -123,6 +123,36 @@ _CAP_OVERRIDES: dict[ExpertTier, float] = {
 }
 
 
+_DISCOVERY_OVERRIDES: dict[ExpertTier, float] = {
+    ExpertTier.LITE: settings.TIER_DISCOVERY_LITE_USD,
+    ExpertTier.STANDARD: settings.TIER_DISCOVERY_STANDARD_USD,
+    ExpertTier.PRO: settings.TIER_DISCOVERY_PRO_USD,
+}
+
+
+def discovery_budget_usd(
+    tier: ExpertTier,
+    plan: Plan = DEFAULT_PLAN,
+    cap_usd: float | None = None,
+) -> float:
+    """What the discovery loop may spend towards before it stops looking.
+
+    Scaled by the same plan multiplier as the cap, and then clamped under the
+    build's actual cap: a per-account cap override that lowers the ceiling must
+    lower the discovery budget with it, or the loop would happily spend past a
+    limit the account has been given.
+    """
+    base = _DISCOVERY_OVERRIDES.get(tier) or 0.0
+    if base <= 0:
+        base = tier_economics(tier).discovery_budget_usd
+    budget = base * plan.spend_cap_multiplier
+    if cap_usd is not None and cap_usd > 0:
+        # Leave the post-discovery stages (graph, reconciliation, persona) room
+        # under the cap; they are roughly half of a healthy build's spend.
+        budget = min(budget, cap_usd * 0.6)
+    return budget
+
+
 def spend_cap_usd(
     tier: ExpertTier,
     plan: Plan = DEFAULT_PLAN,

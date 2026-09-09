@@ -333,6 +333,19 @@ class ExpertRepository:
                 json.dumps(key_concepts), expert_id,
             )
 
+    async def update_build_summary(self, expert_id: int, summary: dict) -> None:
+        """Record what the discovery loop did and why it stopped.
+
+        Written as soon as discovery finishes rather than at the end of the
+        build, so a build that later fails in graph extraction still leaves
+        behind the account of how its corpus was assembled.
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE experts SET build_summary = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(summary), expert_id,
+            )
+
     async def update_counts(
         self,
         expert_id: int,
@@ -545,6 +558,12 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
 
     owner_id = row["owner_id"] if "owner_id" in keys and row["owner_id"] else None
 
+    # Absent from partial projections and from rows written before migration 025.
+    raw_summary = row["build_summary"] if "build_summary" in keys else None
+    if isinstance(raw_summary, str):
+        raw_summary = json.loads(raw_summary)
+    build_summary = raw_summary if isinstance(raw_summary, dict) else None
+
     catalog = _row_to_catalog(row, keys)
 
     # Readiness comes from the row (migration 018); rows read before that
@@ -568,6 +587,7 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
         edge_count=row["edge_count"],
         avg_quality=row["avg_quality"],
         key_concepts=key_concepts,
+        build_summary=build_summary,
         source_type_counts=source_type_counts,
         catalog=catalog,
         readiness=readiness,

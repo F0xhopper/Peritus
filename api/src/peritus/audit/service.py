@@ -58,13 +58,56 @@ MAX_CONCEPT_SOURCES = 50
 # What this surface is and is not. Returned on every response so a caller
 # cannot render these numbers as something they aren't.
 METHOD_STATEMENT = (
-    "First-pass automated screening with a complete audit trail. Every source "
-    "was scored by a language model against a versioned rubric; the scores, the "
-    "model, the rubric version, the discovery path and the exclusion reason are "
-    "recorded for each one. This is not a systematic review: no two independent "
-    "human reviewers screened these records, and no reconciliation step took "
-    "place. Treat it as a reviewable first pass that a human must check."
+    "First-pass automated screening with a complete audit trail. Sources were "
+    "found over one or more search rounds — each later round targeted at the "
+    "concepts the corpus covered least well — de-duplicated by identifier, URL "
+    "and content fingerprint, then scored by a language model against a "
+    "versioned rubric, with borderline scores re-examined by a stronger model "
+    "where that is enabled. The scores, the model whose verdict stands, the "
+    "rubric version, how the text was obtained, the discovery path and the "
+    "exclusion reason are recorded for each source, and the search stopped for "
+    "a stated reason. This is not a systematic review: no two independent human "
+    "reviewers screened these records, and no reconciliation step took place. "
+    "Treat it as a reviewable first pass that a human must check."
 )
+
+# What each stop reason means, in the response rather than in a docstring the
+# caller cannot read. A funnel that says the search stopped is only useful if it
+# also says whether that was success or surrender.
+STOP_REASONS: dict[str, str] = {
+    "targets_met": (
+        "Every key concept reached this tier's coverage target — enough accepted "
+        "sources, from enough different kinds of source, including at least one "
+        "that is not a summary. The search stopped because it was finished."
+    ),
+    "max_rounds": (
+        "The tier's round limit was reached with some concepts still short of "
+        "target. A higher tier would have searched again."
+    ),
+    "source_limit": (
+        "The tier's ceiling on how many sources one build may fetch was reached. "
+        "This is a count, not a cost: the discovery budget in the same block may "
+        "still show money unspent, and the two are different limits."
+    ),
+    "budget_exhausted": (
+        "The estimated cost of ingesting what had been found reached the tier's "
+        "discovery budget. Sources beyond this point were not fetched."
+    ),
+    "no_new_candidates": (
+        "A round's searches returned nothing the build had not already "
+        "considered. Further rounds would re-examine the same tail."
+    ),
+    "acceptance_collapsed": (
+        "A round fetched sources and validation accepted almost none of them, "
+        "which means the search space for this topic is exhausted rather than "
+        "under-explored. Another round would be spend without return."
+    ),
+    "loop_disabled": (
+        "This build ran a single search pass. The iterating loop is off for "
+        "batched background builds, where each round's validation queues "
+        "separately and can add an hour of wall clock per round."
+    ),
+}
 
 
 class AuditService:
@@ -244,6 +287,7 @@ class AuditService:
         ingestion = await self._repo.ingestion_stats(expert.id)
         by_search = await self._repo.search_provenance(expert.id)
         gapfill_rows = await self._repo.gapfill_sources(expert.id)
+        build_summary = await self._repo.build_summary(expert.id)
 
         assessed = int(totals.get("total") or 0)
         included = int(totals.get("accepted") or 0)
@@ -335,6 +379,7 @@ class AuditService:
                     ),
                 },
             },
+            "discovery": _discovery_block(funnel, build_summary),
             "gap_fill": {
                 **_gapfill_block(funnel),
                 "rounds": _gapfill_rounds(gapfill_rows),
@@ -449,8 +494,13 @@ class AuditService:
         """`contradicts` edges resolved all the way down to passages and citations.
 
         Rich enough to render "Source A claims X / Source B claims Y" with no
-        second round trip: both concept nodes, and for each side the passages
-        that carry it plus the source behind each passage.
+        second round trip: both claims, the point in dispute between them, and
+        for each side the passages that carry it plus the source behind each.
+
+        Both endpoints are claims, always: a `contradicts` edge with a concept
+        on either end is rejected at ingest and was removed from existing graphs
+        by migration 024. Two concepts can differ; only two propositions can be
+        incompatible, and the difference is the whole meaning of this page.
 
         ``computed`` is load-bearing. Contradictions come from the concept graph,
         which is extracted a whole stage after the corpus becomes searchable, so
@@ -496,7 +546,7 @@ class AuditService:
             "readiness": readiness.value,
             "summary": {
                 "contradictions": total,
-                "concepts_involved": int(summary.get("concepts_involved") or 0),
+                "claims_involved": int(summary.get("claims_involved") or 0),
                 "relationships_total": total_edges,
                 "share_of_relationships": (
                     round(total / total_edges, 4) if total_edges else None
@@ -515,16 +565,17 @@ class AuditService:
                 {
                     "edge_type": r["edge_type"],
                     "count": r["n"],
-                    "mean_weight": round_or_none(r["mean_weight"], 3),
+                    "mean_evidence": round_or_none(r["mean_evidence"], 2),
                 }
                 for r in edge_mix
             ],
             "note": (
-                "A contradiction is an edge a language model extracted while "
-                "reading the corpus, between two concept nodes. The passages on "
-                "each side are the passages those concepts were extracted from — "
-                "they are the evidence to check, not a proof that the two sources "
-                "disagree. Read both sides before citing one."
+                "A contradiction is a judgement a language model made between two "
+                "claims the corpus makes, with the claims from every source in "
+                "front of it, and `point` is what it says is in dispute. The "
+                "passages on each side are the passages those claims were "
+                "extracted from — they are the evidence to check, not a proof "
+                "that the two sources disagree. Read both sides before citing one."
             ),
             "page": {
                 "limit": limit,
@@ -578,7 +629,7 @@ class AuditService:
                     "source": e["from_node_id"],
                     "target": e["to_node_id"],
                     "edge_type": e["edge_type"],
-                    "weight": e["weight"],
+                    "evidence": e["evidence"],
                 }
                 for e in edges
             ],
@@ -742,11 +793,29 @@ def _source_row(row: dict[str, Any]) -> dict[str, Any]:
         "quality_score": round_or_none(row["quality_score"]),
         "relevance_score": round_or_none(row["relevance_score"]),
         "drop_reason": row["drop_reason"] if not row["passed"] else None,
+        "source_tier": row.get("source_tier"),
+        # Identity. NULL on every row written before migration 025 — those
+        # builds genuinely did not record a DOI, and a backfilled guess would be
+        # a fabrication in the provenance record.
+        "doi": row.get("doi"),
+        "arxiv_id": row.get("arxiv_id"),
+        "identifiers": decode_json_field(row.get("identifiers"), None),
+        # How much of the source was actually read, and how it was obtained.
+        "full_text_method": row.get("full_text_method"),
+        "text_chars": row.get("text_chars"),
+        # Whose verdict this row records, and what a second opinion changed.
         "validator_model": row["validator_model"],
+        "review_model": row.get("review_model"),
+        "first_pass_quality": round_or_none(row.get("first_pass_quality")),
+        "first_pass_relevance": round_or_none(row.get("first_pass_relevance")),
+        "reviewed": bool(row.get("review_model")),
         "rubric_version": row["rubric_version"],
         "discovered_via": row["discovered_via"],
         "discovery_method": method,
         "gap_filled_for_concept": gapfill_concept,
+        # Which accepted sources' citations led here — the reference trail, for
+        # sources snowballing found.
+        "snowball_seed_urls": decode_json_field(row.get("snowball_seed_urls"), []),
         "covered_concepts": decode_json_field(row.get("covered_concepts"), []),
         "key_claims": decode_json_field(row.get("key_claims"), []),
         "passage_count": int(row.get("chunk_count") or 0),
@@ -845,6 +914,117 @@ def _retrieve_stage(funnel: DiscoveryFunnel) -> dict[str, Any]:
     }
 
 
+def _discovery_block(
+    funnel: DiscoveryFunnel | None,
+    build_summary: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """How many search rounds ran, what each found, and why the search stopped.
+
+    Two records, deliberately not reconciled. ``experts.build_summary`` is
+    written by the build itself and survives event pruning; the per-round
+    numbers come from the event log and may be absent. Where both exist they
+    should agree, and showing both is what makes a disagreement visible.
+
+    The stop reason is the part that matters. "This corpus has 34 sources" is
+    not a claim anyone can check; "the search met its coverage targets after two
+    rounds", or "it stopped at the discovery budget with two concepts still
+    short", both are.
+    """
+    if funnel is None and not build_summary:
+        return {
+            "rounds_run": None,
+            "unavailable_reason": (
+                "Neither a retained build event log nor a stored build summary "
+                "exists for this expert. Experts built before the discovery loop "
+                "shipped ran a single search pass followed by one gap-fill round; "
+                "see the gap_fill block."
+            ),
+        }
+
+    summary = build_summary or {}
+    rounds = funnel.rounds if funnel else []
+    stop_reason = (funnel.stop_reason if funnel else None) or summary.get("stop_reason")
+    coverage = summary.get("coverage") or {}
+
+    return {
+        "rounds_run": summary.get("rounds") or (len(rounds) or None),
+        "stop_reason": stop_reason,
+        "stop_reason_meaning": STOP_REASONS.get(str(stop_reason)) if stop_reason else None,
+        "rubric_version": summary.get("rubric_version"),
+        "budget": {
+            "discovery_budget_usd": _first_number(
+                summary.get("budget_usd"),
+                funnel.discovery_budget_usd if funnel else None,
+            ),
+            "metered_spend_at_stop_usd": _first_number(
+                summary.get("spent_usd"),
+                funnel.discovery_spent_usd if funnel else None,
+            ),
+            "estimated_ingest_usd": summary.get("estimated_ingest_usd"),
+            "note": (
+                "The discovery budget is a soft target the search spends towards, "
+                "not the build's hard spend cap. estimated_ingest_usd is a "
+                "forecast made at fetch time, not a measurement — compare it "
+                "with the actual cost in build/usage."
+            ),
+        },
+        "coverage_targets": (funnel.coverage_targets if funnel else None)
+        or coverage.get("target"),
+        "coverage_met": coverage.get("met"),
+        "final_coverage": (funnel.final_coverage if funnel else [])
+        or coverage.get("concepts", []),
+        "duplicates_removed": {
+            "by_identifier": funnel.identity_duplicates_removed if funnel else None,
+            "by_url": funnel.url_duplicates_removed if funnel else None,
+            "already_seen_in_an_earlier_round": (
+                funnel.already_seen_skipped if funnel else None
+            ),
+            "by_content_fingerprint": (
+                funnel.content_duplicates_removed if funnel else None
+            ),
+            "note": (
+                "Removed as duplicates rather than judged. By identifier is "
+                "certain (a shared DOI, arXiv id, PMID or PMCID); by URL is "
+                "near-certain; by content fingerprint compares the fetched text "
+                "and is the only one of the three that can be wrong — those "
+                "sources appear in the ledger with drop_reason 'duplicate of …'."
+            ),
+        },
+        "rounds": [
+            {
+                "round": r.round,
+                "targeted_concepts": r.weakest_concepts,
+                "queries": r.feedback_queries,
+                "candidates_identified": r.candidates_identified,
+                "screened_at_triage": r.screened_at_triage,
+                "passed_triage": r.passed_triage,
+                "retrieved_full_text": r.fetched_full_text,
+                "snowballed_candidates": r.snowballed,
+                "accepted": r.validated_passed,
+                "rejected": r.validated_dropped,
+                "acceptance_rate": r.acceptance_rate,
+            }
+            for r in rounds
+        ],
+        "note": (
+            "Round 0 searches the research plan's own queries. Every later round "
+            "reads the corpus that exists: the concepts furthest from target are "
+            "re-searched using the vocabulary the accepted sources actually use, "
+            "and the accepted scholarly sources are followed through their "
+            "citations in both directions. The plan's key concepts are never "
+            "rewritten between rounds."
+        ),
+    }
+
+
+def _first_number(*values: Any) -> float | None:
+    """The first value that is actually a number. Zero is a number."""
+    for value in values:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return float(value)
+    return None
+
+
 def _gapfill_block(funnel: DiscoveryFunnel | None) -> dict[str, Any]:
     if funnel is None or funnel.gapfill_attempted is None:
         return {
@@ -853,6 +1033,21 @@ def _gapfill_block(funnel: DiscoveryFunnel | None) -> dict[str, Any]:
                 "Gap-fill is recorded in the build event log, which is not "
                 "retained for this expert. Whether a concept was gap-filled is "
                 "still visible per source via discovered_via = 'gapfill:<concept>'."
+            ),
+        }
+    if funnel.rounds:
+        # A loop build never ran the old single gap-fill round, and reporting
+        # "attempted: false" without saying why would read as "nothing was done
+        # about the gaps" when in fact every later round *was* the gap-fill.
+        return {
+            "attempted": False,
+            "superseded_by": "discovery",
+            "note": (
+                "This build ran the discovery loop, which replaced the single "
+                "gap-fill round: every round after the first re-searches the "
+                "concepts furthest from their coverage target. See the "
+                "`discovery` block for what each round did and why the search "
+                "stopped."
             ),
         }
     return {
@@ -1091,7 +1286,7 @@ def _contradictions_not_computed(
         ),
         "summary": {
             "contradictions": None,
-            "concepts_involved": None,
+            "claims_involved": None,
             "relationships_total": None,
             "share_of_relationships": None,
             "cross_source_on_page": None,
@@ -1100,8 +1295,8 @@ def _contradictions_not_computed(
         },
         "relationship_mix": [],
         "note": (
-            "A contradiction is an edge a language model extracted while reading "
-            "the corpus, between two concept nodes."
+            "A contradiction is a judgement a language model made between two "
+            "claims the corpus makes, with the point in dispute stated."
         ),
         "page": {
             "limit": limit,
@@ -1149,10 +1344,18 @@ def _contradiction_item(
     else:
         kind = "cross_source"
 
+    properties = decode_json_field(edge.get("properties"), None) or {}
     return {
         "edge_id": edge["edge_id"],
-        "weight": round_or_none(edge["weight"], 3),
-        "properties": decode_json_field(edge.get("properties"), None),
+        # How many distinct sources stand behind the two sides' passages. Not a
+        # confidence: the model's "weight" it replaces was one in everything but
+        # name, and sat above 0.8 three quarters of the time.
+        "evidence": edge["evidence"],
+        # The sentence saying what is disputed, in the subject's terms. Required
+        # at ingest, so it is present on everything extracted since migration
+        # 024 and absent on older edges — which is why it can be null.
+        "point": properties.get("point"),
+        "properties": properties or None,
         "kind": kind,
         "shared_source_ids": shared,
         "side_a": a,

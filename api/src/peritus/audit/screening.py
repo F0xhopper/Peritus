@@ -48,9 +48,11 @@ UNPERSISTED: dict[str, str] = {
         "stage only."
     ),
     "gapfill_candidates_identified": (
-        "The gap-fill round searches and fetches directly, bypassing the "
-        "instrumented triage path, so it emits no per-fetcher candidate counts — "
-        "only how many of its results survived validation."
+        "Applies to builds that ran the old single gap-fill round, which searched "
+        "and fetched directly and bypassed the instrumented triage path, so it "
+        "emitted no per-fetcher candidate counts. Builds that ran the discovery "
+        "loop route every round through triage and do report these counts, per "
+        "round, under `rounds`."
     ),
 }
 
@@ -66,6 +68,15 @@ _EV_VALIDATE_DONE = "validate_done"
 _EV_COVERAGE_GAPS = "coverage_gaps"
 _EV_GAPFILL_DONE = "gapfill_done"
 _EV_STAGE = "stage"
+# The discovery loop (see experts/builder.py). Builds predating it emit none of
+# these, which is why every field derived from them is optional and why the
+# gap-fill fields above are still read: an expert built last month must still
+# render its funnel.
+_EV_ROUND_STARTED = "round_started"
+_EV_FEEDBACK_QUERIES = "feedback_queries"
+_EV_DEDUP_DONE = "dedup_done"
+_EV_COVERAGE_REPORT = "coverage_report"
+_EV_DISCOVERY_DONE = "discovery_done"
 
 
 @dataclass
@@ -80,8 +91,47 @@ class FetcherIdentified:
 
 
 @dataclass
+class RoundSummary:
+    """One discovery round's own funnel.
+
+    A build that iterates has to report per round or not at all: totals alone
+    cannot distinguish "we searched once and found 40" from "we searched four
+    times and found ten each", and those are different corpora.
+    """
+
+    round: int
+    candidates_identified: int | None = None
+    screened_at_triage: int | None = None
+    passed_triage: int | None = None
+    fetched_full_text: int | None = None
+    validated_passed: int | None = None
+    validated_dropped: int | None = None
+    identity_duplicates: int | None = None
+    url_duplicates: int | None = None
+    already_seen: int | None = None
+    content_duplicates: int | None = None
+    snowballed: int | None = None
+    weakest_concepts: list[str] = field(default_factory=list)
+    feedback_queries: list[str] = field(default_factory=list)
+
+    @property
+    def acceptance_rate(self) -> float | None:
+        if not self.fetched_full_text or self.validated_passed is None:
+            return None
+        return round(self.validated_passed / self.fetched_full_text, 4)
+
+
+@dataclass
 class DiscoveryFunnel:
     """Pre-validation funnel, reconstructed from one build attempt's event log."""
+
+    # ── the discovery loop, when the build ran one ───────────────────────────
+    rounds: list[RoundSummary] = field(default_factory=list)
+    stop_reason: str | None = None
+    discovery_spent_usd: float | None = None
+    discovery_budget_usd: float | None = None
+    final_coverage: list[dict[str, Any]] = field(default_factory=list)
+    coverage_targets: dict[str, Any] | None = None
 
     fetchers_planned: list[str] = field(default_factory=list)
     fetchers_active: list[str] = field(default_factory=list)
@@ -95,6 +145,13 @@ class DiscoveryFunnel:
     fetched_full_text: int | None = None
     ranked_not_fetched: int | None = None
     snowballed_added: int | None = None
+    # Removed as duplicates rather than judged, split by the evidence used.
+    # Identity is certain (a shared DOI/arXiv id); URL is near-certain; content
+    # is a text fingerprint and is the only one of the three that can be wrong.
+    identity_duplicates_removed: int | None = None
+    url_duplicates_removed: int | None = None
+    already_seen_skipped: int | None = None
+    content_duplicates_removed: int | None = None
     gapfill_attempted: bool | None = None
     gapfill_concepts: list[str] = field(default_factory=list)
     gapfill_accepted: int | None = None
@@ -141,6 +198,79 @@ def _int(payload: dict[str, Any] | None, key: str) -> int | None:
     return int(value)
 
 
+def _round_of(ev: BuildEventRow) -> int:
+    """Which discovery round an event belongs to. 0 for a build with no loop."""
+    value = ev.payload.get("round")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0
+    return int(value)
+
+
+def _sum(values: list[int | None]) -> int | None:
+    """Sum, or None when nothing was reported. Never turns absence into zero."""
+    present = [v for v in values if v is not None]
+    return sum(present) if present else None
+
+
+def _float(payload: dict[str, Any] | None, key: str) -> float | None:
+    if not payload:
+        return None
+    value = payload.get(key)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return round(float(value), 4)
+
+
+def _rounds(events: list[BuildEventRow]) -> list[RoundSummary]:
+    """One summary per discovery round, or an empty list for a pre-loop build.
+
+    A build that never ran the loop emits no ``round_started``, and returning
+    a single synthetic "round 0" for it would imply an iteration that did not
+    happen. The caller falls back to the flat counts in that case.
+    """
+    if not any(e.type == _EV_ROUND_STARTED for e in events):
+        return []
+
+    summaries: dict[int, RoundSummary] = {}
+
+    def _round(n: int) -> RoundSummary:
+        return summaries.setdefault(n, RoundSummary(round=n))
+
+    for ev in events:
+        n = _round_of(ev)
+        payload = ev.payload
+        if ev.type == _EV_ROUND_STARTED:
+            _round(n).weakest_concepts = _str_list(payload, "weakest")
+        elif ev.type == _EV_FEEDBACK_QUERIES:
+            _round(n).feedback_queries = _str_list(payload, "queries")
+        elif ev.type == _EV_FETCHER_DONE:
+            summary = _round(n)
+            summary.candidates_identified = (
+                summary.candidates_identified or 0
+            ) + (_int(payload, "count") or 0)
+        elif ev.type == _EV_DEDUP_DONE:
+            summary = _round(n)
+            summary.identity_duplicates = _int(payload, "identity_merged")
+            summary.url_duplicates = _int(payload, "url_merged")
+            summary.already_seen = _int(payload, "seen_skipped")
+        elif ev.type == _EV_TRIAGE_DONE:
+            summary = _round(n)
+            summary.screened_at_triage = _int(payload, "candidates")
+            summary.passed_triage = _int(payload, "ranked")
+        elif ev.type == _EV_FETCH_DONE:
+            summary = _round(n)
+            summary.fetched_full_text = _int(payload, "fetched")
+            summary.content_duplicates = _int(payload, "content_duplicates")
+        elif ev.type == _EV_SNOWBALL_DONE:
+            _round(n).snowballed = _int(payload, "added")
+        elif ev.type == _EV_VALIDATE_DONE:
+            summary = _round(n)
+            summary.validated_passed = _int(payload, "passed")
+            summary.validated_dropped = _int(payload, "dropped")
+
+    return [summaries[n] for n in sorted(summaries)]
+
+
 def _str_list(payload: dict[str, Any] | None, key: str) -> list[str]:
     if not payload:
         return []
@@ -174,19 +304,36 @@ def derive_discovery_funnel(events: list[BuildEventRow]) -> DiscoveryFunnel | No
     funnel.fetchers_planned = _str_list(discovery, "fetchers")
     funnel.fetchers_active = _str_list(discovery, "active")
 
+    # Per-fetcher counts are summed across rounds: the same fetcher runs in
+    # several of them, and reporting only its last round would understate what
+    # it contributed.
+    merged: dict[str, dict[str, Any]] = {}
     for ev in fetcher_events:
         payload = ev.payload
         name = payload.get("name")
         if not isinstance(name, str):
             continue
+        entry = merged.setdefault(
+            name,
+            {"count": 0, "queries": 0, "skipped": True, "reason": None},
+        )
+        entry["count"] += _int(payload, "count") or 0
+        entry["queries"] += _int(payload, "queries") or 0
+        # Skipped only if it was skipped in every round it ran in; a fetcher
+        # that produced nothing once and plenty later was not skipped.
+        entry["skipped"] = entry["skipped"] and bool(payload.get("skipped"))
         reason = payload.get("reason")
+        if isinstance(reason, str) and reason:
+            entry["reason"] = reason
+
+    for name, entry in merged.items():
         funnel.identified_by_fetcher.append(
             FetcherIdentified(
                 name=name,
-                candidates=_int(payload, "count") or 0,
-                queries=_int(payload, "queries"),
-                skipped=bool(payload.get("skipped")),
-                skip_reason=reason if isinstance(reason, str) and reason else None,
+                candidates=entry["count"],
+                queries=entry["queries"] or None,
+                skipped=entry["skipped"],
+                skip_reason=entry["reason"],
             )
         )
     funnel.identified_by_fetcher.sort(key=lambda f: (-f.candidates, f.name))
@@ -194,8 +341,41 @@ def derive_discovery_funnel(events: list[BuildEventRow]) -> DiscoveryFunnel | No
     if fetcher_events:
         funnel.identified_total = sum(f.candidates for f in funnel.identified_by_fetcher)
 
-    funnel.screened_at_triage = _int(triage, "candidates")
-    funnel.passed_triage = _int(triage, "ranked")
+    funnel.rounds = _rounds(events)
+    discovery_done = _last(events, _EV_DISCOVERY_DONE)
+    if discovery_done is not None:
+        reason = discovery_done.get("stop_reason")
+        funnel.stop_reason = reason if isinstance(reason, str) else None
+        funnel.discovery_spent_usd = _float(discovery_done, "spent_usd")
+        funnel.discovery_budget_usd = _float(discovery_done, "budget_usd")
+    coverage = _last(events, _EV_COVERAGE_REPORT)
+    if coverage is not None:
+        concepts = coverage.get("concepts")
+        funnel.final_coverage = [c for c in concepts or [] if isinstance(c, dict)]
+        targets = coverage.get("target")
+        funnel.coverage_targets = targets if isinstance(targets, dict) else None
+    round_started = _last(events, _EV_ROUND_STARTED)
+    if funnel.coverage_targets is None and round_started is not None:
+        targets = round_started.get("targets")
+        funnel.coverage_targets = targets if isinstance(targets, dict) else None
+
+    if funnel.rounds:
+        # A loop build reports totals as the sum over its rounds. Reading only
+        # the last `triage_done` would report round 3's candidate count as the
+        # build's, which is both wrong and flattering in the wrong direction.
+        funnel.screened_at_triage = _sum([r.screened_at_triage for r in funnel.rounds])
+        funnel.passed_triage = _sum([r.passed_triage for r in funnel.rounds])
+        funnel.identity_duplicates_removed = _sum(
+            [r.identity_duplicates for r in funnel.rounds]
+        )
+        funnel.url_duplicates_removed = _sum([r.url_duplicates for r in funnel.rounds])
+        funnel.already_seen_skipped = _sum([r.already_seen for r in funnel.rounds])
+        funnel.content_duplicates_removed = _sum(
+            [r.content_duplicates for r in funnel.rounds]
+        )
+    else:
+        funnel.screened_at_triage = _int(triage, "candidates")
+        funnel.passed_triage = _int(triage, "ranked")
     funnel.fetch_budget = _int(triage, "budget") or _int(fetch, "budget")
 
     # Fetchers de-duplicate by URL within themselves; the pooled list is
@@ -209,14 +389,20 @@ def derive_discovery_funnel(events: list[BuildEventRow]) -> DiscoveryFunnel | No
         excluded = funnel.screened_at_triage - funnel.passed_triage
         funnel.excluded_at_triage = excluded if excluded >= 0 else None
 
-    funnel.fetched_full_text = _int(fetch, "fetched")
+    funnel.fetched_full_text = (
+        _sum([r.fetched_full_text for r in funnel.rounds])
+        if funnel.rounds
+        else _int(fetch, "fetched")
+    )
     if funnel.passed_triage is not None and funnel.fetched_full_text is not None:
         remainder = funnel.passed_triage - funnel.fetched_full_text
         funnel.ranked_not_fetched = remainder if remainder >= 0 else None
 
-    snowball = _last(events, _EV_SNOWBALL_DONE)
-    if snowball is not None:
-        funnel.snowballed_added = _int(snowball, "added")
+    snowball_events = [e for e in events if e.type == _EV_SNOWBALL_DONE]
+    if snowball_events:
+        funnel.snowballed_added = _sum(
+            [_int(e.payload, "added") for e in snowball_events]
+        )
     elif fetch is not None:
         # The pipeline emits snowball_done only when it added something, and it
         # runs immediately after fetching. A completed fetch stage with no
@@ -237,8 +423,16 @@ def derive_discovery_funnel(events: list[BuildEventRow]) -> DiscoveryFunnel | No
         funnel.gapfill_attempted = False
         funnel.gapfill_accepted = 0
 
-    funnel.reported_validated_passed = _int(validate, "passed")
-    funnel.reported_validated_dropped = _int(validate, "dropped")
+    if funnel.rounds:
+        funnel.reported_validated_passed = _sum(
+            [r.validated_passed for r in funnel.rounds]
+        )
+        funnel.reported_validated_dropped = _sum(
+            [r.validated_dropped for r in funnel.rounds]
+        )
+    else:
+        funnel.reported_validated_passed = _int(validate, "passed")
+        funnel.reported_validated_dropped = _int(validate, "dropped")
     funnel.stage_timings = _stage_timings(events)
     return funnel
 

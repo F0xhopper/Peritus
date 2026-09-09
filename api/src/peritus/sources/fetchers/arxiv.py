@@ -8,7 +8,13 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.domain import (
+    Identifiers,
+    RawSource,
+    SourceCandidate,
+    SourceType,
+    resolved_identifiers,
+)
 
 logger = get_logger(__name__)
 
@@ -32,39 +38,36 @@ class ArxivFetcher:
             logger.warning("ArXiv search failed for %r: %s", query, exc)
             return []
 
-        return [
-            SourceCandidate(
-                source_type=SourceType.ARXIV,
-                url=paper.entry_id,
-                title=paper.title,
-                author=", ".join(str(a) for a in paper.authors[:3]),
-                snippet=paper.summary,
-                metadata={
-                    "arxiv_id": _extract_id(paper.entry_id),
-                    "published": str(paper.published),
-                    "categories": paper.categories,
-                    "summary": paper.summary,
-                },
-            )
-            for paper in papers
-        ]
+        return [_to_candidate(paper) for paper in papers]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        arxiv_id = candidate.metadata["arxiv_id"]
-        try:
-            async with httpx.AsyncClient(
-                timeout=30, headers=HEADERS, follow_redirects=True
-            ) as http:
-                full_text = await fetch_ar5iv(http, arxiv_id)
-        except Exception as exc:
-            logger.warning("ar5iv fetch failed for %r: %s", arxiv_id, exc)
-            full_text = ""
+        # Through the shared resolver, which adds the PDF-OCR fallback: ar5iv
+        # cannot render every paper, and a render failure used to cost the whole
+        # body when the PDF was one request away.
+        from peritus.sources.fulltext import FullTextHints, resolve_full_text
 
+        resolved = await resolve_full_text(
+            resolved_identifiers(candidate), FullTextHints.from_candidate(candidate)
+        )
+        full_text = resolved.text if resolved else ""
+
+        abstract = candidate.metadata.get("summary") or candidate.snippet
         has_full = len(full_text) >= MIN_FULL_TEXT
-        text = full_text[:MAX_FULL_TEXT] if has_full \
-            else f"{candidate.title}\n\n{candidate.metadata.get('summary', candidate.snippet)}"
+        # Prepend title + abstract even to a full text, matching pubmed and
+        # openalex. ar5iv renders the abstract inconsistently, and it is the
+        # densest statement of the paper's claim — it belongs at the head of the
+        # text, which is the part the validator preview always sees.
+        text = (
+            f"{candidate.title}\n\n{abstract}\n\n{full_text}"[:MAX_FULL_TEXT]
+            if has_full
+            else f"{candidate.title}\n\n{abstract}"
+        )
         metadata = {k: v for k, v in candidate.metadata.items() if k != "summary"}
         metadata["full_text"] = has_full
+        metadata.setdefault("abstract", abstract)
+        metadata["full_text_method"] = (
+            resolved.method if resolved is not None and has_full else "abstract"
+        )
         return RawSource(
             source_type=SourceType.ARXIV,
             url=candidate.url,
@@ -72,7 +75,34 @@ class ArxivFetcher:
             author=candidate.author,
             text=text,
             metadata=metadata,
+            identifiers=candidate.identifiers,
         )
+
+
+def _to_candidate(paper) -> SourceCandidate:
+    """One arXiv API result → a triage candidate carrying its identity.
+
+    ``paper.doi`` is populated for preprints the authors later published
+    elsewhere; capturing it is what lets the same work found through OpenAlex or
+    through a DOI-only citation de-duplicate against this one.
+    """
+    arxiv_id = _extract_id(paper.entry_id)
+    doi = getattr(paper, "doi", None)
+    return SourceCandidate(
+        source_type=SourceType.ARXIV,
+        url=paper.entry_id,
+        title=paper.title,
+        author=", ".join(str(a) for a in paper.authors[:3]),
+        snippet=paper.summary,
+        metadata={
+            "arxiv_id": arxiv_id,
+            "doi": doi,
+            "published": str(paper.published),
+            "categories": paper.categories,
+            "summary": paper.summary,
+        },
+        identifiers=Identifiers.build(arxiv_id=arxiv_id, doi=doi),
+    )
 
 
 def _extract_id(entry_id: str) -> str:

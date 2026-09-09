@@ -6,11 +6,12 @@ from peritus.experts.builder import (
     _MAX_QUERIES_PER_FETCHER,
     _MIN_RESULTS_PER_QUERY,
     ExpertBuilder,
-    _compute_coverage,
     _normalise_plan,
     _route_must_have_works,
     _search_breadth,
+    _type_caps,
 )
+from peritus.experts.coverage import CoverageTarget, compute_coverage
 from peritus.sources.domain import RawSource, SourceType, ValidatedSource
 from peritus.sources.fetchers.gutenberg import _title_matches
 from peritus.sources.fetchers.thought_leaders import _mentions_leader
@@ -133,13 +134,20 @@ def test_search_breadth_tolerates_zero_queries():
 
 # ── coverage ──────────────────────────────────────────────────────────────────
 
+_TARGET = CoverageTarget(
+    min_sources=1, min_source_types=1, require_non_tertiary=False, max_rounds=1
+)
+
+
 def test_compute_coverage_counts_only_known_concepts():
     passed = [
         _validated(["virtue", "logos"]),
         _validated(["virtue"]),
         _validated(["hallucinated concept"]),
     ]
-    coverage = _compute_coverage(["virtue", "logos", "apatheia"], passed)
+    coverage = compute_coverage(
+        ["virtue", "logos", "apatheia"], passed, _TARGET
+    ).counts()
     assert coverage == {"virtue": 2, "logos": 1, "apatheia": 0}
 
 
@@ -185,3 +193,55 @@ def test_mentions_leader_found_in_title_or_text():
 def test_mentions_leader_short_surname_passes_through():
     # Too short to test meaningfully — defer to the validator.
     assert _mentions_leader("Xi", "anything", "anything")
+
+
+# ── per-type caps ────────────────────────────────────────────────────────────
+#
+# The cap's job is to stop one source type dominating the corpus. It is NOT
+# meant to decide how large the corpus is — that is the discovery budget's job,
+# and a cap that does not scale with the budget silently takes the decision
+# away from it. On a live STANDARD build four of six productive types capped out
+# at 43 sources while the count ceiling (60) and the money ($1.58 of $3.00) were
+# both untouched.
+
+
+def _fetchers(**weights):
+    from peritus.experts.builder import ExpertBuilder
+
+    return ExpertBuilder.__new__(ExpertBuilder)._build_fetchers(1.0, None, weights)
+
+
+def test_caps_shape_the_mix_and_never_the_size():
+    """Summing to more than the budget is the property that matters: the caps
+    can constrain what the corpus is made of, and can never be what stops it
+    growing."""
+    for budget in (15, 30, 60, 120):
+        caps = _type_caps(_fetchers(), budget)
+        assert sum(caps.values()) > budget
+
+
+def test_a_cap_scales_with_the_budget():
+    small = _type_caps(_fetchers(), 30)
+    large = _type_caps(_fetchers(), 120)
+    assert all(large[t] > small[t] for t in small), (
+        "a fixed cap becomes the real limit as soon as the budget grows past it"
+    )
+
+
+def test_a_heavily_weighted_fetcher_gets_a_larger_share():
+    """The plan's weights decide how much of the search each type gets; the cap
+    follows the same weighting rather than contradicting it."""
+    caps = _type_caps(_fetchers(openalex=2.0), 60)
+    assert caps[SourceType.OPENALEX] > caps[SourceType.WIKIPEDIA]
+
+
+def test_no_type_may_take_the_whole_corpus():
+    caps = _type_caps(_fetchers(), 60)
+    assert all(cap < 60 for cap in caps.values())
+
+
+def test_a_small_build_still_lets_a_small_fetcher_contribute():
+    """Without a floor, a low-quota fetcher on a lite build is capped at one or
+    two sources, which is indistinguishable from switching it off."""
+    caps = _type_caps(_fetchers(), 15)
+    assert min(caps.values()) >= 4

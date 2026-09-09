@@ -18,7 +18,10 @@ from peritus.billing.domain import (
 from peritus.billing.metering import BuildMeter, Stage, stage_for_event
 from peritus.billing.pricing import (
     BATCH_MULTIPLIER,
+    OCR_USD_PER_PAGE,
     embedding_cost_usd,
+    estimated_ingest_cost_usd,
+    estimated_ocr_pages,
     message_cost_usd,
     price_for,
 )
@@ -221,3 +224,60 @@ def test_restore_puts_rows_back_after_a_failed_flush():
     rows = meter.drain()
     meter.restore(rows)
     assert len(meter.drain()) == len(rows)
+
+
+# ── the ingest estimator ─────────────────────────────────────────────────────
+#
+# The discovery loop decides what it can afford *before* any of it is ingested,
+# so the estimator has to be right about the shape of the cost even while its
+# constants are still uncalibrated. These tests pin the shape.
+
+
+def test_cost_scales_with_characters_not_with_source_count():
+    """The whole reason a budget in dollars replaces a budget in sources: a
+    120,000-character monograph and a 2,000-character blog post are one unit
+    each to a count, and two orders of magnitude apart in what they cost."""
+    small = estimated_ingest_cost_usd(2_000)
+    large = estimated_ingest_cost_usd(120_000)
+    assert large > small * 20
+
+
+def test_a_batched_build_is_forecast_at_the_batched_price():
+    """A forecast that ignored batching would stop a background build at half
+    the corpus it can actually afford."""
+    live = estimated_ingest_cost_usd(50_000)
+    batched = estimated_ingest_cost_usd(50_000, batch=True)
+    assert batched < live
+    # Embeddings are not batched, so the saving is less than the full 50%.
+    assert live * Decimal("0.5") < batched < live
+
+
+def test_ocr_is_added_on_top_of_the_text_cost():
+    text_only = estimated_ingest_cost_usd(30_000)
+    with_ocr = estimated_ingest_cost_usd(30_000, ocr_pages=10)
+    assert with_ocr == text_only + OCR_USD_PER_PAGE * 10
+
+
+def test_an_empty_source_costs_nothing_but_its_ocr():
+    assert estimated_ingest_cost_usd(0) == Decimal(0)
+    assert estimated_ingest_cost_usd(0, ocr_pages=3) == OCR_USD_PER_PAGE * 3
+
+
+def test_page_estimates_round_up_so_a_partial_page_is_still_billed():
+    assert estimated_ocr_pages(0) == 0
+    assert estimated_ocr_pages(1) == 1
+    assert estimated_ocr_pages(3_000) == 1
+    assert estimated_ocr_pages(3_001) == 2
+
+
+def test_a_pro_discovery_budget_buys_a_real_corpus_under_its_cap():
+    """The sizing check that matters: PRO's $7.00 discovery budget has to buy
+    enough full-length papers to be worth having, and still leave room under the
+    $12.00 cap for graph extraction, reconciliation and persona."""
+    from peritus.billing.domain import discovery_budget_usd
+    from peritus.experts.domain import ExpertTier, tier_economics
+
+    budget = Decimal(str(discovery_budget_usd(ExpertTier.PRO)))
+    per_paper = estimated_ingest_cost_usd(120_000)
+    assert budget / per_paper >= 30, "a PRO corpus should afford at least 30 full papers"
+    assert budget < Decimal(str(tier_economics(ExpertTier.PRO).spend_cap_usd))

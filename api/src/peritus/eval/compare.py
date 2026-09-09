@@ -190,7 +190,8 @@ async def compare(expert_name: str, gold: list[GoldQuestion]) -> ComparisonRepor
         after_answer = await _compose(
             build_cached_system(expert.persona_style, expert.topic),
             build_user_message(
-                gq.question, ctx.context_block, ctx.plan, ctx.has_contradiction
+                gq.question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+                ctx.contradiction_points,
             ),
             expert,
         )

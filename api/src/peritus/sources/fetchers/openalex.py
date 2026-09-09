@@ -8,10 +8,11 @@ returns title, authors, abstract, venue, citation counts and open-access
 locations from a single JSON call, which fits the cheap-`search()` half of the
 Fetcher contract exactly.
 
-fetch() climbs down a ladder: open-access PDF through Mistral OCR when a key is
-available, then the open-access landing page as HTML, then title + abstract —
-the same degradation the pubmed fetcher uses, so a paywalled-but-relevant paper
-still contributes its densest paragraph instead of being lost.
+fetch() delegates to the shared full-text resolver (sources/fulltext.py), which
+climbs from structured full text down to an open-access PDF, a landing page and
+finally the abstract — so a biomedical work found here gets Europe PMC's free
+JATS rather than an OCR bill, and a paywalled-but-relevant paper still
+contributes its densest paragraph instead of being lost.
 """
 
 import re
@@ -20,7 +21,13 @@ import httpx
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.domain import (
+    Identifiers,
+    RawSource,
+    SourceCandidate,
+    SourceType,
+    resolved_identifiers,
+)
 
 logger = get_logger(__name__)
 
@@ -65,7 +72,12 @@ class OpenAlexFetcher:
         return [c for c in candidates if c is not None]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        full_text = await _fetch_open_access_text(candidate)
+        from peritus.sources.fulltext import FullTextHints, resolve_full_text
+
+        resolved = await resolve_full_text(
+            resolved_identifiers(candidate), FullTextHints.from_candidate(candidate)
+        )
+        full_text = resolved.text if resolved else ""
         abstract = candidate.metadata.get("abstract") or candidate.snippet
 
         has_full = len(full_text) >= MIN_FULL_TEXT
@@ -80,6 +92,10 @@ class OpenAlexFetcher:
 
         metadata = {k: v for k, v in candidate.metadata.items() if k != "abstract"}
         metadata["full_text"] = has_full
+        metadata["abstract"] = abstract
+        metadata["full_text_method"] = (
+            resolved.method if resolved is not None and has_full else "abstract"
+        )
         return RawSource(
             source_type=SOURCE_TYPE,
             url=candidate.url,
@@ -87,6 +103,7 @@ class OpenAlexFetcher:
             author=candidate.author,
             text=text,
             metadata=metadata,
+            identifiers=candidate.identifiers,
         )
 
 
@@ -129,6 +146,10 @@ def _to_candidate(work: dict) -> SourceCandidate | None:
         return None
 
     venue = ((primary.get("source") or {}).get("display_name")) or None
+    # OpenAlex mirrors the other registries' ids on every work it knows about,
+    # so a biomedical work found here arrives with the pmcid that unlocks free
+    # Europe PMC full text — see sources/fulltext.py.
+    ids = work.get("ids") or {}
     return SourceCandidate(
         source_type=SOURCE_TYPE,
         url=url,
@@ -144,8 +165,17 @@ def _to_candidate(work: dict) -> SourceCandidate | None:
             "work_type": work.get("type"),
             "oa_pdf_url": best_oa.get("pdf_url"),
             "oa_landing_url": best_oa.get("landing_page_url"),
+            "is_open_access": bool((work.get("open_access") or {}).get("is_oa")),
+            "pmid": ids.get("pmid"),
+            "pmcid": ids.get("pmcid"),
             "abstract": abstract,
         },
+        identifiers=Identifiers.build(
+            openalex_id=work.get("id"),
+            doi=doi_url,
+            pmid=_bare_registry_id(ids.get("pmid")),
+            pmcid=_bare_registry_id(ids.get("pmcid")),
+        ),
     )
 
 
@@ -178,37 +208,14 @@ def _authors(work: dict) -> str | None:
     return ", ".join(names[:3]) if names else None
 
 
+def _bare_registry_id(url: str | None) -> str | None:
+    """OpenAlex ships PMIDs and PMCIDs as resolver URLs; the tail is the id."""
+    if not url or not isinstance(url, str):
+        return None
+    return url.rstrip("/").rsplit("/", 1)[-1] or None
+
+
 def _bare_doi(doi_url: str | None) -> str | None:
     if not doi_url:
         return None
     return doi_url.removeprefix("https://doi.org/").removeprefix("http://doi.org/") or None
-
-
-async def _fetch_open_access_text(candidate: SourceCandidate) -> str:
-    """Best open-access full text available: OCR'd PDF, else landing-page HTML."""
-    pdf_url = candidate.metadata.get("oa_pdf_url")
-    if pdf_url and settings.MISTRAL_API_KEY:
-        try:
-            from peritus.infrastructure.pdf_parser import parse_pdf_url
-
-            text = await parse_pdf_url(pdf_url)
-            if len(text) >= MIN_FULL_TEXT:
-                return text
-        except Exception as exc:
-            logger.debug("OpenAlex OA PDF failed for %r: %s", pdf_url, exc)
-
-    landing = candidate.metadata.get("oa_landing_url")
-    if landing:
-        from peritus.sources.fetchers.web import _fetch_page
-
-        try:
-            async with httpx.AsyncClient(
-                timeout=20, headers=HEADERS, follow_redirects=True
-            ) as http:
-                text, _title = await _fetch_page(http, landing)
-            if len(text) >= MIN_FULL_TEXT:
-                return text
-        except Exception as exc:
-            logger.debug("OpenAlex OA landing fetch failed for %r: %s", landing, exc)
-
-    return ""

@@ -11,7 +11,7 @@ use tokio::sync::{mpsc, Notify};
 use futures_util::StreamExt;
 
 use crate::api::client::ApiClient;
-use crate::api::types::BuildEvent;
+use crate::api::types::{stop_reason_text, BuildEvent};
 use crate::tui::theme::Theme;
 use crate::tui::widgets::spinner;
 
@@ -62,14 +62,28 @@ pub struct BuildScreen {
     stage_name: String,
     // Discovery
     fetchers: indexmap::IndexMap<String, FetcherState>,
-    triage: Option<(u64, u64)>,  // (candidates, ranked)
-    fetched: Option<(u64, u64)>, // (fetched, budget)
+    triage: Option<(u64, u64)>,  // (candidates, ranked), summed over rounds
+    fetched: Option<(u64, u64)>, // (fetched, budget), summed over rounds
     snowball_added: Option<u64>,
+    /// Which discovery round is running. Discovery iterates, and the funnel
+    /// reports the corpus rather than the last round, so the running totals
+    /// below carry what earlier rounds contributed.
+    round: u64,
+    fetched_before_round: u64,
+    fetch_budget_total: u64,
+    /// (metered spend, discovery budget) in USD, as of the last round boundary.
+    /// The soft target the search spends towards — not the build's hard cap.
+    discovery_budget: Option<(f64, f64)>,
     // Plan
     key_concepts: Vec<String>,
     // Validation
     validate_passed: u64,
     validate_dropped: u64,
+    /// Totals as of the end of the last completed round. Per-source events
+    /// increment the live counters during a round; the round's `validate_done`
+    /// is authoritative and replaces them, which needs a baseline to add to.
+    validated_passed_before_round: u64,
+    validated_dropped_before_round: u64,
     validate_total: u64,
     validate_last: Option<(String, bool, f64, f64)>, // (title, passed, q, r)
     accepted_q_sum: f64,
@@ -228,9 +242,15 @@ impl BuildScreen {
             triage: None,
             fetched: None,
             snowball_added: None,
+            round: 0,
+            fetched_before_round: 0,
+            fetch_budget_total: 0,
+            discovery_budget: None,
             key_concepts: vec![],
             validate_passed: 0,
             validate_dropped: 0,
+            validated_passed_before_round: 0,
+            validated_dropped_before_round: 0,
             validate_total: 0,
             validate_last: None,
             accepted_q_sum: 0.0,
@@ -332,9 +352,15 @@ impl BuildScreen {
         self.triage = None;
         self.fetched = None;
         self.snowball_added = None;
+        self.round = 0;
+        self.fetched_before_round = 0;
+        self.fetch_budget_total = 0;
+        self.discovery_budget = None;
         self.key_concepts.clear();
         self.validate_passed = 0;
         self.validate_dropped = 0;
+        self.validated_passed_before_round = 0;
+        self.validated_dropped_before_round = 0;
         self.validate_total = 0;
         self.validate_last = None;
         self.accepted_q_sum = 0.0;
@@ -443,40 +469,173 @@ impl BuildScreen {
                     for f in active   { self.fetchers.insert(f.clone(), FetcherState::Fetching); }
                     self.log(format!("Starting {} source fetchers", active.len()), LogLevel::Info);
                 }
-                BuildEvent::FetcherDone { name, count, skipped, reason } => {
-                    let state = if *skipped { FetcherState::Skipped } else { FetcherState::Done(*count) };
+                // ── the discovery loop ───────────────────────────────────
+                // Round 0 searches the plan; later rounds target the concepts
+                // furthest from their coverage target. Counters ACCUMULATE
+                // across rounds — assigning each round's totals would make a
+                // three-round build report only its last round's numbers.
+                BuildEvent::RoundStarted { round, budget, budget_usd, weakest } => {
+                    self.round = *round;
+                    if *round == 0 {
+                        self.log(
+                            format!("Round 0 — searching the plan (budget {} sources, ${:.2})", budget, budget_usd),
+                            LogLevel::Info,
+                        );
+                    } else {
+                        let targets = if weakest.is_empty() {
+                            "remaining gaps".to_string()
+                        } else {
+                            weakest.join(", ")
+                        };
+                        self.log(format!("Round {} — targeting {}", round, targets), LogLevel::Info);
+                    }
+                }
+                BuildEvent::FeedbackQueries { round, concepts, queries } => {
+                    let _ = concepts; // named in the RoundStarted line above
+                    let shown: Vec<String> =
+                        queries.iter().take(3).map(|q| format!("\u{201c}{}\u{201d}", trunc(q, 48))).collect();
+                    let more = queries.len().saturating_sub(shown.len());
+                    let tail = if more > 0 { format!(", +{} more", more) } else { String::new() };
+                    self.log(
+                        format!("{}New queries from the corpus: {}{}", round_prefix(*round), shown.join(", "), tail),
+                        LogLevel::Info,
+                    );
+                }
+                BuildEvent::DedupDone { round, candidates, identity_merged, url_merged, seen_skipped, kept } => {
+                    let removed = identity_merged + url_merged + seen_skipped;
+                    if removed == 0 {
+                        self.log(
+                            format!("{}{} candidates, no duplicates", round_prefix(*round), candidates),
+                            LogLevel::Info,
+                        );
+                    } else {
+                        self.log(
+                            format!(
+                                "{}{} candidates → {} after {} duplicate(s): {} same work, {} same page, {} already seen",
+                                round_prefix(*round), candidates, kept, removed,
+                                identity_merged, url_merged, seen_skipped,
+                            ),
+                            LogLevel::Info,
+                        );
+                    }
+                }
+                BuildEvent::CoverageReport { round, met, concepts, spent_usd, budget_usd } => {
+                    if *budget_usd > 0.0 {
+                        self.discovery_budget = Some((*spent_usd, *budget_usd));
+                    }
+                    if *met {
+                        self.log(
+                            format!("{}Every key concept meets its target", round_prefix(*round)),
+                            LogLevel::Success,
+                        );
+                    } else {
+                        let short: Vec<String> = concepts
+                            .iter()
+                            .filter(|c| !c.met)
+                            .map(|c| format!("{} ({})", c.concept, c.sources))
+                            .collect();
+                        self.log(
+                            format!("{}Still short: {}", round_prefix(*round), short.join(", ")),
+                            LogLevel::Info,
+                        );
+                    }
+                }
+                BuildEvent::DiscoveryDone { rounds, stop_reason, accepted, rejected, spent_usd, budget_usd } => {
+                    if *budget_usd > 0.0 {
+                        self.discovery_budget = Some((*spent_usd, *budget_usd));
+                    }
+                    let spend = if *budget_usd > 0.0 {
+                        format!(" (${:.2} of a ${:.2} search budget)", spent_usd, budget_usd)
+                    } else {
+                        String::new()
+                    };
+                    self.log(
+                        format!(
+                            "Search finished after {} round(s) — {}. {} kept, {} rejected{}",
+                            rounds, stop_reason_text(stop_reason), accepted, rejected, spend,
+                        ),
+                        LogLevel::Success,
+                    );
+                }
+                BuildEvent::FetcherDone { name, count, skipped, reason, round } => {
+                    // Summed, not replaced: the same fetcher runs in several
+                    // rounds and the funnel should show what it contributed in
+                    // total, not what it found last.
+                    let previous = match self.fetchers.get(name) {
+                        Some(FetcherState::Done(n)) => *n,
+                        _ => 0,
+                    };
+                    let state = if *skipped && previous == 0 {
+                        FetcherState::Skipped
+                    } else {
+                        FetcherState::Done(previous + count)
+                    };
                     self.fetchers.insert(name.clone(), state);
                     if *skipped {
                         let why = if reason.is_empty() { String::new() } else { format!(" ({})", reason) };
-                        self.log(format!("{}: skipped{}", name, why), LogLevel::Info);
+                        self.log(format!("{}{}: skipped{}", round_prefix(*round), name, why), LogLevel::Info);
                     } else {
-                        self.log(format!("{}: {} sources", name, count), LogLevel::Success);
+                        self.log(
+                            format!("{}{}: {} sources", round_prefix(*round), name, count),
+                            LogLevel::Success,
+                        );
                     }
                 }
-                BuildEvent::TriageDone { candidates, ranked, budget } => {
-                    self.triage = Some((*candidates, *ranked));
+                BuildEvent::TriageDone { candidates, ranked, budget, round } => {
+                    let (seen, kept) = self.triage.unwrap_or((0, 0));
+                    self.triage = Some((seen + candidates, kept + ranked));
                     self.log(
-                        format!("Triage: {} candidates → {} ranked (budget {})", candidates, ranked, budget),
+                        format!(
+                            "{}Triage: {} candidates → {} ranked (budget {})",
+                            round_prefix(*round), candidates, ranked, budget,
+                        ),
                         LogLevel::Success,
                     );
                 }
                 // Fills the funnel's "of N fetched" leg while the fetch is still
                 // running, so a long fetch stage is visibly moving rather than
                 // indistinguishable from a dead worker.
-                BuildEvent::FetchProgress { fetched, attempted, budget } => {
-                    self.fetched = Some((*fetched, *budget));
+                BuildEvent::FetchProgress { fetched, attempted, budget, round } => {
+                    // Within a round this is a live count, so it replaces the
+                    // round's own figure; `fetched_before_round` carries the
+                    // earlier rounds' total so the funnel keeps summing.
+                    self.fetched = Some((self.fetched_before_round + fetched, self.fetch_budget_total.max(*budget)));
                     self.log(
-                        format!("Fetching: {}/{} retrieved ({} tried)", fetched, budget, attempted),
+                        format!(
+                            "{}Fetching: {}/{} retrieved ({} tried)",
+                            round_prefix(*round), fetched, budget, attempted,
+                        ),
                         LogLevel::Info,
                     );
                 }
-                BuildEvent::FetchDone { fetched, budget } => {
-                    self.fetched = Some((*fetched, *budget));
-                    self.log(format!("Fetched {} of {} budgeted sources", fetched, budget), LogLevel::Success);
+                BuildEvent::FetchDone { fetched, budget, round, content_duplicates } => {
+                    self.fetched_before_round += fetched;
+                    self.fetch_budget_total += budget;
+                    self.fetched = Some((self.fetched_before_round, self.fetch_budget_total));
+                    let dupes = if *content_duplicates > 0 {
+                        format!(", {} dropped as duplicate text", content_duplicates)
+                    } else {
+                        String::new()
+                    };
+                    self.log(
+                        format!(
+                            "{}Fetched {} of {} budgeted sources{}",
+                            round_prefix(*round), fetched, budget, dupes,
+                        ),
+                        LogLevel::Success,
+                    );
                 }
-                BuildEvent::SnowballDone { added } => {
+                BuildEvent::SnowballDone { added, round, backward, forward } => {
                     self.snowball_added = Some(self.snowball_added.unwrap_or(0) + added);
-                    self.log(format!("Snowball: +{} sources", added), LogLevel::Success);
+                    let split = if *forward > 0 || *backward > 0 {
+                        format!(" ({} cited by them, {} citing them)", backward, forward)
+                    } else {
+                        String::new()
+                    };
+                    self.log(
+                        format!("{}Snowball: +{} candidates{}", round_prefix(*round), added, split),
+                        LogLevel::Success,
+                    );
                 }
                 BuildEvent::SourceValidated { title, passed, q, r } => {
                     let short = trunc(title, 44);
@@ -492,10 +651,35 @@ impl BuildScreen {
                         self.log(format!("✗ {} (Q {:.1} · R {:.1})", short, q, r), LogLevel::Info);
                     }
                 }
-                BuildEvent::ValidateDone { passed, dropped } => {
-                    self.validate_passed = *passed;
-                    self.validate_dropped = *dropped;
-                    self.log(format!("{} accepted, {} dropped", passed, dropped), LogLevel::Success);
+                // A borderline verdict the stronger model re-examined. Logged
+                // only when it actually changed — an unchanged second opinion
+                // is not news to someone watching the stream go past.
+                BuildEvent::SourceReviewed { title, passed, q, r, first_q, first_r, reversed } => {
+                    if *reversed {
+                        let fq = first_q.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "—".into());
+                        let fr = first_r.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "—".into());
+                        self.log(
+                            format!(
+                                "⟳ {} {} on review (Q {}→{:.1} · R {}→{:.1})",
+                                if *passed { "kept" } else { "dropped" },
+                                trunc(title, 40), fq, q, fr, r,
+                            ),
+                            LogLevel::Info,
+                        );
+                    }
+                }
+                BuildEvent::ValidateDone { passed, dropped, round } => {
+                    // Authoritative for this round, added to what earlier rounds
+                    // contributed. Assigning outright would report a three-round
+                    // build as if only its last round had happened.
+                    self.validate_passed = self.validated_passed_before_round + passed;
+                    self.validate_dropped = self.validated_dropped_before_round + dropped;
+                    self.validated_passed_before_round = self.validate_passed;
+                    self.validated_dropped_before_round = self.validate_dropped;
+                    self.log(
+                        format!("{}{} accepted, {} dropped", round_prefix(*round), passed, dropped),
+                        LogLevel::Success,
+                    );
                 }
                 BuildEvent::CoverageGaps { gaps } => {
                     self.log(
@@ -810,6 +994,18 @@ impl BuildScreen {
             }
             if let Some(added) = self.snowball_added {
                 funnel.push(Span::styled(format!("  +{} snowball", added), Theme::success()));
+            }
+            if self.round > 0 {
+                funnel.push(Span::styled(format!("  ·  round {}", self.round), Theme::dim()));
+            }
+            // The soft budget the search spends towards, not the build's hard
+            // cap. Shown because it is what decides when discovery stops, and a
+            // build that stopped for money should say so while it is happening.
+            if let Some((spent, budget)) = self.discovery_budget {
+                funnel.push(Span::styled(
+                    format!("  ·  ${:.2}/${:.2} search budget", spent, budget),
+                    Theme::dim(),
+                ));
             }
             f.render_widget(Paragraph::new(Line::from(funnel)), split[2]);
         }
@@ -1252,6 +1448,16 @@ fn bar_spans(frac: f64, width: usize, fill_style: Style) -> Vec<Span<'static>> {
 fn fmt_elapsed(secs: u64) -> String {
     if secs < 60 { format!("{}s", secs) }
     else { format!("{}m {:02}s", secs / 60, secs % 60) }
+}
+
+/// "Round N · " for a later round, "" for round 0 and for builds from before
+/// the discovery loop, whose events carry no round at all.
+fn round_prefix(round: u64) -> String {
+    if round == 0 {
+        String::new()
+    } else {
+        format!("Round {} \u{00b7} ", round)
+    }
 }
 
 fn trunc(s: &str, max: usize) -> String {

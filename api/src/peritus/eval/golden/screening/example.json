@@ -1,0 +1,34 @@
+{
+  "_comment": "Schema example only — these labels are illustrative, not real human judgements, and this file must never be used to report a number. See README.md for how to build a real golden set from a captured build.",
+  "topic": "intermittent fasting and cardiometabolic risk",
+  "key_concepts": [
+    "time-restricted eating",
+    "insulin sensitivity",
+    "circadian regulation of metabolism",
+    "cardiovascular endpoints"
+  ],
+  "captured_from": "intermittent-fasting/1234.jsonl",
+  "labels": [
+    {
+      "url": "https://doi.org/10.0000/example-trial",
+      "decision": "keep",
+      "reason": "randomised controlled trial reporting the primary cardiometabolic endpoint directly",
+      "labeller": "human",
+      "covered_concepts": ["time-restricted eating", "cardiovascular endpoints"]
+    },
+    {
+      "url": "https://example.org/10-fasting-tips-that-actually-work",
+      "decision": "drop",
+      "reason": "listicle restating popular coverage; no primary data and no argument of its own",
+      "labeller": "human",
+      "covered_concepts": []
+    },
+    {
+      "url": "https://europepmc.org/article/MED/00000000",
+      "decision": "keep",
+      "reason": "mechanistic review of circadian control of insulin sensitivity; makes its own argument",
+      "labeller": "human",
+      "covered_concepts": ["insulin sensitivity", "circadian regulation of metabolism"]
+    }
+  ]
+}

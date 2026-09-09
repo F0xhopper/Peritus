@@ -35,8 +35,15 @@ CSV_COLUMNS: tuple[str, ...] = (
     "quality_score",
     "relevance_score",
     "drop_reason",
+    "doi",
+    "arxiv_id",
     "validator_model",
+    "review_model",
+    "first_pass_quality",
+    "first_pass_relevance",
     "rubric_version",
+    "full_text_method",
+    "text_chars",
     "discovered_via",
     "discovery_method",
     "gap_filled_for_concept",
@@ -50,6 +57,8 @@ CSV_COLUMNS: tuple[str, ...] = (
 # type, so the mapping picks the nearest type the importers understand and the
 # exact origin is preserved in the notes field of every record.
 RIS_TYPES: dict[str, str] = {
+    "openalex": "JOUR",  # peer-reviewed scholarship, whatever the discipline
+    "pubmed": "JOUR",
     "arxiv": "UNPB",   # unpublished work — preprint
     "pdf": "RPRT",     # report — the usual grey-literature shape
     "gutenberg": "BOOK",
@@ -116,8 +125,18 @@ def source_to_csv_row(row: dict[str, Any]) -> dict[str, str]:
         # Only rejected rows carry an exclusion reason; leaving a stale value on
         # an accepted row would misrepresent the decision.
         "drop_reason": row.get("drop_reason") if not row.get("passed") else None,
+        "doi": row.get("doi"),
+        "arxiv_id": row.get("arxiv_id"),
+        # The model whose verdict stands. Where review_model is also set, a
+        # second, stronger model re-examined a borderline first pass and the
+        # first-pass scores below are what it changed.
         "validator_model": row.get("validator_model"),
+        "review_model": row.get("review_model"),
+        "first_pass_quality": row.get("first_pass_quality"),
+        "first_pass_relevance": row.get("first_pass_relevance"),
         "rubric_version": row.get("rubric_version"),
+        "full_text_method": row.get("full_text_method"),
+        "text_chars": row.get("text_chars"),
         "discovered_via": row.get("discovered_via"),
         "discovery_method": method,
         "gap_filled_for_concept": concept,
@@ -161,6 +180,19 @@ def _ris_note(row: dict[str, Any]) -> str:
         ("Discovered via", row.get("discovered_via")),
         ("Discovery method", method),
     ]
+    if row.get("review_model"):
+        parts.append(("Reviewed by", row.get("review_model")))
+        parts.append(
+            (
+                "First-pass scores",
+                f"quality {_flatten(row.get('first_pass_quality'))}, "
+                f"relevance {_flatten(row.get('first_pass_relevance'))}",
+            )
+        )
+    if row.get("full_text_method"):
+        parts.append(("Text obtained by", row.get("full_text_method")))
+    if row.get("text_chars"):
+        parts.append(("Text length (characters)", row.get("text_chars")))
     if concept:
         parts.append(("Gap-filled for concept", concept))
     concepts = _joined(row.get("covered_concepts"))
@@ -199,6 +231,13 @@ def source_to_ris(row: dict[str, Any]) -> str:
         lines.append(("PY", str(created.year)))
         lines.append(("DA", created.strftime("%Y/%m/%d")))
 
+    # DOI is the field every reference manager keys on; a record without one is
+    # a record the reviewer has to look up again by hand, which is most of the
+    # work this export exists to save.
+    doi = _flatten(row.get("doi"))
+    if doi:
+        lines.append(("DO", doi))
+
     url = _flatten(row.get("url"))
     if url:
         lines.append(("UR", url))
@@ -212,6 +251,10 @@ def source_to_ris(row: dict[str, Any]) -> str:
         for concept in concepts:
             if concept:
                 lines.append(("KW", _flatten(concept)))
+
+    arxiv_id = _flatten(row.get("arxiv_id"))
+    if arxiv_id:
+        lines.append(("C1", f"arXiv:{arxiv_id}"))
 
     lines.append(("DP", "Peritus"))
     lines.append(("DB", f"Peritus corpus ({_flatten(row.get('source_type'))})"))

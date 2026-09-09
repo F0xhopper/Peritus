@@ -74,6 +74,9 @@ _EVENT_STAGE_MAP: dict[str, str] = {
     "ingest": Stage.CONTEXTUALIZATION,
     "graph": Stage.GRAPH_EXTRACTION,
     "resolve": Stage.GRAPH_EXTRACTION,
+    # The cross-source pass: one model call per concept, billed with the rest
+    # of the graph stage it completes.
+    "reconcile": Stage.GRAPH_EXTRACTION,
     "persona": Stage.PERSONA,
 }
 

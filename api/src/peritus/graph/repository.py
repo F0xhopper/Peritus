@@ -1,9 +1,19 @@
 import json
+from collections import Counter
 from collections.abc import Awaitable, Callable
 
 import asyncpg
 
 from peritus.core.logging import get_logger
+from peritus.graph.domain import (
+    CONTENT_TYPES,
+    EDGE_REQUIRED_PROPERTY,
+    NodeType,
+    coerce_edge_type,
+    coerce_node_type,
+    edge_is_valid,
+)
+from peritus.graph.reconciler import ClaimRow, ConceptClaims
 
 logger = get_logger(__name__)
 
@@ -24,6 +34,13 @@ def merge_node_extractions(extractions: list[dict]) -> dict[str, dict]:
     Keeps the longest description and the first non-null value for each
     property; chunk ids are unioned. Pure function so the merge policy is
     testable without a database.
+
+    A node whose ``node_type`` is not in the enum is dropped, not coerced. The
+    tool schema has always declared the enum and nothing enforced it, which is
+    how the graph came to hold nodes typed `definition`, `example` and
+    `argument` — and how `content_type` came to hold *edge* type names. A wrong
+    type is worse than a missing node: every endpoint rule below is stated in
+    terms of it.
     """
     merged: dict[str, dict] = {}
     for ext in extractions:
@@ -31,14 +48,24 @@ def merge_node_extractions(extractions: list[dict]) -> dict[str, dict]:
             if not node.get("label"):
                 logger.warning("Skipping node with no label: %r", node)
                 continue
+            node_type = coerce_node_type(node.get("node_type"))
+            if node_type is None:
+                logger.debug(
+                    "Rejecting node %r: node_type %r is not in the schema",
+                    node.get("label"), node.get("node_type"),
+                )
+                continue
             key = node["label"].lower().strip()
             existing = merged.get(key)
             if existing is None:
+                properties = {k: node.get(k) for k in _NODE_PROPERTY_KEYS}
+                if properties.get("content_type") not in CONTENT_TYPES:
+                    properties["content_type"] = None
                 merged[key] = {
                     "label": node["label"],
-                    "node_type": node.get("node_type", "concept"),
+                    "node_type": str(node_type),
                     "description": node.get("description", ""),
-                    "properties": {k: node.get(k) for k in _NODE_PROPERTY_KEYS},
+                    "properties": properties,
                     "chunk_ids": list(node.get("chunk_db_ids", [])),
                 }
                 continue
@@ -46,8 +73,11 @@ def merge_node_extractions(extractions: list[dict]) -> dict[str, dict]:
             if len(desc) > len(existing["description"]):
                 existing["description"] = desc
             for k in _NODE_PROPERTY_KEYS:
+                value = node.get(k)
+                if k == "content_type" and value not in CONTENT_TYPES:
+                    continue
                 if existing["properties"].get(k) is None:
-                    existing["properties"][k] = node.get(k)
+                    existing["properties"][k] = value
             existing["chunk_ids"].extend(node.get("chunk_db_ids", []))
     return merged
 
@@ -98,10 +128,20 @@ class GraphRepository:
             # and only the build pipeline runs the embedding-similarity cleanup
             # afterwards, so the upload path accumulated duplicates permanently.
             existing = await conn.fetch(
-                "SELECT id, lower(btrim(label)) AS key FROM expert_nodes WHERE expert_id = $1",
+                """
+                SELECT id, node_type, lower(btrim(label)) AS key
+                FROM expert_nodes WHERE expert_id = $1
+                """,
                 expert_id,
             )
             existing_ids = {r["key"]: r["id"] for r in existing}
+            # Endpoint rules are stated in node types, so the resolver carries
+            # the type of every node an edge could name — including the ones
+            # already in the graph, which this batch may only be deepening.
+            node_types: dict[str, NodeType] = {
+                r["key"]: coerce_node_type(r["node_type"]) or NodeType.CONCEPT
+                for r in existing
+            }
 
             label_to_id: dict[str, int] = {}
             for i, (key, node) in enumerate(merged_nodes.items()):
@@ -154,42 +194,75 @@ class GraphRepository:
                         embedding,
                     )
                 label_to_id[key] = node_id
+                node_types[key] = coerce_node_type(node["node_type"]) or NodeType.CONCEPT
 
             # Resolve every edge to node ids first, then write them in one
-            # round trip. Duplicates across batches collapse onto the unique
-            # relation, keeping the strongest weight.
-            strongest: dict[tuple[int, int, str], float] = {}
+            # round trip. Nothing is coerced on the way: an edge whose type is
+            # not in the enum, or whose endpoints are the wrong kind of node for
+            # its type, is rejected and counted. The old code defaulted a
+            # missing type to `builds_on`, which silently mislabelled rather
+            # than dropping, and let `contradicts` stand between two concepts —
+            # a category error that accounted for nearly half the graph's
+            # headline signal.
+            relations: dict[tuple[int, int, str], dict] = {}
+            rejected: Counter[str] = Counter()
             for ext in extractions:
                 for edge in ext.get("edges", []):
                     if not edge.get("from_label") or not edge.get("to_label"):
-                        logger.warning("Skipping edge with missing label: %r", edge)
+                        rejected["missing_label"] += 1
                         continue
-                    from_id = label_to_id.get(edge["from_label"].lower().strip())
-                    to_id = label_to_id.get(edge["to_label"].lower().strip())
+                    edge_type = coerce_edge_type(edge.get("edge_type"))
+                    if edge_type is None:
+                        rejected[f"unknown_type:{edge.get('edge_type')}"] += 1
+                        continue
+                    from_key = edge["from_label"].lower().strip()
+                    to_key = edge["to_label"].lower().strip()
+                    from_id, to_id = label_to_id.get(from_key), label_to_id.get(to_key)
                     # An edge naming a node no extraction produced, or a
                     # self-loop, carries no information.
-                    if from_id is None or to_id is None or from_id == to_id:
+                    if from_id is None or to_id is None:
+                        rejected["unresolved_endpoint"] += 1
                         continue
-                    weight = min(max(float(edge.get("weight", 1.0)), 0.0), 1.0)
-                    relation = (from_id, to_id, edge.get("edge_type", "builds_on"))
-                    strongest[relation] = max(weight, strongest.get(relation, 0.0))
+                    if from_id == to_id:
+                        rejected["self_loop"] += 1
+                        continue
+                    if not edge_is_valid(edge_type, node_types[from_key], node_types[to_key]):
+                        rejected[f"bad_endpoints:{edge_type}"] += 1
+                        continue
 
-            if strongest:
+                    properties = {
+                        k: v for k, v in (edge.get("properties") or {}).items()
+                        if isinstance(v, (str, int, float, bool))
+                    }
+                    required = EDGE_REQUIRED_PROPERTY.get(edge_type)
+                    if required is not None and not str(properties.get(required, "")).strip():
+                        rejected[f"missing_{required}"] += 1
+                        continue
+                    relations[(from_id, to_id, str(edge_type))] = properties
+
+            if rejected:
+                logger.info(
+                    "Graph ingest for expert %d rejected %d edge(s): %s",
+                    expert_id, sum(rejected.values()), dict(rejected),
+                )
+
+            if relations:
                 await conn.executemany(
                     """
                     INSERT INTO expert_edges
-                        (expert_id, from_node_id, to_node_id, edge_type, weight)
-                    VALUES ($1, $2, $3, $4, $5)
+                        (expert_id, from_node_id, to_node_id, edge_type, properties)
+                    VALUES ($1, $2, $3, $4, $5::jsonb)
                     ON CONFLICT (expert_id, from_node_id, to_node_id, edge_type)
-                    DO UPDATE SET weight = GREATEST(expert_edges.weight, EXCLUDED.weight)
+                    DO UPDATE SET properties =
+                        coalesce(expert_edges.properties, '{}'::jsonb) || EXCLUDED.properties
                     """,
                     [
-                        (expert_id, from_id, to_id, edge_type, weight)
-                        for (from_id, to_id, edge_type), weight in strongest.items()
+                        (expert_id, from_id, to_id, edge_type, json.dumps(properties))
+                        for (from_id, to_id, edge_type), properties in relations.items()
                     ],
                 )
 
-        return len(merged_nodes), len(strongest)
+        return len(merged_nodes), len(relations)
 
     async def get_top_nodes(self, expert_id: int, limit: int = 20) -> list[dict]:
         async with self._pool.acquire() as conn:
@@ -299,8 +372,8 @@ class GraphRepository:
     ) -> tuple[list[dict], list[dict]]:
         """Return (nodes, edges) reachable within `hops` from node_ids.
 
-        Expansion is capped per hop, preferring the strongest edges, so a hub
-        node cannot pull the whole graph into the context window.
+        Expansion is capped per hop, preferring the best-evidenced edges, so a
+        hub node cannot pull the whole graph into the context window.
         """
         if not node_ids:
             return [], []
@@ -312,11 +385,11 @@ class GraphRepository:
             for _ in range(hops):
                 edge_rows = await conn.fetch(
                     """
-                    SELECT from_node_id, to_node_id, edge_type, weight
+                    SELECT from_node_id, to_node_id, edge_type, evidence, properties
                     FROM expert_edges
                     WHERE expert_id = $1
                       AND (from_node_id = ANY($2) OR to_node_id = ANY($2))
-                    ORDER BY weight DESC
+                    ORDER BY evidence DESC
                     """,
                     expert_id, frontier,
                 )
@@ -342,7 +415,7 @@ class GraphRepository:
             )
             edge_rows = await conn.fetch(
                 """
-                SELECT from_node_id, to_node_id, edge_type, weight
+                SELECT from_node_id, to_node_id, edge_type, evidence, properties
                 FROM expert_edges
                 WHERE expert_id = $1
                   AND from_node_id = ANY($2)
@@ -351,4 +424,196 @@ class GraphRepository:
                 expert_id, all_node_ids,
             )
 
-        return [dict(r) for r in node_rows], [dict(r) for r in edge_rows]
+        return [dict(r) for r in node_rows], [_edge_dict(r) for r in edge_rows]
+
+    # ── reconciliation pass ──────────────────────────────────────────────────
+
+    async def claims_by_concept(
+        self,
+        expert_id: int,
+        min_sources: int = 2,
+        touching_chunk_ids: list[int] | None = None,
+    ) -> list[ConceptClaims]:
+        """Every claim in the corpus, grouped by the concept it is `about`.
+
+        This is the unit the reconciliation pass works in, and the reason
+        `about` earns its place in the vocabulary: without a claim→concept
+        index there is no bounded way to put the claims two sources make about
+        the same thing in front of a model at once.
+
+        A claim's source is the source behind its passages. Claims spanning
+        several sources (after entity resolution merged two labels) are listed
+        once per source, so the pass can still see them from both sides.
+
+        ``touching_chunk_ids`` narrows the concepts to those some claim in those
+        passages is about — every claim about them still comes back, from every
+        source. That is what makes reconciliation affordable on the upload path:
+        one document's concepts get re-examined against the whole corpus,
+        instead of the whole corpus being re-examined against itself.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT c.id            AS concept_id,
+                       c.label         AS concept_label,
+                       n.id            AS claim_id,
+                       n.label         AS claim_label,
+                       n.description   AS claim_description,
+                       s.id            AS source_id,
+                       s.title         AS source_title,
+                       s.source_type   AS source_type
+                FROM expert_edges e
+                JOIN expert_nodes n ON n.id = e.from_node_id AND n.node_type = 'claim'
+                JOIN expert_nodes c ON c.id = e.to_node_id   AND c.node_type = 'concept'
+                LEFT JOIN LATERAL (
+                    SELECT DISTINCT sc.source_id
+                    FROM source_chunks sc
+                    WHERE sc.id = ANY(n.chunk_ids)
+                ) cs ON true
+                LEFT JOIN sources s ON s.id = cs.source_id
+                WHERE e.expert_id = $1 AND e.edge_type = 'about'
+                  AND ($2::integer[] IS NULL OR c.id IN (
+                        SELECT e2.to_node_id
+                        FROM expert_edges e2
+                        JOIN expert_nodes n2 ON n2.id = e2.from_node_id
+                        WHERE e2.expert_id = $1 AND e2.edge_type = 'about'
+                          AND n2.chunk_ids && $2::integer[]
+                  ))
+                ORDER BY c.id, n.id
+                """,
+                expert_id, touching_chunk_ids,
+            )
+
+        groups: dict[int, ConceptClaims] = {}
+        for r in rows:
+            group = groups.get(r["concept_id"])
+            if group is None:
+                group = ConceptClaims(
+                    concept_id=r["concept_id"], concept_label=r["concept_label"]
+                )
+                groups[r["concept_id"]] = group
+            group.claims.append(ClaimRow(
+                node_id=r["claim_id"],
+                label=r["claim_label"],
+                description=r["claim_description"],
+                source_id=r["source_id"],
+                source_title=r["source_title"],
+                source_type=r["source_type"],
+            ))
+        return [g for g in groups.values() if g.source_count >= min_sources]
+
+    async def insert_relations(self, expert_id: int, relations: list[dict]) -> int:
+        """Persist claim-to-claim relations from the reconciliation pass.
+
+        Validated here as well as at extraction: this path takes node ids
+        straight from a model's answer, so the endpoint rule is re-checked
+        against the stored node types rather than assumed.
+        """
+        if not relations:
+            return 0
+
+        wanted = {r["from_node_id"] for r in relations} | {r["to_node_id"] for r in relations}
+        async with self._pool.acquire() as conn, conn.transaction():
+            rows = await conn.fetch(
+                "SELECT id, node_type FROM expert_nodes WHERE expert_id = $1 AND id = ANY($2)",
+                expert_id, list(wanted),
+            )
+            types = {
+                r["id"]: coerce_node_type(r["node_type"]) or NodeType.CONCEPT for r in rows
+            }
+
+            payload: dict[tuple[int, int, str], dict] = {}
+            rejected: Counter[str] = Counter()
+            for relation in relations:
+                edge_type = coerce_edge_type(relation.get("edge_type"))
+                from_id, to_id = relation["from_node_id"], relation["to_node_id"]
+                if edge_type is None:
+                    rejected[f"unknown_type:{relation.get('edge_type')}"] += 1
+                    continue
+                if from_id not in types or to_id not in types or from_id == to_id:
+                    rejected["unresolved_endpoint"] += 1
+                    continue
+                if not edge_is_valid(edge_type, types[from_id], types[to_id]):
+                    rejected[f"bad_endpoints:{edge_type}"] += 1
+                    continue
+                required = EDGE_REQUIRED_PROPERTY.get(edge_type)
+                properties = relation.get("properties") or {}
+                if required is not None and not str(properties.get(required, "")).strip():
+                    rejected[f"missing_{required}"] += 1
+                    continue
+                payload[(from_id, to_id, str(edge_type))] = properties
+
+            if rejected:
+                logger.info(
+                    "Reconciliation for expert %d rejected %d relation(s): %s",
+                    expert_id, sum(rejected.values()), dict(rejected),
+                )
+            if not payload:
+                return 0
+
+            await conn.executemany(
+                """
+                INSERT INTO expert_edges
+                    (expert_id, from_node_id, to_node_id, edge_type, properties)
+                VALUES ($1, $2, $3, $4, $5::jsonb)
+                ON CONFLICT (expert_id, from_node_id, to_node_id, edge_type)
+                DO UPDATE SET properties =
+                    coalesce(expert_edges.properties, '{}'::jsonb) || EXCLUDED.properties
+                """,
+                [
+                    (expert_id, from_id, to_id, edge_type, json.dumps(properties))
+                    for (from_id, to_id, edge_type), properties in payload.items()
+                ],
+            )
+        return len(payload)
+
+    async def recompute_edge_evidence(self, expert_id: int) -> None:
+        """Count the distinct sources behind each edge's two endpoints.
+
+        This replaces the model-asserted `weight`, which was a number with no
+        definition: three quarters of edges sat above 0.8, so ordering by it
+        ordered nothing. The count here is read off the corpus — how many
+        sources the passages behind both endpoints come from — so an edge that
+        two independent sources stand behind outranks one asserted from a single
+        paragraph, and nothing about the ordering is a model's opinion.
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE expert_edges e
+                SET evidence = coalesce(v.n, 0)
+                FROM (
+                    SELECT e2.id,
+                           count(DISTINCT sc.source_id)::int AS n
+                    FROM expert_edges e2
+                    JOIN expert_nodes fn ON fn.id = e2.from_node_id
+                    JOIN expert_nodes tn ON tn.id = e2.to_node_id
+                    LEFT JOIN source_chunks sc
+                      ON sc.id = ANY(coalesce(fn.chunk_ids, '{}') || coalesce(tn.chunk_ids, '{}'))
+                    WHERE e2.expert_id = $1
+                    GROUP BY e2.id
+                ) v
+                WHERE e.id = v.id AND e.expert_id = $1
+                """,
+                expert_id,
+            )
+
+
+def _edge_dict(row: asyncpg.Record) -> dict:
+    """One edge row with its properties decoded.
+
+    The pool registers no JSONB codec, so `properties` arrives as text on some
+    paths and as an object on others; the stated point of a contradiction is
+    read on every chat turn, so it is decoded once here rather than at each
+    reader.
+    """
+    edge = dict(row)
+    raw = edge.get("properties")
+    if isinstance(raw, str):
+        try:
+            edge["properties"] = json.loads(raw)
+        except json.JSONDecodeError:
+            edge["properties"] = {}
+    elif raw is None:
+        edge["properties"] = {}
+    return edge

@@ -6,6 +6,7 @@ extraction starts, not after the build finishes.
 """
 
 from datetime import UTC, datetime
+from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -62,8 +63,12 @@ async def _run_build(builder: ExpertBuilder, expert: Expert, readiness_log: list
     chunks = [TextChunk(text="Virtue is the sole good.", sequence_n=0, chunk_meta={})]
 
     builder._build_fetchers = lambda *a, **k: {}
-    builder._stage_discover = AsyncMock(return_value=[passed[0].raw])
-    builder._fill_coverage_gaps = AsyncMock(return_value=(passed, []))
+    # Discovery is stubbed at its outermost seam. `_discovery_round` is the unit
+    # a round is made of, so stubbing it exercises the loop itself — the stop
+    # conditions, the coverage measurement, the per-round events — while every
+    # network call and model call inside a round stays out of the test.
+    builder._discovery_round = AsyncMock(return_value=([passed[0].raw], Decimal(0)))
+    builder._repo.update_build_summary = AsyncMock()
     builder._persist_sources = AsyncMock(return_value=[101])
     builder._repo.update_key_concepts = AsyncMock()
     builder._repo.update_counts = AsyncMock()
@@ -82,7 +87,6 @@ async def _run_build(builder: ExpertBuilder, expert: Expert, readiness_log: list
             "must_have_works": [],
         })),
         patch("peritus.experts.builder._route_must_have_works"),
-        patch("peritus.experts.builder._snowball_citations", AsyncMock(return_value=[])),
         patch("peritus.experts.builder.validate_sources", AsyncMock(return_value=(passed, []))),
         patch(
             "peritus.experts.builder.ingest_sources",

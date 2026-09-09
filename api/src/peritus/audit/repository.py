@@ -69,6 +69,15 @@ _SOURCE_COLUMNS = """
     s.quality_score, s.relevance_score, s.content_type, s.difficulty,
     s.key_claims, s.drop_reason, s.validator_model, s.rubric_version,
     s.discovered_via, s.covered_concepts, s.created_at,
+    s.source_tier,
+    -- Identity and provenance (migration 025). Every one of these is what a
+    -- reviewer asks next after "what was kept": which paper is this really,
+    -- how much of it did you read, how did you get the text, and did anything
+    -- re-examine the decision.
+    s.doi, s.arxiv_id, s.identifiers,
+    s.full_text_method, s.text_chars,
+    s.review_model, s.first_pass_quality, s.first_pass_relevance,
+    s.snowball_seed_urls,
     COALESCE(c.chunk_count, 0) AS chunk_count
 """
 
@@ -412,6 +421,24 @@ class AuditRepository:
             )
         return [dict(r) for r in rows]
 
+    async def build_summary(self, expert_id: int) -> dict[str, Any] | None:
+        """What the discovery loop recorded about its own run, if anything.
+
+        Distinct from the event log and outlives it: events can be pruned, and
+        this is the build's own account of how many rounds it ran, why it
+        stopped, and what coverage it reached.
+        """
+        async with self._pool.acquire() as conn:
+            raw = await conn.fetchval(
+                "SELECT build_summary FROM experts WHERE id = $1", expert_id
+            )
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except ValueError:
+                return None
+        return raw if isinstance(raw, dict) else None
+
     async def gapfill_sources(self, expert_id: int) -> list[dict[str, Any]]:
         """Every source a gap-fill search returned, with its concept and outcome.
 
@@ -528,7 +555,7 @@ class AuditRepository:
             row = await conn.fetchrow(
                 """
                 SELECT count(DISTINCT e.id)::int AS total,
-                       count(DISTINCT v.node_id)::int AS concepts_involved
+                       count(DISTINCT v.node_id)::int AS claims_involved
                 FROM expert_edges e
                 CROSS JOIN LATERAL (
                     VALUES (e.from_node_id), (e.to_node_id)
@@ -537,14 +564,14 @@ class AuditRepository:
                 """,
                 expert_id,
             )
-        return dict(row) if row else {"total": 0, "concepts_involved": 0}
+        return dict(row) if row else {"total": 0, "claims_involved": 0}
 
     async def edge_type_breakdown(self, expert_id: int) -> list[dict[str, Any]]:
         """Relationship mix, so `contradicts` has a denominator to sit against."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT edge_type, count(*)::int AS n, avg(weight) AS mean_weight
+                SELECT edge_type, count(*)::int AS n, avg(evidence) AS mean_evidence
                 FROM expert_edges
                 WHERE expert_id = $1
                 GROUP BY edge_type
@@ -557,7 +584,7 @@ class AuditRepository:
     async def contradiction_edges(
         self, expert_id: int, limit: int, offset: int
     ) -> list[dict[str, Any]]:
-        """Contradiction edges with both concept nodes resolved.
+        """Contradiction edges with the claim on each side resolved.
 
         Uses the partial index added in migration 017; without it this is a scan
         of every relationship in the graph to find the few that disagree.
@@ -565,7 +592,7 @@ class AuditRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT e.id AS edge_id, e.weight, e.properties,
+                SELECT e.id AS edge_id, e.evidence, e.properties,
                        fn.id AS from_id, fn.label AS from_label,
                        fn.node_type AS from_node_type, fn.description AS from_description,
                        fn.chunk_ids AS from_chunk_ids,
@@ -576,7 +603,7 @@ class AuditRepository:
                 JOIN expert_nodes fn ON fn.id = e.from_node_id
                 JOIN expert_nodes tn ON tn.id = e.to_node_id
                 WHERE e.expert_id = $1 AND e.edge_type = 'contradicts'
-                ORDER BY e.weight DESC, e.id
+                ORDER BY e.evidence DESC, e.id
                 LIMIT $2 OFFSET $3
                 """,
                 expert_id, limit, offset,
@@ -615,7 +642,7 @@ class AuditRepository:
             edges = (
                 await conn.fetch(
                     """
-                    SELECT id, from_node_id, to_node_id, edge_type, weight
+                    SELECT id, from_node_id, to_node_id, edge_type, evidence
                     FROM expert_edges
                     WHERE expert_id = $1
                       AND from_node_id = ANY($2::int[])

@@ -71,10 +71,11 @@ async def stream_expert_answer(
 
     # Stream the Anthropic response token by token. System prompt and history
     # carry prompt-cache breakpoints so follow-up turns read the shared prefix
-    # at ~0.1× input price. The plan and the contradiction flag shape only the
-    # final (uncached) message — see `build_composition_messages`.
+    # at ~0.1× input price. The plan and what the corpus disputes shape only
+    # the final (uncached) message — see `build_composition_messages`.
     messages = build_composition_messages(
         history, question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+        ctx.contradiction_points,
     )
     client = get_anthropic_client()
     answer_parts: list[str] = []

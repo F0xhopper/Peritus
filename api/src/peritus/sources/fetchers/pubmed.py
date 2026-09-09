@@ -18,7 +18,13 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.domain import (
+    Identifiers,
+    RawSource,
+    SourceCandidate,
+    SourceType,
+    resolved_identifiers,
+)
 
 logger = get_logger(__name__)
 
@@ -74,19 +80,15 @@ class PubmedFetcher:
         return [c for c in candidates if c is not None]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        pmcid = candidate.metadata.get("pmcid")
-        full_text = ""
-        # Only the open-access subset has retrievable full text; asking for the
-        # rest is a guaranteed 404, so don't spend the request.
-        if pmcid and candidate.metadata.get("open_access"):
-            try:
-                async with httpx.AsyncClient(
-                    timeout=30, headers=HEADERS, follow_redirects=True
-                ) as http:
-                    full_text = await fetch_full_text(http, pmcid)
-            except Exception as exc:
-                logger.warning("Europe PMC full text failed for %r: %s", pmcid, exc)
-                full_text = ""
+        # Routed through the shared resolver rather than calling Europe PMC
+        # directly: the behaviour is the same for a record that already has a
+        # PMCID, and a record that has only a PMID now reaches full text too.
+        from peritus.sources.fulltext import FullTextHints, resolve_full_text
+
+        resolved = await resolve_full_text(
+            resolved_identifiers(candidate), FullTextHints.from_candidate(candidate)
+        )
+        full_text = resolved.text if resolved else ""
 
         abstract = candidate.metadata.get("abstract") or candidate.snippet
         has_full = len(full_text) >= MIN_FULL_TEXT
@@ -101,6 +103,10 @@ class PubmedFetcher:
 
         metadata = {k: v for k, v in candidate.metadata.items() if k != "abstract"}
         metadata["full_text"] = has_full
+        metadata["abstract"] = abstract
+        metadata["full_text_method"] = (
+            resolved.method if resolved is not None and has_full else "abstract"
+        )
         return RawSource(
             source_type=SOURCE_TYPE,
             url=candidate.url,
@@ -108,6 +114,7 @@ class PubmedFetcher:
             author=candidate.author,
             text=text,
             metadata=metadata,
+            identifiers=candidate.identifiers,
         )
 
 
@@ -125,6 +132,8 @@ def _to_candidate(result: dict) -> SourceCandidate | None:
     src = result.get("source", "MED")
     ext_id = result.get("id", "")
     pmcid = result.get("pmcid")
+    pmid = result.get("pmid")
+    doi = result.get("doi")
     return SourceCandidate(
         source_type=SOURCE_TYPE,
         url=_ARTICLE_URL.format(src=src, ext_id=ext_id),
@@ -132,9 +141,9 @@ def _to_candidate(result: dict) -> SourceCandidate | None:
         author=_authors(result),
         snippet=abstract,
         metadata={
-            "pmid": result.get("pmid"),
+            "pmid": pmid,
             "pmcid": pmcid,
-            "doi": result.get("doi"),
+            "doi": doi,
             "journal": (result.get("journalInfo") or {}).get("journal", {}).get("title"),
             "year": result.get("pubYear"),
             "cited_by_count": result.get("citedByCount"),
@@ -144,6 +153,7 @@ def _to_candidate(result: dict) -> SourceCandidate | None:
             "europepmc_source": src,
             "abstract": abstract,
         },
+        identifiers=Identifiers.build(pmid=pmid, pmcid=pmcid, doi=doi),
     )
 
 
@@ -176,6 +186,42 @@ def _jats_to_text(xml: str) -> str:
     if not body:
         return ""
     return _WS_RE.sub("\n\n", body.get_text(separator="\n", strip=True))
+
+
+async def pmcid_for_pmid(pmid: str) -> str | None:
+    """Resolve a PubMed id to its PubMed Central id, or None if it has none.
+
+    Only the PMC subset has retrievable full text, and plenty of sources arrive
+    carrying a PMID and nothing else — an OpenAlex work, a Semantic Scholar
+    citation. One cheap lookup here is the difference between free structured
+    full text and an abstract.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=15, headers=HEADERS) as http:
+            resp = await http.get(
+                _SEARCH_URL,
+                params={
+                    "query": f"EXT_ID:{pmid} AND SRC:MED",
+                    "format": "json",
+                    "resultType": "lite",
+                    "pageSize": 1,
+                },
+            )
+            if resp.status_code != 200:
+                return None
+            results = resp.json().get("resultList", {}).get("result", []) or []
+    except Exception as exc:
+        logger.debug("Europe PMC id lookup failed for PMID %s: %s", pmid, exc)
+        return None
+    if not results:
+        return None
+    record = results[0]
+    if record.get("isOpenAccess") != "Y" or record.get("inEPMC") != "Y":
+        # Licensed as OA is not the same as deposited in Europe PMC; asking for
+        # full text it does not hold is a guaranteed 404.
+        return None
+    pmcid = record.get("pmcid")
+    return pmcid if isinstance(pmcid, str) and pmcid else None
 
 
 async def fetch_full_text(client: httpx.AsyncClient, pmcid: str) -> str:

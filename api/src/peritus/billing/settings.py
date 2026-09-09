@@ -46,6 +46,14 @@ class BillingSettings:
     TIER_CAP_STANDARD_USD: float = _float("PERITUS_TIER_CAP_STANDARD_USD", 0.0)
     TIER_CAP_PRO_USD: float = _float("PERITUS_TIER_CAP_PRO_USD", 0.0)
 
+    # ── Discovery budgets ────────────────────────────────────────────────────
+    # The soft target the discovery loop spends towards, overriding the tier
+    # defaults in experts/domain.py. Not a ceiling — the cap above is — but the
+    # number that decides when the loop stops looking for more sources.
+    TIER_DISCOVERY_LITE_USD: float = _float("PERITUS_TIER_DISCOVERY_LITE_USD", 0.0)
+    TIER_DISCOVERY_STANDARD_USD: float = _float("PERITUS_TIER_DISCOVERY_STANDARD_USD", 0.0)
+    TIER_DISCOVERY_PRO_USD: float = _float("PERITUS_TIER_DISCOVERY_PRO_USD", 0.0)
+
     # Enforce the cap by aborting the build. When false the cap is still
     # recorded (cap_exceeded_at) and logged, but the build runs to completion —
     # the "observe first, enforce later" setting for a new deployment.
