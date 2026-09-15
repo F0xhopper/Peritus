@@ -136,8 +136,9 @@ jobs:
       # Production environment variables (PERITUS_API_URL, NEXT_PUBLIC_APP_URL)
       # live in the Vercel project and are pulled here, because
       # NEXT_PUBLIC_APP_URL is inlined into the bundle at build time.
+      # Not `vercel pull`: it cannot use a project-scoped token. See the script.
       - name: Pull production settings
-        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: node ../.github/scripts/vercel-pull.mjs production
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
 

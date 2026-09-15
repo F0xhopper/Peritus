@@ -24,7 +24,7 @@ push to main ──► deploy.yml
                   ├─ ci (calls ci.yml — the whole suite)
                   ├─ changes (paths filter)
                   ├─ deploy-api   if api/ changed    fly deploy → release_command migrations → /health, /ready
-                  └─ deploy-web   if web/ changed    vercel pull → build → deploy --prebuilt --prod → smoke test
+                  └─ deploy-web   if web/ changed    settings via REST → build → deploy --prebuilt --prod → smoke test
 ```
 
 - **Nothing deploys unless CI passed**, and the web app deploys only after the
@@ -65,7 +65,7 @@ inlined at build time, so a change needs a redeploy.
 | Name | Kind | Scope | What |
 |---|---|---|---|
 | `FLY_API_TOKEN` | secret | environment `production-api` (main only) | Fly deploy token for app `peritus` only (`fly tokens create deploy -a peritus`), 1-year expiry |
-| `VERCEL_TOKEN` | secret | repository (preview + production) | Vercel access token, scope `eden-phillips-projects` |
+| `VERCEL_TOKEN` | secret | repository (preview + production) | Vercel **project** access token (`vcp_…`) for `peritus`. `vercel pull` cannot use one, so CI writes `.vercel/` with `.github/scripts/vercel-pull.mjs` instead; `build` and `deploy` accept it |
 | `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID` | variables | repository | from `web/.vercel/project.json` |
 
 The `production-api` and `production-web` environments accept deployments from
