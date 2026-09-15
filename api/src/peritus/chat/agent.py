@@ -372,6 +372,40 @@ def build_user_message(
     }
 
 
+# Models that think adaptively — and, for Sonnet 5 and later, by default when
+# the request says nothing. Everything else takes the plain request.
+_ADAPTIVE_THINKING_PREFIXES = (
+    "claude-sonnet-5", "claude-opus-5", "claude-fable", "claude-mythos",
+    "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+)
+
+
+def composition_params(model: str, max_answer_tokens: int) -> dict[str, Any]:
+    """``max_tokens``, ``thinking`` and ``output_config`` for composing an answer.
+
+    ``max_answer_tokens`` is the tier's answer length. It used to be sent as the
+    request's whole ``max_tokens``, which was right when the model did not think.
+    Claude Sonnet 5 thinks unless told otherwise, the thinking is hidden, and
+    thinking tokens count against ``max_tokens``: a question like "What is the end
+    of man?" spent all 2,048 tokens of a STANDARD answer thinking, produced no
+    text at all, and the conversation stored the question with no answer — every
+    first question, on every expert, looked like a dropped connection.
+
+    So the thinking is stated rather than defaulted: adaptive, at the effort
+    ``CHAT_EFFORT`` names (a grounded answer from retrieved passages does not
+    need deep reasoning, and a long silence before the first token is the
+    visible cost of it), with ``CHAT_THINKING_HEADROOM_TOKENS`` added on top of
+    the answer's own length so thinking can never consume it.
+    """
+    if not model.startswith(_ADAPTIVE_THINKING_PREFIXES):
+        return {"max_tokens": max_answer_tokens}
+    return {
+        "max_tokens": max_answer_tokens + max(0, settings.CHAT_THINKING_HEADROOM_TOKENS),
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": settings.CHAT_EFFORT},
+    }
+
+
 def build_cached_system(persona_style: str | None, topic: str) -> list[TextBlockParam]:
     """System prompt as a block list with a prompt-cache breakpoint.
 
@@ -718,9 +752,9 @@ class ChatAgent:
         )
         resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.CLAUDE_MODEL,
-            max_tokens=expert.config.max_response_tokens,
             system=build_cached_system(expert.persona_style, expert.topic),
             messages=messages,
+            **composition_params(settings.CLAUDE_MODEL, expert.config.max_response_tokens),
         )
         answer_text = "".join(b.text for b in resp.content if hasattr(b, "text"))
 

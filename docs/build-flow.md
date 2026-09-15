@@ -150,15 +150,17 @@ stateDiagram-v2
 
 ```mermaid
 flowchart TD
-    T(["topic"]) --> P["0 · PLAN<br/>Claude writes the research brief:<br/>per-fetcher queries + weights,<br/>5–8 key concepts, must-have works"]
+    T(["topic"]) --> P["0 · PLAN<br/>Claude writes the research brief:<br/>per-fetcher queries + weights, 5–8 key concepts,<br/>what counts as primary here, canonical works,<br/>and a primary text per concept (with sections)"]
+    P --> CW["0b · PRIMARY TEXTS<br/>each named work looked for by title, by kind:<br/>texts: Gutenberg → Internet Archive → Exa<br/>papers: arXiv → OpenAlex → Exa · standards: Exa<br/>best hit per work queued first, cut to its sections"]
+    CW --> TR
     P --> D["1 · DISCOVER<br/>11 fetchers search concurrently, over-searching<br/>3× the fetch quota (floor 10 results/query):<br/>wikipedia · gutenberg · arxiv · openalex · pubmed<br/>pdf · youtube · exa · web · reddit · thought-leaders"]
     D --> DD["1b · DE-DUPLICATE<br/>identity (shared DOI/arXiv/PMID/PMCID),<br/>then normalised URL, against everything<br/>every earlier round already considered"]
-    DD --> TR["1c · TRIAGE<br/>Haiku scores candidates on title+snippet<br/>against the brief, × a domain prior;<br/>junk drops before download"]
-    TR --> F["1d · FETCH<br/>one resolver picks the best text available;<br/>ordered by triage score, cost breaking ties;<br/>bounded by a source count AND a dollar budget"]
+    DD --> TR["1c · TRIAGE<br/>Haiku scores candidates by id on title+snippet<br/>against the brief, + a domain prior;<br/>unscored → re-asked → fails closed at 0"]
+    TR --> F["1d · FETCH<br/>score floor (6, relaxable to 5 in round 0);<br/>ordered by triage score, cost breaking ties;<br/>bounded by a source count AND a dollar budget;<br/>every candidate's outcome → screening ledger"]
     F --> CD["1e · FINGERPRINT<br/>simhash over the fetched text catches the<br/>preprint/published pair sharing no id"]
     CD --> V["2 · VALIDATE<br/>Claude scores quality + relevance per source<br/>against versioned rubric, tags covered concepts<br/>(q≥5, r≥6 — below drops, reason recorded);<br/>borderline scores can go to a stronger model"]
-    V --> CV["2b · MEASURE COVERAGE<br/>each key concept vs the tier's target:<br/>min sources · min source types · non-tertiary"]
-    CV --> LP{"targets met?<br/>rounds, budget,<br/>new candidates left?"}
+    V --> CV["2b · MEASURE COVERAGE<br/>caps: abstract-only ≤15%, tertiary ≤25%;<br/>each key concept vs the tier's target:<br/>min sources · types · non-tertiary · a primary<br/>(abstract-only sources never count)"]
+    CV --> LP{"targets met AND the<br/>guaranteed round ran?<br/>rounds, budget,<br/>new candidates left?"}
     LP -- "search again" --> FB["1a′ · FEEDBACK + SNOWBALL<br/>weakest concepts → new queries written from<br/>the corpus's own vocabulary; accepted scholarly<br/>sources followed backwards AND forwards<br/>through their citations, ranked by co-citation"]
     FB --> DD
     LP -- "stop, with a reason" --> CE["3 · CHUNK + EMBED<br/>1500-char chunks, contextual prefixes,<br/>text-embedding-3-large → pgvector"]
@@ -177,7 +179,18 @@ Stage notes, in pipeline order (`experts/builder.py`):
 
 - **Plan** is one call on the strong model; the brief shapes everything
   downstream. A failed plan degrades to raw-topic queries with equal weights
-  rather than failing the build. The planner may zero out a source type
+  rather than failing the build. **Before it, the planner reads** how one or two
+  reference overviews structure the topic (`sources/orientation.py`): the
+  Wikipedia article titled after it and an SEP / IEP / Britannica entry, each as
+  a lead and a two-level outline, under one 8-second deadline that never fails
+  the build. They are a checklist of facets, not the syllabus, and are not added
+  to the corpus. The syllabus has **two levels**: 2–5 facets, 2–4 concepts each,
+  at most 8 / 10 / 14 concepts by tier (`max_key_concepts`); `key_concepts`
+  stays the flat list every reader uses. The plan also names **figures** — the
+  people whose own writing is primary — each with one freely obtainable work,
+  and marks every named work `public_domain` / `open_text`, naming a
+  `substitute` for one that cannot be had. All of it is on
+  `experts.research_plan` and `plan_ready` (`facets`, `figures`, `orientation`). The planner may zero out a source type
   (weight 0 = "would add noise here") unless the user's explicit `sources`
   filter requested it. Fetchers are routed by kind: `arxiv` for STEM preprints,
   `pubmed` for biomedical literature, and `openalex` as the scholarly channel
@@ -202,7 +215,76 @@ Stage notes, in pipeline order (`experts/builder.py`):
 - **Triage** combines the model's expected-value score with a **domain prior**
   (`sources/triage.py`): title and snippet alone can't distinguish a work from
   a summary of that work, so known hosts get a nudge — journals and archives up
-  (arxiv.org, nature.com, doi.org, europepmc.org…), content farms down.
+  (arxiv.org, nature.com, doi.org, europepmc.org…), content farms, library
+  catalogue records, tables of contents and overview mills down. Scores are
+  matched to candidates **by the id the model echoes**, never by position; a
+  candidate left unscored is re-asked in batches of 10 and then 5, and one still
+  unscored scores **0 and is not fetched** unless a must-have title or a
+  co-citation vouches for it. There is no neutral fallback score: the old 5.0
+  outranked every honest 3 and 4 and fetched an actress into a Thomism corpus.
+- **The fetch floor.** A candidate under `FETCH_SCORE_FLOOR` (6.0) is not
+  fetched however much count and money remain; the count stays a ceiling. If
+  fewer than max(8, budget/4) candidates reach it in round 0, round 0 fetches
+  down to 5.0 and says so (`floor_relaxed`). Every candidate triage saw is
+  written to `candidate_screenings` with its model score, prior, fetch rank and
+  outcome (`fetched | failed | capped | below_floor | near_duplicate | budget |
+  not_reached | content_duplicate`), and the plan itself to
+  `experts.research_plan` (migration 029). `python -m peritus.eval.triage`
+  exports a job's ledger for labelling and measures triage against the labels.
+- **Canonical works** (`sources/canonical.py`). Each must-have the plan names
+  is looked for by title before triage: Project Gutenberg's catalogue, held
+  locally and refreshed weekly (`infrastructure/gutenberg_catalogue.py`); the
+  Internet Archive's full-text items; Exa restricted to primary-text hosts; Exa
+  unrestricted. Each hit is **whole** or **partial** — a title with a question,
+  chapter, book, part or volume number is partial, and a title *about* the work
+  ("A Companion to…") is not a hit at all — and the search stops at the first
+  whole hit. Hits are fetched first; only a *whole* one that passes validation
+  makes the work `found_whole` in `build_summary.corpus.must_have`.
+- **Primary texts per concept, not only per topic.** The plan says what counts
+  as primary for this topic (a thinker's own writings, trial reports, a standard,
+  documents from the period) and names, for each key concept, the primary text
+  that sets it out — with the numbered sections that do, for a long work. The
+  resolver looks each up by the kind of work it is, merges a work named more
+  than once, and queues only its best hit ahead of triage (canonical works
+  first, then concept texts, within half the round's money). Fetchers cut the
+  named sections out of long texts (`sources/sections.py`: `QUESTION 94`,
+  `CHAPTER IV`, `Book II, chapters 1–10`, a specification's `9.` or `## 9.2.1.`),
+  up to 200k characters for a canonical work and 60k for a concept text on
+  STANDARD. The corpus summary reports each as `found_whole`, `found_sections`,
+  `found_partial`, `not_found` or `not_obtainable` — an in-copyright work with no
+  free text gets one open Exa search, never the public-domain libraries, and its
+  `substitute` is then resolved as a work of its own. A figure's work (3 on
+  STANDARD, 6 on PRO, `figure_texts`) is resolved after the concept texts, with
+  a concept text's ceiling; `build_summary.corpus.figures` says per figure
+  whether the corpus holds them in their `own_voice`, `about_only`, or
+  `not_found` / `not_obtainable`. When a round still finds a concept without a
+  primary source, the strong model is asked which primary text sets it out, and
+  those titles are resolved the same way — search queries alone return
+  scholarship *about* a subject. The validator is shown the plan's definition of
+  primary (rubric `v8-graded-tags-q5r6`).
+- **Resolver volumes are not near-duplicates.** Triage's title near-duplicate
+  filter compares a must-have candidate only with candidates for the same work
+  and sections, and never across volume designators ("Part I-II" vs "Part I"),
+  so the resolver's per-volume lookups survive. The must-have boost is not
+  given to a work already found whole, nor to a title about the work (an
+  encyclopedia or summary-service suffix or host, or the work named after
+  "in" / "of" / "on"). Every fetch is cut to its stamped `text_max_chars` where
+  it arrives (`ceiling_enforced` in the log).
+- **What is not used.** Internet Archive items are used only when their metadata
+  shows a public-domain or open licence or a publication year before the US
+  cutoff (95 years back); any archive.org page, however it was found, goes
+  through that check and to the item's text rather than its catalogue page.
+  Pirate PDF mirrors are penalised at triage and excluded from Exa. A fetched
+  text not in `CORPUS_LANGUAGE` (English by default) is dropped before
+  validation (`not_english` in the ledger).
+- **Channels report why they are empty.** `fetcher_done` carries `status`
+  (`ok | empty | timeout | rate_limited | error | skipped`) and the error. A
+  timed-out or rate-limited channel is retried once in the same round, and any
+  channel whose last search failed joins later rounds. Gutenberg resolves books
+  through its catalogue and uses Gutendex only as a fallback, with a 10-second
+  per-call timeout that keeps the books already resolved. Exa excludes the hosts
+  the triage prior penalises hardest; OpenAlex puts works with a route to full
+  text ahead of abstract-only records; Reddit's base quota is 2.
 - **De-duplication** runs three passes with different amounts of evidence
   (`sources/dedup.py`). *Identity* is certain and runs before triage: two
   candidates sharing a DOI, arXiv id, PMID or PMCID are one work, and the copy
@@ -247,8 +329,37 @@ Stage notes, in pipeline order (`experts/builder.py`):
   twelve section headings, and body samples drawn from outside the front matter
   and the bibliography. The old preview was three fixed 800-character windows,
   which asked the model to infer all of that from prose. The rubric version
-  (`v5-structured-q5r6`) changed with the preview even though the thresholds did
-  not, because a screening run has to be able to tell the two apart.
+  (`v6-substance-q5r6`) names catalogue records, tables of contents and
+  publisher blurbs as tertiary with quality at most 3, and study guides as
+  tertiary scored on depth rather than title match.
+- **Substance and composition** (`sources/substance.py`,
+  `experts/composition.py`). Every source is `full`, `partial` (a landing page
+  or a text cut at the length cap) or `abstract` (only an abstract, or under
+  1,500 characters). An abstract-only source must rest on ≥ 800 characters of
+  abstract, is capped at 15% of a round's accepted sources, and **never counts
+  toward coverage**. Tertiary sources are capped at 25%. What a cap removes is
+  dropped with a reason and kept as `passed = false`. `build_summary.corpus`
+  reports the tier and abstract-only shares, junk fetched (fetched sources
+  scored ≤ 3 for relevance), each concept's share and the concepts with no
+  primary source; the audit report shows it under `selection`.
+- **Depth targets and the guaranteed round.** STANDARD wants 3 counting
+  sources, 2 types, a non-tertiary *and a primary* source per concept, and PRO
+  4; both always run at least one feedback round, and round 0 may commit only
+  65% of the discovery budget so that round can afford to run. When every
+  target is already met, the guaranteed round searches the concepts with no
+  primary source first, and the feedback prompt names them. LITE is unchanged.
+- **Tags cost something.** Each concept tag has a depth — `sets_out` (the
+  source's subject or a chapter of it), `treats`, `mentions` — stored on
+  `sources.concept_depths` (migration 030); `covered_concepts` is the tags at
+  `treats` or deeper. Coverage counts at most three tags per source, deepest
+  first, never a mention, and a work cut to named sections counts only for the
+  concepts it was cut for. **The named text gates "has primary":** a concept
+  whose plan named a primary text has one when that text is in the corpus
+  (whole, cut to its sections, or in part); when it is missing, only a primary
+  source that *sets the concept out* stands in for it. A concept with no named
+  text keeps the old rule. `coverage_report.concepts[]` carries `named_text` and
+  `depth_counts`, and `build_summary.corpus.concepts_missing_named_text` names
+  what is absent.
 - **Per-source-type hints** still apply: academic types (arxiv, pubmed,
   openalex) are judged on methodology and evidence — an abstract-only record
   can still pass if the abstract substantively states the finding — while
@@ -293,8 +404,15 @@ Stage notes, in pipeline order (`experts/builder.py`):
   from **pseudo-relevance feedback** (`experts/feedback.py`): one fast-model
   call reads the accepted corpus and writes queries in the field's own
   vocabulary, which is the cheapest large gain here — the planner's blind
-  queries are the main reason a niche concept comes back empty. The brief is
-  never rewritten between rounds; a loop that can redefine its own goal can
+  queries are the main reason a niche concept comes back empty. A round takes
+  its concepts **a facet at a time** — each facet's largest shortfall in turn —
+  so one heavy facet's neighbours cannot take the whole round; the prompt groups
+  them under their facets and names each missing named text and each figure
+  with no work in their own voice. Authors the corpus cites and lacks go to the
+  thought-leader search, which looks for the plan's figures in their own voice:
+  each person searched with the encyclopedias and summary services excluded and
+  on personal sites, and pages about a person dropped before triage. The brief
+  is never rewritten between rounds; a loop that can redefine its own goal can
   always declare itself finished.
 - **Stopping**, with the reason recorded in `experts.build_summary` and emitted
   as `discovery_done`:
@@ -392,11 +510,13 @@ Provider dependence, for operators:
 
 | Provider | Required? | Missing/failing means |
 |----------|-----------|----------------------|
-| Anthropic | boot-required | plan degrades; triage falls back to neutral scores; validation failure = terminal; graph/persona degrade |
+| Anthropic | boot-required | plan degrades; unscored candidates are re-asked, then not fetched (must-haves still are); validation failure = terminal; graph/persona degrade |
 | OpenAI (embeddings) | boot-required | nothing embeds → terminal; graph-node embeddings degrade silently |
 | Exa | optional | exa/youtube/thought-leaders fetchers skip, reason surfaced in events |
 | OpenAlex | optional, keyless | openalex fetcher and DOI snowball resolution skip. Set `OPENALEX_MAILTO` to join its faster "polite pool" — no key exists |
 | Mistral OCR | optional | pdf fetcher skips; PDF uploads rejected |
+| Semantic Scholar | optional, keyless | pdf fetcher and snowballing return nothing and report `rate_limited`. Set `S2_API_KEY` to leave the shared unauthenticated pool |
+| Project Gutenberg / Internet Archive | optional, keyless | canonical works fall through to Exa; Gutenberg falls back to Gutendex. The catalogue CSV is cached under `GUTENBERG_CATALOGUE_DIR` |
 | Cohere | optional | chat rerank falls back to windowed LLM rerank (chat path only) |
 | Wikimedia | optional, keyless | the expert gets no picture and shows its monogram; nothing else changes. Set `PERITUS_CONTACT` — their API policy asks for a contact address in the User-Agent |
 
@@ -416,7 +536,8 @@ Event vocabulary (payload always carries `type`):
 `created`, `build_started`, `execution_mode`, `stage`, `plan_ready`,
 `picture_ready`, `picture_skipped`,
 `discovery_started`, `round_started`, `feedback_queries`, `dedup_done`,
-`fetcher_done`, `triage_done`, `fetch_progress`, `fetch_done`,
+`canonical_resolved`, `primary_texts_suggested`, `fetcher_done`, `fetcher_retried`, `triage_done`,
+`floor_relaxed`, `fetch_progress`, `fetch_done`, `composition_capped`,
 `snowball_done`, `source_validated`, `source_reviewed`, `validate_done`,
 `coverage_report`, `discovery_done`, `corpus_warning`, `source_ingested`,
 `chat_ready`,

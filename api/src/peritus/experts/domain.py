@@ -66,14 +66,31 @@ class ExpertConfig:
     coverage_min_sources: int = 2
     coverage_min_source_types: int = 2
     coverage_require_non_tertiary: bool = True
+    # Every concept needs a primary source (docs/plans/source-selection.md §9).
+    # Defaulted False so a row snapshotted before it existed is not re-graded.
+    coverage_require_primary: bool = False
     # Discovery rounds *after* the first. 1 is today's behaviour: one pass, then
     # one targeted round for what it missed.
     discovery_max_rounds: int = 2
+    # Rounds after the first that must run before meeting the targets can stop
+    # the loop. Defaulted 0 for the same reason as coverage_require_primary.
+    discovery_min_rounds: int = 0
     # Snowball references followed per round, and how many hops deep. Two hops
     # means an accepted snowball find seeds the next round's snowball, which the
     # discovery loop gives for free.
     snowball_max_per_round: int = 10
     snowball_hops: int = 1
+    # How many of the plan's per-concept primary texts the build looks for by
+    # title (docs/plans/source-selection.md, "primary texts per concept").
+    # Defaulted 0 so a config snapshotted before it existed builds as it did.
+    concept_primary_texts: int = 0
+    # The most key concepts the planner may name (docs/plans/syllabus.md,
+    # phase 2). Defaulted 8 — the old fixed cap — so a snapshotted config plans
+    # as it did.
+    max_key_concepts: int = 8
+    # How many of the plan's named figures get one of their works looked up by
+    # title (phase 3.A). Defaulted 0 so an old snapshot builds as it did.
+    figure_texts: int = 0
 
     @classmethod
     def from_tier(cls, tier: ExpertTier) -> "ExpertConfig":
@@ -87,6 +104,8 @@ class ExpertConfig:
             min_source_types=self.coverage_min_source_types,
             require_non_tertiary=self.coverage_require_non_tertiary,
             max_rounds=self.discovery_max_rounds,
+            require_primary=self.coverage_require_primary,
+            min_rounds=self.discovery_min_rounds,
         )
 
 
@@ -104,9 +123,14 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_min_sources=1,
         coverage_min_source_types=1,
         coverage_require_non_tertiary=False,
+        coverage_require_primary=False,
         discovery_max_rounds=1,
+        discovery_min_rounds=0,
         snowball_max_per_round=3,
         snowball_hops=1,
+        concept_primary_texts=3,
+        max_key_concepts=8,
+        figure_texts=0,
     ),
     ExpertTier.STANDARD: ExpertConfig(
         source_multiplier=1.0,
@@ -116,12 +140,21 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_extra_k=5,
         max_context_passages=15,
         max_response_tokens=2048,
-        coverage_min_sources=2,
+        # Three counting sources and a primary text per concept, and a feedback
+        # round that always runs. The old target (two sources, two types, one
+        # non-tertiary) was met by the Thomism corpus after round 0 with 3 of
+        # 43 sources primary, and the round that could have fixed that never ran.
+        coverage_min_sources=3,
         coverage_min_source_types=2,
         coverage_require_non_tertiary=True,
+        coverage_require_primary=True,
         discovery_max_rounds=2,
+        discovery_min_rounds=1,
         snowball_max_per_round=10,
         snowball_hops=1,
+        concept_primary_texts=8,
+        max_key_concepts=10,
+        figure_texts=3,
     ),
     ExpertTier.PRO: ExpertConfig(
         source_multiplier=2.0,
@@ -133,12 +166,17 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_extra_k=10,
         max_context_passages=25,
         max_response_tokens=4096,
-        coverage_min_sources=3,
+        coverage_min_sources=4,
         coverage_min_source_types=2,
         coverage_require_non_tertiary=True,
+        coverage_require_primary=True,
         discovery_max_rounds=3,
+        discovery_min_rounds=1,
         snowball_max_per_round=20,
         snowball_hops=2,
+        concept_primary_texts=16,
+        max_key_concepts=14,
+        figure_texts=6,
     ),
 }
 

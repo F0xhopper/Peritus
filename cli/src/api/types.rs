@@ -165,12 +165,28 @@ pub enum BuildEvent {
         #[serde(default)] seen_skipped: u64,
         #[serde(default)] kept: u64,
     },
+    /// `status` says why a channel came back empty: `empty` means it answered
+    /// with nothing, `timeout`/`rate_limited`/`error` mean it did not answer,
+    /// and `error` carries the reason. `attempt` is 1 on the one retry a
+    /// timed-out or rate-limited channel gets. All default for older builds.
     FetcherDone {
         name: String,
         count: u64,
         skipped: bool,
         #[serde(default)] reason: String,
         #[serde(default)] round: u64,
+        #[serde(default)] status: String,
+        #[serde(default)] error: String,
+        #[serde(default)] attempt: u64,
+    },
+    /// Round 0 found too few candidates above the fetch floor and fetched down
+    /// to a lower one.
+    FloorRelaxed {
+        #[serde(default)] round: u64,
+        #[serde(default)] floor: f64,
+        #[serde(default)] relaxed_to: f64,
+        #[serde(default)] reaching: u64,
+        #[serde(default)] needed: u64,
     },
     TriageDone { candidates: u64, ranked: u64, budget: u64, #[serde(default)] round: u64 },
     /// One per fetch wave. `attempted` counts candidates tried (failures
@@ -450,6 +466,48 @@ mod tests {
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(snowball).unwrap(),
             BuildEvent::SnowballDone { added: 3, round: 0, backward: 0, forward: 0 }
+        ));
+    }
+
+    #[test]
+    fn plan_ready_with_primary_texts_and_new_events_still_parse() {
+        let plan = r#"{"type":"plan_ready","key_concepts":["natural law"],
+            "fetcher_plans":{"exa":{"queries":["q"],"weight":1.0}},
+            "must_have_works":[{"title":"Summa","author":"Aquinas","kind":"text","public_domain":true,"sections":""}],
+            "concept_primary_texts":[{"concept":"natural law","title":"Summa","author":"Aquinas",
+                "kind":"text","public_domain":true,"sections":"I-II qq. 90-97"}],
+            "primary_source_definition":"Aquinas's own writings."}"#;
+        match serde_json::from_str::<BuildEvent>(plan).unwrap() {
+            BuildEvent::PlanReady { key_concepts } => assert_eq!(key_concepts, vec!["natural law"]),
+            other => panic!("expected PlanReady, got {:?}", other),
+        }
+        let suggested = r#"{"type":"primary_texts_suggested","round":1,"concepts":["x"],"texts":[]}"#;
+        assert!(matches!(serde_json::from_str::<BuildEvent>(suggested).unwrap(), BuildEvent::Unknown));
+    }
+
+    #[test]
+    fn fetcher_done_says_why_a_channel_was_empty() {
+        let raw = r#"{"type":"fetcher_done","round":0,"name":"gutenberg","count":0,
+            "skipped":false,"reason":"Gutendex timed out after 10s","status":"timeout",
+            "error":"Gutendex timed out after 10s","attempt":0,"elapsed":10.2,"queries":1}"#;
+        match serde_json::from_str::<BuildEvent>(raw).unwrap() {
+            BuildEvent::FetcherDone { status, error, attempt, count, .. } => {
+                assert_eq!(status, "timeout");
+                assert!(error.contains("Gutendex"));
+                assert_eq!((attempt, count), (0, 0));
+            }
+            other => panic!("expected FetcherDone, got {:?}", other),
+        }
+        let old = r#"{"type":"fetcher_done","name":"exa","count":12,"skipped":false,"reason":""}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(old).unwrap(),
+            BuildEvent::FetcherDone { count: 12, attempt: 0, .. }
+        ));
+        let relaxed = r#"{"type":"floor_relaxed","round":0,"floor":6.0,"relaxed_to":5.0,
+            "reaching":7,"needed":15}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(relaxed).unwrap(),
+            BuildEvent::FloorRelaxed { reaching: 7, needed: 15, .. }
         ));
     }
 

@@ -24,18 +24,39 @@ from urllib.parse import urlsplit
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
-from peritus.sources.domain import SourceCandidate
+from peritus.sources.canonical import classify_extent, matching_work, title_key
+from peritus.sources.domain import SourceCandidate, SourceType
 
 logger = get_logger(__name__)
 
 _TRIAGE_BATCH_SIZE = 20
+# Sizes a failed or partly-scored batch is re-asked at, for its unscored
+# candidates only. Smaller batches are where a model stops skipping entries.
+_REASK_BATCH_SIZES: tuple[int, ...] = (10, 5)
 _SNIPPET_CHARS = 400
+# Public: the screening ledger stores exactly what triage was shown.
+TRIAGE_SNIPPET_CHARS = _SNIPPET_CHARS
 # Below this expected value a candidate isn't worth a full fetch at all.
 MIN_TRIAGE_SCORE = 3.0
-# Neutral score assumed when a triage batch fails — keeps candidates usable
-# without letting an outage promote junk above genuinely scored items.
-_FALLBACK_SCORE = 5.0
 _NEAR_DUP_TITLE_RATIO = 0.85
+
+# What a triage score rests on, recorded per candidate in the screening ledger.
+#
+# There is deliberately no neutral fallback score any more. A failed batch used
+# to give every candidate in it 5.0, which outranked every honest 3 and 4: the
+# Thomism build (job 53) fetched an actress, a disambiguation page and an OCR'd
+# visual-analytics paper that a live re-run scored 0.0–1.5. An outage now costs
+# candidates, never a corpus full of junk.
+STATUS_SCORED = "scored"
+STATUS_REASKED = "reasked"
+STATUS_UNSCORED = "unscored"
+STATUS_MUST_HAVE = "must_have"
+STATUS_PRIORITY = "priority"
+
+# Source types that can carry a work's title and never be the work: an
+# encyclopedia article named "Summa Theologica", a lecture, a forum thread.
+# They are triaged on their merits; they are not must-have hits.
+_NOT_THE_WORK_TYPES = frozenset({SourceType.WIKIPEDIA, SourceType.YOUTUBE, SourceType.REDDIT})
 
 _TRIAGE_TOOL: dict[str, Any] = {
     "name": "triage_candidates",
@@ -45,10 +66,17 @@ _TRIAGE_TOOL: dict[str, Any] = {
         "properties": {
             "scores": {
                 "type": "array",
-                "description": "One entry per candidate, in the same order as the input.",
+                "description": "One entry per candidate, each naming the candidate it scores.",
                 "items": {
                     "type": "object",
                     "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": (
+                                "The candidate's tag, copied exactly — e.g. "
+                                "'candidate_3' for <candidate_3>."
+                            ),
+                        },
                         "expected_value": {
                             "type": "number",
                             "description": (
@@ -59,7 +87,7 @@ _TRIAGE_TOOL: dict[str, Any] = {
                             ),
                         },
                     },
-                    "required": ["expected_value"],
+                    "required": ["id", "expected_value"],
                 },
             }
         },
@@ -82,6 +110,12 @@ _SYSTEM = (
     "anything, and pages that mainly link elsewhere. A page *about* an important "
     "work is not the important work, and a corpus of such pages can only produce "
     "second-hand answers.\n"
+    "\n"
+    "Score 0–1, however well the title matches the topic: institutional pages "
+    "(a college, a society, a parish), biographies of people who merely share a "
+    "name with the subject, disambiguation pages, library catalogue records, "
+    "tables of contents, and one-paragraph book reviews. None of them contain "
+    "the subject.\n"
     "\n"
     "The URL is evidence: judge the publisher, not just the headline."
 )
@@ -129,6 +163,38 @@ _HOST_ADJUSTMENTS: tuple[tuple[str, float], ...] = (
     ("quora.com", -2.5),
     ("linkedin.com/pulse", -1.5),
     ("medium.com", -1.0),
+    # Library catalogue records. They carry a title, a subject heading and
+    # sometimes a publisher's blurb, which passes both triage and validation as
+    # "a scholarly book" — twelve of the 43 sources kept by the Thomism build
+    # were records like these, at 300–4,500 characters each.
+    ("ci.nii.ac.jp", -4.0),
+    ("bvbr.bib-bvb.de", -4.0),
+    ("catalog.loc.gov", -4.0),
+    ("worldcat.org", -4.0),
+    # Pirate mirrors of books and papers. Their copies are unlicensed, often
+    # incomplete, and a corpus built on them cites a download site. A live
+    # rebuild kept a "PDF Free Download" copy of an in-copyright monograph.
+    ("docplayer.net", -5.0),
+    ("dokumen.pub", -5.0),
+    ("dokumen.tips", -5.0),
+    ("pdfcoffee.com", -5.0),
+    ("epdf.pub", -5.0),
+    ("ebin.pub", -5.0),
+    ("vdoc.pub", -5.0),
+    ("docslib.org", -5.0),
+    ("pdfdrive.com", -5.0),
+    ("oceanofpdf.com", -5.0),
+    ("z-lib.org", -5.0),
+    ("annas-archive.org", -5.0),
+    ("libgen.is", -5.0),
+    ("libgen.rs", -5.0),
+    ("vdocuments.net", -5.0),
+    ("idoc.pub", -5.0),
+    ("studylib.net", -3.5),
+    # Overview mills that passed validation as tertiary on the same build.
+    ("studyguides.com", -3.0),
+    ("philosophystudent.org", -3.0),
+    ("handwiki.org", -3.0),
     # ── Boosted: primary texts, canonical publishers, standards bodies ─────
     ("gutenberg.org", 2.0),
     ("archive.org", 1.5),
@@ -188,7 +254,23 @@ _PATH_ADJUSTMENTS: tuple[tuple[re.Pattern[str], float], ...] = (
     (re.compile(r"/(?:quotes|quotations)(?:/|$)"), -1.5),
     (re.compile(r"/(?:tag|tags|category|categories)/"), -1.0),
     (re.compile(r"/(?:review|reviews)/"), -1.5),
+    # Library of Congress tables of contents. Before this rule they collected
+    # the `.gov` boost and scored 4.5 for being on a government site.
+    (re.compile(r"/catdir/toc/"), -4.0),
 )
+
+# DOI-prefix priors, for publishers whose DOIs name something that is not a work.
+# Matched against the path of a ``doi.org`` URL, after the resolver's own boost.
+_DOI_PREFIX_ADJUSTMENTS: tuple[tuple[str, float], ...] = (
+    # Choice book reviews: one paragraph, and +1.5 as a DOI until this line.
+    ("/10.5860/choice", -3.0),
+)
+
+# Wiki software on a host that is not one of the real wikis is almost always a
+# mirror or a fork of an encyclopedia article — the same text, less maintained.
+_WIKI_PATH = re.compile(r"/wiki/")
+_REAL_WIKI_HOSTS: tuple[str, ...] = ("wikipedia.org", "wikisource.org", "wikiquote.org")
+_WIKI_MIRROR_ADJUSTMENT = -1.0
 
 
 def domain_adjustment(url: str) -> float:
@@ -216,8 +298,30 @@ def domain_adjustment(url: str) -> float:
         if _suffix_matches(target, pattern) and len(pattern) > best_len:
             host_delta, best_len = delta, len(pattern)
 
+    # Path rules add to the host rule rather than replacing it, so a catalogue
+    # page on a `.gov` host nets −2.5, not +1.5.
     path_deltas = [d for rx, d in _PATH_ADJUSTMENTS if rx.search(path)]
+    if host == "doi.org" or host.endswith(".doi.org"):
+        path_deltas += [d for prefix, d in _DOI_PREFIX_ADJUSTMENTS if path.startswith(prefix)]
+    if _WIKI_PATH.search(path) and not any(
+        _suffix_matches(host, wiki) for wiki in _REAL_WIKI_HOSTS
+    ):
+        path_deltas.append(_WIKI_MIRROR_ADJUSTMENT)
     return host_delta + (min(path_deltas) if path_deltas else 0.0)
+
+
+def penalised_hosts(threshold: float = -2.5) -> list[str]:
+    """Hosts the prior penalises at least this hard — the ones not worth searching.
+
+    Handed to search APIs that accept a domain exclusion list (Exa), so results
+    triage would score down anyway are never paid for in triage tokens or slots.
+    Patterns with a path are left out: an exclusion list takes domains only.
+    """
+    return [
+        pattern
+        for pattern, delta in _HOST_ADJUSTMENTS
+        if delta <= threshold and "/" not in pattern and not pattern.startswith(".")
+    ]
 
 
 def _suffix_matches(target: str, pattern: str) -> bool:
@@ -233,7 +337,14 @@ def _suffix_matches(target: str, pattern: str) -> bool:
 @dataclass
 class TriagedCandidate:
     candidate: SourceCandidate
+    # What the fetch queue sorts on: the model's score plus the domain prior,
+    # clamped, and lifted for a must-have work.
     score: float
+    # The model's own number, before any prior. ``None`` when the model never
+    # scored this candidate — which is recorded, not papered over.
+    model_score: float | None = None
+    domain_adjustment: float = 0.0
+    status: str = STATUS_SCORED
 
 
 async def triage_candidates(
@@ -245,51 +356,105 @@ async def triage_candidates(
     """Score all candidates in batched Haiku calls. Order is preserved.
 
     Calls run through the Message Batches API (half price) when enabled, else
-    as concurrent live calls.
+    as concurrent live calls. Scores are matched to candidates by the id the
+    model echoes back, never by position: a response that skips one entry in
+    the middle used to shift every later score onto the wrong candidate.
+
+    A candidate the first pass did not score is re-asked in smaller batches
+    (see :data:`_REASK_BATCH_SIZES`). One still unscored after that gets 0.0 and
+    ``status = unscored`` — it fails closed, and is fetched only if something
+    other than its score vouches for it (a must-have title, a snowball priority).
     """
     if not candidates:
         return []
 
-    batches = [
-        candidates[i: i + _TRIAGE_BATCH_SIZE]
-        for i in range(0, len(candidates), _TRIAGE_BATCH_SIZE)
-    ]
+    model_scores: dict[int, float] = {}
+    reasked: set[int] = set()
 
-    responses = await gather_claude_calls(
-        [_triage_params(topic, key_concepts, b) for b in batches],
-        live_concurrency=settings.VALIDATE_CONCURRENCY,
-        description="triage",
-    )
+    pending = list(range(len(candidates)))
+    sizes = (_TRIAGE_BATCH_SIZE, *_REASK_BATCH_SIZES)
+    for attempt, size in enumerate(sizes):
+        if not pending:
+            break
+        if attempt:
+            logger.warning(
+                "Triage: re-asking %d unscored candidate(s) in batches of %d",
+                len(pending), size,
+            )
+            reasked.update(pending)
+        batches = [pending[i: i + size] for i in range(0, len(pending), size)]
+        responses = await gather_claude_calls(
+            [_triage_params(topic, key_concepts, [candidates[j] for j in b]) for b in batches],
+            live_concurrency=settings.VALIDATE_CONCURRENCY,
+            description="triage" if attempt == 0 else "triage-reask",
+        )
+        for batch, resp in zip(batches, responses, strict=True):
+            if resp is None:
+                logger.warning("Triage batch failed (%d candidates)", len(batch))
+                continue
+            try:
+                scores = _parse_triage_response(resp, len(batch))
+            except Exception as exc:
+                logger.warning("Triage batch unparseable (%d candidates): %s", len(batch), exc)
+                continue
+            if len(scores) < len(batch):
+                logger.warning(
+                    "Triage batch scored %d of %d candidates", len(scores), len(batch),
+                )
+            for local, value in scores.items():
+                model_scores[batch[local]] = value
+        pending = [j for j in pending if j not in model_scores]
 
-    batch_scores: list[list[float]] = []
-    for batch, resp in zip(batches, responses, strict=True):
-        if resp is None:
-            logger.warning("Triage batch failed (%d candidates)", len(batch))
-            batch_scores.append([_FALLBACK_SCORE] * len(batch))
-            continue
-        try:
-            batch_scores.append(_parse_triage_response(resp, len(batch)))
-        except Exception as exc:
-            logger.warning("Triage batch unparseable (%d candidates): %s", len(batch), exc)
-            batch_scores.append([_FALLBACK_SCORE] * len(batch))
+    if pending:
+        logger.warning(
+            "Triage: %d of %d candidate(s) were never scored — they fail closed at 0.0",
+            len(pending), len(candidates),
+        )
 
     triaged: list[TriagedCandidate] = []
-    for batch, scores in zip(batches, batch_scores, strict=True):
-        for candidate, score in zip(batch, scores, strict=True):
+    for index, candidate in enumerate(candidates):
+        model = model_scores.get(index)
+        adjustment = domain_adjustment(candidate.url)
+        if model is None:
+            score, status = 0.0, STATUS_UNSCORED
+        else:
             # Provenance prior, then clamp back onto the model's own scale.
-            score = min(max(score + domain_adjustment(candidate.url), 0.0), 10.0)
-            # A must-have work found by search should never lose the triage —
-            # applied last, so a canonical text hosted somewhere unglamorous
-            # still survives its domain's prior.
-            #
-            # Marked as well as scored. A score can be traded away by whatever
-            # the fetch stage divides it by; a flag says what is actually meant,
-            # which is "the research plan named this work, do not come back
-            # without it".
-            if _matches_must_have(candidate.title, must_have_titles):
-                score = max(score, 9.0)
-                candidate.metadata["fetch_priority"] = True
-            triaged.append(TriagedCandidate(candidate=candidate, score=score))
+            score = min(max(model + adjustment, 0.0), 10.0)
+            status = STATUS_REASKED if index in reasked else STATUS_SCORED
+        # A must-have work found by search should never lose the triage —
+        # applied last, so a canonical text hosted somewhere unglamorous
+        # still survives its domain's prior.
+        #
+        # Marked as well as scored. A score can be traded away by whatever
+        # the fetch stage divides it by; a flag says what is actually meant,
+        # which is "the research plan named this work, do not come back
+        # without it". Whether the hit is the whole work or one section of it
+        # is recorded too: a single question of the Summa is worth fetching,
+        # and is not the Summa.
+        wanted = (
+            None
+            if candidate.source_type in _NOT_THE_WORK_TYPES
+            else matching_work(candidate.title, must_have_titles, candidate.url)
+        )
+        if wanted is not None:
+            score = max(score, 9.0)
+            status = STATUS_MUST_HAVE
+            candidate.metadata["fetch_priority"] = True
+            candidate.metadata.setdefault("must_have_title", wanted)
+            candidate.metadata.setdefault(
+                "must_have_extent", classify_extent(candidate.title, candidate.url)
+            )
+        elif candidate.metadata.get("fetch_priority"):
+            status = STATUS_PRIORITY
+        triaged.append(
+            TriagedCandidate(
+                candidate=candidate,
+                score=score,
+                model_score=model,
+                domain_adjustment=adjustment,
+                status=status,
+            )
+        )
     return triaged
 
 
@@ -301,33 +466,63 @@ def rank_candidates(
 
     Returns the full ranked list (not cut to budget) so the fetch stage can
     refill from lower ranks when a download fails.
+
+    Titles are compared within a group. A candidate for a must-have work is
+    compared only with candidates for the same work and the same named
+    sections; everything else only with everything else. The resolver queues
+    one lookup per volume of a multi-volume work on purpose, and the volumes'
+    titles differ by a designator: "Summa Theologica, Part I-II" is 0.93 of
+    "Summa Theologica, Part I", and a live Thomism build dropped Part I-II and
+    Part III as near-duplicates of Part I — taking the treatise on law, the
+    plan's named text for natural law, with them. Two copies of one volume from
+    two routes still collapse, and volumes whose designators differ never do.
     """
     ranked = sorted(triaged, key=lambda t: t.score, reverse=True)
     kept: list[TriagedCandidate] = []
-    kept_titles: list[str] = []
+    kept_titles: dict[tuple[str, str] | None, list[str]] = {}
     for item in ranked:
-        if item.score < min_score:
+        # A priority candidate (a must-have, a work several accepted sources
+        # cite) does not depend on its score, so an unscored one still ranks.
+        if item.score < min_score and not item.candidate.metadata.get("fetch_priority"):
             continue
+        group = _dedup_group(item.candidate)
         title = item.candidate.title.casefold().strip()
-        if any(
-            difflib.SequenceMatcher(None, title, seen).ratio() >= _NEAR_DUP_TITLE_RATIO
-            for seen in kept_titles
-        ):
+        seen = kept_titles.setdefault(group, [])
+        if any(_near_duplicate_titles(title, other, group is not None) for other in seen):
             continue
         kept.append(item)
-        kept_titles.append(title)
+        seen.append(title)
     return kept
 
 
 def _matches_must_have(title: str, must_have_titles: list[str]) -> bool:
-    t = title.casefold().strip()
-    for wanted in must_have_titles:
-        w = wanted.casefold().strip()
-        if not w:
-            continue
-        if w in t or difflib.SequenceMatcher(None, w, t).ratio() >= 0.7:
-            return True
-    return False
+    return matching_work(title, must_have_titles) is not None
+
+
+def _dedup_group(candidate: SourceCandidate) -> tuple[str, str] | None:
+    """The work and sections a must-have candidate is for; ``None`` for anything else."""
+    wanted = candidate.metadata.get("must_have_title")
+    if not wanted:
+        return None
+    sections = " ".join(str(candidate.metadata.get("must_have_sections") or "").casefold().split())
+    return title_key(str(wanted)), sections
+
+
+# Numbered volume and part designators: "Part I-II", "Vol. 3", "Book II".
+_DESIGNATOR = re.compile(
+    r"\b(?:part|vol(?:ume)?|book|tome)\.?\s+([ivxlc]+(?:\s*-\s*[ivxlc]+)?|\d+)\b",
+    re.IGNORECASE,
+)
+
+
+def _designators(title: str) -> set[str]:
+    return {re.sub(r"\s+", "", m.group(1).casefold()) for m in _DESIGNATOR.finditer(title)}
+
+
+def _near_duplicate_titles(title: str, other: str, same_work: bool) -> bool:
+    if same_work and _designators(title) != _designators(other):
+        return False
+    return difflib.SequenceMatcher(None, title, other).ratio() >= _NEAR_DUP_TITLE_RATIO
 
 
 def _triage_params(
@@ -372,16 +567,31 @@ def _triage_params(
     }
 
 
-def _parse_triage_response(resp: Any, batch_len: int) -> list[float]:
+_ID_RE = re.compile(r"(\d+)\s*>?\s*$")
+
+
+def _parse_triage_response(resp: Any, batch_len: int) -> dict[int, float]:
+    """``{position in batch: score}`` for the entries the model actually scored.
+
+    Keyed by the id each entry names. An entry with no readable id, an id outside
+    the batch, a repeat of an id already scored, or no numeric value is ignored —
+    its candidate simply stays unscored, which the caller re-asks.
+    """
     block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    raw_scores = list(block.input.get("scores", []))
-    scores: list[float] = []
-    for entry in raw_scores[:batch_len]:
+    raw_scores = block.input.get("scores", [])
+    scores: dict[int, float] = {}
+    for entry in raw_scores if isinstance(raw_scores, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        match = _ID_RE.search(str(entry.get("id", "")))
+        if match is None:
+            continue
+        index = int(match.group(1))
+        if not 0 <= index < batch_len or index in scores:
+            continue
         try:
-            value = float(entry.get("expected_value", _FALLBACK_SCORE))
-        except (TypeError, ValueError, AttributeError):
-            value = _FALLBACK_SCORE
-        scores.append(min(max(value, 0.0), 10.0))
-    while len(scores) < batch_len:
-        scores.append(_FALLBACK_SCORE)
+            value = float(entry["expected_value"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        scores[index] = min(max(value, 0.0), 10.0)
     return scores

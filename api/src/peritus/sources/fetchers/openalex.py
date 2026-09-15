@@ -28,6 +28,7 @@ from peritus.sources.domain import (
     SourceType,
     resolved_identifiers,
 )
+from peritus.sources.fetchers.base import note_search_failure
 
 logger = get_logger(__name__)
 
@@ -50,10 +51,12 @@ SOURCE_TYPE: SourceType = SourceType.OPENALEX
 
 class OpenAlexFetcher:
     async def search(self, query: str, max_results: int = 4) -> list[SourceCandidate]:
+        # Twice what is wanted, so the works with a route to text can be
+        # kept ahead of the abstract-only records and the list cut after.
         params: dict[str, str | int] = {
             "search": query,
             "filter": _FILTER,
-            "per-page": max(1, min(max_results, 50)),
+            "per-page": max(1, min(max_results * 2, 50)),
         }
         # OpenAlex's polite pool (faster, more reliable) just wants an email.
         if settings.OPENALEX_MAILTO:
@@ -64,12 +67,15 @@ class OpenAlexFetcher:
                 resp.raise_for_status()
                 payload = resp.json()
         except Exception as exc:
+            from peritus.sources.fetchers.exa import classify_search_error
+
             logger.warning("OpenAlex search failed for %r: %s", query, exc)
+            note_search_failure(*classify_search_error(exc, "OpenAlex"))
             return []
 
         results = payload.get("results", []) or []
-        candidates = [_to_candidate(w) for w in results[:max_results]]
-        return [c for c in candidates if c is not None]
+        candidates = [c for c in (_to_candidate(w) for w in results) if c is not None]
+        return prefer_readable(candidates)[:max_results]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
         from peritus.sources.fulltext import FullTextHints, resolve_full_text
@@ -105,6 +111,36 @@ class OpenAlexFetcher:
             metadata=metadata,
             identifiers=candidate.identifiers,
         )
+
+
+async def search_by_title(title: str, author: str = "", limit: int = 5) -> list[SourceCandidate]:
+    """Works whose title matches, for resolving a paper the plan named.
+
+    Raises on a transport failure so the resolver can record the route as
+    failed rather than as having found nothing.
+    """
+    params: dict[str, str | int] = {
+        "filter": f"title.search:{_filter_escape(title)},is_retracted:false",
+        "per-page": limit,
+        "sort": "cited_by_count:desc",
+    }
+    if settings.OPENALEX_MAILTO:
+        params["mailto"] = settings.OPENALEX_MAILTO
+    async with httpx.AsyncClient(timeout=30, headers=HEADERS) as http:
+        resp = await http.get(_WORKS_URL, params=params)
+        resp.raise_for_status()
+        results = resp.json().get("results", []) or []
+    candidates = [c for c in (_to_candidate(w) for w in results) if c is not None]
+    surname = (author or "").split()[-1:]
+    if surname:
+        by_author = [c for c in candidates if surname[0].casefold() in (c.author or "").casefold()]
+        candidates = by_author or candidates
+    return candidates
+
+
+def _filter_escape(text: str) -> str:
+    """OpenAlex filter values cannot contain commas or colons."""
+    return re.sub(r"[,:|]", " ", text).strip()
 
 
 async def fetch_by_doi(doi: str) -> SourceCandidate | None:
@@ -177,6 +213,30 @@ def _to_candidate(work: dict) -> SourceCandidate | None:
             pmcid=_bare_registry_id(ids.get("pmcid")),
         ),
     )
+
+
+def has_route_to_text(candidate: SourceCandidate) -> bool:
+    """Whether fetching this work can yield more than its abstract.
+
+    An open-access PDF or landing page, a PMC id (Europe PMC's free full text),
+    an arXiv id. A bare catalogue record has none of these, and is what an
+    abstract-only filter returns plenty of: publisher blurbs attached to book
+    records whose landing page is a library catalogue.
+    """
+    meta = candidate.metadata
+    ids = candidate.identifiers
+    return bool(
+        meta.get("oa_pdf_url")
+        or meta.get("oa_landing_url")
+        or meta.get("pmcid")
+        or ids.pmcid
+        or ids.arxiv_id
+    )
+
+
+def prefer_readable(candidates: list[SourceCandidate]) -> list[SourceCandidate]:
+    """Works with a route to text first, relevance order kept within each group."""
+    return sorted(candidates, key=lambda c: 0 if has_route_to_text(c) else 1)
 
 
 def _reconstruct_abstract(inverted: dict | None) -> str:

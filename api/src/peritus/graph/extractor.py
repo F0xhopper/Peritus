@@ -257,6 +257,16 @@ def _complete(entries: Any, required: tuple[str, ...] | list[str], kind: str) ->
     arrives as something that is not an object at all. Both are unusable and
     neither should cost the batch, so both are dropped with a count.
     """
+    if isinstance(entries, str):
+        # The model sometimes serialises a long array into a JSON string inside
+        # the tool call. Four of 144 batches on a live rebuild arrived that way
+        # and were discarded whole — every node in ten chunks, for a formatting
+        # choice. Decoded here, and repaired when the string was cut off.
+        decoded = decode_json_list(entries)
+        if decoded is None:
+            logger.warning("Graph extraction returned %s as an undecodable string", kind)
+            return []
+        entries = decoded
     if not isinstance(entries, list):
         logger.warning("Graph extraction returned %s as %s, not a list", kind, type(entries).__name__)
         return []
@@ -270,6 +280,35 @@ def _complete(entries: Any, required: tuple[str, ...] | list[str], kind: str) ->
             len(entries) - len(valid), kind,
         )
     return valid
+
+
+def decode_json_list(text: str) -> list | None:
+    """A JSON array from a string, recovering the complete objects of a truncated one."""
+    import json
+
+    text = text.strip()
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, list) else None
+    except ValueError:
+        pass
+    if not text.startswith("["):
+        return None
+    # Truncated: keep everything up to the last complete top-level object.
+    decoder = json.JSONDecoder()
+    items: list = []
+    index = 1
+    while index < len(text):
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            break
+        try:
+            item, index = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        items.append(item)
+    return items or None
 
 
 def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:

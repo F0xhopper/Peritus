@@ -421,6 +421,52 @@ class AuditRepository:
             )
         return [dict(r) for r in rows]
 
+    async def screening_ledger(self, expert_id: int) -> dict[str, Any] | None:
+        """The most recent build's candidate ledger, counted (migration 029).
+
+        ``None`` when no build of this expert has written one — every expert
+        built before the ledger existed.
+        """
+        async with self._pool.acquire() as conn:
+            latest = await conn.fetchrow(
+                """
+                SELECT job_id, MAX(created_at) AS written_at
+                FROM candidate_screenings
+                WHERE expert_id = $1
+                GROUP BY job_id
+                ORDER BY written_at DESC
+                LIMIT 1
+                """,
+                expert_id,
+            )
+            if latest is None:
+                return None
+            rows = await conn.fetch(
+                """
+                SELECT round, fetch_outcome, triage_status, COUNT(*) AS n,
+                       AVG(triage_score) AS mean_score
+                FROM candidate_screenings
+                WHERE expert_id = $1 AND job_id IS NOT DISTINCT FROM $2
+                GROUP BY round, fetch_outcome, triage_status
+                ORDER BY round, fetch_outcome, triage_status
+                """,
+                expert_id, latest["job_id"],
+            )
+        return {
+            "job_id": latest["job_id"],
+            "rows": [
+                {
+                    "round": r["round"],
+                    "fetch_outcome": r["fetch_outcome"],
+                    "triage_status": r["triage_status"],
+                    "count": r["n"],
+                    "mean_triage_score": round(float(r["mean_score"]), 2)
+                    if r["mean_score"] is not None else None,
+                }
+                for r in rows
+            ],
+        }
+
     async def build_summary(self, expert_id: int) -> dict[str, Any] | None:
         """What the discovery loop recorded about its own run, if anything.
 

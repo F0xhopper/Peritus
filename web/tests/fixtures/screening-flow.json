@@ -1,0 +1,104 @@
+{
+  "expert": {
+    "name": "varroa-mite-control-in-temperate-beekeeping",
+    "topic": "Varroa mite control in temperate beekeeping",
+    "tier": "standard"
+  },
+  "method_statement": "Every source this expert considered, kept or dropped, with the scores and the rubric version that decided it. Screening is a single language-model pass against a written rubric, with a second read by a stronger model on borderline scores. There is no dual human review.",
+  "build": { "job_id": 118, "events_available": true },
+  "stages": {},
+  "discovery": { "rounds_run": 2, "stop_reason": "targets_met" },
+  "selection": {
+    "available": true,
+    "corpus": {
+      "sources": 21,
+      "primary": 9,
+      "secondary": 8,
+      "tertiary": 2,
+      "unclassified": 2,
+      "abstract_only": 3,
+      "primary_share": 0.429,
+      "secondary_share": 0.381,
+      "tertiary_share": 0.095,
+      "abstract_only_share": 0.143,
+      "junk_fetched": 2,
+      "concept_shares": {
+        "varroa biology": 0.52,
+        "acaricide resistance": 0.24,
+        "drone brood removal": 0.14,
+        "viral co-infection": 0.1
+      },
+      "concepts_without_primary": ["viral co-infection"],
+      "must_have": [
+        {
+          "title": "The Hive and the Honey-Bee",
+          "author": "L. L. Langstroth",
+          "kind": "book",
+          "scope": "overall",
+          "concepts": [],
+          "sections": "",
+          "status": "found_whole",
+          "source_urls": ["https://archive.org/details/hivehoneybee00lang"],
+          "routes_tried": ["gutenberg", "internet_archive"],
+          "route_errors": {}
+        },
+        {
+          "title": "ABC and XYZ of Bee Culture",
+          "author": "A. I. Root",
+          "status": "found_partial",
+          "source_urls": ["https://www.gutenberg.org/ebooks/00000"],
+          "routes_tried": ["gutenberg"],
+          "route_errors": {}
+        },
+        {
+          "title": "Varroa destructor: research avenues towards sustainable control",
+          "author": "Rosenkranz, Aumeier and Ziegelmann",
+          "status": "not_found",
+          "source_urls": [],
+          "routes_tried": ["gutenberg", "internet_archive", "exa"],
+          "route_errors": { "gutenberg": "Gutendex timed out after 10s" }
+        },
+        {
+          "title": "ABC and XYZ of Bee Culture",
+          "author": "A. I. Root",
+          "kind": "book",
+          "scope": "concept",
+          "concepts": ["drone brood removal"],
+          "sections": "Drone comb; Swarming",
+          "status": "found_sections",
+          "source_urls": ["https://archive.org/details/abcxyzofbeecultu00root"],
+          "routes_tried": ["internet_archive"],
+          "route_errors": {}
+        },
+        {
+          "title": "Varroa jacobsoni (Acari: Varroidae) is more than one species",
+          "author": "Anderson and Trueman",
+          "kind": "paper",
+          "scope": "concept",
+          "concepts": ["acaricide resistance", "varroa biology"],
+          "sections": "",
+          "status": "not_found",
+          "source_urls": [],
+          "routes_tried": ["openalex", "exa"],
+          "route_errors": {}
+        }
+      ]
+    },
+    "failed_channels": { "pdf": "rate_limited" },
+    "candidate_ledger": {
+      "job_id": 118,
+      "rows": [
+        { "round": 0, "fetch_outcome": "fetched", "triage_status": "scored", "count": 26, "mean_triage_score": 7.4 },
+        { "round": 0, "fetch_outcome": "fetched", "triage_status": "must_have", "count": 2, "mean_triage_score": 9.0 },
+        { "round": 0, "fetch_outcome": "failed", "triage_status": "scored", "count": 3, "mean_triage_score": 6.8 },
+        { "round": 0, "fetch_outcome": "below_floor", "triage_status": "scored", "count": 58, "mean_triage_score": 3.1 },
+        { "round": 0, "fetch_outcome": "below_floor", "triage_status": "unscored", "count": 4, "mean_triage_score": 0.0 },
+        { "round": 1, "fetch_outcome": "fetched", "triage_status": "scored", "count": 6, "mean_triage_score": 7.1 },
+        { "round": 1, "fetch_outcome": "budget", "triage_status": "scored", "count": 5, "mean_triage_score": 6.2 },
+        { "round": 1, "fetch_outcome": "content_duplicate", "triage_status": "scored", "count": 1, "mean_triage_score": 6.9 }
+      ]
+    },
+    "note": "junk_fetched counts fetched sources the validator scored 3 or less for relevance — candidates triage should not have sent to fetch. An abstract-only source ships to the corpus but never counts toward coverage. Must-have works are judged on the accepted corpus: found_partial means only a section or volume of the work passed; found_sections means the sections the plan named were found and kept."
+  },
+  "not_persisted": {}
+}

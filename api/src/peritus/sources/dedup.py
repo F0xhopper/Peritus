@@ -383,6 +383,11 @@ def _merge_group(members: list[SourceCandidate]) -> SourceCandidate:
         for key in ("oa_pdf_url", "oa_landing_url", "abstract", "cited_by_count"):
             if not metadata.get(key) and member.metadata.get(key):
                 metadata[key] = member.metadata[key]
+        # A must-have or priority mark on any copy belongs to the work, not to
+        # whichever copy the fetcher preference happened to pick.
+        for key in ("fetch_priority", "must_have_title", "must_have_extent", "must_have_sections"):
+            if not metadata.get(key) and member.metadata.get(key):
+                metadata[key] = member.metadata[key]
     if merged_from:
         metadata["merged_from"] = merged_from
     if len(discovered) > 1:

@@ -264,6 +264,10 @@ def answer_error_message(error: BaseException) -> str:
     It is still trimmed: an SDK message is a sentence, and anything longer than
     one is not something a reader wants in a notice.
     """
+    from peritus.chat.streaming import EmptyAnswerError
+
+    if isinstance(error, EmptyAnswerError):
+        return "The expert finished without writing an answer. Ask again."
     if isinstance(error, anthropic.APIStatusError):
         detail = provider_error_message(error)[:300].strip()
         return (

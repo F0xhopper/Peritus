@@ -7,6 +7,7 @@ import {
   isTerminalEvent,
   reduceAll,
   reduceBuildEvent,
+  rowKey,
   TIMELINE,
 } from '@/lib/build/reducer'
 import type { BuildEvent } from '@/lib/api/types'
@@ -249,6 +250,175 @@ describe('discovery', () => {
 
   it('keeps the key concepts from the plan', () => {
     expect(play('created', 'plan_ready').keyConcepts).toHaveLength(4)
+  })
+})
+
+describe('source selection', () => {
+  it('names the must-have works on a follow-up line, with its own key', () => {
+    const state = play('created', 'plan_ready_selection')
+    const [plan, works] = state.rows.slice(-2)
+    expect(plan!.message).toContain('Research plan ready — 2 key concepts')
+    expect(works).toMatchObject({
+      kind: 'info',
+      stage: 'plan',
+      message:
+        'Must-have works: The Hive and the Honey-Bee (L. L. Langstroth), Varroa destructor: research avenues towards sustainable control (Rosenkranz, Aumeier and Ziegelmann)',
+    })
+    // Two rows from one event must not share a React key.
+    expect(rowKey(plan!)).not.toBe(rowKey(works!))
+    expect(new Set(groupRows(state.rows).map((group) => group.key)).size).toBe(state.rows.length)
+  })
+
+  it('adds no must-have line for an older plan', () => {
+    const state = play('created', 'plan_ready')
+    expect(state.rows.filter((row) => row.message.startsWith('Must-have'))).toEqual([])
+  })
+
+  it('warns on a fetcher that timed out, and says why', () => {
+    expect(play('created', 'fetcher_timeout').rows.at(-1)).toMatchObject({
+      kind: 'warn',
+      group: 'fetchers:0',
+      message: 'gutenberg: timed out — Gutendex timed out after 10s',
+    })
+  })
+
+  it('warns on a rate-limited retry, reading it as a retry', () => {
+    expect(play('created', 'fetcher_rate_limited').rows.at(-1)).toMatchObject({
+      kind: 'warn',
+      message: 'pdf (retry): rate-limited — Semantic Scholar returned 429 after 3 attempts',
+    })
+  })
+
+  it('logs the retry and its result inside the fetcher group', () => {
+    const state = play('created', 'fetcher_timeout', 'fetcher_retried', 'fetcher_retry_ok')
+    expect(state.rows.slice(-2).map((row) => [row.kind, row.message])).toEqual([
+      ['info', 'Retrying gutenberg after a timeout'],
+      ['info', 'gutenberg (retry): 3 candidates from 1 query'],
+    ])
+    expect(groupRows(state.rows).find((group) => group.group === 'fetchers:0')?.rows).toHaveLength(3)
+  })
+
+  it('keeps an empty fetcher an info line', () => {
+    expect(play('created', 'fetcher_empty').rows.at(-1)).toMatchObject({
+      kind: 'info',
+      message: 'youtube: 0 candidates from 2 queries',
+    })
+  })
+
+  it('warns when the fetch floor is relaxed', () => {
+    expect(play('created', 'floor_relaxed').rows.at(-1)).toMatchObject({
+      kind: 'warn',
+      stage: 'discover',
+      message: 'Few strong candidates (7 of 15 needed scored ≥ 6) — fetching down to 5 this round',
+    })
+  })
+
+  it('reports the fetch floor and the unscored candidates at triage', () => {
+    expect(play('created', 'triage_done_selection').rows.at(-1)!.message).toBe(
+      'Triaged 104 candidates, ranked 41 for a budget of 30, 26 above the fetch floor; 4 could not be scored and were not fetched',
+    )
+    // An older build's triage line is unchanged.
+    expect(play('created', 'triage_done').rows.at(-1)!.message).toBe(
+      'Triaged 104 candidates, ranked 41 for a budget of 30',
+    )
+  })
+
+  it('counts failed downloads from the fetch outcomes', () => {
+    expect(play('created', 'fetch_done_outcomes').rows.at(-1)!.message).toBe(
+      'Retrieved full text for 24 sources, 1 dropped as duplicates, 3 could not be downloaded',
+    )
+  })
+
+  it('writes one line per canonical work: whole, partial and not found', () => {
+    const state = play('created', 'canonical_resolved')
+    const rows = state.rows.filter((row) => row.group === 'canonical:0')
+    expect(rows.map((row) => row.message)).toEqual([
+      'The Hive and the Honey-Bee: whole text found (internet_archive)',
+      'ABC and XYZ of Bee Culture: only parts found (gutenberg)',
+      'Varroa destructor: research avenues towards sustainable control: not found (tried gutenberg, internet_archive, exa)',
+    ])
+    expect(rows.every((row) => row.kind === 'info')).toBe(true)
+    expect(new Set(rows.map(rowKey)).size).toBe(3)
+  })
+
+  it('logs the sources dropped over the composition caps', () => {
+    const state = play('created', 'composition_capped', 'validate_done_capped')
+    expect(state.rows.slice(-2).map((row) => row.message)).toEqual([
+      'Dropped 2 sources over the abstract-only / tertiary share',
+      'Screening done — kept 19, dropped 9 (2 over the composition caps)',
+    ])
+  })
+
+  it('names the primary text per concept, and the plan\'s definition, after the must-have line', () => {
+    const state = play('created', 'plan_ready_primary_texts')
+    expect(state.rows.slice(-3).map((row) => [row.kind, row.stage, row.message])).toEqual([
+      ['info', 'plan', 'Must-have works: Summa Theologiae (Thomas Aquinas)'],
+      [
+        'info',
+        'plan',
+        'Primary texts per concept: Summa Theologiae I-II qq. 90–97 (natural law), On the Origin of Species ch. IV (natural selection)',
+      ],
+      [
+        'info',
+        'plan',
+        'Primary sources here: the original treatises and monographs in which the theories were first set out, not commentaries on them',
+      ],
+    ])
+    expect(new Set(state.rows.map(rowKey)).size).toBe(state.rows.length)
+    // An older plan has neither line.
+    expect(
+      play('created', 'plan_ready_selection').rows.filter((row) => row.message.startsWith('Primary')),
+    ).toEqual([])
+  })
+
+  it('names the concept a concept-scope canonical work is the primary text for', () => {
+    expect(play('created', 'canonical_resolved_concept').rows.at(-1)).toMatchObject({
+      group: 'canonical:0',
+      kind: 'info',
+      message: 'Summa Theologiae (for natural law): only parts found (gutenberg)',
+    })
+  })
+
+  it('logs the primary texts looked up for concepts without one', () => {
+    expect(play('created', 'primary_texts_suggested').rows.at(-1)).toMatchObject({
+      kind: 'info',
+      stage: 'discover',
+      message:
+        'Looking up primary texts for concepts without one: ABC and XYZ of Bee Culture (drone brood removal), Deformed wing virus (viral co-infection)',
+    })
+    const conceptsOnly = reduceBuildEvent(initialBuildState(), 1, {
+      type: 'primary_texts_suggested',
+      round: 1,
+      concepts: ['viral co-infection'],
+      texts: [],
+    })
+    expect(conceptsOnly.rows.at(-1)!.message).toBe(
+      'Looking up primary texts for concepts without one: viral co-infection',
+    )
+  })
+
+  it('mentions fetched sources dropped as not in English', () => {
+    expect(play('created', 'fetch_done_not_english').rows.at(-1)!.message).toBe(
+      'Retrieved full text for 22 sources, 1 could not be downloaded, 2 not in English',
+    )
+    // No mention when none were dropped.
+    expect(play('created', 'fetch_done_outcomes').rows.at(-1)!.message).not.toContain('English')
+  })
+
+  it('names the concepts that still lack a primary source', () => {
+    expect(play('created', 'feedback_queries_selection').rows.at(-1)!.message).toBe(
+      'New queries from the corpus: amitraz tolerance monitoring assay — no primary source yet for acaricide resistance',
+    )
+  })
+
+  it('names the search channels that failed when discovery ends', () => {
+    const state = play('created', 'discovery_done_selection')
+    expect(state.rows.at(-1)).toMatchObject({
+      kind: 'warn',
+      message: 'Searches that failed: pdf (rate-limited)',
+    })
+    // An older summary has no such line.
+    expect(play('created', 'discovery_done').rows.at(-1)!.message).toContain('coverage targets')
   })
 })
 

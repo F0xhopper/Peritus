@@ -4,6 +4,8 @@ import httpx
 
 from peritus.core.logging import get_logger
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.fetchers.base import note_search_failure
+from peritus.sources.fetchers.exa import classify_search_error
 
 logger = get_logger(__name__)
 
@@ -22,6 +24,7 @@ class RedditFetcher:
             hits = await _ddg_search(f"site:reddit.com/r {query}", max_results)
         except Exception as exc:
             logger.warning("DDG Reddit search failed for %r: %s", query, exc)
+            note_search_failure(*classify_search_error(exc, "DuckDuckGo (reddit)"))
             return []
 
         return [

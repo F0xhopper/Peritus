@@ -37,6 +37,7 @@ from peritus.chat.agent import (
     RetrievedContext,
     build_cached_system,
     build_composition_messages,
+    composition_params,
 )
 from peritus.chat.audit_trail import audit_db_rows, build_audit_payload
 from peritus.chat.grounding import parse_citations, used_citations
@@ -47,6 +48,10 @@ from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.search.readiness import get_readiness
 
 logger = get_logger(__name__)
+
+
+class EmptyAnswerError(RuntimeError):
+    """Composition ended without a single token of answer text."""
 
 
 async def stream_expert_answer(
@@ -81,9 +86,9 @@ async def stream_expert_answer(
     answer_parts: list[str] = []
     async with client.messages.stream(
         model=settings.CLAUDE_MODEL,
-        max_tokens=expert.config.max_response_tokens,
         system=build_cached_system(expert.persona_style, expert.topic),
         messages=messages,
+        **composition_params(settings.CLAUDE_MODEL, expert.config.max_response_tokens),
     ) as stream:
         async for text in stream.text_stream:
             answer_parts.append(text)
@@ -93,6 +98,16 @@ async def stream_expert_answer(
         # stored and shown as a finished answer.
         final = await stream.get_final_message()
         truncated = final.stop_reason == "max_tokens"
+
+    if not "".join(answer_parts).strip():
+        # Never a silent empty answer. Ending the stream with `done` and no
+        # tokens stored the question with nothing under it and told the reader
+        # only that "the answer was interrupted" — the failure that hid the
+        # thinking budget eating every answer. Raising gives the client an
+        # `error` with the cause, and the caller persists nothing.
+        raise EmptyAnswerError(
+            f"The model finished without writing an answer (stop_reason={final.stop_reason!r})."
+        )
 
     # Resolve citations: only passages the answer actually cited, with the
     # passage numbers preserved so inline [n] matches the rendered list.

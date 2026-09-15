@@ -262,9 +262,14 @@ async function buildScript() {
     'plan_ready',
     'picture_ready',
     'discovery_started',
+    'canonical_resolved',
     'fetcher_done',
     'fetcher_skipped',
+    'fetcher_timeout',
+    'fetcher_retried',
+    'fetcher_retry_ok',
     'dedup_done',
+    'floor_relaxed',
     'triage_done',
     'fetch_done',
     'stage_validate',
@@ -273,6 +278,7 @@ async function buildScript() {
     'source_reviewed',
     'validate_done',
     'coverage_report',
+    'primary_texts_suggested',
     'discovery_done',
     'stage_chunk',
     'source_ingested',
@@ -762,6 +768,14 @@ async function handle(req, res) {
         expert: { name: expert.name, topic: expert.topic, tier: expert.tier },
         page: { ...report.page, decision, returned: sources.length },
         sources,
+      })
+    }
+    if (rest === '/screening-flow' && method === 'GET') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      const flow = await fixture('screening-flow')
+      return json(res, 200, {
+        ...flow,
+        expert: { name: expert.name, topic: expert.topic, tier: expert.tier },
       })
     }
     if (rest === '/corpus-report/export' && method === 'GET') {

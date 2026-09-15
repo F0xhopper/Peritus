@@ -393,6 +393,122 @@ class ExpertRepository:
                 json.dumps(summary), expert_id,
             )
 
+    async def update_research_plan(self, expert_id: int, plan: dict) -> None:
+        """Store the normalised research plan. A rebuild overwrites it."""
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE experts SET research_plan = $1::jsonb, updated_at = NOW() WHERE id = $2",
+                json.dumps(plan), expert_id,
+            )
+
+    async def clear_candidate_screenings(self, expert_id: int, job_id: int | None) -> None:
+        """Forget a previous attempt's ledger for this job before a new one writes.
+
+        A retried job re-runs discovery from nothing, and two attempts' rows under
+        one job would double every count the ledger exists to answer.
+        """
+        async with self._pool.acquire() as conn:
+            if job_id is None:
+                await conn.execute(
+                    "DELETE FROM candidate_screenings WHERE expert_id = $1 AND job_id IS NULL",
+                    expert_id,
+                )
+            else:
+                await conn.execute(
+                    "DELETE FROM candidate_screenings WHERE job_id = $1", job_id,
+                )
+
+    async def insert_candidate_screenings(
+        self, expert_id: int, job_id: int | None, rows: list[dict]
+    ) -> None:
+        """One round's screening ledger, in one transaction."""
+        if not rows:
+            return
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.executemany(
+                """
+                INSERT INTO candidate_screenings
+                    (job_id, expert_id, round, source_type, url, title, author, snippet,
+                     discovered_via, model_score, domain_adjustment, triage_score,
+                     triage_status, fetch_rank, fetch_outcome)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+                """,
+                [
+                    (
+                        job_id, expert_id, r["round"], r["source_type"], r["url"],
+                        r["title"][:1000], r.get("author"), r.get("snippet") or "",
+                        r["discovered_via"], r["model_score"], r["domain_adjustment"],
+                        r["triage_score"], r["triage_status"], r["fetch_rank"],
+                        r["fetch_outcome"],
+                    )
+                    for r in rows
+                ],
+            )
+
+    async def candidate_screenings(self, job_id: int) -> list[dict]:
+        """Every candidate one job's triage saw, in round and fetch order."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT cs.*, s.passed, s.relevance_score, s.source_tier, s.drop_reason
+                FROM candidate_screenings cs
+                LEFT JOIN sources s ON s.id = cs.source_id
+                WHERE cs.job_id = $1
+                ORDER BY cs.round, cs.fetch_rank NULLS LAST, cs.triage_score DESC
+                """,
+                job_id,
+            )
+        return [dict(r) for r in rows]
+
+    async def latest_candidate_screenings(self, expert_id: int) -> list[dict]:
+        """The most recent build's ledger for an expert, job or no job.
+
+        A build run outside the job queue (the CLI, a script) writes its ledger
+        with ``job_id`` NULL, and a job id cannot find it.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                WITH latest AS (
+                    SELECT job_id FROM candidate_screenings
+                    WHERE expert_id = $1
+                    ORDER BY created_at DESC LIMIT 1
+                )
+                SELECT cs.*, s.passed, s.relevance_score, s.source_tier, s.drop_reason
+                FROM candidate_screenings cs
+                LEFT JOIN sources s ON s.id = cs.source_id
+                WHERE cs.expert_id = $1
+                  AND cs.job_id IS NOT DISTINCT FROM (SELECT job_id FROM latest)
+                ORDER BY cs.round, cs.fetch_rank NULLS LAST, cs.triage_score DESC
+                """,
+                expert_id,
+            )
+        return [dict(r) for r in rows]
+
+    async def link_candidate_screenings(self, expert_id: int, job_id: int | None) -> None:
+        """Point the ledger at the sources rows it produced, once they exist.
+
+        The ledger is written per round, before anything is persisted, so a
+        build that fails before persisting still leaves it behind; the link is
+        made afterwards by URL.
+        """
+        async with self._pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE candidate_screenings cs
+                SET source_id = s.id
+                FROM sources s
+                WHERE cs.expert_id = $1
+                  AND cs.job_id IS NOT DISTINCT FROM $2
+                  AND cs.source_id IS NULL
+                  AND cs.fetch_outcome IN ('fetched', 'content_duplicate')
+                  AND s.expert_id = cs.expert_id
+                  AND s.url = cs.url
+                  AND (s.discovered_via IS DISTINCT FROM 'upload')
+                """,
+                expert_id, job_id,
+            )
+
     async def update_counts(
         self,
         expert_id: int,

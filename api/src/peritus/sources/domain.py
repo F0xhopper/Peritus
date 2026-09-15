@@ -207,6 +207,15 @@ class ValidatedSource:
     review_model: str | None = None
     first_pass_quality: float | None = None
     first_pass_relevance: float | None = None
+    # full | partial | abstract — how much of the work the text actually is.
+    # ``None`` for a source built by hand, which is treated as counting. See
+    # :func:`peritus.sources.substance.substance_of`.
+    substance: str | None = None
+    # How deeply this source treats each key concept it was tagged with:
+    # sets_out | treats | mentions (docs/plans/syllabus.md, 4.A).
+    # ``covered_concepts`` is the names at ``treats`` or deeper. Empty for a
+    # source validated before graded tags, whose tags coverage reads as ``treats``.
+    concept_depths: dict[str, str] = field(default_factory=dict)
 
     @property
     def source_type(self) -> SourceType:

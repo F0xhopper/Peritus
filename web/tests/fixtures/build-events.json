@@ -209,6 +209,306 @@
     "cap_usd": 3.0
   },
   "cancelled": { "type": "cancelled", "message": "Build cancelled" },
+  "plan_ready_selection": {
+    "type": "plan_ready",
+    "key_concepts": ["varroa biology", "acaricide resistance"],
+    "fetcher_plans": {
+      "openalex": { "queries": ["varroa destructor acaricide resistance"], "weight": 1.5 },
+      "gutenberg": { "queries": ["apiculture"], "weight": 0.5 }
+    },
+    "must_have_works": [
+      {
+        "title": "The Hive and the Honey-Bee",
+        "author": "L. L. Langstroth",
+        "kind": "book",
+        "public_domain": true,
+        "sections": ""
+      },
+      {
+        "title": "Varroa destructor: research avenues towards sustainable control",
+        "author": "Rosenkranz, Aumeier and Ziegelmann",
+        "kind": "paper",
+        "public_domain": false,
+        "sections": ""
+      }
+    ]
+  },
+  "fetcher_timeout": {
+    "type": "fetcher_done",
+    "round": 0,
+    "name": "gutenberg",
+    "count": 0,
+    "skipped": false,
+    "reason": "Gutendex timed out after 10s",
+    "status": "timeout",
+    "error": "Gutendex timed out after 10s",
+    "attempt": 0,
+    "elapsed": 10.2,
+    "queries": 1
+  },
+  "fetcher_retried": {
+    "type": "fetcher_retried",
+    "round": 0,
+    "name": "gutenberg",
+    "after": "timeout"
+  },
+  "fetcher_retry_ok": {
+    "type": "fetcher_done",
+    "round": 0,
+    "name": "gutenberg",
+    "count": 3,
+    "skipped": false,
+    "reason": "",
+    "status": "ok",
+    "error": "",
+    "attempt": 1,
+    "elapsed": 4.1,
+    "queries": 1
+  },
+  "fetcher_rate_limited": {
+    "type": "fetcher_done",
+    "round": 0,
+    "name": "pdf",
+    "count": 0,
+    "skipped": false,
+    "reason": "Semantic Scholar returned 429 after 3 attempts",
+    "status": "rate_limited",
+    "error": "Semantic Scholar returned 429 after 3 attempts",
+    "attempt": 1,
+    "elapsed": 22.7,
+    "queries": 2
+  },
+  "fetcher_empty": {
+    "type": "fetcher_done",
+    "round": 0,
+    "name": "youtube",
+    "count": 0,
+    "skipped": false,
+    "reason": "",
+    "status": "empty",
+    "error": "",
+    "attempt": 0,
+    "elapsed": 1.3,
+    "queries": 2
+  },
+  "floor_relaxed": {
+    "type": "floor_relaxed",
+    "round": 0,
+    "floor": 6,
+    "relaxed_to": 5,
+    "reaching": 7,
+    "needed": 15
+  },
+  "triage_done_selection": {
+    "type": "triage_done",
+    "round": 0,
+    "candidates": 104,
+    "ranked": 41,
+    "budget": 30,
+    "floor": 5,
+    "above_floor": 26,
+    "unscored": 4
+  },
+  "fetch_done_outcomes": {
+    "type": "fetch_done",
+    "round": 0,
+    "fetched": 24,
+    "content_duplicates": 1,
+    "budget": 30,
+    "estimated_ingest_usd": 0.74,
+    "outcomes": { "fetched": 24, "failed": 3, "below_floor": 15, "content_duplicate": 1 }
+  },
+  "canonical_resolved": {
+    "type": "canonical_resolved",
+    "round": 0,
+    "works": [
+      {
+        "title": "The Hive and the Honey-Bee",
+        "author": "L. L. Langstroth",
+        "kind": "book",
+        "public_domain": true,
+        "scope": "overall",
+        "concepts": [],
+        "sections": "",
+        "routes_tried": ["gutenberg", "internet_archive"],
+        "route_errors": {},
+        "candidates": [
+          {
+            "url": "https://archive.org/details/hivehoneybee00lang",
+            "title": "The Hive and the Honey-Bee",
+            "extent": "whole",
+            "route": "internet_archive",
+            "priority": false
+          }
+        ]
+      },
+      {
+        "title": "ABC and XYZ of Bee Culture",
+        "author": "A. I. Root",
+        "kind": "book",
+        "public_domain": true,
+        "routes_tried": ["gutenberg"],
+        "route_errors": {},
+        "candidates": [
+          {
+            "url": "https://www.gutenberg.org/ebooks/00000",
+            "title": "ABC and XYZ of Bee Culture, volume II",
+            "extent": "partial",
+            "route": "gutenberg"
+          }
+        ]
+      },
+      {
+        "title": "Varroa destructor: research avenues towards sustainable control",
+        "author": "Rosenkranz, Aumeier and Ziegelmann",
+        "kind": "paper",
+        "public_domain": false,
+        "routes_tried": ["gutenberg", "internet_archive", "exa"],
+        "route_errors": { "gutenberg": "Gutendex timed out after 10s" },
+        "candidates": []
+      }
+    ]
+  },
+  "composition_capped": {
+    "type": "composition_capped",
+    "round": 0,
+    "dropped": [
+      { "title": "Varroa mite (encyclopedia entry)", "reason": "tertiary (over share)" },
+      {
+        "title": "Mite counts in spring colonies",
+        "reason": "abstract only (under 800 characters)"
+      }
+    ]
+  },
+  "validate_done_capped": {
+    "type": "validate_done",
+    "round": 0,
+    "passed": 19,
+    "dropped": 9,
+    "capped": 2
+  },
+  "feedback_queries_selection": {
+    "type": "feedback_queries",
+    "round": 1,
+    "concepts": ["acaricide resistance"],
+    "without_primary": ["acaricide resistance"],
+    "queries": ["amitraz tolerance monitoring assay"],
+    "fetchers": ["openalex", "pubmed"],
+    "retried_fetchers": ["gutenberg"]
+  },
+  "discovery_done_selection": {
+    "type": "discovery_done",
+    "rounds": 2,
+    "stop_reason": "targets_met",
+    "coverage_met": true,
+    "corpus": {
+      "sources": 19,
+      "primary": 8,
+      "secondary": 7,
+      "tertiary": 2,
+      "unclassified": 2,
+      "abstract_only": 3,
+      "primary_share": 0.421,
+      "secondary_share": 0.368,
+      "tertiary_share": 0.105,
+      "abstract_only_share": 0.158,
+      "junk_fetched": 2,
+      "concept_shares": { "varroa biology": 0.58, "acaricide resistance": 0.26 },
+      "concepts_without_primary": ["acaricide resistance"],
+      "must_have": []
+    },
+    "failed_channels": { "pdf": "rate_limited" }
+  },
+  "plan_ready_primary_texts": {
+    "type": "plan_ready",
+    "key_concepts": ["natural law", "natural selection"],
+    "must_have_works": [
+      {
+        "title": "Summa Theologiae",
+        "author": "Thomas Aquinas",
+        "kind": "text",
+        "public_domain": true,
+        "sections": ""
+      }
+    ],
+    "primary_source_definition": "the original treatises and monographs in which the theories were first set out, not commentaries on them",
+    "concept_primary_texts": [
+      {
+        "concept": "natural law",
+        "title": "Summa Theologiae",
+        "author": "Thomas Aquinas",
+        "kind": "text",
+        "public_domain": true,
+        "sections": "I-II qq. 90–97"
+      },
+      {
+        "concept": "natural selection",
+        "title": "On the Origin of Species",
+        "author": "Charles Darwin",
+        "kind": "book",
+        "public_domain": true,
+        "sections": "ch. IV"
+      }
+    ]
+  },
+  "canonical_resolved_concept": {
+    "type": "canonical_resolved",
+    "round": 0,
+    "works": [
+      {
+        "title": "Summa Theologiae",
+        "author": "Thomas Aquinas",
+        "kind": "text",
+        "public_domain": true,
+        "scope": "concept",
+        "concepts": ["natural law"],
+        "sections": "I-II qq. 90–97",
+        "routes_tried": ["gutenberg"],
+        "route_errors": {},
+        "candidates": [
+          {
+            "url": "https://www.gutenberg.org/ebooks/17611",
+            "title": "Summa Theologica, Part I-II",
+            "extent": "partial",
+            "route": "gutenberg",
+            "priority": true
+          }
+        ]
+      }
+    ]
+  },
+  "primary_texts_suggested": {
+    "type": "primary_texts_suggested",
+    "round": 1,
+    "concepts": ["drone brood removal", "viral co-infection"],
+    "texts": [
+      {
+        "concept": "drone brood removal",
+        "title": "ABC and XYZ of Bee Culture",
+        "author": "A. I. Root",
+        "kind": "book",
+        "public_domain": true,
+        "sections": ""
+      },
+      {
+        "concept": "viral co-infection",
+        "title": "Deformed wing virus",
+        "author": "",
+        "kind": "paper",
+        "public_domain": false,
+        "sections": ""
+      }
+    ]
+  },
+  "fetch_done_not_english": {
+    "type": "fetch_done",
+    "round": 0,
+    "fetched": 22,
+    "content_duplicates": 0,
+    "budget": 30,
+    "estimated_ingest_usd": 0.68,
+    "outcomes": { "fetched": 22, "failed": 1, "not_english": 2, "below_floor": 15 }
+  },
   "unknown_future_event": {
     "type": "some_event_this_build_has_never_heard_of",
     "payload": { "anything": true }

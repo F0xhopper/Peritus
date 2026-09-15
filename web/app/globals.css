@@ -395,9 +395,11 @@
   .pt-safe {
     padding-top: max(env(safe-area-inset-top), 0px);
   }
-  /* The composer adds the iOS keyboard inset on top of its own padding. */
+  /* The composer adds the iOS keyboard inset on top of its own padding. The
+     0.75rem is that padding: this sets `padding-bottom` outright, so without it
+     the box sits flush against the bottom wherever both insets are zero. */
   .pb-keyboard {
-    padding-bottom: calc(var(--vv-offset) + max(env(safe-area-inset-bottom), 0px));
+    padding-bottom: calc(0.75rem + var(--vv-offset, 0px) + max(env(safe-area-inset-bottom), 0px));
   }
 }
 

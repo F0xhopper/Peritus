@@ -290,12 +290,17 @@ export type BuildEventType =
   | 'plan_ready'
   | 'discovery_started'
   | 'round_started'
+  | 'canonical_resolved'
+  | 'primary_texts_suggested'
   | 'fetcher_done'
+  | 'fetcher_retried'
   | 'dedup_done'
+  | 'floor_relaxed'
   | 'triage_done'
   | 'fetch_progress'
   | 'fetch_done'
   | 'resolve_progress'
+  | 'composition_capped'
   | 'validate_done'
   | 'source_validated'
   | 'source_reviewed'
@@ -379,6 +384,9 @@ export interface SourceReviewedEvent extends BuildEventBase {
   review_model: string
 }
 
+/** How one search channel ended. `skipped` is a deliberate no-op, not a failure. */
+export type FetcherStatus = 'ok' | 'empty' | 'timeout' | 'rate_limited' | 'error' | 'skipped'
+
 export interface FetcherDoneEvent extends BuildEventBase {
   type: 'fetcher_done'
   round: number
@@ -387,6 +395,30 @@ export interface FetcherDoneEvent extends BuildEventBase {
   skipped: boolean
   reason: string | null
   queries: number
+  /** Absent from builds before source selection (migration 029). */
+  status?: FetcherStatus
+  error?: string
+  /** 0 on the first try, 1 on the retry after a timeout or a 429. */
+  attempt?: number
+  /** Seconds. */
+  elapsed?: number
+}
+
+export interface FetcherRetriedEvent extends BuildEventBase {
+  type: 'fetcher_retried'
+  round: number
+  name: string
+  after: 'timeout' | 'rate_limited'
+}
+
+/** Too few candidates cleared the fetch floor, so this round fetches lower. */
+export interface FloorRelaxedEvent extends BuildEventBase {
+  type: 'floor_relaxed'
+  round: number
+  floor: number
+  relaxed_to: number
+  reaching: number
+  needed: number
 }
 
 export interface TriageDoneEvent extends BuildEventBase {
@@ -395,7 +427,21 @@ export interface TriageDoneEvent extends BuildEventBase {
   candidates: number
   ranked: number
   budget: number
+  floor?: number
+  above_floor?: number
+  /** Candidates the model never scored; they are not fetched. */
+  unscored?: number
 }
+
+/** What happened to each ranked candidate at fetch time. */
+export type FetchOutcome =
+  | 'fetched'
+  | 'failed'
+  | 'capped'
+  | 'below_floor'
+  | 'budget'
+  | 'not_reached'
+  | 'content_duplicate'
 
 export interface FetchDoneEvent extends BuildEventBase {
   type: 'fetch_done'
@@ -404,6 +450,85 @@ export interface FetchDoneEvent extends BuildEventBase {
   content_duplicates: number
   budget: number
   estimated_ingest_usd: number
+  /** `not_english`: fetched sources dropped as not in the corpus language. */
+  outcomes?: Partial<Record<FetchOutcome | 'not_english' | string, number>>
+}
+
+export type MustHaveKind = 'text' | 'book' | 'paper' | 'standard'
+
+/** A work the plan says a corpus on this topic cannot do without. */
+export interface MustHaveWork {
+  title: string
+  author: string
+  kind: MustHaveKind
+  public_domain: boolean
+  sections: string
+}
+
+/** Whether a must-have work is canonical for the whole topic or the primary text for a concept. */
+export type MustHaveScope = 'overall' | 'concept'
+
+/** The primary text the plan names for one key concept. */
+export interface ConceptPrimaryText extends MustHaveWork {
+  concept: string
+}
+
+export interface CanonicalResolution {
+  title: string
+  author: string
+  kind: MustHaveKind
+  public_domain: boolean
+  routes_tried: string[]
+  route_errors: Record<string, string>
+  /** Absent before concept primary texts; treat as `overall`. */
+  scope?: MustHaveScope
+  concepts?: string[]
+  sections?: string
+  candidates: {
+    url: string
+    title: string
+    extent: 'whole' | 'partial' | null
+    route: string | null
+    priority?: boolean
+  }[]
+}
+
+export interface CanonicalResolvedEvent extends BuildEventBase {
+  type: 'canonical_resolved'
+  round: number
+  works: CanonicalResolution[]
+}
+
+/** Primary texts looked up for concepts the corpus still has none for. */
+export interface PrimaryTextsSuggestedEvent extends BuildEventBase {
+  type: 'primary_texts_suggested'
+  round: number
+  concepts: string[]
+  texts: ConceptPrimaryText[]
+}
+
+export interface CompositionCappedEvent extends BuildEventBase {
+  type: 'composition_capped'
+  round: number
+  dropped: { title: string; reason: string }[]
+}
+
+export interface ValidateDoneEvent extends BuildEventBase {
+  type: 'validate_done'
+  round: number
+  passed: number
+  dropped: number
+  capped?: number
+}
+
+export interface FeedbackQueriesEvent extends BuildEventBase {
+  type: 'feedback_queries'
+  round: number
+  queries: string[]
+  concepts?: string[]
+  without_primary?: string[]
+  fetchers?: string[]
+  retried_fetchers?: string[]
 }
 
 export interface ChatReadyEvent extends BuildEventBase {
@@ -423,6 +548,12 @@ export interface GraphReadyEvent extends BuildEventBase {
 export interface PlanReadyEvent extends BuildEventBase {
   type: 'plan_ready'
   key_concepts: string[]
+  /** Absent from builds before source selection. */
+  fetcher_plans?: Record<string, { queries: string[]; weight: number }>
+  must_have_works?: MustHaveWork[]
+  /** Absent before concept primary texts. */
+  primary_source_definition?: string
+  concept_primary_texts?: ConceptPrimaryText[]
 }
 
 export interface SourceIngestedEvent extends BuildEventBase {
@@ -470,6 +601,15 @@ export interface CoverageReportEvent extends BuildEventBase {
   round?: number
 }
 
+export interface DiscoveryDoneEvent extends BuildEventBase {
+  type: 'discovery_done'
+  rounds: number
+  stop_reason: string
+  corpus?: CorpusComposition
+  /** Fetcher name → the status it failed with. */
+  failed_channels?: Record<string, FetcherStatus | string>
+}
+
 export type BuildEvent =
   | CreatedEvent
   | StageEvent
@@ -487,6 +627,14 @@ export type BuildEvent =
   | ErrorEvent
   | RetryEvent
   | CoverageReportEvent
+  | FetcherRetriedEvent
+  | FloorRelaxedEvent
+  | CanonicalResolvedEvent
+  | PrimaryTextsSuggestedEvent
+  | CompositionCappedEvent
+  | ValidateDoneEvent
+  | FeedbackQueriesEvent
+  | DiscoveryDoneEvent
   | BuildEventBase
 
 // ── conversations ───────────────────────────────────────────────────────────
@@ -733,6 +881,79 @@ export interface CorpusReport {
   }
   page: AuditPage
   sources: LedgerSource[]
+}
+
+// ── source selection (the screening-flow report) ────────────────────────────
+
+/**
+ * `found_sections`: the named sections of a long work were found and kept —
+ * as good as whole for a work the plan only needs part of.
+ */
+export type MustHaveStatus = 'found_whole' | 'found_sections' | 'found_partial' | 'not_found'
+
+/**
+ * What the corpus is made of, computed once at the end of discovery and stored
+ * in `build_summary.corpus`. Shares are 0..1 over `sources`.
+ */
+export interface CorpusComposition {
+  sources: number
+  primary: number
+  secondary: number
+  tertiary: number
+  unclassified: number
+  abstract_only: number
+  primary_share: number
+  secondary_share: number
+  tertiary_share: number
+  abstract_only_share: number
+  /** Fetched sources the validator scored 3 or less for relevance. */
+  junk_fetched: number
+  concept_shares: Record<string, number>
+  concepts_without_primary: string[]
+  must_have: {
+    title: string
+    author: string
+    status: MustHaveStatus
+    source_urls: string[]
+    routes_tried: string[]
+    route_errors: Record<string, string>
+    /** The four below are absent from older builds; no scope means `overall`. */
+    kind?: MustHaveKind
+    scope?: MustHaveScope
+    concepts?: string[]
+    sections?: string
+  }[]
+}
+
+export interface CandidateLedgerRow {
+  round: number
+  /** Null when triage saw the candidate but the fetch stage never recorded it. */
+  fetch_outcome: FetchOutcome | string | null
+  triage_status: string
+  count: number
+  mean_triage_score: number | null
+}
+
+export type SelectionBlock =
+  | { available: false; unavailable_reason: string }
+  | {
+      available: true
+      corpus: CorpusComposition | null
+      failed_channels: Record<string, FetcherStatus | string>
+      candidate_ledger: { job_id: number | null; rows: CandidateLedgerRow[] } | null
+      note: string
+    }
+
+/**
+ * `GET /experts/{slug}/screening-flow`. Only the part the web renders is typed
+ * here; the funnel stages, discovery and gap-fill blocks ride along untyped.
+ */
+export interface ScreeningFlow {
+  expert: { name: string; topic: string; [k: string]: unknown }
+  method_statement: string
+  /** Absent from servers older than source selection. */
+  selection?: SelectionBlock
+  [k: string]: unknown
 }
 
 // ── sources (owner-scoped management view) ──────────────────────────────────

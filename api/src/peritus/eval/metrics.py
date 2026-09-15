@@ -352,3 +352,41 @@ def concept_jaccard(predicted: list[str], actual: list[str]) -> float:
         return 1.0
     union = left | right
     return round(len(left & right) / len(union), 4) if union else 1.0
+
+
+def spearman(xs: list[float], ys: list[float]) -> float:
+    """Rank correlation, with tied values given their average rank.
+
+    Used between a triage score and a human keep/drop label (1/0): it asks
+    whether the candidates people want to keep are the ones triage ranks higher,
+    which is the only thing a score that orders a fetch queue has to get right.
+    0.0 when either side is constant, where the correlation is undefined.
+    """
+    if len(xs) != len(ys):
+        raise ValueError("spearman: inputs must be the same length")
+    n = len(xs)
+    if n < 2:
+        return 0.0
+
+    def ranks(values: list[float]) -> list[float]:
+        order = sorted(range(n), key=lambda i: values[i])
+        out = [0.0] * n
+        i = 0
+        while i < n:
+            j = i
+            while j + 1 < n and values[order[j + 1]] == values[order[i]]:
+                j += 1
+            average = (i + j) / 2 + 1
+            for k in range(i, j + 1):
+                out[order[k]] = average
+            i = j + 1
+        return out
+
+    rx, ry = ranks(xs), ranks(ys)
+    mean_x, mean_y = sum(rx) / n, sum(ry) / n
+    cov = sum((a - mean_x) * (b - mean_y) for a, b in zip(rx, ry, strict=True))
+    var_x = sum((a - mean_x) ** 2 for a in rx)
+    var_y = sum((b - mean_y) ** 2 for b in ry)
+    if var_x == 0 or var_y == 0:
+        return 0.0
+    return round(cov / (var_x * var_y) ** 0.5, 4)

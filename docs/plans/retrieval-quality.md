@@ -40,6 +40,24 @@ Thomism, before the rebuild (old corpus, new retrieval code, 45 generated
 questions, 44 of 45 reranked by Cohere): recall@10 0.644, MRR 0.535, source
 recall@10 0.733.
 
+**The rebuild (expert 55, STANDARD, job 53, $3.98).** Built by the local worker
+with the Fly worker stopped. Note `api/.env` pins `CHUNK_SIZE_CHARS=1500`, so
+this build still chunked at 1,500 — the R3 figures above were also measured at
+1,500. 43 sources, 998 chunks (old: 39 / 1,345), 0 chunks under 300 chars.
+Graph: 2,271 nodes; `supports` 173 (89 cross-source), `qualifies` 66 (37),
+`contradicts` 13 (7), every one of the last two with its stated condition or
+point — the first reconciled edges in production. `claims_reconciled`: 63
+examined, 0 calls failed, 265 returned, 252 inserted, 13 refused at insert
+(unresolved endpoints). So the zero-edge builds were failed calls, not a code
+defect. Claims with no `about` edge: 121 of 1,431 (8.5%, was 34%).
+
+**The before/after retrieval number is not usable.** Discovery found a mostly
+different corpus: only 8 of the 45 gold passages exist in the rebuilt expert,
+capping recall at 0.18. The run also hit an exhausted Anthropic credit balance,
+so planning fell back to the raw question throughout. A like-for-like measure
+needs the golden set generated *after* a rebuild and run against two retrieval
+configurations on that one corpus, not against two corpora.
+
 ---
 
 ## 1. Summary

@@ -5,6 +5,7 @@ import {
   type Readiness,
   type StageName,
 } from '@/lib/api/types'
+import { describeChannelStatus } from '@/lib/selection'
 
 /**
  * Build events in, a renderable log out.
@@ -60,8 +61,14 @@ const STAGE_SEGMENT: Record<string, StageName> = {
 export type RowKind = 'info' | 'keep' | 'drop' | 'stage' | 'warn' | 'bad' | 'ok' | 'meta'
 
 export interface LogRow {
-  /** The event's `seq`, and the React key. Unique and monotonic per job. */
+  /** The event's `seq`. Monotonic per job; with `sub`, the React key. */
   seq: number
+  /**
+   * Position within its event, set only on the second and later rows of an
+   * event that logs several (`canonical_resolved` writes one per work). Read
+   * the key through `rowKey`, never `seq` alone.
+   */
+  sub?: number
   kind: RowKind
   /** Which pipeline stage was running. Rendered in the second column. */
   stage: StageName | null
@@ -138,6 +145,17 @@ export function initialBuildState(): BuildState {
   }
 }
 
+/** The object entries of an array field, ignoring anything that is not one. */
+function records(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+    : []
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []
+}
+
 function num(value: unknown, fallback = 0): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
@@ -193,8 +211,10 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
     // Any event arriving means the stream is alive again.
     retrying: type === 'retry' ? true : state.retrying,
   }
-  const push = (row: Omit<LogRow, 'seq' | 'raw'>) => {
-    next.rows = [...state.rows, { ...row, seq, raw: event }]
+  let pushed = 0
+  const push = (row: Omit<LogRow, 'seq' | 'sub' | 'raw'>) => {
+    next.rows = [...next.rows, { ...row, seq, ...(pushed > 0 ? { sub: pushed } : {}), raw: event }]
+    pushed += 1
   }
 
   switch (type) {
@@ -286,6 +306,30 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
         stage: 'plan',
         message: `Research plan ready — ${concepts.length} key concepts: ${concepts.join(', ')}`,
       })
+      // Older builds carry no must-have works; the line is simply absent.
+      const works = records(event.must_have_works)
+        .map((work) => {
+          const title = str(work.title)
+          const author = str(work.author)
+          return title ? (author ? `${title} (${author})` : title) : ''
+        })
+        .filter(Boolean)
+      if (works.length > 0) {
+        push({ kind: 'info', stage: 'plan', message: `Must-have works: ${works.join(', ')}` })
+      }
+      // Builds before concept primary texts carry neither; both lines are absent.
+      const conceptTexts = records(event.concept_primary_texts).map(primaryTextLabel).filter(Boolean)
+      if (conceptTexts.length > 0) {
+        push({
+          kind: 'info',
+          stage: 'plan',
+          message: `Primary texts per concept: ${conceptTexts.join(', ')}`,
+        })
+      }
+      const definition = str(event.primary_source_definition).trim()
+      if (definition) {
+        push({ kind: 'info', stage: 'plan', message: `Primary sources here: ${definition}` })
+      }
       return next
     }
 
@@ -310,18 +354,76 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
 
     case 'fetcher_done': {
       const name = str(event.name)
-      const skipped = event.skipped === true
+      const label = num(event.attempt) >= 1 ? `${name} (retry)` : name
+      const status = str(event.status)
+      const skipped = event.skipped === true || status === 'skipped'
+      const failure = FETCHER_FAILURES[status]
+      // `error` is new; older builds put the same text in `reason`, if anywhere.
+      const why = str(event.error) || str(event.reason)
       push({
         // Fetcher results fold into one collapsed group per round: eleven rows
         // of "n candidates" is the least interesting part of a build log.
         group: `fetchers:${num(event.round)}`,
-        kind: skipped ? 'warn' : 'info',
+        kind: skipped || failure ? 'warn' : 'info',
         stage: 'discover',
         message: skipped
-          ? `${name} skipped — ${str(event.reason, 'nothing usable')}`
-          : `${name}: ${num(event.count)} candidates from ${num(event.queries)} ${
-              num(event.queries) === 1 ? 'query' : 'queries'
-            }`,
+          ? `${label} skipped — ${str(event.reason) || str(event.error) || 'nothing usable'}`
+          : failure
+            ? `${label}: ${failure}${why ? ` — ${why}` : ''}`
+            : `${label}: ${num(event.count)} candidates from ${num(event.queries)} ${
+                num(event.queries) === 1 ? 'query' : 'queries'
+              }`,
+      })
+      return next
+    }
+
+    case 'fetcher_retried': {
+      const after = str(event.after)
+      const cause =
+        after === 'rate_limited' ? 'being rate-limited' : after === 'timeout' ? 'a timeout' : 'a failure'
+      push({
+        group: `fetchers:${num(event.round)}`,
+        kind: 'info',
+        stage: 'discover',
+        message: `Retrying ${str(event.name, 'a search')} after ${cause}`,
+      })
+      return next
+    }
+
+    case 'floor_relaxed': {
+      push({
+        kind: 'warn',
+        stage: 'discover',
+        message:
+          `Few strong candidates (${num(event.reaching)} of ${num(event.needed)} needed scored ≥ ${num(event.floor)})` +
+          ` — fetching down to ${num(event.relaxed_to)} this round`,
+      })
+      return next
+    }
+
+    case 'canonical_resolved': {
+      // One line per must-have work, folded like the fetchers: the reader
+      // opens the group to see which of the plan's canonical works were found.
+      for (const work of records(event.works)) {
+        push({
+          group: `canonical:${num(event.round)}`,
+          kind: 'info',
+          stage: 'discover',
+          message: canonicalMessage(work),
+        })
+      }
+      return next
+    }
+
+    case 'primary_texts_suggested': {
+      const texts = records(event.texts).map(primaryTextLabel).filter(Boolean)
+      // With no texts named, the concepts alone still say what is being looked up.
+      const named = texts.length > 0 ? texts : strings(event.concepts)
+      if (named.length === 0) return next
+      push({
+        kind: 'info',
+        stage: 'discover',
+        message: `Looking up primary texts for concepts without one: ${named.join(', ')}`,
       })
       return next
     }
@@ -341,10 +443,14 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
 
     case 'triage_done': {
       next.counts = { ...state.counts, considered: state.counts.considered + num(event.candidates) }
+      const unscored = num(event.unscored)
       push({
         kind: 'info',
         stage: 'discover',
-        message: `Triaged ${num(event.candidates)} candidates, ranked ${num(event.ranked)} for a budget of ${num(event.budget)}`,
+        message:
+          `Triaged ${num(event.candidates)} candidates, ranked ${num(event.ranked)} for a budget of ${num(event.budget)}` +
+          (typeof event.above_floor === 'number' ? `, ${event.above_floor} above the fetch floor` : '') +
+          (unscored > 0 ? `; ${unscored} could not be scored and were not fetched` : ''),
       })
       return next
     }
@@ -362,12 +468,20 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
 
     case 'fetch_done': {
       const dupes = num(event.content_duplicates)
+      const outcomes =
+        typeof event.outcomes === 'object' && event.outcomes !== null
+          ? (event.outcomes as Record<string, unknown>)
+          : {}
+      const failed = num(outcomes.failed)
+      const notEnglish = num(outcomes.not_english)
       push({
         kind: 'info',
         stage: 'discover',
         message:
           `Retrieved full text for ${num(event.fetched)} sources` +
-          (dupes ? `, ${dupes} dropped as duplicates` : ''),
+          (dupes ? `, ${dupes} dropped as duplicates` : '') +
+          (failed ? `, ${failed} could not be downloaded` : '') +
+          (notEnglish ? `, ${notEnglish} not in English` : ''),
       })
       return next
     }
@@ -399,12 +513,28 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
       return next
     }
 
-    case 'validate_done': {
-      next.stages = completeThrough(state.stages, 'validate')
+    case 'composition_capped': {
+      const dropped = records(event.dropped)
+      if (dropped.length === 0) return next
       push({
         kind: 'info',
         stage: 'validate',
-        message: `Screening done — kept ${num(event.passed)}, dropped ${num(event.dropped)}`,
+        message: `Dropped ${dropped.length} ${
+          dropped.length === 1 ? 'source' : 'sources'
+        } over the abstract-only / tertiary share`,
+      })
+      return next
+    }
+
+    case 'validate_done': {
+      next.stages = completeThrough(state.stages, 'validate')
+      const capped = num(event.capped)
+      push({
+        kind: 'info',
+        stage: 'validate',
+        message:
+          `Screening done — kept ${num(event.passed)}, dropped ${num(event.dropped)}` +
+          (capped ? ` (${capped} over the composition caps)` : ''),
       })
       return next
     }
@@ -426,12 +556,17 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
 
     case 'feedback_queries': {
       const queries = Array.isArray(event.queries) ? (event.queries as string[]) : []
+      const withoutPrimary = strings(event.without_primary)
       push({
         kind: 'info',
         stage: 'discover',
-        message: `New queries from the corpus: ${queries.slice(0, 3).join(' · ')}${
-          queries.length > 3 ? ` (+${queries.length - 3})` : ''
-        }`,
+        message:
+          `New queries from the corpus: ${queries.slice(0, 3).join(' · ')}${
+            queries.length > 3 ? ` (+${queries.length - 3})` : ''
+          }` +
+          (withoutPrimary.length > 0
+            ? ` — no primary source yet for ${withoutPrimary.join(', ')}`
+            : ''),
       })
       return next
     }
@@ -458,6 +593,21 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
             ? `Search met its coverage targets after ${rounds} ${rounds === 1 ? 'round' : 'rounds'}`
             : `Search stopped: ${reason.replace(/_/g, ' ')}`,
       })
+      // A channel that failed is why a corpus can be thin in one direction
+      // (no primary texts when Gutenberg timed out); say so once, at the end.
+      const failedChannels =
+        typeof event.failed_channels === 'object' && event.failed_channels !== null
+          ? Object.entries(event.failed_channels as Record<string, unknown>)
+          : []
+      if (failedChannels.length > 0) {
+        push({
+          kind: 'warn',
+          stage: 'discover',
+          message: `Searches that failed: ${failedChannels
+            .map(([name, status]) => `${name} (${describeChannelStatus(str(status))})`)
+            .join(', ')}`,
+        })
+      }
       return next
     }
 
@@ -653,6 +803,51 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
   }
 }
 
+/** The fetcher statuses that are failures, as the log phrases them. */
+const FETCHER_FAILURES: Record<string, string> = Object.fromEntries(
+  ['timeout', 'rate_limited', 'error'].map((status) => [status, describeChannelStatus(status)]),
+)
+
+/** "Summa Theologiae I-II qq. 90–97 (natural law)": title, sections when named, concept. */
+function primaryTextLabel(text: Record<string, unknown>): string {
+  const title = str(text.title).trim()
+  if (!title) return ''
+  const sections = str(text.sections).trim()
+  const concept = str(text.concept).trim()
+  return `${title}${sections ? ` ${sections}` : ''}${concept ? ` (${concept})` : ''}`
+}
+
+/**
+ * "Summa Theologiae: whole text found (internet_archive)", and for a concept's
+ * primary text "Summa Theologiae (for natural law): only parts found (gutenberg)".
+ */
+function canonicalMessage(work: Record<string, unknown>): string {
+  const concepts = work.scope === 'concept' ? strings(work.concepts) : []
+  const title =
+    str(work.title, 'Untitled work') + (concepts.length ? ` (for ${concepts.join(', ')})` : '')
+  const candidates = records(work.candidates)
+  const routesFor = (extent: string) => [
+    ...new Set(
+      candidates
+        .filter((candidate) => candidate.extent === extent)
+        .map((candidate) => str(candidate.route))
+        .filter(Boolean),
+    ),
+  ]
+  const whole = routesFor('whole')
+  if (candidates.some((candidate) => candidate.extent === 'whole')) {
+    return `${title}: whole text found${whole.length ? ` (${whole.join(', ')})` : ''}`
+  }
+  if (candidates.length > 0) {
+    const partial = [
+      ...new Set(candidates.map((candidate) => str(candidate.route)).filter(Boolean)),
+    ]
+    return `${title}: only parts found${partial.length ? ` (${partial.join(', ')})` : ''}`
+  }
+  const tried = strings(work.routes_tried)
+  return `${title}: not found${tried.length ? ` (tried ${tried.join(', ')})` : ''}`
+}
+
 /** What each `picture_skipped` reason means in the build log. */
 const PICTURE_SKIP_REASONS: Record<string, string> = {
   no_candidate: 'no freely licensed picture of this subject',
@@ -702,7 +897,12 @@ export function groupRows(rows: LogRow[]): RowGroup[] {
       last.rows.push(row)
       continue
     }
-    out.push({ key: `${row.seq}`, group: row.group ?? null, rows: [row] })
+    out.push({ key: rowKey(row), group: row.group ?? null, rows: [row] })
   }
   return out
+}
+
+/** The stable React key of a log row: its event's `seq`, plus its place in that event. */
+export function rowKey(row: Pick<LogRow, 'seq' | 'sub'>): string {
+  return row.sub ? `${row.seq}.${row.sub}` : `${row.seq}`
 }

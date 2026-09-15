@@ -106,6 +106,13 @@ class Settings:
     # chat is free to the user but not to us — every message is a planning call,
     # a rerank, a coverage call and a composition. This is the only ceiling on
     # what one authenticated account can spend, so it is on by default.
+    # Thinking for answer composition. Claude Sonnet 5 thinks by default and its
+    # thinking counts against max_tokens, so an answer request states both: the
+    # effort (low | medium | high | xhigh | max) and the tokens thinking may use
+    # on top of the tier's answer length.
+    CHAT_EFFORT: str = os.getenv("CHAT_EFFORT", "low").strip().lower()
+    CHAT_THINKING_HEADROOM_TOKENS: int = int(os.getenv("CHAT_THINKING_HEADROOM_TOKENS", "4096"))
+
     CHAT_RATE_LIMIT: int = int(os.getenv("CHAT_RATE_LIMIT", "20"))
     CHAT_RATE_WINDOW: float = float(os.getenv("CHAT_RATE_WINDOW", "60"))
 
@@ -113,6 +120,20 @@ class Settings:
     EXA_API_KEY: str = os.getenv("EXA_API_KEY", "")
     # OpenAlex needs no key; an email opts requests into its faster "polite pool".
     OPENALEX_MAILTO: str = os.getenv("OPENALEX_MAILTO", "")
+    # Semantic Scholar API key (free, from semanticscholar.org). Sent as
+    # `x-api-key` by the pdf fetcher and by citation snowballing. Without it
+    # both share the unauthenticated pool, which rate-limits hard: the pdf
+    # fetcher returned nothing on the Thomism build (job 53), almost certainly
+    # to 429s. Unset still works, and a 429 is now reported as `rate_limited`.
+    S2_API_KEY: str = os.getenv("S2_API_KEY", "")
+    # Project Gutenberg's catalogue CSV (~21 MB), downloaded once a week per
+    # worker so identifying a public-domain book is a local lookup rather than a
+    # call to Gutendex. Defaults to ~/.cache/peritus. Disable to fall back to
+    # Gutendex alone.
+    GUTENBERG_CATALOGUE_DIR: str = os.getenv("GUTENBERG_CATALOGUE_DIR", "")
+    GUTENBERG_CATALOGUE_ENABLED: bool = (
+        os.getenv("GUTENBERG_CATALOGUE_ENABLED", "true").lower() == "true"
+    )
     # Wall-clock cap on one full fetch of one candidate. Every fetcher already
     # sets httpx timeouts, but those are per-operation: a server that dribbles a
     # byte before each read timeout never trips one, and the fetch hangs forever
@@ -204,6 +225,26 @@ class Settings:
     # "false" to override for every execution mode.
     DISCOVERY_LOOP: str = os.getenv("DISCOVERY_LOOP", "auto").strip().lower()
 
+    # The triage score a candidate must reach to be fetched at all (priority
+    # candidates — must-have works, co-cited snowball finds — are exempt). The
+    # count budget stays as the ceiling; this is the quality bar beside it.
+    # Without it the fetch walked down the ranked tail until the count filled.
+    # If fewer than max(8, budget // 4) candidates reach it in round 0, round 0
+    # relaxes to FETCH_SCORE_FLOOR_RELAXED and says so (`floor_relaxed`). 6.0 is
+    # a starting point, not a measurement: the triage harness
+    # (eval/triage.py) is how it gets calibrated.
+    FETCH_SCORE_FLOOR: float = float(os.getenv("FETCH_SCORE_FLOOR", "6.0"))
+    # Share caps on a round's accepted sources, 0 = off (the default). The aim is
+    # primary texts present for every concept, not a small share of everything
+    # else; set these to cap abstract-only or tertiary sources anyway.
+    COMPOSITION_ABSTRACT_SHARE_CAP: float = float(os.getenv("COMPOSITION_ABSTRACT_SHARE_CAP", "0"))
+    COMPOSITION_TERTIARY_SHARE_CAP: float = float(os.getenv("COMPOSITION_TERTIARY_SHARE_CAP", "0"))
+    # The language the corpus is written in. A fetched source whose text is not
+    # in it is dropped before validation — the validator scores what it can read
+    # and a Spanish paper passed on a live rebuild. "any" turns the check off.
+    CORPUS_LANGUAGE: str = os.getenv("CORPUS_LANGUAGE", "en").strip().lower()
+    FETCH_SCORE_FLOOR_RELAXED: float = float(os.getenv("FETCH_SCORE_FLOOR_RELAXED", "5.0"))
+
     # Optional directory for screening captures. When set, every source that
     # reaches validation is written to <dir>/<expert_slug>/<job_id>.jsonl before
     # it is judged, which is the only way to rebuild a screening fixture later:
@@ -215,6 +256,11 @@ class Settings:
     # chunk text is now sent (not a 400-char preview) — large batches truncate the
     # tool_use JSON and the whole batch is lost.
     GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "10"))
+    # Chunks per source that graph extraction reads; the rest are embedded and
+    # retrievable but not read for concepts. A primary text cut to 200,000
+    # characters is ~200 chunks — a fifth of a STANDARD corpus's graph cost —
+    # and its opening chunks carry the concepts its later ones repeat. 0 = all.
+    GRAPH_MAX_CHUNKS_PER_SOURCE: int = int(os.getenv("GRAPH_MAX_CHUNKS_PER_SOURCE", "80"))
 
     # Chunking
     # ~1,000 chars: the whole chunk is shown to the model (it used to see only

@@ -1,5 +1,5 @@
 import { LedgerPage } from '@/components/ledger/ledger-page'
-import { getCorpusReport, getExpert } from '@/lib/api/data'
+import { getCorpusReport, getExpert, getScreeningFlow } from '@/lib/api/data'
 import type { SourceDecision, SourceSort } from '@/lib/api/types'
 import { displayName } from '@/lib/persona'
 
@@ -45,7 +45,7 @@ export default async function SourcesPage({
   const sort = SORTS.has(query.sort as SourceSort) ? (query.sort as SourceSort) : 'decision'
   const page = Math.max(1, Number(query.page) || 1)
 
-  const [expert, report] = await Promise.all([
+  const [expert, report, flow] = await Promise.all([
     getExpert(slug),
     getCorpusReport(slug, {
       decision,
@@ -53,6 +53,8 @@ export default async function SourcesPage({
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
     }),
+    // Null on failure: the selection block annotates the ledger, never gates it.
+    getScreeningFlow(slug),
   ])
 
   return (
@@ -65,6 +67,7 @@ export default async function SourcesPage({
       pageSize={PAGE_SIZE}
       conceptFilter={query.concept ?? null}
       focusSourceId={Number(query.source) || null}
+      selection={flow?.selection ?? null}
     />
   )
 }

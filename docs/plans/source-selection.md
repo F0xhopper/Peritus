@@ -25,6 +25,93 @@ here sits on top of that work and none of its calibrated constants move (see
 
 ---
 
+## Implementation status (2026-09-15)
+
+Implemented on the `web` branch, same day, in the rollout order of §11. Nothing
+below has been measured on a rebuild yet — the changelog table in §11 is still
+empty, and filling it is the next step.
+
+| step | phase | status | where |
+|---|---|---|---|
+| 1 | 0.A–0.D | done | plan on `experts.research_plan` and in `plan_ready`; `candidate_screenings` ledger (with the snippet triage saw, so the harness can re-score) and `sources.triage_score`/`substance` in migration 029; `fetcher_done.status/error`; `build_summary.corpus` and the audit report's `selection` block |
+| 2 | 2.A–2.B | done | `sources/triage.py`: id-keyed tool schema and parser, re-ask in 10s then 5s, fail closed at 0.0; `_FALLBACK_SCORE` deleted |
+| 3 | 1.A, 1.D, 0.C | done | `fetchers/base.py` search notes → `SearchOutcome`; one sequential retry for `timeout`/`rate_limited`; `S2_API_KEY` on pdf and snowball; 429 at WARNING |
+| 4 | 2.C–2.D | done | `FETCH_SCORE_FLOOR` 6.0 / relaxed 5.0 with `floor_relaxed`; catalogue, TOC, Choice-DOI, overview-mill and wiki-mirror priors; the `_SYSTEM` line |
+| 5 | 5.A–5.D | done | `require_primary`, `min_rounds`, the new tier table, `thinnest()` for a round that runs with every target met, `_ROUND0_BUDGET_SHARE = 0.65`, "primary: none" and concept shares in the feedback prompt |
+| 6 | 4.A–4.C | done | `sources/substance.py`, `experts/composition.py` (800-char abstract floor, 15% / 25% caps, at least one allowed), rubric `v6-substance-q5r6` |
+| 7 | 1.C | done | `infrastructure/gutenberg_catalogue.py`; Gutendex is a fallback with a 10 s per-call timeout that keeps resolved books; text from the predictable URL; one identification query per build |
+| 8 | 7.A–7.B | done | planner `kind`/`public_domain`/`sections`; `sources/canonical.py` resolver (Gutenberg catalogue → Internet Archive → Exa primary hosts → Exa), whole/partial extent, a stricter "is this the work, not a book about it" title match; round 1 re-resolves works whose route *failed* |
+| 9 | 0.E | harness only | `python -m peritus.eval.triage export/run`, `eval/golden/triage/README.md`. **No labels exist** — they must be human |
+| 10 | 6 | mostly | Exa `exclude_domains` from the prior, OpenAlex prefers works with a route to text, reddit quota 2, YouTube snippets from Exa text. Not done: per-query Exa `category` from the planner |
+| 11 | 7.C | done (follow-up below) | `sources/sections.py`; per-tier ceilings for canonical works and concept texts |
+
+Deviations from the text below, each deliberate:
+
+- `candidate_screenings.job_id` is nullable (CLI builds run without a job) and
+  the table also stores `author` and `snippet`, which the harness needs.
+- Must-have works are exempt from per-type caps and do not consume a type's
+  share, so a Gutenberg volume cannot crowd out the Gutenberg texts triage chose.
+- The per-query title match for must-haves is no longer a substring: a title
+  must start with the work's title (after an article or the author's name) or
+  contain it without a marker of a book *about* it ("companion", "commentary",
+  "based on"…). A live resolver run accepted *The Cambridge Companion to the
+  Summa Theologiae* as the Summa before this.
+- Feedback-round `authors` go to Exa as before, not to the canonical resolver.
+- Internet Archive OCR text is rejected when a sample from its middle is mostly
+  not words.
+
+Measured once, live, while implementing (not a rebuild): the resolver found the
+Summa Theologiae as Gutenberg volumes (partial, Part I-II first per the sections
+hint) and as whole Internet Archive items; the Summa Contra Gentiles as whole
+and per-volume Internet Archive items; De Ente et Essentia through Exa on
+primary-text hosts. Semantic Scholar returned 429 three times running without a
+key, and the pdf channel now reports `rate_limited` instead of `0`.
+
+### Follow-up, same day: primary texts per concept, sections, and what the first rebuild showed
+
+The first rebuild under the changes above (Thomism, expert 57) kept 37 sources
+with tertiary 10 → 5, abstract stubs 12 → 5, every concept with a primary
+source, two rounds run and $5.61 spent. But primary share was still 11%, the
+Summa I-II was cut to questions 1–45 (none on law), four junk fetches were
+Internet Archive catalogue pages, three full texts were probably unlicensed
+archive uploads, a Spanish paper passed, and 4 of 144 graph batches were lost
+to the model returning its node list as a JSON string. Implemented in response,
+without anything specific to one subject:
+
+- **Planner:** `primary_source_definition` and `concept_primary_texts` (≤2 per
+  concept, with sections); tiers resolve 3 / 8 / 16 of them.
+- **Sections (7.C, now built):** `sources/sections.py` parses hints into numbered
+  ranges and cuts them out of Gutenberg, Internet Archive and Exa texts;
+  `found_sections` counts as found. Ceilings: canonical 200k (PRO 400k), concept
+  text 40k / 60k / 100k. Nothing is added to fill a ceiling.
+- **Resolver:** routes by kind (texts: Gutenberg → Internet Archive → Exa
+  primary hosts → Exa; papers: arXiv → OpenAlex → Exa; standards: Exa), works
+  merged across scopes, only the best hit per work gets priority, priority spend
+  capped at half a round's money, abstract-only paper records don't stop the
+  search, the catalogue route checks the book is the work.
+- **Loop:** concepts still lacking a primary source get primary texts suggested
+  by the plan model and resolved (`primary_texts_suggested`).
+- **Validator:** shown the plan's definition of primary (`v7-primary-defined-q5r6`).
+- **Holes:** archive.org pages always go to the item's text through a licence /
+  publication-year check; pirate mirrors −5 at triage and excluded from Exa;
+  non-English texts dropped before validation (`CORPUS_LANGUAGE`).
+- **Graph:** a node or edge list sent as a JSON string is decoded (and repaired
+  if truncated); graph extraction reads at most `GRAPH_MAX_CHUNKS_PER_SOURCE`
+  (80) chunks per source, everything still embedded.
+- **Harness:** `python -m peritus.eval.triage export <out> --expert <name>`
+  reads a build that ran without a job.
+
+Live checks while implementing (no LLM): Summa I-II qq. 90–93 cut from the right
+Gutenberg volume within 60k; *On the Origin of Species* chapter IV (after the
+catalogue route stopped accepting *The Foundations of the Origin of Species*);
+RFC 9110 section 9 from Exa's Markdown; a 1924 archive edition used and two 1937
+items refused. Not verified: the arXiv route's success path (the arXiv API was
+returning 429 to this machine), and any rebuild.
+
+Not done from the improvement list: a fixed per-topic question set for answer
+quality (it needs human-written questions); the graph stage's 10-minute stall
+was not diagnosed.
+
 ## 1. Summary
 
 | # | Finding | Measured (job 53 unless noted) | Fix | Phase |

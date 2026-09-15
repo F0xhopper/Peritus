@@ -9,6 +9,7 @@ import { AddSourceDialog } from '@/components/ledger/add-source-dialog'
 import { LedgerCards } from '@/components/ledger/ledger-cards'
 import { COLUMNS, LedgerTable } from '@/components/ledger/ledger-table'
 import { RowDetail } from '@/components/ledger/row-detail'
+import { SelectionSection } from '@/components/ledger/selection-section'
 import { ContextSlot } from '@/components/shell/context-panel'
 import { useShell } from '@/components/shell/shell-context'
 import { TopBar } from '@/components/shell/top-bar'
@@ -27,6 +28,7 @@ import type {
   CorpusReport,
   ExpertWithCatalog,
   LedgerSource,
+  SelectionBlock,
   SourceDecision,
   SourceSort,
 } from '@/lib/api/types'
@@ -55,6 +57,7 @@ export function LedgerPage({
   pageSize,
   conceptFilter,
   focusSourceId,
+  selection = null,
 }: {
   expert: ExpertWithCatalog
   report: CorpusReport
@@ -64,6 +67,8 @@ export function LedgerPage({
   pageSize: number
   conceptFilter: string | null
   focusSourceId: number | null
+  /** The screening-flow report's selection block; null when the report failed or predates it. */
+  selection?: SelectionBlock | null
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -382,6 +387,8 @@ export function LedgerPage({
               </Button>
             </div>
           )}
+
+          <SelectionSection selection={selection} />
 
           <p className="pt-2 text-xs leading-relaxed text-fg-3">{report.method_statement}</p>
         </div>

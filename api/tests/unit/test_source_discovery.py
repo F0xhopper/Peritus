@@ -67,8 +67,19 @@ def test_normalise_plan_clamps_weights_and_dedupes_queries():
     assert plan["fetcher_plans"]["web"] == {"queries": ["stoicism"], "weight": 1.0}
     assert plan["key_concepts"] == ["virtue", "logos"]
     assert plan["must_have_works"] == [
-        {"title": "Meditations", "author": "Marcus Aurelius"},
+        {
+            "title": "Meditations",
+            "author": "Marcus Aurelius",
+            # Absent from the model's output → the safe reading: a book, not
+            # known to be public domain, no sections singled out.
+            "kind": "book",
+            "public_domain": False,
+            "sections": "",
+            "open_text": False,
+        },
     ]
+    # A model that ignores facets gets one facet named after the topic.
+    assert plan["facets"] == [{"name": "stoicism", "concepts": ["virtue", "logos"]}]
 
 
 def test_route_must_have_works_appends_quoted_queries():
@@ -157,13 +168,14 @@ def test_match_concepts_normalises_case_and_rejects_inventions():
         [" virtue ethics ", "LOGOS", "logos", "made-up", 42, None],
         canonical,
     )
-    assert matched == ["Virtue Ethics", "Logos"]
+    # Bare strings are the pre-graded shape, and read as `treats`.
+    assert matched == {"Virtue Ethics": "treats", "Logos": "treats"}
 
 
 def test_match_concepts_empty_inputs():
-    assert _match_concepts([], ["a"]) == []
-    assert _match_concepts(None, ["a"]) == []
-    assert _match_concepts(["a"], []) == []
+    assert _match_concepts([], ["a"]) == {}
+    assert _match_concepts(None, ["a"]) == {}
+    assert _match_concepts(["a"], []) == {}
 
 
 # ── gutenberg title matching ──────────────────────────────────────────────────

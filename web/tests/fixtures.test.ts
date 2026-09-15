@@ -7,6 +7,7 @@ import denials from './fixtures/denial.json' with { type: 'json' }
 import expert from './fixtures/expert.json' with { type: 'json' }
 import graph from './fixtures/graph.json' with { type: 'json' }
 import graphPending from './fixtures/graph-not-computed.json' with { type: 'json' }
+import screeningFlow from './fixtures/screening-flow.json' with { type: 'json' }
 import {
   isEntitlementDenial,
   type ChatEvent,
@@ -15,6 +16,7 @@ import {
   type EntitlementDenial,
   type ExpertWithCatalog,
   type GraphResponse,
+  type ScreeningFlow,
 } from '@/lib/api/types'
 
 /**
@@ -38,6 +40,7 @@ const reportFixture: CorpusReport = corpusReport as CorpusReport
 const graphFixture: GraphResponse = graph as GraphResponse
 const graphPendingFixture: GraphResponse = graphPending as GraphResponse
 const chatFixtures: Record<string, ChatEvent> = chatEvents
+const flowFixture: ScreeningFlow = screeningFlow as ScreeningFlow
 
 describe('expert detail', () => {
   it('carries the readiness field chat is gated on', () => {
@@ -168,6 +171,23 @@ describe('corpus report', () => {
 
   it('carries a method statement to render beside the data', () => {
     expect(reportFixture.method_statement.length).toBeGreaterThan(40)
+  })
+})
+
+describe('screening flow', () => {
+  it('carries an available selection block with the composition and the ledger', () => {
+    const selection = flowFixture.selection!
+    expect(selection.available).toBe(true)
+    if (!selection.available) return
+    expect(selection.corpus?.primary_share).toBeGreaterThan(0)
+    expect(selection.corpus?.must_have.map((work) => work.status)).toEqual([
+      'found_whole',
+      'found_partial',
+      'not_found',
+      'found_sections',
+      'not_found',
+    ])
+    expect(selection.candidate_ledger?.rows.length).toBeGreaterThan(0)
   })
 })
 

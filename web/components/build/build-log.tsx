@@ -6,7 +6,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 
 import { cn } from '@/lib/cn'
 import { formatScore } from '@/lib/format'
-import { STAGE_LABEL, groupRows, type LogRow, type RowGroup } from '@/lib/build/reducer'
+import { STAGE_LABEL, groupRows, rowKey, type LogRow, type RowGroup } from '@/lib/build/reducer'
 import { useIsTabletUp } from '@/hooks/use-media-query'
 
 /**
@@ -64,10 +64,10 @@ export function BuildLog({
         const open = openGroups.has(group.group)
         out.push({ kind: 'group', key: `g:${group.key}`, group, open })
         if (open) {
-          for (const row of group.rows) out.push({ kind: 'row', key: `r:${row.seq}`, row })
+          for (const row of group.rows) out.push({ kind: 'row', key: `r:${rowKey(row)}`, row })
         }
       } else {
-        for (const row of group.rows) out.push({ kind: 'row', key: `r:${row.seq}`, row })
+        for (const row of group.rows) out.push({ kind: 'row', key: `r:${rowKey(row)}`, row })
       }
     }
     return out
@@ -249,6 +249,9 @@ function GroupSummary({
   onToggle: () => void
 }) {
   const label = GROUP_LABELS[group.group ?? ''] ?? group.group ?? 'group'
+  // A failed search folded into a closed group is exactly the silent failure
+  // the fetcher statuses exist to expose, so the summary counts them.
+  const warnings = group.rows.filter((row) => row.kind === 'warn').length
   return (
     <button
       type="button"
@@ -275,6 +278,12 @@ function GroupSummary({
       </span>
       <span className="min-w-0 flex-1 truncate text-fg-3">
         {label} · {group.rows.length} lines
+        {warnings > 0 && (
+          <span className="text-warn">
+            {' '}
+            · {warnings} {warnings === 1 ? 'warning' : 'warnings'}
+          </span>
+        )}
       </span>
     </button>
   )
@@ -322,4 +331,5 @@ const GROUP_LABELS: Record<string, string> = {
 // literal key.
 for (let round = 0; round < 8; round += 1) {
   GROUP_LABELS[`fetchers:${round}`] = `Search results (round ${round + 1})`
+  GROUP_LABELS[`canonical:${round}`] = `Must-have works (round ${round + 1})`
 }
