@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 
 import { stashAskDraft } from '@/components/chat/new-chat-composer'
 import { AddSourceDialog } from '@/components/ledger/add-source-dialog'
+import { ExclusionsSection } from '@/components/ledger/exclusions-section'
 import { LedgerCards } from '@/components/ledger/ledger-cards'
 import { COLUMNS, LedgerTable } from '@/components/ledger/ledger-table'
 import { RowDetail } from '@/components/ledger/row-detail'
@@ -387,6 +388,8 @@ export function LedgerPage({
               </Button>
             </div>
           )}
+
+          <ExclusionsSection exclusions={report.exclusions} />
 
           <SelectionSection selection={selection} />
 

@@ -93,6 +93,13 @@ test('a topic builds, reaching chat-ready before the build finishes', async ({
 })
 
 test('a dropped build stream resumes from its cursor rather than replaying', async ({ page }) => {
+  // Every tail the client opens, by its `after=` cursor.
+  const cursors: number[] = []
+  page.on('request', (request) => {
+    const match = /\/build\/events\?after=(\d+)/.exec(request.url())
+    if (match) cursors.push(Number(match[1]))
+  })
+
   await page.goto('/experts')
   await useScenario(page, 'drop-midway', 'resumable-build-test')
 
@@ -110,14 +117,22 @@ test('a dropped build stream resumes from its cursor rather than replaying', asy
   })
   await expect(page.getByRole('button', { name: 'reconnecting — retry now' })).toBeVisible()
 
-  // It then reaches the end, and — the point — each row appears exactly once:
-  // the reconnect resumed from the cursor rather than replaying the log.
+  // It then reaches the end, and — the point — the reconnect resumed from the
+  // cursor rather than replaying the log: once a tail has resumed past seq 0,
+  // no later tail starts from 0 again.
   const log = page.getByRole('log', { name: 'Build log' })
   await expect(log.getByText(/is ready —|Build finished/)).toBeVisible({
     timeout: 40_000,
   })
-  await expect(log.getByText('Research plan ready', { exact: false })).toHaveCount(1)
+  const resumed = cursors.findIndex((cursor) => cursor > 0)
+  expect(resumed, `tails opened at cursors ${cursors.join(', ')}`).toBeGreaterThanOrEqual(0)
+  expect(cursors.slice(resumed)).not.toContain(0)
+
+  // And each row is there exactly once. The log is virtualized and follows the
+  // tail, so on a phone the first row is out of the DOM until scrolled back to.
   await expect(log.getByText('Chat ready —', { exact: false })).toHaveCount(1)
+  await log.evaluate((element) => element.scrollTo({ top: 0 }))
+  await expect(log.getByText('Research plan ready', { exact: false })).toHaveCount(1)
 })
 
 test('a 402 renders the numbers and the one remedy, and keeps the form', async ({ page }) => {
