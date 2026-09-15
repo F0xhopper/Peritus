@@ -30,14 +30,8 @@ import math
 from typing import Any
 
 from peritus.core.config import settings
-from peritus.experts.coverage import (
-    DEPTH_SETS_OUT,
-    NAMED_MISSING,
-    NAMED_NONE,
-    counting_tags,
-    has_primary,
-)
-from peritus.sources.domain import DroppedSource, ValidatedSource
+from peritus.experts.coverage import CoverageReport, CoverageTarget, compute_coverage
+from peritus.sources.domain import NAMED_MISSING, DroppedSource, ValidatedSource
 from peritus.sources.substance import SUBSTANCE_ABSTRACT, abstract_chars
 
 MIN_ABSTRACT_CHARS = 800
@@ -134,11 +128,12 @@ def corpus_composition(
 ) -> dict[str, Any]:
     """The corpus by tier, substance and concept, for ``build_summary.corpus``.
 
-    Concept shares and "without primary" count a source's tags the way coverage
-    does (experts/coverage.py): counting depths only, at most three per source,
-    a section-cut work for the concepts it was cut for. And a concept is without
-    primary by the named-text gate, so a concept whose named text is missing is
-    not reported as having one because a long primary text was tagged with it.
+    Concept shares and "without primary" are read off coverage itself
+    (experts/coverage.py), so they count a source's tags exactly as coverage
+    does — counting depths only, at most three per source, a section-cut work for
+    the concepts it was cut for — and a concept is without primary by the
+    named-text gate: one whose named text is missing is not reported as having a
+    primary source because a long primary text was tagged with it.
     """
 
     total = len(passed)
@@ -161,21 +156,8 @@ def corpus_composition(
         and not ds.drop_reason.startswith(_UNJUDGED_PREFIXES)
     )
 
-    concept_counts = {c: 0 for c in key_concepts}
-    concept_primary = {c: 0 for c in key_concepts}
-    concept_sets_out = {c: 0 for c in key_concepts}
-    for vs in passed:
-        for concept, depth in counting_tags(vs):
-            if concept in concept_counts:
-                concept_counts[concept] += 1
-                if vs.source_tier == "primary" and vs.substance != SUBSTANCE_ABSTRACT:
-                    concept_primary[concept] += 1
-                    if depth == DEPTH_SETS_OUT:
-                        concept_sets_out[concept] += 1
     named = named_texts or {}
-
-    def _named(concept: str) -> str:
-        return str((named.get(concept) or {}).get("status") or NAMED_NONE)
+    coverage = _measure(passed, key_concepts, named)
 
     return {
         "sources": total,
@@ -189,22 +171,34 @@ def corpus_composition(
         "tertiary_share": share(tiers["tertiary"]),
         "abstract_only_share": share(abstract_only),
         "junk_fetched": junk,
-        "concept_shares": {c: share(n) for c, n in concept_counts.items()},
-        "concepts_without_primary": [
-            c for c in key_concepts
-            if not has_primary(concept_primary[c], concept_sets_out[c], _named(c))
-        ],
+        "concept_shares": {c.concept: share(c.sources + c.abstract_only) for c in coverage.concepts},
+        "concepts_without_primary": [c.concept for c in coverage.concepts if not c.has_primary],
         "concepts_missing_named_text": [
-            {"concept": c, "texts": list((named.get(c) or {}).get("texts") or [])}
-            for c in key_concepts
-            if _named(c) == NAMED_MISSING
+            {"concept": c.concept, "texts": list(named[c.concept].get("texts") or [])}
+            for c in coverage.concepts
+            if c.named_text == NAMED_MISSING
         ],
         "must_have": list(must_have or []),
         "figures": list(figures or []),
     }
 
 
+# Counts only — no concept is held to a target when describing the corpus.
+_NO_TARGET = CoverageTarget(min_sources=0, min_source_types=0, require_non_tertiary=False, max_rounds=0)
+
+
+def _measure(
+    passed: list[ValidatedSource], key_concepts: list[str], named: dict[str, dict[str, Any]]
+) -> CoverageReport:
+    statuses = {c: str(entry.get("status")) for c, entry in named.items() if entry.get("status")}
+    return compute_coverage(key_concepts, passed, _NO_TARGET, named_texts=statuses)
+
+
 def top_concept_shares(passed: list[ValidatedSource], key_concepts: list[str], n: int = 3) -> list[tuple[str, float]]:
     """The ``n`` concepts taking the largest share of the corpus, largest first."""
-    shares = corpus_composition(passed, [], key_concepts)["concept_shares"]
-    return sorted(shares.items(), key=lambda item: (-item[1], item[0]))[:n]
+    total = len(passed)
+    shares = [
+        (c.concept, round((c.sources + c.abstract_only) / total, 3) if total else 0.0)
+        for c in _measure(passed, key_concepts, {}).concepts
+    ]
+    return sorted(shares, key=lambda item: (-item[1], item[0]))[:n]

@@ -19,7 +19,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from peritus.sources.domain import SourceType, ValidatedSource
+from peritus.sources.domain import (
+    COUNTING_DEPTHS,
+    DEPTH_SETS_OUT,
+    DEPTH_TREATS,
+    DEPTHS,
+    NAMED_FOUND,
+    NAMED_MISSING,
+    NAMED_NONE,
+    NAMED_PARTIAL,
+    SourceType,
+    ValidatedSource,
+)
 
 # Tiers that count as evidence rather than restatement. A concept whose only
 # support is tertiary is covered by material *about* the subject, which is the
@@ -33,25 +44,14 @@ NON_TERTIARY: frozenset[str] = frozenset({"primary", "secondary"})
 # reason for the loop to stop looking.
 NON_COUNTING_SUBSTANCE: frozenset[str] = frozenset({"abstract"})
 
-# How deeply a source treats a concept (docs/plans/syllabus.md, 4.A). A tag used
-# to be free: a 200,000-character volume "covered" four concepts at once, each
+# Concept tags are graded (the depths live in sources/domain.py). A tag used to
+# be free: a 200,000-character volume "covered" four concepts at once, each
 # gaining a source, a type and a primary from one fetch, and a target meant to
 # need three sources per concept was met by three long texts.
-DEPTH_SETS_OUT = "sets_out"
-DEPTH_TREATS = "treats"
-DEPTH_MENTIONS = "mentions"
-DEPTHS: tuple[str, ...] = (DEPTH_SETS_OUT, DEPTH_TREATS, DEPTH_MENTIONS)
-# Depths that count toward coverage. A passing mention never does.
-COUNTING_DEPTHS: frozenset[str] = frozenset({DEPTH_SETS_OUT, DEPTH_TREATS})
+#
 # At most this many of one source's tags count, deepest first. A source that
 # treats more than three concepts is a survey; it counts for its three deepest.
 MAX_COUNTING_TAGS = 3
-
-# The status of a concept's named primary text (4.C).
-NAMED_FOUND = "found"
-NAMED_PARTIAL = "partial"
-NAMED_MISSING = "missing"
-NAMED_NONE = "none_named"
 
 
 def counting_tags(source: ValidatedSource) -> list[tuple[str, str]]:
@@ -123,13 +123,9 @@ class ConceptCoverage:
     named_text: str = NAMED_NONE
     # Counting tags by depth: {"sets_out": n, "treats": n}.
     depth_counts: dict[str, int] = field(default_factory=dict)
-    # Whether the concept has a primary source by the gate, as opposed to a
-    # primary-tier source merely tagged with it. ``None`` for a hand-built record.
-    primary_met: bool | None = None
-
-    @property
-    def has_primary(self) -> bool:
-        return self.primary_met if self.primary_met is not None else self.primary > 0
+    # Whether the concept has its primary source by the named-text gate, as
+    # opposed to a primary-tier source merely being tagged with it.
+    has_primary: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -385,5 +381,5 @@ def _score(
         abstract_only=tally.abstract_only,
         named_text=named_text,
         depth_counts=dict(tally.depths),
-        primary_met=primary_met,
+        has_primary=primary_met,
     )

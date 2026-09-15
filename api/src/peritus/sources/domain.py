@@ -183,6 +183,27 @@ class RawSource:
     identifiers: Identifiers = field(default_factory=Identifiers)
 
 
+# How deeply a source treats a key concept (docs/plans/syllabus.md, 4.A), graded
+# by the validator and counted by coverage: sets_out and treats count toward a
+# concept's target, a passing mention never does.
+DEPTH_SETS_OUT = "sets_out"
+DEPTH_TREATS = "treats"
+DEPTH_MENTIONS = "mentions"
+DEPTHS: tuple[str, ...] = (DEPTH_SETS_OUT, DEPTH_TREATS, DEPTH_MENTIONS)
+COUNTING_DEPTHS: frozenset[str] = frozenset({DEPTH_SETS_OUT, DEPTH_TREATS})
+
+# The status of a concept's named primary text (4.C). Written by the resolver's
+# outcome, read by coverage's "has primary" gate.
+NAMED_FOUND = "found"
+NAMED_PARTIAL = "partial"
+NAMED_MISSING = "missing"
+NAMED_NONE = "none_named"
+
+# A named figure whose own writing reached the corpus (3.E).
+FIGURE_OWN_VOICE = "own_voice"
+FIGURE_ABOUT_ONLY = "about_only"
+
+
 @dataclass
 class ValidatedSource:
     raw: RawSource

@@ -28,12 +28,11 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
-
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.wikimedia import user_agent
+from peritus.infrastructure.wikimedia import WikimediaClient
 from peritus.sources.canonical import title_key
+from peritus.sources.hosts import host_and_path, split_site_suffix
 
 logger = get_logger(__name__)
 
@@ -42,7 +41,6 @@ LEAD_MAX_CHARS = 3_000
 OUTLINE_MAX_HEADINGS = 60
 _TITLE_MATCH_RATIO = 0.6
 
-_WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
 _REFERENCE_DOMAINS: tuple[str, ...] = ("plato.stanford.edu", "iep.utm.edu", "britannica.com")
 _EXA_TEXT_CHARS = 4_000
 
@@ -169,13 +167,8 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit].rsplit(" ", 1)[0] + " …"
 
 
-def _site_title(title: str) -> str:
-    """"Thomism | Philosophy, History, & Facts | Britannica" → "Thomism"."""
-    return re.split(r"\s[|—–-]\s|\s\(", title or "", maxsplit=1)[0].strip()
-
-
 def title_matches_topic(topic: str, title: str) -> bool:
-    t, w = title_key(_site_title(title)), title_key(topic)
+    t, w = title_key(split_site_suffix(title)[0]), title_key(topic)
     if not t or not w:
         return False
     return t == w or difflib.SequenceMatcher(None, w, t).ratio() >= _TITLE_MATCH_RATIO
@@ -202,31 +195,16 @@ def select_hit(topic: str, hits: list[dict[str, str]]) -> dict[str, str] | None:
 
 
 async def _wikipedia_overview(topic: str) -> Overview | None:
-    from peritus.sources.fetchers.wikipedia import WikipediaFetcher
-
-    candidates = await WikipediaFetcher().search(topic, 3)
-    hit = select_hit(
-        topic, [{"title": c.title, "snippet": c.snippet, "url": c.url} for c in candidates]
-    )
-    if hit is None:
-        return None
-    async with httpx.AsyncClient(timeout=ORIENTATION_TIMEOUT_SECONDS, headers={"User-Agent": user_agent()}) as client:
-        resp = await client.get(_WIKIPEDIA_API, params={
-            "action": "query",
-            "titles": hit["title"],
-            "prop": "extracts",
-            "explaintext": True,
-            "exsectionformat": "wiki",
-            "format": "json",
-        })
-        resp.raise_for_status()
-        pages = (resp.json().get("query") or {}).get("pages") or {}
-    page: dict[str, Any] = next(iter(pages.values()), {}) if pages else {}
-    extract = str(page.get("extract") or "")
+    async with WikimediaClient(timeout=ORIENTATION_TIMEOUT_SECONDS) as wiki:
+        hit = select_hit(topic, await wiki.search_with_snippets(topic, 3))
+        if hit is None:
+            return None
+        extract = await wiki.extract(hit["title"], section_format="wiki")
     lead, headings = parse_wiki_extract(extract)
     if not lead and not headings:
         return None
-    return Overview("Wikipedia", hit["title"], hit["url"], lead, headings)
+    url = f"https://en.wikipedia.org/wiki/{hit['title'].replace(' ', '_')}"
+    return Overview("Wikipedia", hit["title"], url, lead, headings)
 
 
 async def _reference_overview(topic: str) -> Overview | None:
@@ -249,8 +227,7 @@ async def _reference_overview(topic: str) -> Overview | None:
         lead, headings = parse_numbered_outline(getattr(r, "text", None) or "")
         if not lead and not headings:
             continue
-        host = r.url.split("//", 1)[-1].split("/", 1)[0].removeprefix("www.")
-        return Overview(host, _site_title(title), r.url, lead, headings)
+        return Overview(host_and_path(r.url)[0], split_site_suffix(title)[0], r.url, lead, headings)
     return None
 
 

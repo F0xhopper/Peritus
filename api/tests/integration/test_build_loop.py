@@ -22,6 +22,7 @@ from peritus.experts.builder import (
     ExpertBuilder,
 )
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
+from peritus.experts.feedback import Feedback
 from peritus.sources.domain import Identifiers, RawSource, SourceType, ValidatedSource
 
 pytestmark = pytest.mark.asyncio
@@ -126,7 +127,7 @@ class _Loop:
         with (
             patch(
                 "peritus.experts.builder.feedback_queries",
-                AsyncMock(return_value={c: [f"query for {c}"] for c in _CONCEPTS}),
+                AsyncMock(return_value=Feedback({c: [f"query for {c}"] for c in _CONCEPTS})),
             ),
             patch(
                 "peritus.experts.builder.snowball",
@@ -220,7 +221,7 @@ async def test_a_round_with_nowhere_left_to_search_stops_and_says_so():
 
     with (
         builder_patch,
-        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value={})),
+        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback())),
         patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
     ):
         outcome = await builder._run_discovery(_expert(), "Thomism", _PLAN, _on_event)
@@ -603,7 +604,7 @@ async def test_a_later_round_searches_the_facet_that_is_not_met():
         loop.events.append(event)
 
     with (
-        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value={})),
+        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback())),
         patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
         patch("peritus.experts.builder.discovery_loop_enabled", lambda: True),
     ):
@@ -645,7 +646,7 @@ async def test_a_concept_whose_named_text_is_missing_is_unmet_on_treats_tagged_p
         loop.events.append(event)
 
     with (
-        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value={})),
+        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback())),
         patch("peritus.experts.builder.suggest_primary_texts", AsyncMock(return_value=[])),
         patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
         patch("peritus.experts.builder.discovery_loop_enabled", lambda: True),

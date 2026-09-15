@@ -14,6 +14,7 @@ a fake of this class recorded JSON rather than touching the network.
 
 import asyncio
 import random
+import re
 from typing import Any
 
 import httpx
@@ -151,6 +152,34 @@ class WikimediaClient:
         raise last
 
     # ── the five calls the picture finder makes ─────────────────────────────
+
+    async def search_with_snippets(self, query: str, limit: int = 3) -> list[dict[str, str]]:
+        """``{title, snippet}`` for articles matching ``query``, best first, snippet as plain text."""
+        data = await self._get(API_URL, {
+            "action": "query",
+            "list": "search",
+            "srsearch": query,
+            "srlimit": limit,
+            "srnamespace": 0,
+            "srprop": "snippet",
+        })
+        return [
+            {"title": hit["title"], "snippet": re.sub(r"<[^>]+>", "", hit.get("snippet") or "")}
+            for hit in data.get("query", {}).get("search", [])
+        ]
+
+    async def extract(self, title: str, section_format: str = "plain") -> str:
+        """An article's plain-text extract; ``section_format="wiki"`` keeps ``== Heading ==`` markers."""
+        data = await self._get(API_URL, {
+            "action": "query",
+            "titles": title,
+            "prop": "extracts",
+            "explaintext": True,
+            "exsectionformat": section_format,
+        })
+        pages = (data.get("query") or {}).get("pages") or {}
+        page: dict[str, Any] = next(iter(pages.values()), {}) if pages else {}
+        return str(page.get("extract") or "")
 
     async def search_articles(self, query: str, limit: int = 3) -> list[str]:
         """Article titles matching ``query``, best first."""

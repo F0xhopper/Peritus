@@ -673,7 +673,10 @@ def test_corpus_composition_reports_the_numbers_the_plan_is_judged_by():
 
 def test_the_feedback_round_is_told_what_lacks_a_primary_and_what_is_heavy():
     block = weak_concepts_block(
-        [ConceptCoverage("metaphysics", sources=3, primary=0), ConceptCoverage("ethics", sources=2, primary=1)],
+        [
+            ConceptCoverage("metaphysics", sources=3, primary=0),
+            ConceptCoverage("ethics", sources=2, primary=1, has_primary=True),
+        ],
         [("natural law", 0.56)],
     )
     assert "metaphysics — 3 accepted source(s), primary: none" in block

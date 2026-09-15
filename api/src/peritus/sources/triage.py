@@ -19,13 +19,13 @@ import difflib
 import re
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
 from peritus.sources.canonical import classify_extent, matching_work, title_key
 from peritus.sources.domain import SourceCandidate, SourceType
+from peritus.sources.hosts import host_and_path, suffix_matches
 
 logger = get_logger(__name__)
 
@@ -279,23 +279,16 @@ def domain_adjustment(url: str) -> float:
     Pure and total: an unparseable or unknown URL scores 0.0 and the model's
     judgement stands alone.
     """
-    if not url:
+    host, path = host_and_path(url)
+    if not host:
         return 0.0
-    try:
-        parts = urlsplit(url if "//" in url else f"//{url}")
-    except ValueError:
-        return 0.0
-
-    host = (parts.hostname or "").lower().removeprefix("www.")
-    path = (parts.path or "").lower()
 
     # One host rule, the most specific — matches don't stack, so adding a host
     # to the table can never silently double an existing TLD adjustment.
     host_delta = 0.0
     best_len = -1
     for pattern, delta in _HOST_ADJUSTMENTS:
-        target = f"{host}{path}" if "/" in pattern else host
-        if _suffix_matches(target, pattern) and len(pattern) > best_len:
+        if suffix_matches(host, path, pattern) and len(pattern) > best_len:
             host_delta, best_len = delta, len(pattern)
 
     # Path rules add to the host rule rather than replacing it, so a catalogue
@@ -304,7 +297,7 @@ def domain_adjustment(url: str) -> float:
     if host == "doi.org" or host.endswith(".doi.org"):
         path_deltas += [d for prefix, d in _DOI_PREFIX_ADJUSTMENTS if path.startswith(prefix)]
     if _WIKI_PATH.search(path) and not any(
-        _suffix_matches(host, wiki) for wiki in _REAL_WIKI_HOSTS
+        suffix_matches(host, path, wiki) for wiki in _REAL_WIKI_HOSTS
     ):
         path_deltas.append(_WIKI_MIRROR_ADJUSTMENT)
     return host_delta + (min(path_deltas) if path_deltas else 0.0)
@@ -322,16 +315,6 @@ def penalised_hosts(threshold: float = -2.5) -> list[str]:
         for pattern, delta in _HOST_ADJUSTMENTS
         if delta <= threshold and "/" not in pattern and not pattern.startswith(".")
     ]
-
-
-def _suffix_matches(target: str, pattern: str) -> bool:
-    """Domain-suffix match on a label boundary, so ``notgoodreads.com`` is not
-    penalised for containing ``goodreads.com``. Patterns containing a slash
-    (e.g. ``linkedin.com/pulse``) are matched as a prefix of host+path instead."""
-    if "/" in pattern:
-        return target.startswith(pattern)
-    p = pattern.lstrip(".")
-    return target == p or target.endswith(f".{p}")
 
 
 @dataclass
@@ -479,7 +462,8 @@ def rank_candidates(
     """
     ranked = sorted(triaged, key=lambda t: t.score, reverse=True)
     kept: list[TriagedCandidate] = []
-    kept_titles: dict[tuple[str, str] | None, list[str]] = {}
+    # Per group: each kept title with its volume designators, computed once.
+    kept_titles: dict[tuple[str, str] | None, list[tuple[str, set[str]]]] = {}
     for item in ranked:
         # A priority candidate (a must-have, a work several accepted sources
         # cite) does not depend on its score, so an unscored one still ranks.
@@ -487,16 +471,13 @@ def rank_candidates(
             continue
         group = _dedup_group(item.candidate)
         title = item.candidate.title.casefold().strip()
+        designators = _designators(title)
         seen = kept_titles.setdefault(group, [])
-        if any(_near_duplicate_titles(title, other, group is not None) for other in seen):
+        if _near_duplicate(title, designators, seen, same_work=group is not None):
             continue
         kept.append(item)
-        seen.append(title)
+        seen.append((title, designators))
     return kept
-
-
-def _matches_must_have(title: str, must_have_titles: list[str]) -> bool:
-    return matching_work(title, must_have_titles) is not None
 
 
 def _dedup_group(candidate: SourceCandidate) -> tuple[str, str] | None:
@@ -519,10 +500,26 @@ def _designators(title: str) -> set[str]:
     return {re.sub(r"\s+", "", m.group(1).casefold()) for m in _DESIGNATOR.finditer(title)}
 
 
-def _near_duplicate_titles(title: str, other: str, same_work: bool) -> bool:
-    if same_work and _designators(title) != _designators(other):
-        return False
-    return difflib.SequenceMatcher(None, title, other).ratio() >= _NEAR_DUP_TITLE_RATIO
+def _near_duplicate(
+    title: str, designators: set[str], kept: list[tuple[str, set[str]]], same_work: bool
+) -> bool:
+    """Whether ``title`` is within the ratio of a kept title (differing volumes never are).
+
+    The cheap upper bounds are checked before the full ratio: a round compares
+    every candidate title with every kept one, and the full ratio is what cost.
+    """
+    matcher = difflib.SequenceMatcher(None, title)
+    for other, other_designators in kept:
+        if same_work and designators != other_designators:
+            continue
+        matcher.set_seq2(other)
+        if (
+            matcher.real_quick_ratio() >= _NEAR_DUP_TITLE_RATIO
+            and matcher.quick_ratio() >= _NEAR_DUP_TITLE_RATIO
+            and matcher.ratio() >= _NEAR_DUP_TITLE_RATIO
+        ):
+            return True
+    return False
 
 
 def _triage_params(

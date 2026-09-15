@@ -70,28 +70,54 @@ _ABOUT_SITE_NAMES = re.compile(
     re.IGNORECASE,
 )
 # A title's site suffix: after " | ", " — ", " – " or " - ", or in trailing brackets.
-_SUFFIX = re.compile(r"(?:\s[|—–-]\s(?P<tail>[^|—–]+)$)|(?:\((?P<paren>[^()]+)\)\s*$)")
+_SUFFIX = re.compile(r"(?:\s[|—–-]\s(?P<tail>[^|—–]+)$)|(?:\s*\((?P<paren>[^()]+)\)\s*$)")
+
+
+def host_and_path(url: str) -> tuple[str, str]:
+    """A URL's lowercased host without ``www.``, and its lowercased path. Empty when unparseable."""
+    if not url:
+        return "", ""
+    try:
+        parts = urlsplit(url if "//" in url else f"//{url}")
+    except ValueError:
+        return "", ""
+    return (parts.hostname or "").lower().removeprefix("www."), (parts.path or "").lower()
+
+
+def suffix_matches(host: str, path: str, pattern: str) -> bool:
+    """Domain-suffix match on a label boundary, so ``notgoodreads.com`` does not
+    match ``goodreads.com``. A pattern with a slash (``linkedin.com/pulse``) is
+    matched as a prefix of host + path instead."""
+    if "/" in pattern:
+        return f"{host}{path}".startswith(pattern)
+    p = pattern.lstrip(".")
+    return host == p or host.endswith(f".{p}")
 
 
 def url_is_about_host(url: str) -> bool:
     """Whether a URL is on a host (or host path) whose pages are about their subject."""
-    try:
-        parts = urlsplit(url if "//" in (url or "") else f"//{url or ''}")
-    except ValueError:
-        return False
-    host = (parts.hostname or "").lower().removeprefix("www.")
-    if not host:
-        return False
-    if any(host == h or host.endswith(f".{h}") for h in ABOUT_HOSTS):
-        return True
-    target = f"{host}{(parts.path or '').lower()}"
-    return any(target.startswith(p) for p in ABOUT_PATHS)
+    host, path = host_and_path(url)
+    return bool(host) and any(suffix_matches(host, path, p) for p in ABOUT_HOSTS + ABOUT_PATHS)
+
+
+def split_site_suffix(title: str) -> tuple[str, str]:
+    """``(title, site suffix)``: "Thomism | Britannica" → ("Thomism", "Britannica")."""
+    title = (title or "").strip()
+    match = _SUFFIX.search(title)
+    if match is None:
+        return title, ""
+    return title[: match.start()].strip(), (match.group("tail") or match.group("paren") or "").strip()
 
 
 def title_names_about_site(title: str) -> bool:
     """Whether a page title ends with the name of an encyclopedia or summary service."""
-    match = _SUFFIX.search(title or "")
-    if match is None:
-        return False
-    tail = match.group("tail") or match.group("paren") or ""
-    return bool(_ABOUT_SITE_NAMES.search(tail))
+    return bool(_ABOUT_SITE_NAMES.search(split_site_suffix(title)[1]))
+
+
+def is_about_page(title: str, url: str = "") -> bool:
+    """A page about its subject, by its host or its title's site suffix.
+
+    "Jacques Maritain (Stanford Encyclopedia of Philosophy)", "Maritain, Jacques |
+    Internet Encyclopedia of Philosophy", "De Ente et Essentia — Philopedia".
+    """
+    return url_is_about_host(url) or title_names_about_site(title)

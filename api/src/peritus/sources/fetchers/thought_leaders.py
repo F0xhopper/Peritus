@@ -24,10 +24,11 @@ import httpx
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.sources.dedup import normalise_url
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.base import note_search_failure
 from peritus.sources.fetchers.exa import classify_search_error
-from peritus.sources.hosts import ABOUT_HOSTS, title_names_about_site, url_is_about_host
+from peritus.sources.hosts import ABOUT_HOSTS, is_about_page
 
 logger = get_logger(__name__)
 
@@ -63,13 +64,10 @@ _IDENTIFY_TOOL: dict[str, Any] = {
 
 
 class ThoughtLeadersFetcher:
-    def __init__(self) -> None:
-        self._figures: list[dict] = []
-        self._topic: str = ""
-
-    def use_figures(self, figures: list[dict], topic: str) -> None:
-        """Search for the plan's named figures instead of identifying people afresh."""
-        self._figures = [f for f in figures if str(f.get("name") or "").strip()]
+    def __init__(self, figures: list[dict] | None = None, topic: str = "") -> None:
+        """``figures`` are the research plan's; with them, the channel searches for
+        those people instead of identifying people afresh."""
+        self._figures = [f for f in figures or [] if str(f.get("name") or "").strip()]
         self._topic = topic
 
     async def search(self, query: str, max_results: int = 6) -> list[SourceCandidate]:
@@ -102,18 +100,7 @@ class ThoughtLeadersFetcher:
                 logger.warning("Leader content search failed: %s", batch)
                 continue
             batches.append([c for c in batch if not is_about_page(c.title, c.url)])
-
-        candidates: list[SourceCandidate] = []
-        seen: set[str] = set()
-        for rank in range(max((len(b) for b in batches), default=0)):
-            for batch in batches:
-                if rank >= len(batch):
-                    continue
-                key = batch[rank].url.rstrip("/").lower()
-                if key not in seen:
-                    seen.add(key)
-                    candidates.append(batch[rank])
-        return candidates
+        return _interleave(batches)
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
         name = candidate.metadata["leader"]
@@ -145,15 +132,6 @@ class ThoughtLeadersFetcher:
             text=text[:_MAX_CHARS],
             metadata=candidate.metadata,
         )
-
-
-def is_about_page(title: str, url: str) -> bool:
-    """An encyclopedia entry, profile or summary about a person, by its host or title.
-
-    "Jacques Maritain (Stanford Encyclopedia of Philosophy)", "Maritain, Jacques |
-    Internet Encyclopedia of Philosophy", "Jacques Maritain - Wikipedia".
-    """
-    return url_is_about_host(url) or title_names_about_site(title)
 
 
 def _mentions_leader(name: str, title: str, text: str) -> bool:
@@ -227,28 +205,49 @@ def people_search_calls(name: str, topic: str) -> list[tuple[str, dict]]:
 async def exa_people_searches(name: str, topic: str, base_metadata: dict) -> list[SourceCandidate]:
     from exa_py import Exa  # type: ignore
 
+    """Both searches for one person, concurrently, their results interleaved.
+
+    Interleaved rather than stacked, so the personal-site hits are not all behind
+    the topic hits when the channel's results are capped.
+    """
     client = Exa(api_key=settings.EXA_API_KEY)
-    candidates: list[SourceCandidate] = []
-    for query, kwargs in people_search_calls(name, topic):
-        try:
-            results = await asyncio.to_thread(client.search_and_contents, query, **kwargs)
-        except Exception as exc:
+    calls = people_search_calls(name, topic)
+    responses = await asyncio.gather(
+        *[asyncio.to_thread(client.search_and_contents, query, **kwargs) for query, kwargs in calls],
+        return_exceptions=True,
+    )
+    per_search: list[list[SourceCandidate]] = []
+    for (query, _kwargs), response in zip(calls, responses, strict=True):
+        if isinstance(response, BaseException):
             # The personal-site category is not accepted everywhere; one search
             # failing costs its results, never the other search's.
-            logger.warning("Exa search for leader %r (%s) failed: %s", name, query, exc)
+            logger.warning("Exa search for leader %r (%s) failed: %s", name, query, response)
             continue
-        for r in results.results:
-            if not r.url:
-                continue
-            candidates.append(SourceCandidate(
+        per_search.append([
+            SourceCandidate(
                 source_type=SourceType.THOUGHT_LEADER,
                 url=r.url,
                 title=r.title or name,
                 author=name,
                 snippet=getattr(r, "text", None) or "",
                 metadata={**base_metadata, "exa_id": r.id},
-            ))
-    return candidates
+            )
+            for r in response.results
+            if r.url
+        ])
+    return _interleave(per_search)
+
+
+def _interleave(batches: list[list[SourceCandidate]]) -> list[SourceCandidate]:
+    """First of each batch, then second of each, …; a URL seen once is not repeated."""
+    out: list[SourceCandidate] = []
+    seen: set[str] = set()
+    for rank in range(max((len(b) for b in batches), default=0)):
+        for batch in batches:
+            if rank < len(batch) and (key := normalise_url(batch[rank].url)) not in seen:
+                seen.add(key)
+                out.append(batch[rank])
+    return out
 
 
 async def _search_via_web(query: str, name: str, base_metadata: dict) -> list[SourceCandidate]:

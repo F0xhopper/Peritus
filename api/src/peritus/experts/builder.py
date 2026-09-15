@@ -65,12 +65,7 @@ from peritus.experts.composition import (
     corpus_composition,
     top_concept_shares,
 )
-from peritus.experts.coverage import (
-    NAMED_MISSING,
-    ConceptCoverage,
-    CoverageReport,
-    compute_coverage,
-)
+from peritus.experts.coverage import ConceptCoverage, CoverageReport, compute_coverage
 from peritus.experts.domain import Expert, ExpertTier
 from peritus.experts.feedback import feedback_queries, suggest_primary_texts
 from peritus.experts.picture import PictureSkipped, find_picture
@@ -122,8 +117,11 @@ from peritus.sources.dedup import (
     deduplicate_by_url,
     deduplicate_candidates,
     deduplicate_sources_by_content,
+    normalise_url,
 )
 from peritus.sources.domain import (
+    FIGURE_OWN_VOICE,
+    NAMED_MISSING,
     DroppedSource,
     RawSource,
     SourceCandidate,
@@ -161,6 +159,7 @@ from peritus.sources.fulltext import (
 )
 from peritus.sources.language import is_expected_language
 from peritus.sources.orientation import OrientationPack, build_orientation_pack
+from peritus.sources.sections import apply_sections
 from peritus.sources.snowball import snowball
 from peritus.sources.substance import substance_of
 from peritus.sources.triage import (
@@ -234,7 +233,6 @@ _CARRIED_METADATA = (
     "must_have_concepts",
     "must_have_figure",
     "sections_matched",
-    "triage_score",
 )
 
 # Why the loop stopped. Recorded in experts.build_summary and emitted on
@@ -698,13 +696,28 @@ class ExpertBuilder:
         # to the validator), and the text ceilings for resolved works.
         self._primary_definition: str = ""
         self._text_ceilings: dict[str, int] = {}
+        # Works looked for beyond the plan's own: primary texts a later round
+        # suggested, and substitutes for works that cannot be had. And the URLs
+        # triage ranked, so a work whose every hit was dropped can be retried.
+        self._suggested_works: list[MustHaveWork] = []
+        self._queued_substitutes: list[MustHaveWork] = []
+        self._ranked_urls: set[str] = set()
+        self._fetchers: dict[str, tuple[Any, int]] = {}
 
     def _build_fetchers(
         self,
         multiplier: float,
         source_filter: list[str] | None,
         weights: dict[str, float] | None = None,
+        figures: list[dict] | None = None,
+        topic: str = "",
     ):
+        """The active fetchers and their fetch quotas.
+
+        ``figures`` are the plan's named figures: the thought-leader channel
+        searches for them in their own voice rather than asking a second, blind
+        model call who matters for the topic.
+        """
         weights = weights or {}
         all_fetchers = {
             "wikipedia": (WikipediaFetcher(), 3),
@@ -718,7 +731,7 @@ class ExpertBuilder:
             # by default. The planner can still weight it up for a practitioner
             # topic.
             "reddit": (RedditFetcher(), 2),
-            "thought_leaders": (ThoughtLeadersFetcher(), 3),
+            "thought_leaders": (ThoughtLeadersFetcher(figures, topic), 3),
             "pubmed": (PubmedFetcher(), 2),
             "openalex": (OpenAlexFetcher(), 3),
         }
@@ -824,7 +837,7 @@ class ExpertBuilder:
 
         # Stage 0: Research planning
         await _emit_event(on_event, {"type": "stage", "stage": 0, "name": "plan"})
-        plan = await _plan_research(topic, getattr(expert.config, "max_key_concepts", 8))
+        plan = await _plan_research(topic, expert.config.max_key_concepts)
         _route_must_have_works(plan)
         key_concepts = plan["key_concepts"]
         if not key_concepts:
@@ -873,6 +886,8 @@ class ExpertBuilder:
             expert.config.source_multiplier,
             self._source_filter,
             weights,
+            plan.get("figures"),
+            topic,
         )
 
         # Stages 1–2: the discovery loop (search → dedup → triage → fetch →
@@ -1375,15 +1390,9 @@ class ExpertBuilder:
         must_have_titles = [w["title"] for w in plan["must_have_works"]]
         works = _planned_works(plan, config)
         self._primary_definition = plan.get("primary_source_definition") or ""
-        self._suggested_works: list[MustHaveWork] = []
+        self._suggested_works = []
         self._text_ceilings = _primary_text_ceilings(expert.tier)
-        self._ranked_urls: set[str] = set()
-        self._figures = figures
-        thought_leaders = (self._fetchers.get("thought_leaders") or (None, 0))[0]
-        if figures and isinstance(thought_leaders, ThoughtLeadersFetcher):
-            # The channel searches for the plan's figures in their own voice
-            # rather than asking a second, blind model call who matters here.
-            thought_leaders.use_figures(figures, topic)
+        self._ranked_urls = set()
 
         def _measure() -> CoverageReport:
             named = concept_named_texts(self._all_works(plan, config), _outcome_metadata(passed))
@@ -1410,7 +1419,7 @@ class ExpertBuilder:
         self._ledger_expert_id = expert.id
         self._fetcher_status = {}
         self._canonical = []
-        self._queued_substitutes: list[MustHaveWork] = []
+        self._queued_substitutes = []
 
         # Caps are computed once, from the whole build's ceiling, and their counts
         # persist across rounds — a cap applied per round would let a type take
@@ -1631,7 +1640,7 @@ class ExpertBuilder:
             resolutions = await resolve_works(
                 works,
                 exa_search=exa.search if exa is not None else None,
-                max_chars=getattr(self, "_text_ceilings", None),
+                max_chars=self._text_ceilings,
             )
         except asyncio.CancelledError:
             raise
@@ -1656,23 +1665,19 @@ class ExpertBuilder:
         # substitute is looked for as a work of its own (docs/plans/syllabus.md,
         # 3.B). Resolved after, not beside, so a substitute is only paid for
         # when the work it stands in for is out of reach.
-        queued = {w.key for w in self._substitutes()}
+        queued = {w.key for w in self._queued_substitutes}
         substitutes = [
             r.work.substitute for r in resolutions
             if r.work.substitute is not None and not r.work.obtainable and not r.whole
             and r.work.substitute.key not in queued
         ]
         if substitutes:
-            self._queued_substitutes = [*self._substitutes(), *substitutes]
+            self._queued_substitutes += substitutes
             candidates += await self._resolve_canonical(substitutes, on_event, round_n)
 
         return _merge_same_volume(
-            candidates, getattr(self, "_text_ceilings", {}).get(SCOPE_OVERALL)
+            candidates, self._text_ceilings.get(SCOPE_OVERALL)
         )
-
-    def _substitutes(self) -> list[MustHaveWork]:
-        """Substitute works queued for lookup so far in this discovery run."""
-        return list(getattr(self, "_queued_substitutes", []))
 
     async def _retry_canonical(
         self,
@@ -1690,11 +1695,11 @@ class ExpertBuilder:
         found and dropped that way, and nothing looked for it again. Dropped hits
         never entered the seen set, so looking again finds them again.
         """
-        ranked: set[str] = getattr(self, "_ranked_urls", set())
         failed = {r.work.title for r in self._canonical if r.route_errors} | {
             r.work.title
             for r in self._canonical
-            if r.candidates and not any(_url_key(c.url) in ranked for c in r.candidates)
+            if r.candidates
+            and not any(normalise_url(c.url) in self._ranked_urls for c in r.candidates)
         }
         if not failed:
             return []
@@ -1724,25 +1729,24 @@ class ExpertBuilder:
         config,
         on_event: EventCallback | None,
         round_n: int,
-        plan: dict | None = None,
-        key_concepts: list[str] | None = None,
+        plan: dict,
+        key_concepts: list[str],
     ) -> tuple[dict[str, list[str]], list[SourceCandidate]]:
         """Queries and citation candidates for a follow-up round."""
         queries_by_fetcher: dict[str, list[str]] = {}
         author_candidates: list[SourceCandidate] = []
         if weakest:
-            works = self._all_works(plan or {}, config)
+            works = self._all_works(plan, config)
             accepted_metadata = _outcome_metadata(passed)
             named = concept_named_texts(works, accepted_metadata)
-            figures = getattr(self, "_figures", None) or (plan or {}).get("figures") or []
-            per_concept = await feedback_queries(
+            feedback = await feedback_queries(
                 topic,
                 weakest,
                 passed,
-                top_concept_shares(passed, key_concepts or []) if key_concepts else None,
+                top_concept_shares(passed, key_concepts) if key_concepts else None,
                 facet_of={
                     concept: facet["name"]
-                    for facet in (plan or {}).get("facets") or []
+                    for facet in plan.get("facets") or []
                     for concept in facet.get("concepts") or []
                 },
                 missing_texts={
@@ -1752,11 +1756,11 @@ class ExpertBuilder:
                 },
                 voiceless_figures=[
                     f["name"]
-                    for f in figure_outcomes(figures, works, accepted_metadata)
-                    if f["status"] != "own_voice"
+                    for f in figure_outcomes(plan.get("figures") or [], works, accepted_metadata)
+                    if f["status"] != FIGURE_OWN_VOICE
                 ],
             )
-            authors = list(getattr(per_concept, "authors", []) or [])
+            per_concept, authors = feedback.queries, feedback.authors
             if authors:
                 author_candidates = await self._search_authors(authors, topic, on_event, round_n)
             flat: list[str] = []
@@ -1764,7 +1768,7 @@ class ExpertBuilder:
                 for query in per_concept.get(concept.concept, []):
                     if query not in flat:
                         flat.append(query)
-            status = getattr(self, "_fetcher_status", {})
+            status = self._fetcher_status
             loop_fetchers = [
                 n for n in self._fetchers
                 if n in _LOOP_FETCHERS or status.get(n) in TRANSIENT_STATUSES | {STATUS_ERROR}
@@ -1772,7 +1776,7 @@ class ExpertBuilder:
             retried = [n for n in loop_fetchers if n not in _LOOP_FETCHERS]
             queries_by_fetcher = {
                 name: (
-                    list((plan or {}).get("fetcher_plans", {}).get(name, {}).get("queries") or [topic])
+                    list(plan.get("fetcher_plans", {}).get(name, {}).get("queries") or [topic])
                     if name in _PLAN_QUERY_FETCHERS
                     else list(flat)
                 )
@@ -1797,11 +1801,11 @@ class ExpertBuilder:
         # scholarship about a subject far more readily than with its own texts.
         primary_candidates: list[SourceCandidate] = []
         lacking = [c.concept for c in weakest if not c.has_primary]
-        limit = getattr(config, "concept_primary_texts", 0)
-        if lacking and limit > 0 and getattr(config, "coverage_require_primary", False):
-            tried = [r.work.title for r in getattr(self, "_canonical", [])]
+        limit = config.concept_primary_texts
+        if lacking and limit > 0 and config.coverage_require_primary:
+            tried = [r.work.title for r in self._canonical]
             suggestions = await suggest_primary_texts(
-                topic, getattr(self, "_primary_definition", ""), lacking, tried
+                topic, self._primary_definition, lacking, tried
             )
             new_works = [MustHaveWork.from_plan(t, SCOPE_CONCEPT) for t in suggestions][:limit]
             if new_works:
@@ -1814,7 +1818,7 @@ class ExpertBuilder:
                         "texts": suggestions[: len(new_works)],
                     },
                 )
-                self._suggested_works = [*getattr(self, "_suggested_works", []), *new_works]
+                self._suggested_works += new_works
                 primary_candidates = await self._resolve_canonical(new_works, on_event, round_n)
 
         # Snowball from what the corpus has already accepted. Seeded from every
@@ -1852,8 +1856,8 @@ class ExpertBuilder:
         """Every work this discovery run has looked for: planned, suggested, substituted."""
         return (
             _planned_works(plan, config)
-            + list(getattr(self, "_suggested_works", []))
-            + self._substitutes()
+            + self._suggested_works
+            + self._queued_substitutes
         )
 
     async def _search_authors(
@@ -1869,7 +1873,7 @@ class ExpertBuilder:
         summary services and drops pages titled as entries about a person — raw
         web search answered an author's name with exactly those pages.
         """
-        if "thought_leaders" not in getattr(self, "_fetchers", {}):
+        if "thought_leaders" not in self._fetchers:
             return []
         try:
             found = await ThoughtLeadersFetcher.search_people(
@@ -1926,8 +1930,7 @@ class ExpertBuilder:
         # call that names books or people, and three of them per build asked the
         # same question three ways.
         _SINGLE_QUERY_FETCHERS = {"thought_leaders", "gutenberg"}
-        status_by_fetcher: dict[str, str] = getattr(self, "_fetcher_status", None) or {}
-        self._fetcher_status = status_by_fetcher
+        status_by_fetcher = self._fetcher_status
 
         async def _search_one(
             name: str, fetcher, quota: int, attempt: int = 0
@@ -2023,11 +2026,9 @@ class ExpertBuilder:
             # candidates alone and report it as a quality collapse.
             _raise_if_provider_down("Source triage")
         ranked = rank_candidates(triaged)
-        ranked_urls = getattr(self, "_ranked_urls", None)
         for item in ranked:
             seen.add_candidate(item.candidate)
-            if ranked_urls is not None:
-                ranked_urls.add(_url_key(item.candidate.url))
+            self._ranked_urls.add(normalise_url(item.candidate.url))
 
         floor = settings.FETCH_SCORE_FLOOR
         reaching = sum(
@@ -2135,7 +2136,7 @@ class ExpertBuilder:
                     "fetch_outcome": fetch_outcome,
                 }
             )
-        expert_id = getattr(self, "_ledger_expert_id", None)
+        expert_id = self._ledger_expert_id
         if expert_id is not None:
             await _quietly(
                 "write the screening ledger",
@@ -2177,7 +2178,7 @@ class ExpertBuilder:
             topic,
             raw_sources,
             key_concepts,
-            primary_definition=getattr(self, "_primary_definition", "") or None,
+            primary_definition=self._primary_definition or None,
             on_result=lambda r: _emit_event(
                 on_event, {"type": "source_validated", "round": round_n, **r}
             ),
@@ -3369,15 +3370,10 @@ def _carry_candidate_metadata(
     candidate: SourceCandidate, source: RawSource, score: float
 ) -> None:
     """Copy the selection facts a fetcher may not have onto the fetched source."""
-    carried = {**candidate.metadata, "triage_score": round(score, 2)}
     for key in _CARRIED_METADATA:
-        if key in carried and key not in source.metadata:
-            source.metadata[key] = carried[key]
+        if key in candidate.metadata and key not in source.metadata:
+            source.metadata[key] = candidate.metadata[key]
     source.metadata["triage_score"] = round(score, 2)
-
-
-def _url_key(url: str) -> str:
-    return (url or "").rstrip("/").lower()
 
 
 def _planned_works(plan: dict, config) -> list[MustHaveWork]:
@@ -3392,10 +3388,10 @@ def _planned_works(plan: dict, config) -> list[MustHaveWork]:
         + [
             MustHaveWork.from_plan(w, SCOPE_CONCEPT)
             for w in (plan.get("concept_primary_texts") or [])[
-                : getattr(config, "concept_primary_texts", 0)
+                : config.concept_primary_texts
             ]
         ]
-        + _figure_works(plan.get("figures") or [], getattr(config, "figure_texts", 0))
+        + _figure_works(plan.get("figures") or [], config.figure_texts)
     )
 
 
@@ -3405,14 +3401,12 @@ def _figure_works(figures: list[dict], limit: int) -> list[MustHaveWork]:
     for figure in figures:
         if len(works) >= limit:
             break
-        if not figure.get("obtainable") or not isinstance(figure.get("work"), dict):
-            continue
-        work = MustHaveWork.from_plan(figure["work"], SCOPE_FIGURE)
-        if not work.title:
-            continue
-        work.figure = str(figure.get("name") or "")
-        work.author = work.author or work.figure
-        works.append(work)
+        # The plan keeps a work only for an obtainable figure, with the figure as
+        # its author when none was given (_normalise_figures).
+        if isinstance(figure.get("work"), dict):
+            work = MustHaveWork.from_plan(figure["work"], SCOPE_FIGURE)
+            work.figure = str(figure.get("name") or "")
+            works.append(work)
     return works
 
 
@@ -3424,7 +3418,9 @@ def _enforce_ceiling(candidate: SourceCandidate, source: RawSource) -> None:
     characters against a 200,000 ceiling — a third of the round's estimated
     ingest in one volume. Whichever path skipped it, the ceiling is enforced
     here, where every fetch arrives, and the log names the fetcher so the next
-    build says which path it was.
+    build says which path it was. The cut is the same one the fetchers make —
+    the named sections first, then the ceiling — so a path that skipped it keeps
+    the passages the plan asked for rather than the work's opening.
     """
     ceiling = candidate.metadata.get("text_max_chars")
     if not isinstance(ceiling, int) or ceiling <= 0 or len(source.text) <= ceiling:
@@ -3434,9 +3430,8 @@ def _enforce_ceiling(candidate: SourceCandidate, source: RawSource) -> None:
         candidate.metadata.get("canonical_fetcher") or candidate.source_type.value,
         len(source.text), candidate.title, ceiling,
     )
-    source.text = source.text[:ceiling]
-    source.metadata["truncated"] = True
-    source.metadata["ceiling_enforced"] = True
+    source.text, selected = apply_sections(source.text, candidate.metadata, ceiling)
+    source.metadata.update(selected, truncated=True, ceiling_enforced=True)
 
 
 def _boosted_must_have_titles(

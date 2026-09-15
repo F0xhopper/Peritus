@@ -17,6 +17,7 @@ The fallback when the call fails is the old behaviour — ``f"{topic} {concept}"
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Any
 
 from peritus.core.config import settings
@@ -101,24 +102,22 @@ _SYSTEM = (
 )
 
 
-class FeedbackQueries(dict[str, list[str]]):
-    """Queries per weak concept, plus the authors the corpus cites and lacks.
+@dataclass
+class Feedback:
+    """Queries per weak concept, and the authors the corpus cites and lacks.
 
-    A dict, so a round's query plan reads it as before; ``authors`` go to the
-    thought-leader search for writing *by* those people, not into the concept
-    queries, where raw web search answered an author's name with pages about them.
+    ``authors`` go to the thought-leader search for writing *by* those people,
+    not into the concept queries, where raw web search answered an author's name
+    with pages about them.
     """
 
-    authors: list[str]
-
-    def __init__(self, queries: dict[str, list[str]] | None = None, authors: list[str] | None = None):
-        super().__init__(queries or {})
-        self.authors = list(authors or [])
+    queries: dict[str, list[str]] = field(default_factory=dict)
+    authors: list[str] = field(default_factory=list)
 
 
-def fallback_queries(topic: str, weakest: list[ConceptCoverage]) -> FeedbackQueries:
+def fallback_queries(topic: str, weakest: list[ConceptCoverage]) -> dict[str, list[str]]:
     """What the loop searches when the feedback call is unavailable."""
-    return FeedbackQueries({c.concept: [f"{topic} {c.concept}"] for c in weakest})
+    return {c.concept: [f"{topic} {c.concept}"] for c in weakest}
 
 
 def weak_concepts_block(
@@ -207,17 +206,17 @@ async def feedback_queries(
     facet_of: dict[str, str] | None = None,
     missing_texts: dict[str, list[str]] | None = None,
     voiceless_figures: list[str] | None = None,
-) -> FeedbackQueries:
+) -> Feedback:
     """Follow-up queries per weak concept. Never raises; falls back on failure.
 
-    The returned mapping always has an entry for every concept in ``weakest``,
+    ``queries`` always has an entry for every concept in ``weakest``,
     so the caller can build a round's query plan without checking for holes.
     """
     if not weakest:
-        return FeedbackQueries()
+        return Feedback()
     fallback = fallback_queries(topic, weakest)
     if not accepted:
-        return fallback
+        return Feedback(fallback)
 
     weak_block = weak_concepts_block(
         weakest, concept_shares,
@@ -250,7 +249,7 @@ async def feedback_queries(
             "topic+concept queries for this round",
             type(exc).__name__, exc,
         )
-        return fallback
+        return Feedback(fallback)
 
     return _normalise(payload, weakest, fallback)
 
@@ -259,7 +258,7 @@ def _normalise(
     payload: dict,
     weakest: list[ConceptCoverage],
     fallback: dict[str, list[str]],
-) -> FeedbackQueries:
+) -> Feedback:
     """Coerce model output onto the concept list, keeping the fallback for holes.
 
     Concept names are matched casefold against the canonical list — a model that
@@ -288,7 +287,7 @@ def _normalise(
 
     for concept, queries in fallback.items():
         out.setdefault(concept, queries)
-    return FeedbackQueries(out, authors)
+    return Feedback(out, authors)
 
 
 # ── primary texts for concepts that have none ────────────────────────────────

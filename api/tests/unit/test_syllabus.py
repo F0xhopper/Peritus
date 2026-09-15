@@ -19,16 +19,7 @@ from peritus.experts.builder import (
     _normalise_plan,
 )
 from peritus.experts.composition import corpus_composition
-from peritus.experts.coverage import (
-    DEPTH_MENTIONS,
-    DEPTH_SETS_OUT,
-    DEPTH_TREATS,
-    NAMED_FOUND,
-    NAMED_MISSING,
-    NAMED_PARTIAL,
-    CoverageTarget,
-    compute_coverage,
-)
+from peritus.experts.coverage import CoverageTarget, compute_coverage
 from peritus.experts.domain import ExpertConfig, ExpertTier
 from peritus.sources.canonical import (
     EXTENT_WHOLE,
@@ -43,13 +34,20 @@ from peritus.sources.canonical import (
     matching_work,
     must_have_outcomes,
 )
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType, ValidatedSource
-from peritus.sources.fetchers.thought_leaders import (
-    ThoughtLeadersFetcher,
-    is_about_page,
-    people_search_calls,
+from peritus.sources.domain import (
+    DEPTH_MENTIONS,
+    DEPTH_SETS_OUT,
+    DEPTH_TREATS,
+    NAMED_FOUND,
+    NAMED_MISSING,
+    NAMED_PARTIAL,
+    RawSource,
+    SourceCandidate,
+    SourceType,
+    ValidatedSource,
 )
-from peritus.sources.hosts import ABOUT_HOSTS, SUMMARY_SERVICE_HOSTS
+from peritus.sources.fetchers.thought_leaders import ThoughtLeadersFetcher, people_search_calls
+from peritus.sources.hosts import ABOUT_HOSTS, SUMMARY_SERVICE_HOSTS, is_about_page
 from peritus.sources.orientation import (
     LEAD_MAX_CHARS,
     OrientationPack,
@@ -533,8 +531,7 @@ async def test_plan_figures_replace_the_blind_identification_call(monkeypatch):
 
     monkeypatch.setattr(thought_leaders, "_identify_leaders", _never)
     monkeypatch.setattr(thought_leaders, "_search_leader_content", _content)
-    fetcher = ThoughtLeadersFetcher()
-    fetcher.use_figures([{"name": "Feser", "why": "x"}, {"name": "Maritain", "why": "y"}], "Thomism")
+    fetcher = ThoughtLeadersFetcher([{"name": "Feser", "why": "x"}, {"name": "Maritain", "why": "y"}], "Thomism")
     found = await fetcher.search("Thomism thinkers", 4)
     assert searched == ["Feser", "Maritain"]
     assert [c.metadata["leader"] for c in found] == ["Feser", "Maritain", "Feser", "Maritain"], (
@@ -585,7 +582,7 @@ async def test_a_substitute_is_looked_for_only_when_the_work_cannot_be_had(monke
     })
     await builder._resolve_canonical([gilson, summa], None, 0)
     assert resolved == [["Elements", "Summa"], ["Spirit"]]
-    assert [w.title for w in builder._substitutes()] == ["Spirit"]
+    assert [w.title for w in builder._queued_substitutes] == ["Spirit"]
 
 
 def test_figure_statuses():
@@ -626,7 +623,7 @@ def test_feedback_authors_are_kept_apart_from_concept_queries():
         {"concepts": [{"concept": "analogy", "queries": ["analogia entis Cajetan"]}], "authors": ["Cajetan"]},
         weakest, fallback_queries("Thomism", weakest),
     )
-    assert result == {"analogy": ["analogia entis Cajetan"]}
+    assert result.queries == {"analogy": ["analogia entis Cajetan"]}
     assert result.authors == ["Cajetan"]
 
 

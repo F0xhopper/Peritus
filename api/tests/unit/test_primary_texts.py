@@ -24,6 +24,7 @@ from peritus.experts.builder import (
 )
 from peritus.experts.coverage import ConceptCoverage
 from peritus.experts.domain import ExpertConfig, ExpertTier
+from peritus.experts.feedback import Feedback
 from peritus.sources import canonical as canonical_module
 from peritus.sources.canonical import (
     EXTENT_PARTIAL,
@@ -467,13 +468,13 @@ async def test_concepts_without_a_primary_source_get_primary_texts_looked_up_by_
         events.append(e)
 
     with (
-        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value={"orbits": ["q"]})),
+        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback({"orbits": ["q"]}))),
         patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
     ):
         _, candidates = await builder._plan_round(
             "Newtonian mechanics",
             [ConceptCoverage("orbits", sources=3, primary=0)],
-            [], MagicMock(), ExpertConfig.from_tier(ExpertTier.STANDARD), on_event, 1,
+            [], MagicMock(), ExpertConfig.from_tier(ExpertTier.STANDARD), on_event, 1, {}, [],
         )
     assert candidates == [found]
     suggest.assert_awaited_once()

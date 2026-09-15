@@ -50,7 +50,17 @@ from urllib.parse import quote
 import httpx
 
 from peritus.core.logging import get_logger
-from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.domain import (
+    FIGURE_ABOUT_ONLY,
+    FIGURE_OWN_VOICE,
+    NAMED_FOUND,
+    NAMED_MISSING,
+    NAMED_PARTIAL,
+    RawSource,
+    SourceCandidate,
+    SourceType,
+)
+from peritus.sources.hosts import title_names_about_site, url_is_about_host
 
 logger = get_logger(__name__)
 
@@ -84,7 +94,6 @@ PRIMARY_TEXT_HOSTS: tuple[str, ...] = (
     "marxists.org",
     "oll.libertyfund.org",
     "wikisource.org",
-    "plato.stanford.edu",
 )
 
 # A section marker in a title: a question, chapter, book, part, volume, article,
@@ -177,8 +186,21 @@ def title_key(title: str) -> str:
 
 
 def names_the_work(title: str, wanted: str, author: str = "") -> bool:
-    """Whether a title is the wanted work itself, under any of the names it was given."""
-    return any(_names_the_work(title, variant, author) for variant in title_variants(wanted))
+    """Whether a title is the wanted work itself, under any of the names it was given.
+
+    Never a title whose site suffix names an encyclopedia or summary service
+    ("De Ente et Essentia — Philopedia"), nor one where the work's title is only
+    the object of a preposition ("the existence-essence distinction in De Ente
+    et Essentia"). Round 1 of a live Thomism build fetched pages like these as
+    the work, each lifted to the front of the queue by its title.
+    """
+    if title_names_about_site(title):
+        return False
+    return any(
+        _names_the_work(title, variant, author)
+        and not _work_is_object_of_preposition(title, variant)
+        for variant in title_variants(wanted)
+    )
 
 
 def _names_the_work(title: str, wanted: str, author: str = "") -> bool:
@@ -210,27 +232,11 @@ def matching_work(title: str, wanted_titles: list[str], url: str = "") -> str | 
     A match says the candidate is *of* the work, not about it. Whether it is the
     whole work is :func:`classify_extent`'s question, answered separately.
 
-    Stricter than :func:`names_the_work`, because a match here lifts a search
-    hit to the front of the fetch queue at any score. Round 1 of a live Thomism
-    build fetched three pages that way that were not the work: an encyclopedia
-    entry titled after it, and a paper on "the existence-essence distinction in
-    De Ente et Essentia". So a title is refused when its site suffix names an
-    encyclopedia or summary service, when its URL is on one, and when the work's
-    title is only the object of a preposition in it.
+    A URL on an encyclopedia or summary host is never the work, whatever its title.
     """
-    from peritus.sources.hosts import title_names_about_site, url_is_about_host
-
-    if url and url_is_about_host(url):
+    if url_is_about_host(url):
         return None
-    if title_names_about_site(title):
-        return None
-    for wanted in wanted_titles:
-        if not wanted.strip() or not names_the_work(title, wanted):
-            continue
-        if any(_work_is_object_of_preposition(title, variant) for variant in title_variants(wanted)):
-            continue
-        return wanted
-    return None
+    return next((w for w in wanted_titles if w.strip() and names_the_work(title, w)), None)
 
 
 _PREPOSITION_BEFORE = re.compile(r"\b(?:in|of|on|about)\s+$")
@@ -334,6 +340,16 @@ class MustHaveWork:
     def copy(self) -> MustHaveWork:
         return replace(self, concepts=list(self.concepts))
 
+    def absorb(self, other: MustHaveWork) -> None:
+        """Take another entry for the same work into this one: its concepts, and
+        whatever it knows about whether a free text exists."""
+        for concept in other.concepts:
+            if concept not in self.concepts:
+                self.concepts.append(concept)
+        self.public_domain = self.public_domain or other.public_domain
+        self.open_text = self.open_text or other.open_text
+        self.substitute = self.substitute or other.substitute
+
     @property
     def search_title(self) -> str:
         """The title without a bracketed alternate name, for search APIs."""
@@ -379,12 +395,7 @@ def merge_works(works: list[MustHaveWork]) -> list[MustHaveWork]:
         if existing is None:
             merged[slot] = work.copy()
             continue
-        for concept in work.concepts:
-            if concept not in existing.concepts:
-                existing.concepts.append(concept)
-        existing.public_domain = existing.public_domain or work.public_domain
-        existing.open_text = existing.open_text or work.open_text
-        existing.substitute = existing.substitute or work.substitute
+        existing.absorb(work)
         if not existing.sections and work.sections:
             existing.sections = work.sections
 
@@ -972,7 +983,7 @@ async def _exa_route(
     for candidate in results:
         if not names_the_work(candidate.title, work.title, work.author):
             continue
-        if _foreign_wikisource(candidate.url):
+        if _foreign_wikisource(candidate.url) or url_is_about_host(candidate.url):
             continue
         candidate.metadata["must_have_extent"] = classify_extent(candidate.title, candidate.url)
         kept.append(candidate)
@@ -980,6 +991,15 @@ async def _exa_route(
 
 
 # ── outcome, once the corpus exists ─────────────────────────────────────────
+
+
+def _primary_hits(passed_metadata: list[tuple[str, dict]], wanted_key: str) -> list[tuple[str, dict]]:
+    """Accepted sources carrying the work's title that the validator classified primary."""
+    return [
+        (url, meta) for url, meta in passed_metadata
+        if title_key(str(meta.get("must_have_title") or "")) == wanted_key
+        and meta.get("source_tier", "primary") == "primary"
+    ]
 
 
 def must_have_outcomes(
@@ -997,7 +1017,7 @@ def must_have_outcomes(
     """
     by_key: dict[str, list[WorkResolution]] = {}
     for resolution in resolutions:
-        by_key.setdefault(resolution.work.key.split("|")[0], []).append(resolution)
+        by_key.setdefault(title_key(resolution.work.title), []).append(resolution)
 
     distinct: dict[str, MustHaveWork] = {}
     for work in works:
@@ -1007,14 +1027,9 @@ def must_have_outcomes(
         if existing is None:
             distinct[work.key] = work.copy()
             continue
-        existing.open_text = existing.open_text or work.open_text
-        existing.public_domain = existing.public_domain or work.public_domain
-        existing.substitute = existing.substitute or work.substitute
+        existing.absorb(work)
         if work.scope == SCOPE_OVERALL:
             existing.scope = SCOPE_OVERALL
-        for concept in work.concepts:
-            if concept not in existing.concepts:
-                existing.concepts.append(concept)
         if work.sections and work.sections not in existing.sections:
             existing.sections = "; ".join(p for p in (existing.sections, work.sections) if p)
 
@@ -1025,11 +1040,7 @@ def must_have_outcomes(
         # Wikipedia article titled "Summa Theologica" and a lecture with the
         # same name both carried the must-have mark on a live build and were
         # reported as the Summa found whole.
-        hits = [
-            (url, meta) for url, meta in passed_metadata
-            if title_key(str(meta.get("must_have_title") or "")) == wanted
-            and meta.get("source_tier", "primary") == "primary"
-        ]
+        hits = _primary_hits(passed_metadata, wanted)
         whole = [
             url for url, meta in hits
             if meta.get("must_have_extent") == EXTENT_WHOLE and not meta.get("sections_matched")
@@ -1087,17 +1098,13 @@ def concept_named_texts(
     A substitute found for a text that cannot be had counts as found.
     """
     statuses: dict[str, dict[str, Any]] = {}
-    rank = {"found": 0, "partial": 1, "missing": 2}
+    rank = {NAMED_FOUND: 0, NAMED_PARTIAL: 1, NAMED_MISSING: 2}
     for lookup in merge_works([w for w in works if w.concepts]):
         wanted = title_key(lookup.title)
         hits = [
-            meta for _url, meta in passed_metadata
-            if title_key(str(meta.get("must_have_title") or "")) == wanted
-            and meta.get("source_tier", "primary") == "primary"
-            and (
-                not lookup.sections
-                or set(meta.get("must_have_concepts") or []) & set(lookup.concepts)
-            )
+            meta for _url, meta in _primary_hits(passed_metadata, wanted)
+            if not lookup.sections
+            or set(meta.get("must_have_concepts") or []) & set(lookup.concepts)
         ]
         if any(
             meta.get("sections_matched")
@@ -1107,11 +1114,11 @@ def concept_named_texts(
             )
             for meta in hits
         ):
-            status = "found"
+            status = NAMED_FOUND
         elif hits:
-            status = "partial"
+            status = NAMED_PARTIAL
         else:
-            status = "missing"
+            status = NAMED_MISSING
         label = " ".join(p for p in (lookup.title, lookup.sections) if p)
         for concept in lookup.concepts:
             current = statuses.setdefault(concept, {"status": status, "texts": []})
@@ -1150,9 +1157,9 @@ def figure_outcomes(
         ]
         own = [url for url, meta in mine if meta.get("source_tier") in ("primary", "secondary")]
         if own:
-            status, urls = "own_voice", own
+            status, urls = FIGURE_OWN_VOICE, own
         elif mine:
-            status, urls = "about_only", [url for url, _ in mine]
+            status, urls = FIGURE_ABOUT_ONLY, [url for url, _ in mine]
         elif not figure.get("obtainable"):
             status, urls = NOT_OBTAINABLE, []
         else:

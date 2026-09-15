@@ -27,7 +27,14 @@ from typing import Any
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
-from peritus.sources.domain import DroppedSource, RawSource, ValidatedSource
+from peritus.sources.domain import (
+    COUNTING_DEPTHS,
+    DEPTH_TREATS,
+    DEPTHS,
+    DroppedSource,
+    RawSource,
+    ValidatedSource,
+)
 from peritus.sources.preview import build_preview, build_review_preview
 from peritus.sources.substance import substance_of
 
@@ -82,10 +89,8 @@ _TIER_DESCRIPTION = (
     "overviews, and other material that mainly restates what others have said."
 )
 
-# How deeply a source treats a concept. Mirrored in experts/coverage.py, which
-# counts sets_out and treats and never mentions.
-CONCEPT_DEPTHS: tuple[str, ...] = ("sets_out", "treats", "mentions")
-_COUNTING_DEPTHS = frozenset({"sets_out", "treats"})
+# How deeply a source treats a concept (the depths are in sources/domain.py;
+# coverage counts sets_out and treats and never mentions).
 _DEPTH_DESCRIPTION = (
     "sets_out = this source is where the concept is set out or argued at length (a "
     "chapter, a section, the paper's subject); treats = a substantial discussion, "
@@ -218,7 +223,7 @@ _BATCH_TOOL: dict[str, Any] = {
                                         "type": "string",
                                         "description": "Copied verbatim from the provided list.",
                                     },
-                                    "depth": {"type": "string", "enum": list(CONCEPT_DEPTHS)},
+                                    "depth": {"type": "string", "enum": list(DEPTHS)},
                                 },
                                 "required": ["concept", "depth"],
                             },
@@ -271,12 +276,12 @@ def _match_concepts(raw: list, key_concepts: list[str]) -> dict[str, str]:
     for item in raw or []:
         name: Any
         if isinstance(item, str):
-            name, depth = item, "treats"
+            name, depth = item, DEPTH_TREATS
         elif isinstance(item, dict):
             name = item.get("concept")
             depth = str(item.get("depth") or "").strip().casefold()
-            if depth not in CONCEPT_DEPTHS:
-                depth = "treats"
+            if depth not in DEPTHS:
+                depth = DEPTH_TREATS
         else:
             continue
         if not isinstance(name, str):
@@ -284,14 +289,14 @@ def _match_concepts(raw: list, key_concepts: list[str]) -> dict[str, str]:
         hit = canonical.get(name.casefold().strip())
         if not hit:
             continue
-        if hit not in matched or CONCEPT_DEPTHS.index(depth) < CONCEPT_DEPTHS.index(matched[hit]):
+        if hit not in matched or DEPTHS.index(depth) < DEPTHS.index(matched[hit]):
             matched[hit] = depth
     return matched
 
 
 def covered_names(depths: dict[str, str]) -> list[str]:
     """The concepts a source covers: its tags at ``treats`` or deeper."""
-    return [concept for concept, depth in depths.items() if depth in _COUNTING_DEPTHS]
+    return [concept for concept, depth in depths.items() if depth in COUNTING_DEPTHS]
 
 
 def _normalise_tier(raw) -> str | None:

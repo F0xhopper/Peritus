@@ -41,7 +41,7 @@ and running `peritus.eval.retrieval run thomism` before and after.
 | 2 | 1 | done | `sources/orientation.py`; `_plan_research` builds the pack itself, so tests that stub the planner stay offline; `research_plan.orientation`, `plan_ready.orientation` |
 | 3 | 4.A–4.D | done | validator `covered_concepts` as `{concept, depth}`, rubric `v8-graded-tags-q5r6`; `coverage.counting_tags`, `has_primary`; `canonical.concept_named_texts`; `sources.concept_depths` (migration 030); audit `coverage` concepts carry `primary_sources` / `has_primary` / `named_text` |
 | 4 | 2 | done | `facets` in the tool schema and `_normalise_facets`; `ExpertConfig.max_key_concepts` 8/10/14; `CoverageReport.facets`, `weakest_by_facet`, `thinnest_by_facet`; feedback grouped by facet |
-| 5 | 3.A–3.E | done | `figures` in the plan, `SCOPE_FIGURE` lookups (`figure_texts` 0/3/6); `open_text`, `substitute`, `NOT_OBTAINABLE`; `sources/hosts.py`; `ThoughtLeadersFetcher.use_figures` / `search_people`; validator author rule; `canonical.figure_outcomes` → `build_summary.corpus.figures`, audit `selection.figures` |
+| 5 | 3.A–3.E | done | `figures` in the plan, `SCOPE_FIGURE` lookups (`figure_texts` 0/3/6); `open_text`, `substitute`, `NOT_OBTAINABLE`; `sources/hosts.py`; `ThoughtLeadersFetcher(figures, topic)` / `search_people`; validator author rule; `canonical.figure_outcomes` → `build_summary.corpus.figures`, audit `selection.figures` |
 | 6 | 5 | **not run** | see above |
 
 Decisions the text left open, each deliberate:
@@ -71,13 +71,16 @@ Decisions the text left open, each deliberate:
 - **An in-copyright book** (neither `public_domain` nor `open_text`) gets one
   open Exa search. Papers and standards keep their routes: `open_text` is not
   asked of them.
-- **Feedback `authors`** come back on `FeedbackQueries.authors` (a dict
-  subclass, so the round's query plan is unchanged) and go to
+- **Feedback `authors`** come back on `Feedback.authors`, beside the
+  per-concept queries, and go to
   `ThoughtLeadersFetcher.search_people` as extra candidates, not into concept
   queries.
 - **Orphan concepts** — in `key_concepts` but no facet — join a facet named
   "Other" (or, with no facets at all, one named after the topic).
-- **The about-host list** lives in `sources/hosts.py`. Triage's scored table
+- **The about-page rules** (host, title site suffix, the work named after a
+  preposition) live in `names_the_work`, so the resolver's routes refuse the
+  same pages triage's boost does, and `plato.stanford.edu` is no longer a
+  primary-text host. **The about-host list** lives in `sources/hosts.py`. Triage's scored table
   keeps its per-host numbers; a test holds every summary service in the list to
   a negative prior, rather than regenerating the calibrated table from it.
 - **Migration 030** is applied to the local test database only. Deploying
