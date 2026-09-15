@@ -45,3 +45,8 @@ next-env.d.ts
 /playwright-report/
 /blob-report/
 /.lighthouseci/
+
+# lhci writes a report per run into the working directory
+/127_0_0_1*.report.html
+/127_0_0_1*.report.json
+.lighthouseci/
