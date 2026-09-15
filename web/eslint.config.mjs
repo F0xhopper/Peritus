@@ -31,6 +31,9 @@ const eslintConfig = defineConfig([
     '.next/**',
     'out/**',
     'build/**',
+    // `vercel build` output (the deploy pipeline builds prebuilt, and so can a
+    // local `vercel build`): compiled bundles, not source.
+    '.vercel/**',
     'next-env.d.ts',
     'coverage/**',
     'playwright-report/**',

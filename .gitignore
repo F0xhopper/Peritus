@@ -18,3 +18,8 @@ cli/target/
 
 # Node
 node_modules/
+
+# Claude Code: agent worktrees are full checkouts (committed, they become
+# gitlinks with no .gitmodules entry and break actions/checkout) and local settings
+.claude/worktrees/
+.claude/settings.local.json

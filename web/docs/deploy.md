@@ -3,6 +3,9 @@
 The web app is a backend-for-frontend: the browser never holds a token and never
 calls FastAPI directly. Everything below follows from that.
 
+Where it runs, the CI/CD pipeline, secrets and rollback: `docs/deployment.md`
+at the repository root.
+
 ## Environment
 
 Two variables, per environment, and nothing else:
