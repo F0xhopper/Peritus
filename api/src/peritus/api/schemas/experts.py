@@ -2,7 +2,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from peritus.experts.domain import BLURB_MAX_CHARS, ExpertTier, ExpertVisibility
+from peritus.experts.domain import BLURB_MAX_CHARS, ExpertAccess, ExpertTier, ExpertVisibility
 
 
 class ExpertAvatar(BaseModel):
@@ -89,6 +89,10 @@ class ExpertSummary(BaseModel):
     # rather than absent, like `avatar`, so a client never has to distinguish
     # "no picture" from "an older server that does not send the field".
     picture: ExpertPictureOut | None = None
+    # The caller's relationship to this expert: "owner", or "viewer" for an
+    # expert they can read through a share link or the public catalog. A
+    # rendering hint for hiding controls; every mutation re-checks ownership.
+    access: ExpertAccess = ExpertAccess.OWNER
     created_at: datetime
 
 

@@ -38,6 +38,7 @@ export function RowDetail({
   source: LedgerSource
   slug: string
   onAsk?: (title: string) => void
+  /** Present only for the owner. Without it there is no Remove button. */
   onDeleted?: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
@@ -230,10 +231,12 @@ export function RowDetail({
             Ask about this
           </Button>
         )}
-        <Button variant="ghost" size="sm" onClick={() => setConfirming(true)} className="text-bad">
-          <Trash2 className="size-3" />
-          Remove
-        </Button>
+        {onDeleted && (
+          <Button variant="ghost" size="sm" onClick={() => setConfirming(true)} className="text-bad">
+            <Trash2 className="size-3" />
+            Remove
+          </Button>
+        )}
       </div>
 
       <Dialog

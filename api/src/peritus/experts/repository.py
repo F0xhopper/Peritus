@@ -8,13 +8,14 @@ belong to them". ``chat.conversation_repository`` imports it to scope
 conversations, so it must never be widened — a conversation belongs to the user
 who had it, not to everyone who can read the expert.
 
-``_readable_clause`` is the *read* clause: ownership OR a shared visibility
-(public/unlisted). It answers "may this user READ / CHAT WITH this expert".
+``_readable_clause`` is the *read* clause: ownership OR public OR a grant on a
+live share link (migration 031). It answers "may this user READ / CHAT WITH
+this expert".
 
 Every query below is explicit about which one it uses. Listing the caller's
-workspace uses ownership; the catalog is a separate query; ``get_for_user`` is
-the read clause (so chat over public experts works), and mutating routes call
-``get_owned_for_user`` instead.
+workspace uses ownership plus grants; the catalog is a separate query;
+``get_for_user`` is the read clause (so chat over public and shared experts
+works), and mutating routes call ``get_owned_for_user`` instead.
 """
 
 import dataclasses
@@ -23,7 +24,6 @@ import json
 import asyncpg
 
 from peritus.experts.domain import (
-    SHARED_VISIBILITIES,
     CatalogMeta,
     Expert,
     ExpertConfig,
@@ -137,20 +137,23 @@ class ExpertRepository:
         return [_row_to_expert(r) for r in rows]
 
     async def list_for_user(self, owner_id: str, include_unowned: bool) -> list[Expert]:
-        """The caller's own workspace: their experts, plus legacy NULL-owned for admins.
+        """The caller's workspace: their experts (plus legacy NULL-owned for
+        admins) and the experts shared with them through a live link.
 
-        Deliberately OWNERSHIP-scoped, not read-scoped: ``GET /experts`` is "my
-        experts", and quietly folding the whole public catalog into it would
-        make every user's workspace grow whenever the founder publishes.
-        The catalog is a separate endpoint (``list_catalog``).
+        Ownership plus grants, never the whole read clause: ``GET /experts`` is
+        "my experts", and quietly folding the public catalog into it would make
+        every user's workspace grow whenever the founder publishes. A grant is
+        different — the caller opened that link on purpose. The catalog is a
+        separate endpoint (``list_catalog``).
         """
         clause, params = _visibility_clause(owner_id, include_unowned, alias="e", idx=1)
+        granted = _granted_clause(alias="e", idx=1)
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
                 SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
                 FROM experts e {_PICTURE_JOIN}
-                WHERE {clause}
+                WHERE {clause} OR {granted}
                 ORDER BY e.created_at DESC
                 """,
                 *params,
@@ -162,9 +165,9 @@ class ExpertRepository:
     ) -> Expert | None:
         """Get an expert by slug if the user may READ it.
 
-        Read visibility = owned, or admin-visible legacy row, or shared
-        (public/unlisted). This is what makes a catalog expert chattable by any
-        signed-in user without touching the chat routes.
+        Read visibility = owned, or admin-visible legacy row, or public, or
+        shared with this user through a live link. This is what makes a catalog
+        or shared expert chattable without touching the chat routes.
 
         **Do not use this to authorise a mutation** — use
         :meth:`get_owned_for_user`.
@@ -178,6 +181,42 @@ class ExpertRepository:
                 WHERE lower(e.name) = lower($1) AND {clause}
                 """,
                 name, *params,
+            )
+        return _row_to_expert(row) if row else None
+
+    async def is_readable_by(
+        self, expert_id: int, owner_id: str, include_unowned: bool
+    ) -> bool:
+        """Whether the user may still READ this expert, by id.
+
+        For paths that reach an expert through something the user owns — a
+        conversation — and must notice that the share behind it was revoked.
+        """
+        clause, params = _readable_clause(owner_id, include_unowned, alias="e", idx=2)
+        async with self._pool.acquire() as conn:
+            return bool(
+                await conn.fetchval(
+                    f"SELECT EXISTS (SELECT 1 FROM experts e WHERE e.id = $1 AND {clause})",
+                    expert_id, *params,
+                )
+            )
+
+    async def get_by_share_token(self, token: str) -> Expert | None:
+        """The expert behind a *live* share link, with no user context.
+
+        Backs the anonymous share page. A revoked or unknown token is None, so a
+        link that was turned off or reset stops rendering immediately.
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"""
+                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
+                FROM expert_share_links l
+                JOIN experts e ON e.id = l.expert_id
+                {_PICTURE_JOIN}
+                WHERE l.token = $1 AND l.revoked_at IS NULL
+                """,
+                token,
             )
         return _row_to_expert(row) if row else None
 
@@ -260,19 +299,20 @@ class ExpertRepository:
         return [_row_to_expert(r) for r in rows]
 
     async def get_public(self, name: str) -> Expert | None:
-        """Fetch a shared (public or unlisted) expert by slug, with no user context.
+        """Fetch a public expert by slug, with no user context.
 
-        Backs the anonymous catalog detail endpoint. Unlisted rows resolve here
-        too — that is the point of "unlisted": unguessable but shareable.
+        Backs the anonymous catalog detail endpoint. Public only: a private
+        expert — shared by link or not — never resolves by slug, because a slug
+        is derived from the topic and is therefore guessable.
         """
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
                 SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
                 FROM experts e {_PICTURE_JOIN}
-                WHERE lower(e.name) = lower($1) AND e.visibility = ANY($2::text[])
+                WHERE lower(e.name) = lower($1) AND e.visibility = 'public'
                 """,
-                name, sorted(SHARED_VISIBILITIES),
+                name,
             )
         return _row_to_expert(row) if row else None
 
@@ -727,17 +767,32 @@ def _visibility_clause(
     return (own, [owner_id])
 
 
+def _granted_clause(alias: str, idx: int) -> str:
+    """The user at ``$idx`` holds a grant on this expert's *live* share link.
+
+    Joining through the link, not only the grant, is what makes revocation
+    total: resetting or disabling a link sets ``revoked_at`` and every grant
+    made on it stops matching here, without a single grant row being touched.
+    """
+    return (
+        "EXISTS (SELECT 1 FROM expert_share_grants g"
+        " JOIN expert_share_links l ON l.id = g.link_id"
+        f" WHERE l.expert_id = {alias}.id AND l.revoked_at IS NULL"
+        f" AND g.user_id = ${idx}::uuid)"
+    )
+
+
 def _readable_clause(
     owner_id: str, include_unowned: bool, alias: str, idx: int
 ) -> tuple[str, list]:
-    """READ clause: ownership OR a shared visibility (public / unlisted).
+    """READ clause: ownership OR public OR a grant on a live share link.
 
     Used only for expert rows. A row matching this is readable and chattable;
     it is *not* necessarily mutable — see :func:`_visibility_clause`.
     """
     own, params = _visibility_clause(owner_id, include_unowned, alias, idx)
-    shared = f"{alias}.visibility IN ('public', 'unlisted')"
-    return (f"({own} OR {shared})", params)
+    public = f"{alias}.visibility = 'public'"
+    return (f"({own} OR {public} OR {_granted_clause(alias, idx)})", params)
 
 
 def _row_to_expert(row: asyncpg.Record) -> Expert:

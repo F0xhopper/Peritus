@@ -20,6 +20,7 @@ import { useShell } from '@/components/shell/shell-context'
 import { Input } from '@/components/ui/input'
 import { StatusDot, dotState } from '@/components/ui/status-dot'
 import { RelativeTime } from '@/components/ui/relative-time'
+import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
 import { chatTitle } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
@@ -154,13 +155,15 @@ function ExpertForm({
         >
           Graph
         </SidebarRow>
-        <SidebarRow
-          href={`${base}/settings`}
-          icon={SidebarSettingsIcon}
-          active={pathname.startsWith(`${base}/settings`)}
-        >
-          Settings
-        </SidebarRow>
+        {canManage(expert) && (
+          <SidebarRow
+            href={`${base}/settings`}
+            icon={SidebarSettingsIcon}
+            active={pathname.startsWith(`${base}/settings`)}
+          >
+            Settings
+          </SidebarRow>
+        )}
       </nav>
 
       <div className="flex min-h-0 flex-1 flex-col px-2 pb-2">

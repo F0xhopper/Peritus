@@ -8,7 +8,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from peritus.api.middleware import RequestContextMiddleware, install_error_handlers
-from peritus.api.routes import audit, auth, chat, conversations, experts, health, sources
+from peritus.api.routes import (
+    audit,
+    auth,
+    chat,
+    conversations,
+    experts,
+    health,
+    sharing,
+    sources,
+)
 from peritus.core.config import settings
 from peritus.core.logging import get_logger, setup_logging
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
@@ -94,6 +103,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations.router)
     app.include_router(audit.router)
     app.include_router(sources.router)
+    app.include_router(sharing.router)
     return app
 
 

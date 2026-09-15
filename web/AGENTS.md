@@ -199,6 +199,29 @@ Two consequences worth knowing before changing this:
   `--fg-4` is for decoration and disabled states only, never for text a reader
   needs.
 
+## Sharing and the viewer
+
+An owner shares an expert with a token link (`/share/{token}`); the design is in
+`docs/sharing.md` at the repo root. Three rules for the web side:
+
+- **Every management control goes through `canManage(expert)`** (`lib/access.ts`),
+  which reads `expert.access`. A viewer — someone who opened a share link — gets the
+  Overview, Sources, graph, build log and composer, and none of: the avatar picker,
+  Settings (the route 404s), Share, Rebuild, Cancel, Cost, Add a source, Remove source,
+  Delete. Their one action on the expert is "Remove from my experts". A new control
+  that changes an expert must check it too; the API would refuse it anyway, and a
+  button that cannot work is the bug.
+- **Opening a link is a click (`OpenSharedExpert`), never a render side effect.** The
+  share page is public so link previews can fetch it; a GET that recorded a grant would
+  let any unfurler put an expert in someone's workspace.
+- **A viewer's chat outlives the link.** When the expert is no longer readable, the chat
+  page renders the transcript read-only from the conversation's own columns
+  (`unavailable`) instead of a 404.
+
+The share URL is built from `window.location.origin` through `useSyncExternalStore`
+with an empty server snapshot, because the Settings page renders the panel on the
+server and an origin read during render would be a hydration mismatch.
+
 ## The shell's two columns
 
 The rail **is** the expert list. The second column never repeats it: on an

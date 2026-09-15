@@ -42,6 +42,9 @@ export interface AvatarProps {
   /** Load the picture eagerly — for the rail, which is always on screen and
    *  otherwise flashed blank on each route change. */
   eager?: boolean
+  /** Where the picture's bytes are, when not behind the signed-in slug route —
+   *  the share page has a token and no slug. */
+  pictureSrc?: string
 }
 
 export function Avatar({
@@ -51,6 +54,7 @@ export function Avatar({
   className,
   recipe,
   eager,
+  pictureSrc,
 }: AvatarProps) {
   const resolved = recipe ?? resolveRecipe(expert)
   const radius = shape === 'circle' ? '9999px' : `${Math.max(4, Math.round(size * 0.3))}px`
@@ -58,8 +62,8 @@ export function Avatar({
   // Only reachable when `resolveRecipe` saw a picture, or when a preview recipe
   // asked for one on an expert that has it — both imply both fields are here.
   const picture =
-    resolved.style === 'picture' && expert.picture?.version && expert.name
-      ? pictureUrl(expert.name, expert.picture.version)
+    resolved.style === 'picture' && expert.picture?.version
+      ? (pictureSrc ?? (expert.name ? pictureUrl(expert.name, expert.picture.version) : null))
       : null
 
   return (

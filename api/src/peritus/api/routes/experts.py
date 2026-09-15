@@ -10,10 +10,11 @@ segments are declared before their parameterised siblings.
 **Two authorisation predicates, and the difference matters.**
 
 - *Read/chat*: ``ExpertRepository.get_for_user`` — owned, admin-visible legacy,
-  or shared (public/unlisted). This is what makes a catalog expert chattable.
+  public, or shared with the caller through a live link. This is what makes a
+  catalog or shared expert chattable.
 - *Mutate*: ``ExpertRepository.get_owned_for_user`` — owned only. Rebuild,
-  cancel, delete and curate all use this, so publishing an expert never makes it
-  writable by anyone but its owner.
+  cancel, delete and curate all use this, so publishing or sharing an expert
+  never makes it writable by anyone but its owner.
 
 Rows outside the caller's scope 404 rather than 403, so slugs stay unguessable.
 """
@@ -36,7 +37,6 @@ from peritus.api.schemas.experts import (
     CatalogMetaOut,
     CatalogUpdateRequest,
     CreditStateOut,
-    ExpertDetail,
     ExpertPictureOut,
     ExpertSummary,
     ExpertWithCatalog,
@@ -60,7 +60,13 @@ from peritus.core.logging import get_logger
 from peritus.experts.avatar import InvalidAvatar
 from peritus.experts.avatar import normalise as normalise_avatar
 from peritus.experts.builder import FETCHER_NAMES
-from peritus.experts.domain import ExpertPicture, ExpertStatus, ExpertTier
+from peritus.experts.domain import (
+    ExpertAccess,
+    ExpertPicture,
+    ExpertStatus,
+    ExpertTier,
+    ExpertVisibility,
+)
 from peritus.experts.picture_repository import ExpertPictureRepository
 from peritus.experts.repository import ExpertRepository
 from peritus.experts.service import ExpertService
@@ -117,7 +123,14 @@ def _picture_out(picture: ExpertPicture | None) -> ExpertPictureOut | None:
     )
 
 
-def _summary_fields(e) -> dict[str, Any]:
+def _access(e, user: AuthUser) -> ExpertAccess:
+    """The caller's relationship to an expert they have already been allowed to read."""
+    if e.is_owned_by(user.id, include_unowned=user.is_admin):
+        return ExpertAccess.OWNER
+    return ExpertAccess.VIEWER
+
+
+def _summary_fields(e, user: AuthUser) -> dict[str, Any]:
     return {
         "id": e.id,
         "name": e.name,
@@ -139,16 +152,13 @@ def _summary_fields(e) -> dict[str, Any]:
         "build_active": e.build_active,
         "avatar": e.avatar,
         "picture": _picture_out(e.picture),
+        "access": _access(e, user),
         "created_at": e.created_at,
     }
 
 
-def _expert_to_summary(e) -> ExpertSummary:
-    return ExpertSummary(**_summary_fields(e))
-
-
-def _expert_to_detail(e) -> ExpertDetail:
-    return ExpertDetail(**_summary_fields(e), error=e.error, updated_at=e.updated_at)
+def _expert_to_summary(e, user: AuthUser) -> ExpertSummary:
+    return ExpertSummary(**_summary_fields(e, user))
 
 
 def _catalog_meta(e) -> CatalogMetaOut:
@@ -164,9 +174,9 @@ def _catalog_meta(e) -> CatalogMetaOut:
     )
 
 
-def _expert_with_catalog(e) -> ExpertWithCatalog:
+def _expert_with_catalog(e, user: AuthUser) -> ExpertWithCatalog:
     return ExpertWithCatalog(
-        **_summary_fields(e),
+        **_summary_fields(e, user),
         error=e.error,
         updated_at=e.updated_at,
         catalog=_catalog_meta(e),
@@ -243,8 +253,8 @@ async def list_catalog_categories():
 
 @router.get("/catalog/{slug}", response_model=CatalogEntry)
 async def get_catalog_expert(slug: str):
-    """One catalog card. Resolves public *and* unlisted slugs — unlisted experts
-    are shareable by link, they are only absent from the listing."""
+    """One catalog card. Public experts only — sharing a private expert is a
+    token link (``GET /share/{token}``), never its slug."""
     repo = ExpertRepository(get_pool())
     expert = await repo.get_public(slug)
     if not expert or not expert.is_chattable:
@@ -356,7 +366,7 @@ async def list_experts(user: AuthUser = Depends(require_user)):
     pool = get_pool()
     repo = ExpertRepository(pool)
     experts = await repo.list_for_user(user.id, include_unowned=user.is_admin)
-    return [_expert_to_summary(e) for e in experts]
+    return [_expert_to_summary(e, user) for e in experts]
 
 
 @router.post("/experts/build")
@@ -491,13 +501,14 @@ async def build_expert(
 
 @router.get("/experts/{slug}", response_model=ExpertWithCatalog)
 async def get_expert(slug: str, user: AuthUser = Depends(require_user)):
-    """Expert detail. Readable if the caller owns it *or* it is public/unlisted."""
+    """Expert detail. Readable if the caller owns it, it is public, or it is
+    shared with them through a live link. ``access`` says which."""
     pool = get_pool()
     repo = ExpertRepository(pool)
     expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
-    return _expert_with_catalog(expert)
+    return _expert_with_catalog(expert, user)
 
 
 @router.patch("/experts/{slug}/catalog", response_model=ExpertWithCatalog)
@@ -508,12 +519,30 @@ async def update_expert_catalog(
 
     Owner-scoped: a public expert is readable by everyone and curatable only by
     the person who built it.
+
+    **Publishing and shelf order are admin-only.** The catalog is curated, and
+    an owner who could set ``visibility``, ``is_featured`` or ``catalog_rank``
+    could put anything at the top of the public shelf. Owners share with a link
+    instead (``PUT /experts/{slug}/share``). Taking one's own expert *off* the
+    shelf stays open to its owner — nobody should need permission to unpublish.
     """
     pool = get_pool()
     repo = ExpertRepository(pool)
     expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
+    curating_the_shelf = (
+        (req.visibility is not None and req.visibility is not ExpertVisibility.PRIVATE)
+        or req.is_featured is not None
+        or req.catalog_rank is not None
+        or "catalog_rank" in (req.clear or [])
+    )
+    if curating_the_shelf and not user.is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only an admin can publish to the catalog or change its order. "
+            "Share this expert with a link instead.",
+        )
 
     updated = await repo.update_catalog(
         expert.id,
@@ -533,7 +562,7 @@ async def update_expert_catalog(
         slug, updated.catalog.visibility.value, updated.catalog.is_featured,
         updated.catalog.catalog_rank,
     )
-    return _expert_with_catalog(updated)
+    return _expert_with_catalog(updated, user)
 
 
 @router.put("/experts/{slug}/avatar", response_model=ExpertWithCatalog)
@@ -565,15 +594,16 @@ async def set_expert_avatar(
     logger.info(
         "Set avatar for expert %r: style=%s", slug, avatar["style"] if avatar else "derived"
     )
-    return _expert_with_catalog(updated)
+    return _expert_with_catalog(updated, user)
 
 
 # ── the expert's picture ────────────────────────────────────────────────────
 #
 # Three endpoints, and the read rule on all of them is the expert's own: a
-# private expert's picture is a 404 to anyone but its owner, a shared one's is
-# readable by any signed-in user. Refresh and delete are owner-only like every
-# other mutation.
+# private expert's picture is a 404 to anyone but its owner and the people it is
+# shared with, a public one's is readable by any signed-in user. Refresh and
+# delete are owner-only like every other mutation. (An anonymous share page gets
+# the picture through ``GET /share/{token}/picture`` instead.)
 
 # Each refresh fans out to five or six Wikimedia requests, so it is throttled
 # per user. Deliberately generous — the picker's "Find another" is a button a
@@ -654,7 +684,7 @@ async def refresh_expert_picture(slug: str, user: AuthUser = Depends(require_use
             status_code=422, detail=_PICTURE_SKIP_MESSAGES.get(skip.reason, skip.reason)
         ) from None
     logger.info("Refreshed picture for expert %r", slug)
-    return _expert_with_catalog(updated)
+    return _expert_with_catalog(updated, user)
 
 
 @router.delete("/experts/{slug}/picture", status_code=204)

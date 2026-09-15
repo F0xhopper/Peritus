@@ -85,7 +85,7 @@ def _summary_from_expert(c: Conversation, expert: Expert) -> ConversationSummary
     return _to_summary(c)
 
 
-async def _get_owned_expert(slug: str, user: AuthUser) -> Expert:
+async def _get_readable_expert(slug: str, user: AuthUser) -> Expert:
     repo = ExpertRepository(get_pool())
     expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
@@ -105,7 +105,7 @@ async def _get_owned_conversation(conversation_id: uuid.UUID, user: AuthUser) ->
 async def create_conversation(slug: str, user: AuthUser = Depends(require_user)):
     """Create an empty conversation. The web client calls this on the first
     send, so empties are transient; recents filter them out regardless."""
-    expert = await _get_owned_expert(slug, user)
+    expert = await _get_readable_expert(slug, user)
     # Retrieval readiness, not job status — see routes/chat.py.
     readiness = await get_readiness(get_pool(), expert.id)
     if not readiness.can_chat:
@@ -117,8 +117,10 @@ async def create_conversation(slug: str, user: AuthUser = Depends(require_user))
 
 @router.get("/experts/{slug}/conversations", response_model=list[ConversationSummary])
 async def list_expert_conversations(slug: str, user: AuthUser = Depends(require_user)):
-    expert = await _get_owned_expert(slug, user)
-    convs = await ConversationRepository(get_pool()).list_for_expert(expert.id)
+    expert = await _get_readable_expert(slug, user)
+    convs = await ConversationRepository(get_pool()).list_for_expert(
+        expert.id, user.id, include_unowned=user.is_admin
+    )
     return [_to_summary(c) for c in convs]
 
 
@@ -207,11 +209,19 @@ async def send_message(
     convs = ConversationRepository(pool)
     conv = await _get_owned_conversation(conversation_id, user)
 
-    expert = await ExpertRepository(pool).get_by_id(conv.expert_id)
+    experts = ExpertRepository(pool)
+    expert = await experts.get_by_id(conv.expert_id)
     if not expert:
         # Deletion cascades the conversation away, so a missing expert here can
         # only be a race with an in-flight delete.
         raise HTTPException(status_code=409, detail="Expert is deleted")
+    # The conversation is the caller's, but the expert may not be any more: a
+    # viewer's chat outlives the share link it was started through. The history
+    # stays readable; asking anything new needs the link to still be live.
+    if not await experts.is_readable_by(expert.id, user.id, include_unowned=user.is_admin):
+        raise HTTPException(
+            status_code=403, detail="This expert is no longer shared with you"
+        )
     # A rebuild resets readiness to pending before it wipes the corpus, so this
     # also catches an expert whose sources are being replaced underneath us.
     readiness = await get_readiness(pool, expert.id)

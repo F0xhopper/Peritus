@@ -10,16 +10,18 @@ import { AvatarPicker } from '@/components/identity/avatar-picker'
 import { PictureCredit } from '@/components/identity/picture-credit'
 import { ConfirmDelete } from '@/components/experts/confirm-delete'
 import { DenialNotice } from '@/components/experts/denial-notice'
+import { SharePanel } from '@/components/experts/share-panel'
 import { CostLine, TierPicker, type TierChoice } from '@/components/experts/tier-picker'
 import { TopBar } from '@/components/shell/top-bar'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/notice'
 import { useStartBuild } from '@/hooks/use-start-build'
 import { displayName } from '@/lib/persona'
-import type { ExpertTier, ExpertWithCatalog, TierPrice } from '@/lib/api/types'
+import type { ExpertTier, ExpertWithCatalog, ShareState, TierPrice } from '@/lib/api/types'
 
 /**
- * Managing one expert: rebuild, re-skin, delete.
+ * Managing one expert: re-skin, share, rebuild, delete. Owner only — the route
+ * 404s a viewer before this renders.
  *
  * A rebuild goes through the same `POST /experts/build` the composer uses —
  * with the **topic**, not the slug, because the server resolves the slug from
@@ -32,12 +34,15 @@ import type { ExpertTier, ExpertWithCatalog, TierPrice } from '@/lib/api/types'
  */
 export function ExpertSettingsPage({
   expert,
+  share,
   tiers,
   allowedTiers,
   creditsEnforced,
   balance,
 }: {
   expert: ExpertWithCatalog
+  /** Null when it could not be loaded; the panel fetches it again itself. */
+  share: ShareState | null
   tiers: TierPrice[]
   allowedTiers: ExpertTier[] | null
   creditsEnforced: boolean
@@ -100,6 +105,20 @@ export function ExpertSettingsPage({
                   <PictureCredit picture={expert.picture} className="mt-1" />
                 )}
               </div>
+            </div>
+          </section>
+
+          <section id="sharing" className="mt-10 scroll-mt-16">
+            <h2 className="text-lg font-medium text-fg">Sharing</h2>
+            <p className="mt-1 text-sm text-fg-3">
+              Private unless you create a link. Only people with the link can open it.
+            </p>
+            <div className="mt-3">
+              <SharePanel
+                slug={expert.name}
+                name={displayName(expert)}
+                initial={share ?? undefined}
+              />
             </div>
           </section>
 

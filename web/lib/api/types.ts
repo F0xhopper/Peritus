@@ -34,7 +34,17 @@ export type SourceSort =
 
 export type ExportFormat = 'csv' | 'ris'
 
-export type Visibility = 'private' | 'unlisted' | 'public'
+/** `public` is the admin-curated catalog. Sharing a private expert is a link
+ *  (`ShareState`), never a visibility — a slug is guessable. */
+export type Visibility = 'private' | 'public'
+
+/**
+ * The caller's relationship to an expert they can read. A viewer opened a share
+ * link (or reads a public expert): they can read and ask, and every control that
+ * changes the expert is hidden. The API re-checks ownership on every mutation;
+ * this only decides what to render. See `lib/access.ts`.
+ */
+export type ExpertAccess = 'owner' | 'viewer'
 
 export const TIERS: readonly ExpertTier[] = ['lite', 'standard', 'pro']
 
@@ -90,6 +100,8 @@ export interface ExpertSummary {
   /** The picture found for this expert's subject, or null. Outranked by
    *  `avatar`; outranks the derived monogram. See `lib/avatar.ts`. */
   picture: ExpertPicture | null
+  /** Absent from older servers, which only ever returned the caller's own. */
+  access?: ExpertAccess
   created_at: string
 }
 
@@ -141,6 +153,47 @@ export interface CatalogMeta {
 
 export interface ExpertWithCatalog extends ExpertDetail {
   catalog: CatalogMeta
+}
+
+// ── sharing ─────────────────────────────────────────────────────────────────
+
+/** The owner's view of an expert's share link. `token` is null while it is off. */
+export interface ShareState {
+  enabled: boolean
+  token: string | null
+  created_at: string | null
+  /** People who have opened this link while signed in. Resets with the link. */
+  viewer_count: number
+  /** Kept sources the owner uploaded — viewers can read passages from them. */
+  uploaded_source_count: number
+}
+
+/**
+ * What anyone holding a live link sees, signed in or not. No slug, no owner, no
+ * error: the share page and its link preview render from this alone.
+ */
+export interface SharedExpert {
+  topic: string
+  tier: ExpertTier
+  readiness: Readiness
+  graph_expanded: boolean
+  build_active: boolean | null
+  persona_name: string | null
+  persona_bio: string | null
+  key_concepts: string[]
+  source_count: number
+  chunk_count: number
+  node_count: number
+  avg_quality: number | null
+  source_type_counts: Record<string, number>
+  avatar: ExpertAvatar | null
+  picture: ExpertPicture | null
+  created_at: string
+}
+
+export interface ShareAccept {
+  slug: string
+  access: ExpertAccess
 }
 
 export interface BuildRequestBody {

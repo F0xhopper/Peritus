@@ -1,6 +1,6 @@
 'use client'
 
-import { MessageSquare, MoreHorizontal, Network, Settings, Table, Trash2 } from 'lucide-react'
+import { LogOut, MessageSquare, MoreHorizontal, Network, Settings, Table, Trash2, Users } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -19,7 +19,9 @@ import {
   MenuTrigger,
 } from '@/components/ui/menu'
 import { StatusDot, dotState, stateLabel, statusTextClass } from '@/components/ui/status-dot'
+import { useLeaveExpert } from '@/hooks/use-leave-expert'
 import { useStartChat } from '@/hooks/use-start-chat'
+import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
 import { firstSentence, formatScore } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
@@ -55,6 +57,8 @@ export function ExpertCard({
   const description = firstSentence(expert.persona_bio)
   const { start: startChat, starting: startingChat } = useStartChat(expert.name)
   const state = dotState(expert.status, expert.readiness, expert.build_active)
+  const owner = canManage(expert)
+  const { leave } = useLeaveExpert(expert.name, displayName(expert))
 
   const remove = async () => {
     setDeleting(true)
@@ -102,8 +106,14 @@ export function ExpertCard({
             </span>
           </ViewTransition>
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-medium text-fg">
-              {displayName(expert)}
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate text-sm font-medium text-fg">{displayName(expert)}</span>
+              {!owner && (
+                <span title="Shared with you" className="inline-flex shrink-0 text-fg-3">
+                  <Users className="size-3" aria-hidden="true" />
+                  <span className="sr-only">Shared with you</span>
+                </span>
+              )}
             </span>
             {subtitle(expert) && (
               <span className="mt-0.5 block truncate text-xs text-fg-3">{subtitle(expert)}</span>
@@ -187,26 +197,42 @@ export function ExpertCard({
               <Network className="size-3.5" />
               Graph
             </MenuLinkItem>
-            <MenuLinkItem render={<Link href={`${base}/settings`} />}>
-              <Settings className="size-3.5" />
-              Settings
-            </MenuLinkItem>
-            <MenuSeparator />
-            <MenuItem tone="danger" onClick={() => setConfirming(true)}>
-              <Trash2 className="size-3.5" />
-              Delete
-            </MenuItem>
+            {owner ? (
+              <>
+                <MenuLinkItem render={<Link href={`${base}/settings`} />}>
+                  <Settings className="size-3.5" />
+                  Settings
+                </MenuLinkItem>
+                <MenuSeparator />
+                <MenuItem tone="danger" onClick={() => setConfirming(true)}>
+                  <Trash2 className="size-3.5" />
+                  Delete
+                </MenuItem>
+              </>
+            ) : (
+              <>
+                <MenuSeparator />
+                {/* Not a delete: the expert is someone else's, and this only
+                    takes it out of this workspace. */}
+                <MenuItem onClick={() => void leave()}>
+                  <LogOut className="size-3.5" />
+                  Remove from my experts
+                </MenuItem>
+              </>
+            )}
           </MenuContent>
         </MenuRoot>
       </div>
 
-      <ConfirmDelete
-        expert={expert}
-        open={confirming}
-        onOpenChange={setConfirming}
-        onConfirm={remove}
-        deleting={deleting}
-      />
+      {owner && (
+        <ConfirmDelete
+          expert={expert}
+          open={confirming}
+          onOpenChange={setConfirming}
+          onConfirm={remove}
+          deleting={deleting}
+        />
+      )}
     </>
   )
 }

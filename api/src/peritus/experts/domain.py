@@ -27,15 +27,36 @@ class ExpertVisibility(StrEnum):
     of visibility — see ``ExpertRepository.get_owned_for_user``.
     """
 
-    PRIVATE  = "private"    # owner only (admins also see legacy owner-less rows)
-    UNLISTED = "unlisted"   # anyone with the slug; never appears in the catalog
-    PUBLIC   = "public"     # anyone; appears in the curated catalog
+    PRIVATE  = "private"    # owner, plus anyone holding a grant on a live share link
+    PUBLIC   = "public"     # anyone; appears in the curated catalog (admin-published)
 
 
-# Visibility levels that make an expert readable/chattable beyond its owner.
-SHARED_VISIBILITIES: frozenset[str] = frozenset(
-    {ExpertVisibility.UNLISTED.value, ExpertVisibility.PUBLIC.value}
-)
+class ExpertAccess(StrEnum):
+    """The caller's relationship to an expert they can read (migration 031).
+
+    Echoed on every expert response so a client can hide the controls a viewer
+    cannot use. It is a rendering hint only — every mutating route re-checks
+    ownership itself.
+    """
+
+    OWNER  = "owner"
+    VIEWER = "viewer"
+
+
+# Share tokens: 192 random bits, URL-safe. Mirrored by a length CHECK in 031.
+SHARE_TOKEN_BYTES = 24
+
+
+@dataclass(frozen=True)
+class ShareLink:
+    """One share link. At most one per expert has ``revoked_at`` unset."""
+
+    id: str
+    expert_id: int
+    token: str
+    created_at: datetime
+    created_by: str | None = None
+    revoked_at: datetime | None = None
 
 # Readiness values (migration 018) at which an expert can answer a question.
 # The catalog lists on this rather than on job status: a public expert whose

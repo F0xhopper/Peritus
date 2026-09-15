@@ -66,6 +66,10 @@ const state = {
   builds: new Map(),
   conversations: new Map(),
   nextConversation: 1,
+  /** slug → { token, viewers } for the caller's own experts with a live link. */
+  links: new Map(),
+  /** Someone else's expert, reachable only through its share token until opened. */
+  foreign: null,
   /** Set by the test harness to steer a scenario. */
   scenario: 'happy',
   /**
@@ -145,6 +149,10 @@ function pictureMeta() {
 }
 
 // ── seeding ─────────────────────────────────────────────────────────────────
+
+/** The live link to the seeded foreign expert. 32+ URL-safe characters, like a real token. */
+const FOREIGN_TOKEN = 'mockSharedTokenForTheThomismExpert01'
+const FOREIGN_SLUG = 'thomism'
 
 async function seed() {
   const expert = await fixture('expert')
@@ -247,6 +255,49 @@ async function seed() {
     ],
   }
   state.conversations.set(conversation.id, conversation)
+
+  // Someone else's expert with a live share link. Not in the workspace until the
+  // test opens the link, exactly like the real read rule.
+  state.foreign = {
+    ...expert,
+    id: 77,
+    name: FOREIGN_SLUG,
+    topic: 'Thomism',
+    persona_name: 'Fr. Reginald Hale',
+    persona_bio: 'A Dominican who reads the Summa slowly and argues with its commentators.',
+    persona_style: 'patient, cites article and objection, distinguishes before answering',
+    avatar: null,
+    picture: pictureMeta(),
+    access: 'viewer',
+  }
+  state.links.set('__foreign__', { token: FOREIGN_TOKEN, viewers: 0 })
+}
+
+function newToken() {
+  return Array.from({ length: 32 }, () =>
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'[Math.floor(Math.random() * 64)],
+  ).join('')
+}
+
+function shareState(slug) {
+  const link = state.links.get(slug)
+  return {
+    enabled: Boolean(link),
+    token: link?.token ?? null,
+    created_at: link ? '2026-09-15T10:00:00.000Z' : null,
+    viewer_count: link?.viewers ?? 0,
+    // The seeded expert has one upload, so the dialog's warning has something to say.
+    uploaded_source_count: slug === 'varroa-mite-control-in-temperate-beekeeping' ? 1 : 0,
+  }
+}
+
+/** The anonymous card: no slug, no id, no owner, no error. */
+function sharedCard(expert) {
+  const {
+    id: _id, name: _name, status: _status, error: _error, updated_at: _updated, catalog: _catalog,
+    access: _access, persona_style: _style, edge_count: _edges, ...card
+  } = expert
+  return card
 }
 
 // ── the build stream ────────────────────────────────────────────────────────
@@ -487,6 +538,8 @@ async function handle(req, res) {
     state.experts.clear()
     state.builds.clear()
     state.conversations.clear()
+    state.links.clear()
+    state.foreign = null
     state.scenario = 'happy'
     state.scenarioSlug = null
     await seed()
@@ -580,6 +633,35 @@ async function handle(req, res) {
     })
   }
 
+  // ── share links (anyone holding one) ──
+  const shareMatch = /^\/share\/([^/]+)(\/picture|\/accept)?$/.exec(path)
+  if (shareMatch) {
+    const token = decodeURIComponent(shareMatch[1])
+    const foreignLink = state.links.get('__foreign__')
+    const ownSlug = [...state.links.entries()].find(
+      ([slug, link]) => slug !== '__foreign__' && link.token === token,
+    )?.[0]
+    const expert =
+      foreignLink?.token === token ? state.foreign : ownSlug ? state.experts.get(ownSlug) : null
+    if (!expert) return json(res, 404, { detail: 'This link is not active' })
+    const noStore = { 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex, nofollow' }
+
+    if (!shareMatch[2] && method === 'GET') return json(res, 200, sharedCard(expert), noStore)
+    if (shareMatch[2] === '/picture' && method === 'GET') {
+      if (!expert.picture) return json(res, 404, { detail: 'This expert has no picture' })
+      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': PICTURE_BYTES.length, ...noStore })
+      return res.end(PICTURE_BYTES)
+    }
+    if (shareMatch[2] === '/accept' && method === 'POST') {
+      if (expert === state.foreign) {
+        foreignLink.viewers += 1
+        state.experts.set(expert.name, expert)
+        return json(res, 200, { slug: expert.name, access: 'viewer' })
+      }
+      return json(res, 200, { slug: expert.name, access: 'owner' })
+    }
+  }
+
   // ── experts ──
   if (path === '/experts' && method === 'GET') {
     return json(res, 200, [...state.experts.values()])
@@ -627,6 +709,30 @@ async function handle(req, res) {
     if (rest === '' && method === 'GET') {
       if (!expert) return json(res, 404, { detail: 'Expert not found' })
       return json(res, 200, expert)
+    }
+    // The owner's link. A viewer resolves nothing through the ownership gate.
+    const owned = expert && expert.access !== 'viewer'
+    if (rest === '/share' || rest === '/share/reset') {
+      if (!owned) return json(res, 404, { detail: 'Expert not found' })
+      if (rest === '/share' && method === 'GET') return json(res, 200, shareState(slug))
+      if (rest === '/share' && method === 'PUT') {
+        if (!state.links.has(slug)) state.links.set(slug, { token: newToken(), viewers: 0 })
+        return json(res, 200, shareState(slug))
+      }
+      if (rest === '/share/reset' && method === 'POST') {
+        state.links.set(slug, { token: newToken(), viewers: 0 })
+        return json(res, 200, shareState(slug))
+      }
+      if (rest === '/share' && method === 'DELETE') {
+        state.links.delete(slug)
+        return noContent(res)
+      }
+    }
+    if (rest === '/access' && method === 'DELETE') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      if (owned) return json(res, 409, { detail: 'You own this expert' })
+      state.experts.delete(slug)
+      return noContent(res)
     }
     if (rest === '' && method === 'DELETE') {
       if (!expert) return json(res, 404, { detail: 'Expert not found' })

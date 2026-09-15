@@ -69,6 +69,10 @@ describe('expert detail', () => {
   it('carries the catalog block on an owner-facing response', () => {
     expect(expertFixture.catalog.visibility).toBe('private')
   })
+
+  it('says whether the caller owns it, which decides every management control', () => {
+    expect(expertFixture.access).toBe('owner')
+  })
 })
 
 describe('billing', () => {

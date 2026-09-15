@@ -89,7 +89,7 @@ def _readiness_note(e: Expert) -> str:
 @app.command("list")
 def list_catalog(
     all_experts: Annotated[
-        bool, typer.Option("--all", help="Include private/unlisted experts too")
+        bool, typer.Option("--all", help="Include private experts too")
     ] = False,
 ) -> None:
     """Show the catalog in shelf order (featured, then rank, then newest)."""
@@ -111,7 +111,7 @@ def list_catalog(
             star = "[yellow]*[/yellow]" if c.is_featured else " "
             rank = f"#{c.catalog_rank}" if c.catalog_rank is not None else "—"
             vis = c.visibility.value
-            colour = {"public": "green", "unlisted": "cyan"}.get(vis, "dim")
+            colour = "green" if vis == "public" else "dim"
             console.print(
                 f"{star} [bold]{e.name}[/bold]  [{colour}]{vis}[/{colour}]  "
                 f"[dim]{rank}  {c.category or 'uncategorised'}[/dim]"
@@ -136,17 +136,17 @@ def publish(
     tag: Annotated[list[str] | None, typer.Option("--tag", "-t", help="Repeatable")] = None,
     rank: Annotated[int | None, typer.Option("--rank", "-r")] = None,
     featured: Annotated[bool, typer.Option("--featured/--not-featured")] = False,
-    unlisted: Annotated[
-        bool, typer.Option("--unlisted", help="Shareable by link, but not listed")
-    ] = False,
 ) -> None:
-    """Make an expert readable and chattable by anyone."""
+    """Make an expert readable and chattable by anyone, and list it.
+
+    To share without listing, the owner turns on a share link in the web app.
+    """
     _validate_blurb(blurb)
 
     async def _inner() -> None:
         repo = await _repo()
         expert = await _resolve(repo, slug)
-        visibility = ExpertVisibility.UNLISTED if unlisted else ExpertVisibility.PUBLIC
+        visibility = ExpertVisibility.PUBLIC
         updated = await repo.update_catalog(
             expert.id,
             visibility=visibility,
@@ -163,7 +163,7 @@ def publish(
                 "[yellow]Note:[/yellow] this expert has no retrievable corpus yet, so it "
                 "will stay out of the catalog until its build reaches chat-ready."
             )
-        if visibility is ExpertVisibility.PUBLIC and not updated.catalog.blurb:
+        if not updated.catalog.blurb:
             console.print(
                 "[dim]Tip: add a blurb — it is the line that sells the card.[/dim]"
             )

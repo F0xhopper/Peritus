@@ -25,7 +25,7 @@ from peritus.audit.domain import (
     round_or_none,
     safe_mean,
 )
-from peritus.audit.repository import AuditRepository
+from peritus.audit.repository import AuditRepository, AuditScope
 from peritus.audit.screening import UNPERSISTED, DiscoveryFunnel, derive_discovery_funnel
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
@@ -674,11 +674,13 @@ class AuditService:
         limit: int = 25,
         offset: int = 0,
         conversation_id: str | None = None,
+        *,
+        scope: AuditScope,
     ) -> dict[str, Any]:
         rows = await self._repo.list_answer_audits(
-            expert.id, limit, offset, conversation_id
+            expert.id, limit, offset, conversation_id, scope=scope
         )
-        total = await self._repo.count_answer_audits(expert.id, conversation_id)
+        total = await self._repo.count_answer_audits(expert.id, conversation_id, scope=scope)
         return {
             "expert": _expert_stub(expert),
             "disposition_meanings": DISPOSITION_MEANINGS,
@@ -693,9 +695,9 @@ class AuditService:
         }
 
     async def get_answer_audit(
-        self, expert: Expert, audit_id: str
+        self, expert: Expert, audit_id: str, *, scope: AuditScope
     ) -> dict[str, Any] | None:
-        row = await self._repo.get_answer_audit(expert.id, audit_id)
+        row = await self._repo.get_answer_audit(expert.id, audit_id, scope=scope)
         if row is None:
             return None
         passages = await self._repo.answer_audit_passages(str(row["id"]))

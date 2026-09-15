@@ -1,10 +1,12 @@
 import 'server-only'
 
+import { cookies } from 'next/headers'
 import { notFound, redirect } from 'next/navigation'
 import { cache } from 'react'
 
 import { ApiError, NotAuthenticatedError, isNextControlFlow } from '@/lib/api/errors'
 import { proxyJson } from '@/lib/api/proxy'
+import { ACCESS_COOKIE, REFRESH_COOKIE } from '@/lib/auth/cookies'
 import type {
   BuildStatus,
   BuildUsage,
@@ -18,6 +20,8 @@ import type {
   LedgerEntry,
   Me,
   ScreeningFlow,
+  SharedExpert,
+  ShareState,
   SourceDecision,
   SourceSort,
 } from '@/lib/api/types'
@@ -106,6 +110,15 @@ export const getExpert = cache((slug: string) =>
   }),
 )
 
+/**
+ * The expert, or null when the caller can no longer read it. For a page that
+ * reaches an expert through something the caller owns — a chat started through
+ * a share link that has since been turned off — and must still render.
+ */
+export function getExpertIfReadable(slug: string) {
+  return optional(() => proxyJson<ExpertWithCatalog>(`/experts/${encodeURIComponent(slug)}`))
+}
+
 /** Null until the expert has ever had a build job. */
 export function getBuildStatus(slug: string) {
   return optional(() =>
@@ -116,6 +129,42 @@ export function getBuildStatus(slug: string) {
 /** Null until the latest job has metered some spend. */
 export function getBuildUsage(slug: string) {
   return optional(() => proxyJson<BuildUsage>(`/experts/${encodeURIComponent(slug)}/build/usage`))
+}
+
+// ── sharing ─────────────────────────────────────────────────────────────────
+
+/**
+ * The owner's share link, or null for anyone who is not the owner (the API
+ * 404s them, deliberately without saying whether a link exists).
+ */
+export function getShareState(slug: string) {
+  return optional(() => proxyJson<ShareState>(`/experts/${encodeURIComponent(slug)}/share`))
+}
+
+/**
+ * The card behind a share link, with no session, or null when the link is
+ * unknown, reset or turned off. Memoised per request: the page's metadata (the
+ * link preview) and the page itself both read it.
+ */
+export const getSharedExpert = cache(async (token: string): Promise<SharedExpert | null> => {
+  try {
+    return await proxyJson<SharedExpert>(`/share/${encodeURIComponent(token)}`, {
+      anonymous: true,
+    })
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+})
+
+/**
+ * Whether this request carries a session, without spending an API call or
+ * redirecting. For public pages that only change their call to action — the
+ * API still decides what a session can actually do.
+ */
+export async function hasSession(): Promise<boolean> {
+  const jar = await cookies()
+  return Boolean(jar.get(ACCESS_COOKIE)?.value || jar.get(REFRESH_COOKIE)?.value)
 }
 
 // ── the ledger ──────────────────────────────────────────────────────────────

@@ -43,10 +43,14 @@ export function ChatView({
   conversation,
   expert,
   siblings,
+  unavailable = false,
 }: {
   conversation: ConversationDetail
   expert: ExpertWithCatalog
   siblings: ConversationSummary[]
+  /** The expert was shared with the caller and no longer is. The transcript
+   *  stays readable; asking, opening the expert and its sources do not. */
+  unavailable?: boolean
 }) {
   const router = useRouter()
   const { openContext, setChatExpert } = useShell()
@@ -71,7 +75,7 @@ export function ChatView({
   const [draft, setDraft] = useState<{ text: string; id: number } | null>(null)
   const handed = useRef(false)
 
-  const chattable = expert.readiness !== 'pending'
+  const chattable = !unavailable && expert.readiness !== 'pending'
 
   // Tell the shell whose chat this is, so the rail and sidebar stay on this
   // expert even when the chat is not in the layout's recents.
@@ -181,7 +185,7 @@ export function ChatView({
       const res = await fetch(`/api/conversations/${conversation.id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       toast.success('Chat deleted')
-      router.push(`/experts/${expert.name}`)
+      router.push(unavailable ? '/chats' : `/experts/${expert.name}`)
       // The sidebar's chat list belongs to the layout, not this page.
       router.refresh()
     } catch {
@@ -192,7 +196,8 @@ export function ChatView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <TopBar
-        expert={expert}
+        // No crumb to an expert the caller can no longer open.
+        expert={unavailable ? null : expert}
         title={title}
         titleSlot={
           renaming ? (
@@ -231,12 +236,16 @@ export function ChatView({
         overflow={
           <>
             <MenuItem onClick={() => setRenaming(true)}>Rename</MenuItem>
-            <MenuItem onClick={() => router.push(`/experts/${expert.name}`)}>
-              Open the expert
-            </MenuItem>
-            <MenuItem onClick={() => router.push(`/experts/${expert.name}/sources`)}>
-              Sources
-            </MenuItem>
+            {!unavailable && (
+              <>
+                <MenuItem onClick={() => router.push(`/experts/${expert.name}`)}>
+                  Open the expert
+                </MenuItem>
+                <MenuItem onClick={() => router.push(`/experts/${expert.name}/sources`)}>
+                  Sources
+                </MenuItem>
+              </>
+            )}
             <MenuItem tone="danger" onClick={() => void remove()}>
               Delete chat
             </MenuItem>
@@ -288,7 +297,9 @@ export function ChatView({
         streaming={chat.streaming}
         disabled={!chattable || chat.phase === 'busy'}
         disabledReason={
-          !chattable ? (
+          unavailable ? (
+            'This expert is no longer shared with you. The chat is kept, but it cannot be continued.'
+          ) : !chattable ? (
             <>
               {displayName(expert)} has no indexed passages yet.{' '}
               <Link

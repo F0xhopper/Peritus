@@ -67,23 +67,27 @@ no build internals. It is the anonymous-readable view.
 
 ### `GET /experts/catalog/{slug}` — no auth
 
-One card. Resolves **public and unlisted** slugs: unlisted experts are shareable by link,
-they are only absent from the listing. `404` if not found or not chattable.
+One card. Resolves **public** slugs only. `404` if not found, not public, or not
+chattable. A private expert is never reachable by slug — slugs are derived from the topic,
+so they are guessable. Sharing is a token link: `docs/sharing.md`.
 
 ### Visibility
 
-| value | listed in catalog | reachable by link |
+| value | listed in catalog | readable by |
 |---|---|---|
-| `private` | no | owner only |
-| `unlisted` | no | yes |
-| `public` | yes | yes |
+| `private` | no | the owner, plus anyone holding a grant on a live share link |
+| `public` | yes | any signed-in user |
+
+`unlisted` was removed in migration 031 and is rejected with a 422.
 
 Listing filters on `readiness <> 'pending'`, so a half-built expert cannot leak onto the
 public shelf.
 
-### `PATCH /experts/{slug}/catalog` — owner only
+### `PATCH /experts/{slug}/catalog` — owner only; publishing is admin only
 
-Curation patch. Every field optional; **omitted means "leave alone"**, so removing a value
+Curation patch. Setting `visibility: "public"`, `is_featured` or `catalog_rank` (or
+clearing the rank) is **403 for anyone but an admin** — the shelf is curated. An owner may
+still unpublish (`visibility: "private"`) and edit the blurb, category and tags. Every field optional; **omitted means "leave alone"**, so removing a value
 needs the `clear` list.
 
 ```jsonc

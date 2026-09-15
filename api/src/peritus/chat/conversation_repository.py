@@ -126,9 +126,16 @@ class ConversationRepository:
             )
         return [_row_to_conversation(r) for r in rows]
 
-    async def list_for_expert(self, expert_id: int, limit: int = 50) -> list[Conversation]:
-        """Per-expert history. The caller has already resolved the expert
-        through its own ownership check, so no visibility clause here."""
+    async def list_for_expert(
+        self, expert_id: int, owner_id: str, include_unowned: bool, limit: int = 50
+    ) -> list[Conversation]:
+        """The caller's own history with one expert.
+
+        Scoped to the caller even though they can already read the expert: a
+        public or shared expert has conversations from many people, and neither
+        its owner nor its other viewers may list them.
+        """
+        clause, params = _visibility_clause(owner_id, include_unowned, alias="c", idx=3)
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
@@ -136,11 +143,11 @@ class ConversationRepository:
                 FROM conversations c
                 JOIN experts e ON e.id = c.expert_id
                 {_EXPERT_PICTURE_JOIN}
-                WHERE c.expert_id = $1 AND c.message_count > 0
+                WHERE c.expert_id = $1 AND c.message_count > 0 AND {clause}
                 ORDER BY c.last_message_at DESC
                 LIMIT $2
                 """,
-                expert_id, limit,
+                expert_id, limit, *params,
             )
         return [_row_to_conversation(r) for r in rows]
 

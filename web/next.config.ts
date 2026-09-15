@@ -29,7 +29,27 @@ const nextConfig: NextConfig = {
     inlineCss: true,
   },
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }]
+    return [
+      { source: '/:path*', headers: securityHeaders },
+      // A share link's token is its access. It must not leak to a site linked
+      // from the page through `Referer`, and the page must never be indexed.
+      // Later entries win for the same header, so this overrides the default
+      // referrer policy above for these paths only.
+      {
+        source: '/share/:path*',
+        headers: [
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+        ],
+      },
+      {
+        source: '/api/share/:path*',
+        headers: [
+          { key: 'Referrer-Policy', value: 'no-referrer' },
+          { key: 'X-Robots-Tag', value: 'noindex, nofollow' },
+        ],
+      },
+    ]
   },
 }
 

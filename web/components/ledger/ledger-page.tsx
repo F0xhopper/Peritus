@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
 
 import { stashAskDraft } from '@/components/chat/new-chat-composer'
 import { AddSourceDialog } from '@/components/ledger/add-source-dialog'
+import { canManage } from '@/lib/access'
 import { ExclusionsSection } from '@/components/ledger/exclusions-section'
 import { LedgerCards } from '@/components/ledger/ledger-cards'
 import { COLUMNS, LedgerTable } from '@/components/ledger/ledger-table'
@@ -79,6 +80,9 @@ export function LedgerPage({
 
   const [localSelection, setLocalSelection] = useState<LedgerSource | null>(null)
   const [adding, setAdding] = useState(false)
+  // A viewer reads the whole record — kept, dropped and why — but cannot add
+  // to it or remove from it.
+  const owner = canManage(expert)
   const [ingestJob, setIngestJob] = useState<number | null>(null)
 
   // A per-viewer convenience, so `localStorage` is the right home for it — it
@@ -205,7 +209,7 @@ export function LedgerPage({
         }
         overflow={
           <>
-            <MenuItem onClick={() => setAdding(true)}>Add a source</MenuItem>
+            {owner && <MenuItem onClick={() => setAdding(true)}>Add a source</MenuItem>}
             <MenuItem onClick={() => router.push(`/experts/${expert.name}`)}>Overview</MenuItem>
             <MenuItem onClick={() => router.push(`/experts/${expert.name}/graph`)}>Graph</MenuItem>
           </>
@@ -319,15 +323,17 @@ export function LedgerPage({
               </MenuContent>
             </MenuRoot>
 
-            <Button
-              variant="secondary"
-              size="action"
-              aria-label="Add a source"
-              onClick={() => setAdding(true)}
-            >
-              <Plus className="size-3.5" />
-              <span className="hidden sm:inline">Add a source</span>
-            </Button>
+            {owner && (
+              <Button
+                variant="secondary"
+                size="action"
+                aria-label="Add a source"
+                onClick={() => setAdding(true)}
+              >
+                <Plus className="size-3.5" />
+                <span className="hidden sm:inline">Add a source</span>
+              </Button>
+            )}
 
             <p className="ml-auto text-xs text-fg-3">
               {formatPercent(report.totals.acceptance_rate, 1)} kept ·{' '}
@@ -413,21 +419,27 @@ export function LedgerPage({
               stashAskDraft(expert.name, `What does “${title}” say?`)
               router.push(`/experts/${expert.name}#ask`)
             }}
-            onDeleted={() => {
-              setLocalSelection(null)
-              navigate({ source: null })
-              router.refresh()
-            }}
+            onDeleted={
+              owner
+                ? () => {
+                    setLocalSelection(null)
+                    navigate({ source: null })
+                    router.refresh()
+                  }
+                : undefined
+            }
           />
         </ContextSlot>
       )}
 
-      <AddSourceDialog
-        slug={expert.name}
-        open={adding}
-        onOpenChange={setAdding}
-        onQueued={(jobId) => setIngestJob(jobId)}
-      />
+      {owner && (
+        <AddSourceDialog
+          slug={expert.name}
+          open={adding}
+          onOpenChange={setAdding}
+          onQueued={(jobId) => setIngestJob(jobId)}
+        />
+      )}
     </div>
   )
 }

@@ -68,16 +68,18 @@ stateDiagram-v2
     pending --> chat_ready: corpus embedded — answers with citations
     chat_ready --> graph_ready: concept graph extracted + resolved
     chat_ready --> chat_ready: graph failed — degraded, still answerable
-    graph_ready --> published: owner PATCHes visibility to unlisted/public
-    chat_ready --> published
+    graph_ready --> shared: owner turns on a share link
+    chat_ready --> shared
+    graph_ready --> published: admin PATCHes visibility to public
 ```
 
 **Readiness, not job status, gates the chat affordance.** An expert becomes
 answerable at `chat_ready`, a full stage before its build job finishes —
 graph and persona are enrichment, and their failure degrades the expert rather
-than destroying a working corpus. Visibility is `private` → `unlisted`
-(link-only) → `public` (listed in the catalog); chat over any readable expert
-is free and ungated, because the build already paid for the corpus.
+than destroying a working corpus. Visibility is `private` or `public` (listed
+in the admin-curated catalog); a private expert is shared through a token link,
+never its slug — see `docs/sharing.md`. Chat over any readable expert is free
+and ungated, because the build already paid for the corpus.
 
 ## Building an expert
 

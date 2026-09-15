@@ -17,6 +17,7 @@ import { MenuItem } from '@/components/ui/menu'
 import { Notice } from '@/components/ui/notice'
 import { useBuildEvents } from '@/hooks/use-build-events'
 import { useStartChat } from '@/hooks/use-start-chat'
+import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
 
 import { STAGE_LABEL } from '@/lib/build/reducer'
@@ -50,6 +51,9 @@ export function BuildView({
   const [confirmingCancel, setConfirmingCancel] = useState(false)
   const [cancelling, setCancelling] = useState(false)
   const { start: startChat, starting: startingChat } = useStartChat(expert.name)
+  // A viewer can watch the log. Cancelling, rebuilding and the cost of the build
+  // are the owner's — the API refuses all three to anyone else.
+  const owner = canManage(expert)
 
   // Already finished before the page loaded: park the hook rather than opening
   // a stream that would close immediately.
@@ -135,7 +139,7 @@ export function BuildView({
               <MessageSquare className="size-3.5" />
               <span className="hidden sm:inline">Ask now</span>
             </Button>
-          ) : !terminal && !noJob ? (
+          ) : owner && !terminal && !noJob ? (
             <Button
               variant="outline"
               size="action"
@@ -156,8 +160,8 @@ export function BuildView({
             </MenuItem>
             {/* The cost panel is inline only from 1280px; this opens it as an
                 overlay or a sheet everywhere below that. */}
-            <MenuItem onClick={openContext}>Cost</MenuItem>
-            {!terminal && !noJob && (
+            {owner && <MenuItem onClick={openContext}>Cost</MenuItem>}
+            {owner && !terminal && !noJob && (
               <MenuItem tone="danger" onClick={() => setConfirmingCancel(true)}>
                 Cancel build
               </MenuItem>
@@ -178,15 +182,21 @@ export function BuildView({
               tone="warn"
               title="This build never started"
               action={
-                <ButtonLink variant="outline" size="sm" href={`/experts/${expert.name}/settings`}>
-                  <RotateCcw className="size-3" />
-                  Start it again
-                </ButtonLink>
+                owner ? (
+                  <ButtonLink
+                    variant="outline"
+                    size="sm"
+                    href={`/experts/${expert.name}/settings`}
+                  >
+                    <RotateCcw className="size-3" />
+                    Start it again
+                  </ButtonLink>
+                ) : undefined
               }
             >
               {expert.readiness !== 'pending'
-                ? 'The expert still answers from its existing sources. Start the build again from Settings to refresh them.'
-                : 'Nothing was searched. Start the build again from Settings.'}
+                ? `The expert still answers from its existing sources.${owner ? ' Start the build again from Settings to refresh them.' : ''}`
+                : `Nothing was searched.${owner ? ' Start the build again from Settings.' : ''}`}
             </Notice>
           ) : (
             <Notice tone="info" title="No build log for this expert">
@@ -216,7 +226,7 @@ export function BuildView({
             tone="bad"
             title={terminal.capped ? 'Stopped at the spend cap' : 'The build failed'}
             action={
-              terminal.capped ? (
+              !owner ? undefined : terminal.capped ? (
                 <ButtonLink
                   variant="outline"
                   size="sm"
@@ -297,21 +307,23 @@ export function BuildView({
 
       {/* Cost by stage, once the job has metered anything. Polled by the panel
           itself, because usage lands after the stages that spent it. */}
-      <ContextSlot title="Cost">
-        <CostPanel
-          slug={expert.name}
-          terminal={terminal !== null}
-          credits={
-            creditCost === null || noJob
-              ? null
-              : {
-                  amount: creditCost,
-                  outcome:
-                    terminal === null ? 'held' : terminal.kind === 'done' ? 'spent' : 'refunded',
-                }
-          }
-        />
-      </ContextSlot>
+      {owner && (
+        <ContextSlot title="Cost">
+          <CostPanel
+            slug={expert.name}
+            terminal={terminal !== null}
+            credits={
+              creditCost === null || noJob
+                ? null
+                : {
+                    amount: creditCost,
+                    outcome:
+                      terminal === null ? 'held' : terminal.kind === 'done' ? 'spent' : 'refunded',
+                  }
+            }
+          />
+        </ContextSlot>
+      )}
 
       <Dialog
         open={confirmingCancel}

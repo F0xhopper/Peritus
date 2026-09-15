@@ -44,7 +44,10 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
         <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-6 text-xs text-fg-3 md:px-6">
           <Wordmark className="h-3.5" markOnly />
           <span>Experts built from the evidence.</span>
-          <nav className="ml-auto flex gap-4">
+          {/* 44px tall under a coarse pointer. The landing page's footer is always
+              below the fold, so this went unnoticed until the share page — short
+              enough to show it on an iPad — put these links on screen. */}
+          <nav className="ml-auto flex gap-4 [&>a]:inline-flex [&>a]:items-center pointer-coarse:[&>a]:min-h-11">
             <Link href="/privacy" className="transition-colors hover:text-fg-3">
               Privacy
             </Link>

@@ -18,6 +18,7 @@ Query notes:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
@@ -63,6 +64,37 @@ _CHUNK_COUNT_LATERAL = """
         WHERE sc.source_id = s.id
     ) c ON true
 """
+
+
+@dataclass(frozen=True)
+class AuditScope:
+    """Whose answer trails a caller may see.
+
+    An answer audit stores the *question*, so it is as private as the chat it
+    came from. Readable-expert is not enough: a public or shared expert answers
+    many people, and neither its owner nor its other viewers may read their
+    questions. A caller sees the trails of their own conversations, and the
+    expert's owner additionally sees stateless answers (``POST
+    /experts/{slug}/chat``), which have no conversation to own them.
+    """
+
+    caller_id: str
+    include_unowned: bool
+    owns_expert: bool
+
+    def params(self) -> tuple[str, bool, bool]:
+        return (self.caller_id, self.include_unowned, self.owns_expert)
+
+
+# Formatted with the placeholder numbers of the three AuditScope params.
+_AUDIT_SCOPE_SQL = """(
+    EXISTS (
+        SELECT 1 FROM conversations c
+        WHERE c.id = a.conversation_id
+          AND (c.owner_id = {caller}::uuid OR ({unowned}::boolean AND c.owner_id IS NULL))
+    )
+    OR (a.conversation_id IS NULL AND {owns}::boolean)
+)"""
 
 _SOURCE_COLUMNS = """
     s.id, s.passed, s.source_type, s.url, s.title, s.author,
@@ -844,57 +876,62 @@ class AuditRepository:
         limit: int,
         offset: int,
         conversation_id: str | None = None,
+        *,
+        scope: AuditScope,
     ) -> list[dict[str, Any]]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT id, expert_id, conversation_id, question, subqueries,
                        followup_queries, coverage_satisfied, second_pass,
                        retrieved_passages, duplicate_hits, unique_passages,
                        context_passages, cited_passages, context_cap,
                        sources_in_context, sources_cited, contradiction_traversed,
                        answer_chars, created_at
-                FROM answer_audits
-                WHERE expert_id = $1
-                  AND ($2::uuid IS NULL OR conversation_id = $2::uuid)
+                FROM answer_audits a
+                WHERE a.expert_id = $1
+                  AND ($2::uuid IS NULL OR a.conversation_id = $2::uuid)
+                  AND {_AUDIT_SCOPE_SQL.format(caller="$5", unowned="$6", owns="$7")}
                 ORDER BY created_at DESC, id
                 LIMIT $3 OFFSET $4
                 """,
-                expert_id, conversation_id, limit, offset,
+                expert_id, conversation_id, limit, offset, *scope.params(),
             )
         return [dict(r) for r in rows]
 
     async def count_answer_audits(
-        self, expert_id: int, conversation_id: str | None = None
+        self, expert_id: int, conversation_id: str | None = None, *, scope: AuditScope
     ) -> int:
         async with self._pool.acquire() as conn:
             n = await conn.fetchval(
-                """
-                SELECT count(*)::int FROM answer_audits
-                WHERE expert_id = $1
-                  AND ($2::uuid IS NULL OR conversation_id = $2::uuid)
+                f"""
+                SELECT count(*)::int FROM answer_audits a
+                WHERE a.expert_id = $1
+                  AND ($2::uuid IS NULL OR a.conversation_id = $2::uuid)
+                  AND {_AUDIT_SCOPE_SQL.format(caller="$3", unowned="$4", owns="$5")}
                 """,
-                expert_id, conversation_id,
+                expert_id, conversation_id, *scope.params(),
             )
         return int(n or 0)
 
     async def get_answer_audit(
-        self, expert_id: int, audit_id: str
+        self, expert_id: int, audit_id: str, *, scope: AuditScope
     ) -> dict[str, Any] | None:
         """Fetch one trail, scoped to the expert the caller already resolved."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT id, expert_id, conversation_id, question, subqueries,
                        followup_queries, coverage_satisfied, second_pass,
                        retrieved_passages, duplicate_hits, unique_passages,
                        context_passages, cited_passages, context_cap,
                        sources_in_context, sources_cited, contradiction_traversed,
                        answer_chars, created_at
-                FROM answer_audits
-                WHERE expert_id = $1 AND id = $2::uuid
+                FROM answer_audits a
+                WHERE a.expert_id = $1 AND a.id = $2::uuid
+                  AND {_AUDIT_SCOPE_SQL.format(caller="$3", unowned="$4", owns="$5")}
                 """,
-                expert_id, audit_id,
+                expert_id, audit_id, *scope.params(),
             )
         return dict(row) if row else None
 

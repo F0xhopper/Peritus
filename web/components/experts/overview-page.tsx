@@ -1,19 +1,22 @@
 'use client'
 
-import { MessageSquare, RotateCcw } from 'lucide-react'
+import { MessageSquare, RotateCcw, Users } from 'lucide-react'
 import Link from 'next/link'
-import { ViewTransition } from 'react'
+import { ViewTransition, useState } from 'react'
 
 import { Avatar } from '@/components/identity/avatar'
 import { AvatarPicker } from '@/components/identity/avatar-picker'
 import { PictureCredit } from '@/components/identity/picture-credit'
 import { ASK_FIELD_ID, NewChatComposer } from '@/components/chat/new-chat-composer'
+import { ShareDialog } from '@/components/experts/share-panel'
 import { TopBar } from '@/components/shell/top-bar'
 import { DateText } from '@/components/ui/relative-time'
 import { Button, ButtonLink } from '@/components/ui/button'
-import { MenuLinkItem } from '@/components/ui/menu'
+import { MenuItem, MenuLinkItem, MenuSeparator } from '@/components/ui/menu'
 import { Notice } from '@/components/ui/notice'
 import { StatusDot, dotState, stateLabel, statusTextClass } from '@/components/ui/status-dot'
+import { useLeaveExpert } from '@/hooks/use-leave-expert'
+import { canManage } from '@/lib/access'
 import { describeBuildFailure } from '@/lib/build/copy'
 import { cn } from '@/lib/cn'
 import {
@@ -54,6 +57,11 @@ import type {
  * are embedded answers questions a whole stage before its build job finishes,
  * and reading `status` here would hide a working expert for the length of graph
  * extraction.
+ *
+ * **A viewer sees the document, not the controls.** Someone reading through a
+ * share link gets every section and the composer, and nothing that changes the
+ * expert: no avatar picker, no rebuild, no Settings, no Share. Their one action
+ * on the expert itself is removing it from their own workspace.
  */
 export function OverviewPage({
   expert,
@@ -67,6 +75,9 @@ export function OverviewPage({
   report: CorpusReport | null
 }) {
   const name = displayName(expert)
+  const owner = canManage(expert)
+  const [sharing, setSharing] = useState(false)
+  const { leave } = useLeaveExpert(expert.name, name)
   const chattable = expert.readiness !== 'pending'
   const state = dotState(expert.status, expert.readiness, expert.build_active)
   const building = state === 'queued' || state === 'building'
@@ -96,21 +107,28 @@ export function OverviewPage({
         <Notice tone="info" className="mt-3">
           This expert cannot answer yet — nothing has been read from its sources.{' '}
           {building && buildStatus ? (
-            <Link
-              href={`/experts/${expert.name}/build`}
-              className="text-fg underline underline-offset-2"
-            >
-              Watch the build
-            </Link>
+            <>
+              <Link
+                href={`/experts/${expert.name}/build`}
+                className="text-fg underline underline-offset-2"
+              >
+                Watch the build
+              </Link>
+              .
+            </>
+          ) : owner ? (
+            <>
+              <Link
+                href={`/experts/${expert.name}/settings`}
+                className="text-fg underline underline-offset-2"
+              >
+                Start a build
+              </Link>
+              .
+            </>
           ) : (
-            <Link
-              href={`/experts/${expert.name}/settings`}
-              className="text-fg underline underline-offset-2"
-            >
-              Start a build
-            </Link>
+            'Its owner has not built it yet.'
           )}
-          .
         </Notice>
       )}
 
@@ -188,9 +206,19 @@ export function OverviewPage({
             <MenuLinkItem render={<Link href={`/experts/${expert.name}/graph`} />}>
               Graph
             </MenuLinkItem>
-            <MenuLinkItem render={<Link href={`/experts/${expert.name}/settings`} />}>
-              Settings
-            </MenuLinkItem>
+            {owner ? (
+              <>
+                <MenuItem onClick={() => setSharing(true)}>Share…</MenuItem>
+                <MenuLinkItem render={<Link href={`/experts/${expert.name}/settings`} />}>
+                  Settings
+                </MenuLinkItem>
+              </>
+            ) : (
+              <>
+                <MenuSeparator />
+                <MenuItem onClick={() => void leave()}>Remove from my experts</MenuItem>
+              </>
+            )}
           </>
         }
       />
@@ -204,13 +232,14 @@ export function OverviewPage({
               slug={expert.name}
               raw={expert.error ?? buildStatus?.last_error ?? null}
               answerable={chattable}
+              canRebuild={owner}
             />
           )}
 
           {degradedPersona && (
             <Notice tone="warn" title="No voice was written for this expert" className="mb-5">
-              It answers from its sources as normal. Rebuilding writes a name, a bio and a voice for
-              it.
+              It answers from its sources as normal.
+              {owner && ' Rebuilding writes a name, a bio and a voice for it.'}
             </Notice>
           )}
 
@@ -224,9 +253,13 @@ export function OverviewPage({
           <header className="flex items-start gap-4">
             <ViewTransition name={`sigil-${expert.name}`}>
               <div>
-                <AvatarPicker expert={expert}>
+                {owner ? (
+                  <AvatarPicker expert={expert}>
+                    <Avatar expert={expert} size={48} />
+                  </AvatarPicker>
+                ) : (
                   <Avatar expert={expert} size={48} />
-                </AvatarPicker>
+                )}
               </div>
             </ViewTransition>
             <div className="min-w-0 flex-1">
@@ -249,6 +282,12 @@ export function OverviewPage({
                   image. `PictureCredit` itself drops out for public domain. */}
               {expert.picture && !expert.avatar && (
                 <PictureCredit picture={expert.picture} className="mt-1.5" />
+              )}
+              {!owner && (
+                <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-fg-3">
+                  <Users className="size-3" aria-hidden="true" />
+                  Shared with you — you can read and ask, not change it.
+                </p>
               )}
             </div>
           </header>
@@ -400,6 +439,10 @@ export function OverviewPage({
           )}
         </div>
       </div>
+
+      {owner && (
+        <ShareDialog slug={expert.name} name={name} open={sharing} onOpenChange={setSharing} />
+      )}
     </div>
   )
 }
@@ -408,10 +451,12 @@ function FailureNotice({
   slug,
   raw,
   answerable,
+  canRebuild,
 }: {
   slug: string
   raw: string | null
   answerable: boolean
+  canRebuild: boolean
 }) {
   const { headline, advice } = describeBuildFailure(raw)
   return (
@@ -420,10 +465,12 @@ function FailureNotice({
       title="This build failed"
       className="mb-5"
       action={
-        <ButtonLink variant="outline" size="sm" href={`/experts/${slug}/settings`}>
-          <RotateCcw className="size-3" />
-          Rebuild
-        </ButtonLink>
+        canRebuild ? (
+          <ButtonLink variant="outline" size="sm" href={`/experts/${slug}/settings`}>
+            <RotateCcw className="size-3" />
+            Rebuild
+          </ButtonLink>
+        ) : undefined
       }
     >
       <p>
