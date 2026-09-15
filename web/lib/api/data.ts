@@ -1,0 +1,179 @@
+import 'server-only'
+
+import { notFound, redirect } from 'next/navigation'
+import { cache } from 'react'
+
+import { ApiError, NotAuthenticatedError, isNextControlFlow } from '@/lib/api/errors'
+import { proxyJson } from '@/lib/api/proxy'
+import type {
+  BuildStatus,
+  BuildUsage,
+  ConversationDetail,
+  ConversationSummary,
+  CorpusReport,
+  CreditState,
+  ExpertWithCatalog,
+  ExpertSummary,
+  GraphResponse,
+  LedgerEntry,
+  Me,
+  SourceDecision,
+  SourceSort,
+} from '@/lib/api/types'
+
+/**
+ * Server-component fetchers. Each one turns the two failures a page cannot
+ * render into the framework's own control flow: a dead session becomes a
+ * redirect to `/login`, and a 404 becomes `notFound()`.
+ *
+ * Everything else is rethrown for the segment's `error.tsx`.
+ */
+
+/**
+ * Run a fetch, translating auth and missing-resource failures.
+ *
+ * The `isNextControlFlow` rethrow is not optional: `redirect()` and
+ * `notFound()` both work by throwing, and a `catch` that swallowed them would
+ * turn a deliberate 404 into a rendered error page.
+ */
+async function safely<T>(
+  fetcher: () => Promise<T>,
+  opts: { next?: string; notFoundOn404?: boolean } = {},
+): Promise<T> {
+  try {
+    return await fetcher()
+  } catch (error) {
+    if (isNextControlFlow(error)) throw error
+    if (error instanceof NotAuthenticatedError) {
+      redirect(`/login?next=${encodeURIComponent(opts.next ?? '/experts')}`)
+    }
+    if (error instanceof ApiError) {
+      if (error.status === 401) {
+        redirect(`/login?next=${encodeURIComponent(opts.next ?? '/experts')}`)
+      }
+      if (error.status === 404 && opts.notFoundOn404 !== false) notFound()
+    }
+    throw error
+  }
+}
+
+/**
+ * A fetch whose absence is not an error. Used for the endpoints that 404 by
+ * design until something exists — build status before the first job, usage
+ * before any is metered — so a page can render the "not yet" state instead of
+ * a 404 page.
+ */
+async function optional<T>(fetcher: () => Promise<T>): Promise<T | null> {
+  try {
+    return await fetcher()
+  } catch (error) {
+    if (isNextControlFlow(error)) throw error
+    if (error instanceof ApiError && error.status === 404) return null
+    if (error instanceof NotAuthenticatedError) redirect('/login')
+    throw error
+  }
+}
+
+// ── identity and billing ────────────────────────────────────────────────────
+
+export function getMe(next?: string) {
+  return safely(() => proxyJson<Me>('/auth/me'), { next })
+}
+
+export function getBilling(next?: string) {
+  return safely(() => proxyJson<CreditState>('/billing/me'), { next })
+}
+
+export function getLedger(limit = 50, next?: string) {
+  return safely(() => proxyJson<LedgerEntry[]>(`/billing/ledger?limit=${limit}`), { next })
+}
+
+// ── experts ─────────────────────────────────────────────────────────────────
+
+export function getExperts(next?: string) {
+  return safely(() => proxyJson<ExpertSummary[]>('/experts'), { next })
+}
+
+/**
+ * Memoised per request, so a page's `generateMetadata` and the page itself
+ * share one API call — which is what lets every expert page title itself with
+ * the persona name rather than the slug.
+ */
+export const getExpert = cache((slug: string) =>
+  safely(() => proxyJson<ExpertWithCatalog>(`/experts/${encodeURIComponent(slug)}`), {
+    next: `/experts/${slug}`,
+  }),
+)
+
+/** Null until the expert has ever had a build job. */
+export function getBuildStatus(slug: string) {
+  return optional(() =>
+    proxyJson<BuildStatus>(`/experts/${encodeURIComponent(slug)}/build/status`),
+  )
+}
+
+/** Null until the latest job has metered some spend. */
+export function getBuildUsage(slug: string) {
+  return optional(() => proxyJson<BuildUsage>(`/experts/${encodeURIComponent(slug)}/build/usage`))
+}
+
+// ── the ledger ──────────────────────────────────────────────────────────────
+
+export interface CorpusQuery {
+  decision?: SourceDecision
+  sort?: SourceSort
+  limit?: number
+  offset?: number
+}
+
+export function getCorpusReport(slug: string, query: CorpusQuery = {}) {
+  const params = new URLSearchParams({
+    decision: query.decision ?? 'all',
+    sort: query.sort ?? 'decision',
+    limit: String(query.limit ?? 100),
+    offset: String(query.offset ?? 0),
+  })
+  return safely(
+    () => proxyJson<CorpusReport>(`/experts/${encodeURIComponent(slug)}/corpus-report?${params}`),
+    { next: `/experts/${slug}/sources` },
+  )
+}
+
+// ── graph ───────────────────────────────────────────────────────────────────
+
+export function getGraph(slug: string, limit = 400) {
+  return safely(
+    () => proxyJson<GraphResponse>(`/experts/${encodeURIComponent(slug)}/graph?limit=${limit}`),
+    { next: `/experts/${slug}/graph` },
+  )
+}
+
+// ── conversations ───────────────────────────────────────────────────────────
+
+export function getConversations(limit = 20, next?: string) {
+  return safely(() => proxyJson<ConversationSummary[]>(`/conversations?limit=${limit}`), { next })
+}
+
+export function getExpertConversations(slug: string) {
+  return safely(
+    () =>
+      proxyJson<ConversationSummary[]>(`/experts/${encodeURIComponent(slug)}/conversations`),
+    { next: `/experts/${slug}` },
+  )
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Memoised per request (metadata and page both read it). An id that is not a
+ * UUID is a 404 here: the API answers it with a 422, which reached the error
+ * boundary as "Something went wrong — Unprocessable Content" and a Try again
+ * that could never succeed.
+ */
+export const getConversation = cache((id: string) => {
+  if (!UUID.test(id)) notFound()
+  return safely(
+    () => proxyJson<ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
+    { next: `/chats/${id}` },
+  )
+})

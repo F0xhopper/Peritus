@@ -30,6 +30,11 @@ class ConversationSummary(BaseModel):
     expert_topic: str
     expert_persona_name: str | None = None
     expert_status: str
+    # The found picture's version (migration 027), or None when the expert has
+    # none. Only the version: a chat row renders the tile at 20px and carries no
+    # credit line, so the rest of the provenance would be dead weight on every
+    # sidebar fetch. The image itself is at GET /experts/{expert_slug}/picture.
+    expert_picture_version: str | None = None
     title: str | None = None
     message_count: int = 0
     created_at: datetime

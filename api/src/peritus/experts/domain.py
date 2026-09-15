@@ -127,7 +127,9 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         source_multiplier=2.0,
         retrieval_top_k=20,
         max_subqueries=6,
-        graph_hops=2,
+        # 1, not 2: passage annotation only uses edges touching the passage's
+        # own anchors, so a second hop was fetched and discarded.
+        graph_hops=1,
         coverage_extra_k=10,
         max_context_passages=25,
         max_response_tokens=4096,
@@ -220,6 +222,59 @@ class CatalogMeta:
 BLURB_MAX_CHARS = 280
 
 
+# Licences that need no credit line beside the picture. Everything else we
+# accept (CC BY, CC BY-SA) requires attribution wherever the picture is shown as
+# an identity, which is why this is a property of the record rather than a
+# judgement made in the web client.
+_NO_ATTRIBUTION_PREFIXES: tuple[str, ...] = ("public domain", "pd", "cc0")
+
+
+@dataclass(frozen=True)
+class ExpertPicture:
+    """A found, licensed picture of what an expert is *about* (migration 027).
+
+    Deliberately not the avatar. ``Expert.avatar`` is the owner's rendering
+    recipe and stays authoritative; this is the default an expert arrives with,
+    and it sits between that recipe and the derived monogram:
+
+        avatar (chosen) -> picture (found) -> sigil (derived)
+
+    The bytes are not here. Every list query would carry 100 KB per row for
+    something only one endpoint serves, so the blob lives behind
+    ``ExpertPictureRepository.get_blob`` and this record carries what a client
+    needs to *render* it: a version for the cache-busting URL, dimensions, and
+    the provenance that has to be shown beside it.
+    """
+
+    provider: str
+    file_url: str
+    file_page_url: str
+    license: str
+    sha256: str
+    width: int = 0
+    height: int = 0
+    byte_size: int = 0
+    file_name: str | None = None
+    page_url: str | None = None
+    page_title: str | None = None
+    artist: str | None = None
+    license_url: str | None = None
+    query: str | None = None
+    chosen_by: str = "build"
+    found_at: datetime | None = None
+
+    @property
+    def version(self) -> str:
+        """Short content hash. The ``?v=`` that makes an immutable cache safe."""
+        return self.sha256[:12]
+
+    @property
+    def attribution_required(self) -> bool:
+        """False for public domain and CC0; true for every CC BY variant."""
+        name = self.license.strip().casefold()
+        return not any(name.startswith(p) for p in _NO_ATTRIBUTION_PREFIXES)
+
+
 @dataclass
 class Expert:
     id: int
@@ -242,7 +297,18 @@ class Expert:
     # Survives the corpus wipe a rebuild performs, so a rebuild can say what the
     # previous build concluded — see builder._log_previous_build.
     build_summary: dict | None = None
+    # The owner's chosen picture avatar (migration 026), or None for "derive it
+    # from the persona name" — which is what every expert starts as and what
+    # every expert built before this column stays as. See ExpertAvatar.
+    avatar: dict | None = None
+    # The picture found for this expert's subject (migration 027), or None.
+    # Joined on by the list/detail/catalog queries; never selected with its
+    # bytes. Outranked by `avatar` and outranks the derived monogram.
+    picture: ExpertPicture | None = None
     source_type_counts: dict[str, int] = field(default_factory=dict)  # computed, not stored
+    # Computed, not stored: whether a build job is queued or running right now.
+    # None where the query did not select it.
+    build_active: bool | None = None
     catalog: CatalogMeta = field(default_factory=CatalogMeta)
     # Retrieval readiness (migration 018): pending | chat_ready | graph_ready.
     # Held as a plain string so this module stays free of a search/ dependency;

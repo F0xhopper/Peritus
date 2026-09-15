@@ -14,6 +14,7 @@ import contextlib
 import json
 import uuid
 
+import anthropic
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
@@ -32,6 +33,7 @@ from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.experts.repository import ExpertRepository
+from peritus.infrastructure.anthropic_batch import provider_error_message
 from peritus.infrastructure.database import get_pool
 from peritus.search.readiness import get_readiness
 
@@ -46,6 +48,9 @@ def _title_from_question(question: str) -> str:
     """First-message auto-title: the question collapsed to one line and cut at
     a word boundary. Deliberately not LLM-generated (cost decision)."""
     collapsed = " ".join(question.split())
+    # Sentence case: questions are typed in whatever casing, and a sidebar of
+    # "what is the potency" beside "Why can we not…" scans as unfinished.
+    collapsed = collapsed[:1].upper() + collapsed[1:]
     if len(collapsed) <= _TITLE_MAX_CHARS:
         return collapsed
     cut = collapsed[:_TITLE_MAX_CHARS]
@@ -62,6 +67,7 @@ def _to_summary(c: Conversation) -> ConversationSummary:
         expert_topic=c.expert_topic or "",
         expert_persona_name=c.expert_persona_name,
         expert_status=c.expert_status or "",
+        expert_picture_version=c.expert_picture_version,
         title=c.title,
         message_count=c.message_count,
         created_at=c.created_at,
@@ -75,6 +81,7 @@ def _summary_from_expert(c: Conversation, expert: Expert) -> ConversationSummary
     c.expert_topic = expert.topic
     c.expert_persona_name = expert.persona_name
     c.expert_status = expert.status.value
+    c.expert_picture_version = expert.picture.version if expert.picture else None
     return _to_summary(c)
 
 
@@ -242,6 +249,30 @@ async def send_message(
     )
 
 
+def answer_error_message(error: BaseException) -> str:
+    """What to tell the reader when an answer dies mid-flight.
+
+    A provider refusal is not an internal error, and calling it one throws away
+    the only sentence that says how to fix it. The build path already surfaces
+    the provider's own wording (``provider_error_message``), so an empty credit
+    balance fails a build with "the Anthropic API rejected every request: Your
+    credit balance is too low…" — while the identical failure in a chat said
+    "the expert hit an internal error while answering", and the owner had no way
+    to tell a billing problem from a bug in retrieval.
+
+    The caller owns the expert, so the provider's own message is theirs to see.
+    It is still trimmed: an SDK message is a sentence, and anything longer than
+    one is not something a reader wants in a notice.
+    """
+    if isinstance(error, anthropic.APIStatusError):
+        detail = provider_error_message(error)[:300].strip()
+        return (
+            "The answer could not be composed — the Anthropic API rejected the "
+            f"request: {detail}"
+        )
+    return "The expert hit an internal error while answering."
+
+
 async def _stream_and_persist(
     pool: asyncpg.Pool,
     convs: ConversationRepository,
@@ -297,16 +328,19 @@ async def _stream_and_persist(
                 citations = event["citations"]
                 has_contradiction = event["has_contradiction"]
             elif event["type"] == "done":
-                await _finalize(interrupted=False)
+                # An answer cut off at the length limit is stored as interrupted,
+                # so the transcript marks it and offers to ask again instead of
+                # presenting half an answer as a whole one.
+                await _finalize(interrupted=bool(event.get("truncated")))
             yield {"data": json.dumps(event)}
 
-    except Exception:
+    except Exception as error:
         logger.exception("Conversation stream failed for %s", conv.id)
         with contextlib.suppress(Exception):
             await _finalize(interrupted=True)
         yield {"data": json.dumps({
             "type": "error",
-            "message": "The expert hit an internal error while answering.",
+            "message": answer_error_message(error),
         })}
 
     finally:

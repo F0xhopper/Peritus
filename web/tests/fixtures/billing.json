@@ -1,0 +1,19 @@
+{
+  "plan": {
+    "name": "free",
+    "display_name": "Free",
+    "included_credits": 3,
+    "allowed_tiers": ["lite", "standard"],
+    "description": "Three credits to try it."
+  },
+  "balance": 2,
+  "granted": 3,
+  "consumed": 1,
+  "held": 0,
+  "credits_enforced": true,
+  "tiers": [
+    { "tier": "lite", "credit_cost": 1, "spend_cap_usd": 2.5, "included_in_plan": true },
+    { "tier": "standard", "credit_cost": 3, "spend_cap_usd": 5.0, "included_in_plan": true },
+    { "tier": "pro", "credit_cost": 8, "spend_cap_usd": 12.0, "included_in_plan": false }
+  ]
+}

@@ -5,10 +5,11 @@ route so the two cannot drift. The whole product rests on answers being grounded
 in retrieved passages and on citations being verifiable, so those rules live here
 in one place rather than inline in a persona blurb.
 
-Two constants, deliberately separate:
+Three constants, deliberately separate:
 
 ``GROUNDING_CONTRACT`` is about *truth* — what may be asserted and what must be
-attributed. ``ANSWER_SHAPE`` is about *form* — how the answer reads. Keeping them
+attributed. ``ANSWER_SHAPE`` is about *form* — how the answer reads — and
+``ANSWER_FORMAT`` about *layout*, the Markdown it is written in. Keeping them
 apart matters because they fail in opposite directions: a weak contract lets the
 model invent, while a contract that also polices form (an earlier version told
 the model to "cite every factual claim" and never "rely on prior knowledge")
@@ -120,6 +121,39 @@ ANSWER_SHAPE = (
     "as evasion and tells the asker nothing about which parts are settled."
 )
 
+# How the answer is laid out. Every client renders GitHub-flavoured Markdown —
+# the web chat, the Rust TUI and the Rich CLI — so structure is worth asking for; but
+# structure is for the reader, and a two-paragraph answer dressed in headings and
+# bullets reads as a slide deck. The rules scale the formatting with the answer.
+ANSWER_FORMAT = (
+    "HOW TO FORMAT THE ANSWER\n"
+    "\n"
+    "Write in GitHub-flavoured Markdown. It is rendered, so use it to make the "
+    "answer easy to read — and only where it helps.\n"
+    "\n"
+    "- Short paragraphs: two to four sentences each, separated by a blank line.\n"
+    "- A short answer is plain paragraphs. Add `##` section headings only when "
+    "the answer has several distinct parts a reader would want to find (roughly "
+    "four or more paragraphs), and `###` only beneath a `##`. Never use `#`. "
+    "Never open the answer with a heading, and never add a \"Summary\" or "
+    "\"Conclusion\" heading.\n"
+    "- Use a numbered list for steps or anything in sequence, and a bulleted "
+    "list for three or more parallel items. Keep each item to a sentence or two; "
+    "don't turn ordinary reasoning into bullets.\n"
+    "- Use **bold** sparingly: a key term the first time it is defined, or the "
+    "one takeaway a reader must not miss. Never bold whole sentences.\n"
+    "- Use a table when comparing two or more options across the same "
+    "attributes. Keep cells short; put citations in cells, never in the header "
+    "row.\n"
+    "- Put formulas, worked calculations, commands, and code in a fenced code "
+    "block, and short literal values in `inline code`.\n"
+    "- Use a `>` blockquote only for a direct quotation from a passage.\n"
+    "- Citation markers go at the end of the sentence or list item they "
+    "support, before the full stop — like this [2]. Never put a citation in a "
+    "heading.\n"
+    "- No emoji, no horizontal rules, no HTML."
+)
+
 
 def build_system_prompt(persona_style: str | None, topic: str) -> str:
     """Combine the immutable grounding rules with the expert's voice and teaching style.
@@ -144,6 +178,8 @@ def build_system_prompt(persona_style: str | None, topic: str) -> str:
         "---\n"
         f"{ANSWER_SHAPE}\n\n"
         "---\n"
+        f"{ANSWER_FORMAT}\n\n"
+        "---\n"
         "WHO YOU ARE\n"
         "This is your voice and your way of teaching: what you emphasise, how "
         "you explain a hard idea, which examples you reach for. It shapes how "
@@ -161,6 +197,9 @@ class Passage:
     citation: str
     source_id: int
     text: str
+    #: The chunk behind the passage, so the audit trail can match a retrieval
+    #: step to its number without assuming the two lists line up by position.
+    chunk_id: int | None = None
 
 
 def build_grounded_context(
@@ -171,6 +210,14 @@ def build_grounded_context(
 
     Passages are deduplicated by chunk so the same passage never gets two numbers,
     which would make citations ambiguous.
+
+    Each passage opens with its contextual note when the chunk has one: the
+    sentence generated at ingestion that says which source and section the
+    chunk sits in and what it is about. It was embedded and keyword-indexed but
+    never shown, so a passage from the middle of a paper reached the model with
+    nothing to say whether it was the finding or the background. It is labelled
+    as a note, not passage text, because it was written about the passage and
+    is not a quotation from the source.
     """
     parts: list[str] = []
     passages: list[Passage] = []
@@ -187,8 +234,11 @@ def build_grounded_context(
             citation=e.citation,
             source_id=e.result.source_id,
             text=e.text,
+            chunk_id=chunk_id,
         ))
-        parts.append(f"[{index}] {e.citation}\n{e.context_block()}")
+        note = " ".join((e.result.context_text or "").split())
+        lead = f"[{index}] {e.citation}" + (f"\n(Where this passage sits: {note})" if note else "")
+        parts.append(f"{lead}\n{e.context_block()}")
         if index >= max_passages:
             break
     return "\n\n".join(parts), passages

@@ -24,10 +24,11 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
 from peritus.api.auth import AuthUser, require_user
+from peritus.api.ratelimit import SlidingWindowLimiter
 from peritus.api.schemas.experts import (
     BuildRequest,
     CatalogCategory,
@@ -36,11 +37,13 @@ from peritus.api.schemas.experts import (
     CatalogUpdateRequest,
     CreditStateOut,
     ExpertDetail,
+    ExpertPictureOut,
     ExpertSummary,
     ExpertWithCatalog,
     GrantCreditsRequest,
     LedgerEntryOut,
     PlanOut,
+    SetAvatarRequest,
     TierPriceOut,
 )
 from peritus.billing.domain import (
@@ -54,9 +57,13 @@ from peritus.billing.service import EntitlementService
 from peritus.billing.settings import settings as billing_settings
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.experts.avatar import InvalidAvatar
+from peritus.experts.avatar import normalise as normalise_avatar
 from peritus.experts.builder import FETCHER_NAMES
-from peritus.experts.domain import ExpertStatus, ExpertTier
+from peritus.experts.domain import ExpertPicture, ExpertStatus, ExpertTier
+from peritus.experts.picture_repository import ExpertPictureRepository
 from peritus.experts.repository import ExpertRepository
+from peritus.experts.service import ExpertService
 from peritus.infrastructure.database import get_pool
 from peritus.jobs.domain import TERMINAL_EVENT_TYPES, BuildJob, JobType
 from peritus.jobs.repository import JobRepository
@@ -86,6 +93,30 @@ def _entitlement_http_error(exc: EntitlementError) -> HTTPException:
     return HTTPException(status_code=exc.status_code, detail=exc.to_payload()["error"])
 
 
+def _picture_out(picture: ExpertPicture | None) -> ExpertPictureOut | None:
+    """Project a found picture down to what a client needs to render and credit it.
+
+    The bytes, the shortlist and the byte size are all deliberately absent: the
+    image is one endpoint away behind the same read rule as the expert itself,
+    and everything here is safe on a public catalog card.
+    """
+    if picture is None:
+        return None
+    return ExpertPictureOut(
+        version=picture.version,
+        width=picture.width,
+        height=picture.height,
+        provider=picture.provider,
+        title=picture.page_title,
+        artist=picture.artist,
+        license=picture.license,
+        license_url=picture.license_url,
+        page_url=picture.page_url,
+        file_page_url=picture.file_page_url,
+        attribution_required=picture.attribution_required,
+    )
+
+
 def _summary_fields(e) -> dict[str, Any]:
     return {
         "id": e.id,
@@ -105,6 +136,9 @@ def _summary_fields(e) -> dict[str, Any]:
         "node_count": e.node_count,
         "edge_count": e.edge_count,
         "source_type_counts": e.source_type_counts,
+        "build_active": e.build_active,
+        "avatar": e.avatar,
+        "picture": _picture_out(e.picture),
         "created_at": e.created_at,
     }
 
@@ -164,6 +198,7 @@ def _to_catalog_entry(e) -> CatalogEntry:
         node_count=e.node_count,
         avg_quality=e.avg_quality,
         source_type_counts=e.source_type_counts,
+        picture=_picture_out(e.picture),
         published_at=c.published_at,
         created_at=e.created_at,
     )
@@ -499,6 +534,158 @@ async def update_expert_catalog(
         updated.catalog.catalog_rank,
     )
     return _expert_with_catalog(updated)
+
+
+@router.put("/experts/{slug}/avatar", response_model=ExpertWithCatalog)
+async def set_expert_avatar(
+    slug: str, req: SetAvatarRequest, user: AuthUser = Depends(require_user)
+):
+    """Pin this expert's picture avatar, or reset it to the generated default.
+
+    Owner-scoped, like every other mutation: a published expert is readable by
+    everyone and re-skinnable only by the person who built it.
+
+    PUT rather than PATCH because the body replaces the whole recipe — there is
+    no merge, and `{"avatar": null}` is the reset.
+    """
+    pool = get_pool()
+    repo = ExpertRepository(pool)
+    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
+    if not expert:
+        raise HTTPException(status_code=404, detail="Expert not found")
+
+    try:
+        avatar = normalise_avatar(req.avatar.model_dump() if req.avatar else None)
+    except InvalidAvatar as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    updated = await repo.update_avatar(expert.id, avatar)
+    if not updated:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    logger.info(
+        "Set avatar for expert %r: style=%s", slug, avatar["style"] if avatar else "derived"
+    )
+    return _expert_with_catalog(updated)
+
+
+# ── the expert's picture ────────────────────────────────────────────────────
+#
+# Three endpoints, and the read rule on all of them is the expert's own: a
+# private expert's picture is a 404 to anyone but its owner, a shared one's is
+# readable by any signed-in user. Refresh and delete are owner-only like every
+# other mutation.
+
+# Each refresh fans out to five or six Wikimedia requests, so it is throttled
+# per user. Deliberately generous — the picker's "Find another" is a button a
+# person presses a few times in a row while deciding — and deliberately present,
+# because nothing else bounds how often it can be pressed.
+_picture_refresh_limiter = SlidingWindowLimiter(limit=6, window=60.0)
+
+
+@router.get("/experts/{slug}/picture")
+async def get_expert_picture(
+    slug: str, request: Request, user: AuthUser = Depends(require_user)
+):
+    """The picture's bytes.
+
+    Cached hard and forever under a versioned URL: the ``?v=`` the client
+    appends is this picture's content hash, so a *different* picture is a
+    different URL and an immutable cache can never serve a stale one. The query
+    is ignored here — it exists only to move the URL.
+
+    ``private`` rather than ``public`` because a shared proxy must not hold an
+    image whose visibility depends on who asked for it.
+    """
+    pool = get_pool()
+    repo = ExpertRepository(pool)
+    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
+    if not expert:
+        raise HTTPException(status_code=404, detail="Expert not found")
+
+    blob = await ExpertPictureRepository(pool).get_blob(expert.id)
+    if blob is None:
+        raise HTTPException(status_code=404, detail="This expert has no picture")
+    image, content_type, sha256 = blob
+
+    etag = f'"{sha256}"'
+    headers = {
+        "ETag": etag,
+        "Cache-Control": "private, max-age=31536000, immutable",
+    }
+    # A 304 must carry the validators and nothing else — notably no body and no
+    # Content-Length, which is why this is not just `Response(status_code=304)`
+    # with the image attached.
+    if request.headers.get("if-none-match") == etag:
+        return Response(status_code=304, headers=headers)
+
+    return Response(content=image, media_type=content_type, headers=headers)
+
+
+@router.post("/experts/{slug}/picture/refresh", response_model=ExpertWithCatalog)
+async def refresh_expert_picture(slug: str, user: AuthUser = Depends(require_user)):
+    """Search Wikimedia again and store whatever it finds. Owner only.
+
+    Synchronous: it is five or six HTTP requests and no model call, so it
+    returns in a couple of seconds and the client can render the result rather
+    than poll for it. A search that finds nothing acceptable is a 422 naming the
+    reason — "no free, non-mark, non-living-person image exists for this topic"
+    is a real answer, not a server error.
+    """
+    from peritus.experts.picture import PictureSkipped
+
+    pool = get_pool()
+    repo = ExpertRepository(pool)
+    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
+    if not expert:
+        raise HTTPException(status_code=404, detail="Expert not found")
+
+    ok, retry_after = _picture_refresh_limiter.check_with_retry_after(user.id)
+    if not ok:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many picture searches. Try again shortly.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+    try:
+        updated = await ExpertService(pool).refresh_picture(expert.id)
+    except PictureSkipped as skip:
+        raise HTTPException(
+            status_code=422, detail=_PICTURE_SKIP_MESSAGES.get(skip.reason, skip.reason)
+        ) from None
+    logger.info("Refreshed picture for expert %r", slug)
+    return _expert_with_catalog(updated)
+
+
+@router.delete("/experts/{slug}/picture", status_code=204)
+async def delete_expert_picture(slug: str, user: AuthUser = Depends(require_user)):
+    """Remove the found picture; the expert falls back to its recipe or sigil.
+
+    Distinct from picking a sigil style in the avatar picker, which writes a
+    recipe that Reset would then undo — bringing the picture straight back. This
+    is how an owner says "not this, and not any".
+    """
+    pool = get_pool()
+    repo = ExpertRepository(pool)
+    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
+    if not expert:
+        raise HTTPException(status_code=404, detail="Expert not found")
+    await ExpertPictureRepository(pool).delete(expert.id)
+    logger.info("Removed picture for expert %r", slug)
+
+
+# What each skip reason means to the person who pressed the button.
+_PICTURE_SKIP_MESSAGES: dict[str, str] = {
+    "no_candidate": (
+        "No freely licensed picture of this subject was found. Wikipedia's "
+        "article may have no image, or the only one is a map, a logo or a "
+        "photograph of someone living."
+    ),
+    "timeout": "Wikimedia did not answer in time. Try again shortly.",
+    "provider_unavailable": "Wikimedia is unreachable right now. Try again shortly.",
+    "too_large": "The pictures found were too large or were not images.",
+    "disabled": "Picture search is turned off on this server.",
+}
 
 
 @router.delete("/experts/{slug}", status_code=204)

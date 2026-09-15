@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630" role="img" aria-label="Peritus — experts built from the evidence, with the receipts">
+  <!--
+    The Open Graph card.
+
+    Static SVG rather than a generated image: it is the same near-black canvas,
+    the same hairlines and the same type ramp as the product, it weighs two
+    kilobytes, and there is nothing per-page to interpolate. A runtime image
+    route would cost a render per share for a card that never changes.
+
+    Fonts are a system stack on purpose — a social scraper will not load a
+    webfont, so naming Inter here would only produce a different fallback than
+    the one this was laid out against.
+  -->
+  <rect width="1200" height="630" fill="#0e0e10"/>
+
+  <!-- The dotted grid, the same texture the graph canvas draws. -->
+  <defs>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <rect width="1" height="1" fill="#26262a"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="630" fill="url(#dots)" opacity="0.6"/>
+
+  <!-- The wordmark: the same rounded tile the expert avatars use. -->
+  <rect x="72" y="72" width="44" height="44" rx="13" fill="#8b7cf6" fill-opacity="0.15" stroke="#8b7cf6" stroke-opacity="0.4"/>
+  <text x="94" y="102" font-family="system-ui, sans-serif" font-size="24" font-weight="600" fill="#8b7cf6" text-anchor="middle">P</text>
+  <text x="130" y="102" font-family="system-ui, sans-serif" font-size="26" font-weight="500" fill="#ececee">Peritus</text>
+
+  <text x="72" y="270" font-family="system-ui, sans-serif" font-size="62" font-weight="500" fill="#ececee">An expert on any subject —</text>
+  <text x="72" y="342" font-family="system-ui, sans-serif" font-size="62" font-weight="500" fill="#ececee">and the receipts behind it.</text>
+
+  <text x="72" y="412" font-family="system-ui, sans-serif" font-size="27" fill="#a1a1a8">Every source it kept, every source it rejected, and the reason.</text>
+
+  <!-- Two log rows, in the monospace the real log uses: one kept, one dropped
+       with its reason. The claim, shown rather than asserted. -->
+  <line x1="72" y1="470" x2="1128" y2="470" stroke="#1f1f22"/>
+  <text x="72" y="514" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" fill="#5cc47a">✓</text>
+  <text x="104" y="514" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" fill="#a1a1a8">Varroa destructor and honeybee viral loads: a five-year cohort</text>
+  <text x="1040" y="514" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" fill="#6b6b73">q8.5 r9.0</text>
+
+  <text x="72" y="556" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" fill="#e05c5c">×</text>
+  <text x="104" y="556" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" fill="#6b6b73">Top 10 beekeeping tips — secondary commentary, no primary data</text>
+  <text x="1040" y="556" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="21" fill="#45454c">q2.5 r4.0</text>
+</svg>

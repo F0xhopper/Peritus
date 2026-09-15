@@ -272,3 +272,45 @@ async def test_acquire_is_bounded():
         )
 
     pool.acquire.assert_called_once_with(timeout=settings.DB_ACQUIRE_TIMEOUT)
+
+
+# ── the keyword arm's query (R2) ──
+
+
+async def test_keyword_arm_matches_any_term_not_all_of_them():
+    """`plainto_tsquery` ANDs every lexeme: 0 hits for 5 of 6 real subqueries.
+
+    The lexemes still come from `plainto_tsquery`; only the operator changes.
+    """
+    conn = await _capture_sql(halfvec=True)
+    keyword = conn.sql[conn.sql.index("keyword AS"):conn.sql.index("fused AS")]
+    assert "@@ plainto_tsquery" not in keyword
+    assert keyword.count("replace(plainto_tsquery('english', $4)::text, '&', '|')::tsquery") == 2
+
+
+def test_question_is_searched_alongside_the_subqueries():
+    from peritus.search.service import _with_question
+
+    assert _with_question("What is potency?", ["potency act Aristotle"]) == [
+        "potency act Aristotle", "What is potency?",
+    ]
+    # Not twice, when the planner fell back to the question verbatim.
+    assert _with_question("What is potency?", ["what is potency? "]) == ["what is potency? "]
+    assert _with_question("  ", ["a"]) == ["a"]
+
+
+def test_all_zero_ranking_is_not_a_relevance_judgement():
+    from peritus.search.domain import SearchResult, SourceRef
+    from peritus.search.service import _apply_ranking
+
+    def hit(i):
+        return SearchResult(
+            chunk_id=i, expert_id=1, source_id=1, text="t", context_text=None, score=0.03,
+            source_ref=SourceRef(source_id=1, title="T", source_type="web", quality_score=None),
+        )
+
+    ranked, scored = _apply_ranking([hit(0), hit(1)], [(1, 0.42), (0, 0.07)])
+    assert [h.chunk_id for h in ranked] == [1, 0] and scored is True
+    # `rerank` returns this identity ranking when no reranker could run.
+    _, scored = _apply_ranking([hit(0), hit(1)], [(0, 0.0), (1, 0.0)])
+    assert scored is False

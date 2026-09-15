@@ -5,6 +5,57 @@ from pydantic import BaseModel, Field
 from peritus.experts.domain import BLURB_MAX_CHARS, ExpertTier, ExpertVisibility
 
 
+class ExpertAvatar(BaseModel):
+    """A rendering recipe, not an image. See peritus.experts.avatar for why.
+
+    ``seed`` is optional; the client derives it when absent. ``hue`` is kept for
+    older clients and is always null — there are no per-expert colours, and a
+    value sent here is discarded rather than refused.
+    """
+
+    style: str
+    seed: str | None = None
+    hue: int | None = None
+
+
+class SetAvatarRequest(BaseModel):
+    """Pin an avatar, or reset to the generated default.
+
+    An explicit ``{"avatar": null}`` is the reset. It has to be a wrapper object
+    rather than a bare nullable body so that "reset" and "you forgot the body"
+    stay distinguishable.
+    """
+
+    avatar: ExpertAvatar | None = None
+
+
+class ExpertPictureOut(BaseModel):
+    """A found, licensed picture of the expert's *subject* (migration 027).
+
+    Not the avatar and not a headshot: the avatar is the owner's rendering
+    recipe and stays authoritative, while this is what a fresh expert arrives
+    with. The bytes are at ``GET /experts/{slug}/picture``; ``version`` is the
+    short content hash that goes in its ``?v=`` so an immutable cache is safe.
+
+    The provenance fields are not decoration. CC BY and CC BY-SA require
+    attribution wherever the picture is shown as an identity, so a client that
+    renders this has to render the credit too — ``attribution_required`` says
+    when, and ``file_page_url`` is where the licence is actually stated.
+    """
+
+    version: str
+    width: int
+    height: int
+    provider: str
+    title: str | None = None
+    artist: str | None = None
+    license: str
+    license_url: str | None = None
+    page_url: str | None = None
+    file_page_url: str
+    attribution_required: bool = True
+
+
 class ExpertSummary(BaseModel):
     id: int
     name: str
@@ -26,6 +77,18 @@ class ExpertSummary(BaseModel):
     node_count: int = 0
     edge_count: int = 0
     source_type_counts: dict[str, int] = {}
+    # Whether a build job is actually queued or running. `status` alone can read
+    # 'queued' for an expert whose job no longer exists; clients show a build as
+    # live only when this is true. None from a read that did not compute it.
+    build_active: bool | None = None
+    # The owner's chosen picture avatar, or None for "derive it from the persona
+    # name" — see peritus.experts.avatar. Clients must handle None, because it
+    # is what every expert looks like until someone changes it.
+    avatar: ExpertAvatar | None = None
+    # The found picture, or None when this expert has none. Present-and-null
+    # rather than absent, like `avatar`, so a client never has to distinguish
+    # "no picture" from "an older server that does not send the field".
+    picture: ExpertPictureOut | None = None
     created_at: datetime
 
 
@@ -74,6 +137,7 @@ class CatalogEntry(BaseModel):
     node_count: int = 0
     avg_quality: float | None = None
     source_type_counts: dict[str, int] = {}
+    picture: ExpertPictureOut | None = None
     published_at: datetime | None = None
     created_at: datetime
 

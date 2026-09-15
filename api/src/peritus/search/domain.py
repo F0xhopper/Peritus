@@ -32,3 +32,8 @@ class SearchResponse:
     query: str
     results: list[SearchResult]
     total: int
+    #: Whether ``results[i].score`` is a reranker's relevance score (0–1,
+    #: comparable across questions) rather than a fused RRF score (a rank
+    #: artefact, not a relevance judgement). Only the former can be held to a
+    #: relevance floor.
+    reranked: bool = False

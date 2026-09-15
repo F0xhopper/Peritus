@@ -129,6 +129,18 @@ def terminal_provider_error() -> BaseException | None:
     return status.terminal if status else None
 
 
+def record_provider_error(exc: BaseException) -> None:
+    """Note ``exc`` against this build if it is a terminal provider error.
+
+    ``gather_claude_calls`` records these itself. A stage that calls the client
+    directly (the persona) has to say so, or a refused request there reads as
+    a flaky stage and the build is retried into the same refusal.
+    """
+    status = _provider_status.get()
+    if status is not None and status.terminal is None and is_terminal_provider_error(exc):
+        status.terminal = exc
+
+
 def current_execution() -> BuildExecution:
     """The execution policy in force for the current build/task."""
     return _execution.get()

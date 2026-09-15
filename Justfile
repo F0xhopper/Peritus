@@ -40,10 +40,25 @@ web:
 
 # Exactly what the `web` CI job runs, so a green local run means a green CI run.
 lint-web:
-    cd web && npx eslint . && npx tsc --noEmit
+    cd web && npx eslint . && npx tsc --noEmit && npx vitest run
 
 build-web:
     cd web && npx next build
+
+# The browser suite, across all seven device projects. Starts the mock API and
+# `next start` itself, so there is nothing to set up first — but it needs a
+# build, so run `build-web` after changing anything.
+e2e-web:
+    cd web && npx playwright test
+
+# One project only, for a fast loop while working on a page.
+e2e-web-fast:
+    cd web && npx playwright test --project=desktop
+
+# The performance budgets (web-design.md §9), on the public pages and on the app
+# pages with a session. Needs a build, like `e2e-web`.
+lighthouse-web:
+    cd web && npm run lighthouse
 
 # ── Everything ───────────────────────────────────────────────────────────────
 

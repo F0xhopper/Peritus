@@ -1,5 +1,3 @@
-import json
-
 import asyncpg
 
 from peritus.core.exceptions import ConflictError, NotFoundError
@@ -64,7 +62,7 @@ class ExpertService:
         from peritus.graph.repository import GraphRepository
 
         expert = await self.get(name_or_id)
-        sources = await self._passed_source_digest(expert.id)
+        sources = await self._repo.passed_source_digest(expert.id)
         if not sources:
             raise NotFoundError("Corpus for expert", expert.name)
 
@@ -82,37 +80,80 @@ class ExpertService:
         )
         return await self.get(expert.id)
 
-    async def _passed_source_digest(
-        self, expert_id: int
-    ) -> list[tuple[str, str, float | None, list[str]]]:
-        """The corpus as the persona prompt wants it: best sources first."""
+    async def refresh_picture(
+        self,
+        name_or_id: str | int,
+        *,
+        hints_from_corpus: bool = True,
+        deadline: float | None = None,
+    ) -> Expert:
+        """Find this expert's picture again, from scratch, and store the result.
+
+        The build finds a picture once and then leaves it alone — a rebuild does
+        not re-find, because the topic has not changed and the owner may have
+        chosen the one that is there. This is the explicit "find another": the
+        backfill for experts built before pictures existed, and the picker's
+        Find-another button.
+
+        ``hints_from_corpus`` adds the titles of the expert's own validated
+        Wikipedia sources to the query list. Those have already been judged
+        relevant to this corpus by the validator, so on an expert whose topic
+        string is vague they are a much better search than the topic is.
+
+        ``deadline`` overrides ``PICTURE_TIMEOUT``, which is sized for a build:
+        20 seconds is right when nothing may wait on the search and the fallback
+        is a monogram nobody will notice. An operator running the backfill is
+        waiting at a terminal on purpose and has no such constraint — and when
+        Wikimedia is pacing us, a single honoured ``Retry-After`` can be most of
+        a build's whole budget.
+
+        Raises :class:`PictureSkipped` when nothing acceptable was found, so the
+        caller can say *why* rather than only that nothing changed.
+        """
+        # Imported lazily for the same reason `regenerate_persona` imports the
+        # builder lazily: no other caller of this service wants httpx clients
+        # and Wikimedia plumbing loaded at import time.
+        from peritus.experts.picture import find_picture
+        from peritus.experts.picture_repository import ExpertPictureRepository
+        from peritus.infrastructure.wikimedia import WikimediaClient
+
+        expert = await self.get(name_or_id)
+        hints = await self._wikipedia_source_titles(expert.id) if hints_from_corpus else ()
+
+        async with WikimediaClient() as client:
+            found = await find_picture(
+                client, expert.topic, expert.key_concepts, hints, deadline=deadline
+            )
+        await ExpertPictureRepository(self._pool).upsert(expert.id, found, chosen_by="build")
+        logger.info(
+            "Refreshed picture for expert %d (%r): %s (%s)",
+            expert.id, expert.name, found.page_title, found.license,
+        )
+        return await self.get(expert.id)
+
+    async def remove_picture(self, name_or_id: str | int) -> Expert:
+        """Drop the found picture. The expert falls back to its recipe or sigil.
+
+        Distinct from choosing a sigil style in the picker: that writes a
+        recipe, and Reset would then bring the picture straight back.
+        """
+        from peritus.experts.picture_repository import ExpertPictureRepository
+
+        expert = await self.get(name_or_id)
+        await ExpertPictureRepository(self._pool).delete(expert.id)
+        return await self.get(expert.id)
+
+    async def _wikipedia_source_titles(self, expert_id: int) -> tuple[str, ...]:
+        """Titles of this expert's validated Wikipedia sources, best first."""
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT title, content_type, quality_score, key_claims
+                SELECT title
                 FROM sources
-                WHERE expert_id = $1 AND passed = true
+                WHERE expert_id = $1 AND passed = true AND source_type = 'wikipedia'
                 ORDER BY quality_score DESC NULLS LAST
-                LIMIT 15
+                LIMIT 3
                 """,
                 expert_id,
             )
-        return [
-            (
-                r["title"],
-                r["content_type"] or "other",
-                r["quality_score"],
-                _as_claims(r["key_claims"]),
-            )
-            for r in rows
-        ]
-
-
-def _as_claims(raw) -> list[str]:
-    """``sources.key_claims`` is JSONB, which asyncpg hands back as a string."""
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except ValueError:
-            return []
-    return [c for c in (raw or []) if isinstance(c, str)]
+        return tuple(r["title"] for r in rows if r["title"])

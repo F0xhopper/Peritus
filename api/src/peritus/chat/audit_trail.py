@@ -34,6 +34,7 @@ def build_audit_payload(
     answer_text: str,
     has_contradiction: bool,
     graph_ready: bool,
+    dangling: set[int] | None = None,
 ) -> dict[str, Any]:
     """Assemble the ``retrieval_audit`` payload for one answer.
 
@@ -44,16 +45,23 @@ def build_audit_payload(
     """
     steps = list(trail.steps) if trail else []
 
-    # Passages, in order, are the first N unique retrieved chunks, so the nth
-    # retrieval step maps to the nth numbered passage. Guard on length rather
-    # than assuming, so a future change to context assembly degrades to
+    # Each step is matched to its passage number by chunk. Positional matching
+    # (nth step = nth passage) stopped being true when the relevance floor began
+    # keeping low-scoring passages out of the prompt while the trail keeps them
+    # in retrieval order. Passages without a chunk id (older callers) fall back
+    # to position, guarded on length so a mismatch degrades to
     # "not_in_context" instead of mislabelling a citation.
+    by_chunk = {p.chunk_id: p.index for p in passages if p.chunk_id is not None}
     dispositions: list[dict[str, Any]] = []
     in_context_sources: set[int] = set()
     cited_sources: set[int] = set()
 
+    positional = [p.index for p in passages]
     for i, step in enumerate(steps):
-        n = passages[i].index if i < len(passages) else None
+        n = (
+            by_chunk.get(step.chunk_id) if by_chunk
+            else positional[i] if i < len(positional) else None
+        )
         if n is None:
             disposition = DISPOSITION_NOT_IN_CONTEXT
         elif n in cited:
@@ -118,6 +126,8 @@ def build_audit_payload(
             ),
         },
         "answer_chars": len(answer_text),
+        # [n] markers pointing at no passage: the model inventing a reference.
+        "dangling_citations": sorted(dangling or ()),
         "dispositions": dispositions,
         "note": (
             "An audit trail of how evidence reached this answer, not a score of "
@@ -155,6 +165,7 @@ def audit_db_rows(
         # distinguished at read time by the expert's readiness.
         "contradiction_traversed": bool(payload["graph"]["contradiction_traversed"]),
         "answer_chars": payload["answer_chars"],
+        "dangling_citations": payload.get("dangling_citations", []),
     }
     rows = [
         {

@@ -40,6 +40,7 @@ class Conversation:
     expert_topic: str | None = None
     expert_persona_name: str | None = None
     expert_status: str | None = None
+    expert_picture_version: str | None = None
 
 
 @dataclass
@@ -54,12 +55,21 @@ class ConversationMessage:
     created_at: datetime
 
 
+# The joined expert columns every conversation list carries, so a sidebar row
+# renders the expert's tile without a second fetch. `expert_picture_version` is
+# the found picture's short content hash (migration 027) — enough to build the
+# image URL and to bust its cache, and nothing more, because a chat list has no
+# room for a credit line and does not show one.
 _EXPERT_JOIN_COLUMNS = """
     e.name AS expert_slug,
     e.topic AS expert_topic,
     e.persona_name AS expert_persona_name,
-    e.status AS expert_status
+    e.status AS expert_status,
+    LEFT(p.sha256, 12) AS expert_picture_version
 """
+
+# Left, because most experts have no picture and a conversation must still list.
+_EXPERT_PICTURE_JOIN = "LEFT JOIN expert_pictures p ON p.expert_id = e.id"
 
 
 class ConversationRepository:
@@ -88,6 +98,7 @@ class ConversationRepository:
                 SELECT c.*, {_EXPERT_JOIN_COLUMNS}
                 FROM conversations c
                 JOIN experts e ON e.id = c.expert_id
+                {_EXPERT_PICTURE_JOIN}
                 WHERE c.id = $1::uuid AND {clause}
                 """,
                 conversation_id, *params,
@@ -106,6 +117,7 @@ class ConversationRepository:
                 SELECT c.*, {_EXPERT_JOIN_COLUMNS}
                 FROM conversations c
                 JOIN experts e ON e.id = c.expert_id
+                {_EXPERT_PICTURE_JOIN}
                 WHERE {clause} AND c.message_count > 0
                 ORDER BY c.last_message_at DESC
                 LIMIT $1
@@ -123,6 +135,7 @@ class ConversationRepository:
                 SELECT c.*, {_EXPERT_JOIN_COLUMNS}
                 FROM conversations c
                 JOIN experts e ON e.id = c.expert_id
+                {_EXPERT_PICTURE_JOIN}
                 WHERE c.expert_id = $1 AND c.message_count > 0
                 ORDER BY c.last_message_at DESC
                 LIMIT $2
@@ -299,6 +312,9 @@ def _row_to_conversation(row: asyncpg.Record) -> Conversation:
         expert_topic=row["expert_topic"] if "expert_topic" in keys else None,
         expert_persona_name=row["expert_persona_name"] if "expert_persona_name" in keys else None,
         expert_status=row["expert_status"] if "expert_status" in keys else None,
+        expert_picture_version=(
+            row["expert_picture_version"] if "expert_picture_version" in keys else None
+        ),
     )
 
 

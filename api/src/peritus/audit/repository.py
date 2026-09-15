@@ -734,12 +734,14 @@ class AuditRepository:
                     expert_id, conversation_id, question, subqueries, followup_queries,
                     coverage_satisfied, second_pass, retrieved_passages, duplicate_hits,
                     unique_passages, context_passages, cited_passages, context_cap,
-                    sources_in_context, sources_cited, contradiction_traversed, answer_chars
+                    sources_in_context, sources_cited, contradiction_traversed, answer_chars,
+                    dangling_citations
                 ) VALUES (
                     $1, $2::uuid, $3, $4::jsonb, $5::jsonb,
                     $6, $7, $8, $9,
                     $10, $11, $12, $13,
-                    $14, $15, $16, $17
+                    $14, $15, $16, $17,
+                    $18::integer[]
                 )
                 RETURNING id
                 """,
@@ -760,6 +762,7 @@ class AuditRepository:
                 int(header.get("sources_cited") or 0),
                 bool(header.get("contradiction_traversed")),
                 int(header.get("answer_chars") or 0),
+                [int(n) for n in header.get("dangling_citations") or []],
             )
             if passages:
                 await conn.executemany(

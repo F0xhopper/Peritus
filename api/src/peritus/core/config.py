@@ -121,6 +121,33 @@ class Settings:
     # above the slowest legitimate fetch — PDF OCR allows itself 120s.
     SOURCE_FETCH_TIMEOUT: float = float(os.getenv("SOURCE_FETCH_TIMEOUT", "180"))
 
+    # ── Expert picture (found on Wikimedia at build time) ────────────────────
+    # A new expert gets a real picture of its subject — the lead image of the
+    # Wikipedia article, with its licence and attribution — instead of only a
+    # monogram. Nothing here can fail a build: the finder runs as a background
+    # task off `plan_ready`, has its own deadline, and emits `picture_skipped`
+    # with a reason when it comes up empty. See experts/picture.py.
+    PICTURE_ENABLED: bool = os.getenv("PICTURE_ENABLED", "true").lower() == "true"
+    # Whole-search deadline, per build. Five or six HTTP requests fit easily;
+    # this is the bound that keeps a slow Wikimedia from being the build's problem.
+    PICTURE_TIMEOUT: float = float(os.getenv("PICTURE_TIMEOUT", "20"))
+    # Refuse a thumbnail larger than this. Mirrored by a CHECK on the table, so
+    # raising it here alone will not let a bigger file through.
+    PICTURE_MAX_BYTES: int = int(os.getenv("PICTURE_MAX_BYTES", "400000"))
+    # The width asked of Wikimedia's thumbnail service. There is no resizing on
+    # our side (no Pillow): this is the size that gets stored and served.
+    PICTURE_THUMB_WIDTH: int = int(os.getenv("PICTURE_THUMB_WIDTH", "512"))
+    # heuristic — rank by article order, format and size (free, phase 1)
+    # model     — one FAST_MODEL call per build over up to six thumbnails
+    PICTURE_RANKER: str = os.getenv("PICTURE_RANKER", "heuristic").strip().lower()
+    # Phase 3 widens this to "wikipedia,commons,openverse".
+    PICTURE_PROVIDERS: str = os.getenv("PICTURE_PROVIDERS", "wikipedia")
+
+    # Wikimedia's API etiquette asks for a contact address in the User-Agent of
+    # anything making real volume. An email or a URL; empty still sends a
+    # descriptive agent, it just cannot be reached.
+    PERITUS_CONTACT: str = os.getenv("PERITUS_CONTACT", "")
+
     # Mistral OCR (PDF parsing)
     MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
     MISTRAL_OCR_MODEL: str = os.getenv("MISTRAL_OCR_MODEL", "mistral-ocr-latest")
@@ -138,6 +165,15 @@ class Settings:
     RERANK_WINDOW: int = int(os.getenv("RERANK_WINDOW", "8"))
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
     COHERE_RERANK_MODEL: str = os.getenv("COHERE_RERANK_MODEL", "rerank-v3.5")
+
+    # Relevance gate on reranker scores (chat/agent.py). A passage scoring below
+    # the floor is padding: it is kept out of the prompt unless that would leave
+    # fewer than RELEVANCE_MIN_PASSAGES, and fewer than that many above the
+    # floor is what triggers the fallback-query retrieval pass. Calibrated on
+    # the audit trail, where cited passages averaged 0.31 and uncited 0.22 —
+    # recalibrate from `answer_audit_passages` when the sample is larger.
+    RELEVANCE_FLOOR: float = float(os.getenv("RELEVANCE_FLOOR", "0.15"))
+    RELEVANCE_MIN_PASSAGES: int = int(os.getenv("RELEVANCE_MIN_PASSAGES", "3"))
 
     # Source validation concurrency limit
     VALIDATE_CONCURRENCY: int = int(os.getenv("VALIDATE_CONCURRENCY", "5"))
@@ -181,7 +217,11 @@ class Settings:
     GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "10"))
 
     # Chunking
-    CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))
+    # ~1,000 chars: the whole chunk is shown to the model (it used to see only
+    # the first 800 of 1,500, while citing all of it), and a smaller unit is
+    # also the better one for a cross-encoder reranker to judge. The overlap is
+    # the longest trailing sentence carried into the next chunk.
+    CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1000"))
     CHUNK_OVERLAP_CHARS: int = int(os.getenv("CHUNK_OVERLAP_CHARS", "200"))
 
     # API auth (legacy shared key — retained for backwards compatibility)

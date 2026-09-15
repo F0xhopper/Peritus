@@ -1,0 +1,245 @@
+{
+  "expert": {
+    "name": "varroa-mite-control-in-temperate-beekeeping",
+    "topic": "Varroa mite control in temperate beekeeping",
+    "tier": "standard"
+  },
+  "method_statement": "Every source this expert considered, kept or dropped, with the scores and the rubric version that decided it. Screening is a single language-model pass against a written rubric, with a second read by a stronger model on borderline scores. There is no dual human review.",
+  "totals": {
+    "considered": 30,
+    "accepted": 21,
+    "rejected": 9,
+    "acceptance_rate": 0.7,
+    "accepted_with_passages": 21,
+    "accepted_without_passages": 0,
+    "passages_total": 412
+  },
+  "scores": {
+    "accepted": { "mean_quality": 7.9, "mean_relevance": 8.3 },
+    "rejected": { "mean_quality": 3.1, "mean_relevance": 4.4 }
+  },
+  "thresholds": {
+    "quality_min": 5,
+    "relevance_min": 6,
+    "current_rubric_version": "v5-structured-q5r6",
+    "note": "These are the floors the CURRENT code applies. Rows stamped with a different rubric_version were judged under different rules."
+  },
+  "rubric_versions": [
+    {
+      "rubric_version": "v5-structured-q5r6",
+      "validator_model": "claude-haiku-4-5-20251001",
+      "sources": 30,
+      "accepted": 21,
+      "first_seen": "2026-09-08T12:18:00.000Z",
+      "last_seen": "2026-09-08T12:24:00.000Z"
+    }
+  ],
+  "provenance": {
+    "sources": 30,
+    "complete": true,
+    "missing": {
+      "validator_model": 0,
+      "rubric_version": 0,
+      "discovered_via": 0,
+      "covered_concepts": 0
+    },
+    "note": "Every source carries full validation and discovery provenance."
+  },
+  "by_source_type": [
+    {
+      "source_type": "openalex",
+      "considered": 12,
+      "accepted": 9,
+      "rejected": 3,
+      "accepted_mean_quality": 8.2,
+      "accepted_mean_relevance": 8.5
+    },
+    {
+      "source_type": "web",
+      "considered": 10,
+      "accepted": 4,
+      "rejected": 6,
+      "accepted_mean_quality": 6.8,
+      "accepted_mean_relevance": 7.6
+    }
+  ],
+  "by_discovery_method": [
+    {
+      "method": "plan",
+      "considered": 24,
+      "accepted": 16,
+      "rejected": 8,
+      "accepted_mean_quality": 7.8
+    },
+    {
+      "method": "gapfill",
+      "considered": 4,
+      "accepted": 3,
+      "rejected": 1,
+      "accepted_mean_quality": 8.1
+    },
+    {
+      "method": "snowball",
+      "considered": 2,
+      "accepted": 2,
+      "rejected": 0,
+      "accepted_mean_quality": 8.4
+    }
+  ],
+  "by_search": {
+    "searches": [
+      {
+        "discovered_via": "gapfill:acaricide resistance",
+        "method": "gapfill",
+        "concept": "acaricide resistance",
+        "considered": 4,
+        "accepted": 3,
+        "rejected": 1,
+        "accepted_mean_quality": 8.1,
+        "accepted_mean_relevance": 8.4,
+        "source_types": ["pubmed", "openalex"]
+      }
+    ],
+    "distinct_searches": 6,
+    "note": "One row per distinct search path recorded on the sources."
+  },
+  "exclusions": {
+    "by_reason": [
+      {
+        "reason": "Secondary commentary; no primary data.",
+        "count": 4,
+        "mean_quality": 2.9,
+        "mean_relevance": 4.6
+      },
+      {
+        "reason": "duplicate of https://example.org/varroa-cohort",
+        "count": 2,
+        "mean_quality": 0.0,
+        "mean_relevance": 0.0
+      }
+    ],
+    "by_threshold": {
+      "quality_below_threshold": 5,
+      "relevance_below_threshold": 2,
+      "both_below_threshold": 2,
+      "above_both_thresholds": 0,
+      "unscored": 0
+    },
+    "by_threshold_meanings": {
+      "quality_below_threshold": "Relevant enough, but not good enough evidence.",
+      "both_below_threshold": "Neither on topic nor sound."
+    }
+  },
+  "page": {
+    "decision": "all",
+    "sort": "decision",
+    "limit": 100,
+    "offset": 0,
+    "returned": 3,
+    "total_matching": 30,
+    "has_more": false
+  },
+  "sources": [
+    {
+      "id": 804,
+      "decision": "accepted",
+      "title": "Varroa destructor and honeybee viral loads: a five-year cohort",
+      "url": "https://example.org/varroa-cohort",
+      "author": "Beaumont, R. and Halvorsen, K.",
+      "source_type": "openalex",
+      "content_type": "primary research",
+      "difficulty": 4,
+      "quality_score": 8.5,
+      "relevance_score": 9.0,
+      "drop_reason": null,
+      "source_tier": "primary",
+      "doi": "10.1234/varroa-cohort",
+      "arxiv_id": null,
+      "identifiers": { "doi": "10.1234/varroa-cohort", "pmid": "31234567" },
+      "full_text_method": "europepmc_jats",
+      "text_chars": 48210,
+      "validator_model": "claude-haiku-4-5-20251001",
+      "review_model": null,
+      "first_pass_quality": null,
+      "first_pass_relevance": null,
+      "reviewed": false,
+      "rubric_version": "v5-structured-q5r6",
+      "discovered_via": "plan",
+      "discovery_method": "plan",
+      "gap_filled_for_concept": null,
+      "snowball_seed_urls": [],
+      "covered_concepts": ["varroa biology", "viral co-infection"],
+      "key_claims": [
+        "Mechanical control alone did not prevent viral amplification in high-pressure years."
+      ],
+      "passage_count": 34,
+      "created_at": "2026-09-08T12:19:11.000Z"
+    },
+    {
+      "id": 812,
+      "decision": "accepted",
+      "title": "Amitraz resistance in field populations, 2019-2024",
+      "url": "https://example.org/amitraz-resistance",
+      "author": "Okonkwo, A.",
+      "source_type": "pubmed",
+      "content_type": "primary research",
+      "difficulty": 4,
+      "quality_score": 8.0,
+      "relevance_score": 8.5,
+      "drop_reason": null,
+      "source_tier": "primary",
+      "doi": "10.1234/amitraz",
+      "arxiv_id": null,
+      "identifiers": { "doi": "10.1234/amitraz" },
+      "full_text_method": "abstract",
+      "text_chars": 1840,
+      "validator_model": "claude-sonnet-5",
+      "review_model": "claude-sonnet-5",
+      "first_pass_quality": 5.5,
+      "first_pass_relevance": 5.5,
+      "reviewed": true,
+      "rubric_version": "v5-structured-q5r6",
+      "discovered_via": "gapfill:acaricide resistance",
+      "discovery_method": "gapfill",
+      "gap_filled_for_concept": "acaricide resistance",
+      "snowball_seed_urls": [],
+      "covered_concepts": ["acaricide resistance"],
+      "key_claims": [],
+      "passage_count": 4,
+      "created_at": "2026-09-08T12:22:40.000Z"
+    },
+    {
+      "id": 831,
+      "decision": "rejected",
+      "title": "Top 10 beekeeping tips for spring",
+      "url": "https://example.com/spring-tips",
+      "author": null,
+      "source_type": "web",
+      "content_type": "commentary",
+      "difficulty": 1,
+      "quality_score": 2.5,
+      "relevance_score": 4.0,
+      "drop_reason": "Secondary commentary; no primary data.",
+      "source_tier": "tertiary",
+      "doi": null,
+      "arxiv_id": null,
+      "identifiers": null,
+      "full_text_method": "oa_landing_html",
+      "text_chars": 3120,
+      "validator_model": "claude-haiku-4-5-20251001",
+      "review_model": null,
+      "first_pass_quality": null,
+      "first_pass_relevance": null,
+      "reviewed": false,
+      "rubric_version": "v5-structured-q5r6",
+      "discovered_via": "plan",
+      "discovery_method": "plan",
+      "gap_filled_for_concept": null,
+      "snowball_seed_urls": [],
+      "covered_concepts": [],
+      "key_claims": [],
+      "passage_count": 0,
+      "created_at": "2026-09-08T12:20:02.000Z"
+    }
+  ]
+}

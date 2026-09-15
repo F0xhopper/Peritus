@@ -264,6 +264,12 @@ class GraphRepository:
 
         return len(merged_nodes), len(relations)
 
+    async def delete_graph(self, expert_id: int) -> None:
+        """Remove every node and edge for an expert, leaving the corpus alone."""
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute("DELETE FROM expert_edges WHERE expert_id = $1", expert_id)
+            await conn.execute("DELETE FROM expert_nodes WHERE expert_id = $1", expert_id)
+
     async def get_top_nodes(self, expert_id: int, limit: int = 20) -> list[dict]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
@@ -286,7 +292,7 @@ class GraphRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 """
-                SELECT id, label, description, chunk_ids, embedding
+                SELECT id, node_type, label, description, chunk_ids, embedding
                 FROM expert_nodes WHERE expert_id = $1
                 """,
                 expert_id,

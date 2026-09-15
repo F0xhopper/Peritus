@@ -31,9 +31,15 @@ from peritus.experts.domain import (
     ExpertTier,
     ExpertVisibility,
 )
+from peritus.experts.picture_repository import (
+    PICTURE_JOIN_COLUMNS,
+    picture_join,
+    row_to_picture,
+)
 
-# Columns computed on list queries; kept here so catalog and workspace listings
-# stay identical in shape.
+# Computed on every query a client renders an expert from — the listings *and*
+# the single-expert reads (Overview's "Source types" section reads it). Kept here
+# so catalog and workspace shapes stay identical.
 _SOURCE_TYPE_COUNTS_SQL = """
     COALESCE(
         (SELECT jsonb_object_agg(source_type, cnt)
@@ -46,6 +52,24 @@ _SOURCE_TYPE_COUNTS_SQL = """
         '{}'::jsonb
     ) AS source_type_counts
 """
+
+# Whether a build job for this expert is actually queued or running. The
+# expert's own `status` column can say 'queued' long after its job is gone (a
+# job deleted, or a row written outside the queue), and a client that trusts it
+# shows a live "building" counter over a working expert indefinitely.
+_BUILD_ACTIVE_SQL = """
+    EXISTS (
+        SELECT 1 FROM build_jobs j
+        WHERE j.expert_id = e.id AND j.status IN ('queued', 'running')
+    ) AS build_active
+"""
+
+# The found picture (migration 027), joined onto every query whose result a
+# client renders an avatar from. Metadata only — `image` is never selected here;
+# the blob has its own repository and exactly one endpoint that reads it.
+_PICTURE_SQL = PICTURE_JOIN_COLUMNS
+_PICTURE_JOIN = picture_join("e")
+
 
 # Catalog shelf order: featured first, then the founder's manual rank
 # (un-ranked sorts last), then newest.
@@ -78,13 +102,25 @@ class ExpertRepository:
 
     async def get_by_id(self, expert_id: int) -> Expert | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM experts WHERE id = $1", expert_id)
+            row = await conn.fetchrow(
+                f"""
+                SELECT e.*, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
+                WHERE e.id = $1
+                """,
+                expert_id,
+            )
         return _row_to_expert(row) if row else None
 
     async def get_by_name(self, name: str) -> Expert | None:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT * FROM experts WHERE lower(name) = lower($1)", name
+                f"""
+                SELECT e.*, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
+                WHERE lower(e.name) = lower($1)
+                """,
+                name,
             )
         return _row_to_expert(row) if row else None
 
@@ -93,8 +129,8 @@ class ExpertRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}
-                FROM experts e
+                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
                 ORDER BY e.created_at DESC
                 """
             )
@@ -112,8 +148,8 @@ class ExpertRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}
-                FROM experts e
+                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
                 WHERE {clause}
                 ORDER BY e.created_at DESC
                 """,
@@ -133,10 +169,14 @@ class ExpertRepository:
         **Do not use this to authorise a mutation** — use
         :meth:`get_owned_for_user`.
         """
-        clause, params = _readable_clause(owner_id, include_unowned, alias="experts", idx=2)
+        clause, params = _readable_clause(owner_id, include_unowned, alias="e", idx=2)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT * FROM experts WHERE lower(name) = lower($1) AND {clause}",
+                f"""
+                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
+                WHERE lower(e.name) = lower($1) AND {clause}
+                """,
                 name, *params,
             )
         return _row_to_expert(row) if row else None
@@ -150,10 +190,14 @@ class ExpertRepository:
         curate. A public expert is readable by everyone and mutable by nobody
         but its owner.
         """
-        clause, params = _visibility_clause(owner_id, include_unowned, alias="experts", idx=2)
+        clause, params = _visibility_clause(owner_id, include_unowned, alias="e", idx=2)
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                f"SELECT * FROM experts WHERE lower(name) = lower($1) AND {clause}",
+                f"""
+                SELECT e.*, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
+                WHERE lower(e.name) = lower($1) AND {clause}
+                """,
                 name, *params,
             )
         return _row_to_expert(row) if row else None
@@ -205,8 +249,8 @@ class ExpertRepository:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""
-                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}
-                FROM experts e
+                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
                 WHERE {' AND '.join(filters)}
                 ORDER BY {_CATALOG_ORDER}
                 LIMIT $1 OFFSET $2
@@ -223,9 +267,10 @@ class ExpertRepository:
         """
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT * FROM experts
-                WHERE lower(name) = lower($1) AND visibility = ANY($2::text[])
+                f"""
+                SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
+                FROM experts e {_PICTURE_JOIN}
+                WHERE lower(e.name) = lower($1) AND e.visibility = ANY($2::text[])
                 """,
                 name, sorted(SHARED_VISIBILITIES),
             )
@@ -304,11 +349,13 @@ class ExpertRepository:
                 f"""
                 UPDATE experts SET {', '.join(sets)}, updated_at = NOW()
                 WHERE id = ${len(params)}
-                RETURNING *
+                RETURNING id
                 """,
                 *params,
             )
-        return _row_to_expert(row) if row else None
+        # Re-read rather than RETURNING *: the response carries the joined
+        # picture, and an UPDATE cannot return a column it did not touch.
+        return await self.get_by_id(row["id"]) if row else None
 
     async def update_status(
         self,
@@ -385,6 +432,52 @@ class ExpertRepository:
                 persona_name, persona_bio, persona_style, expert_id,
             )
 
+    async def passed_source_digest(
+        self, expert_id: int
+    ) -> list[tuple[str, str, float | None, list[str]]]:
+        """The corpus as the persona prompt wants it: best sources first."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT title, content_type, quality_score, key_claims
+                FROM sources
+                WHERE expert_id = $1 AND passed = true
+                ORDER BY quality_score DESC NULLS LAST
+                LIMIT 15
+                """,
+                expert_id,
+            )
+        return [
+            (
+                r["title"],
+                r["content_type"] or "other",
+                r["quality_score"],
+                _as_claims(r["key_claims"]),
+            )
+            for r in rows
+        ]
+
+    async def update_avatar(self, expert_id: int, avatar: dict | None) -> Expert | None:
+        """Pin (or clear) an expert's picture avatar.
+
+        ``None`` writes SQL NULL, which is the "derive it from the persona name"
+        default — so the same method both sets and resets, and there is no
+        second endpoint for the reset.
+        """
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                UPDATE experts
+                SET avatar = $1::jsonb, updated_at = NOW()
+                WHERE id = $2
+                RETURNING id
+                """,
+                json.dumps(avatar) if avatar is not None else None,
+                expert_id,
+            )
+        # Re-read for the joined picture — see `update_catalog`.
+        return await self.get_by_id(row["id"]) if row else None
+
     async def update_config(self, expert_id: int, config: ExpertConfig) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(
@@ -413,8 +506,12 @@ class ExpertRepository:
     async def reset_build_state(self, expert_id: int) -> None:
         """Clear derived corpus state so a (re)build starts from a clean slate.
 
-        Builds are not checkpointed, so a retry re-runs the whole pipeline. Deleting
-        the previous attempt's sources/chunks/graph first keeps a retry from creating
+        Runs at the start of a job's first attempt, and of a retry whose earlier
+        attempt never reached ``chat_ready``. A retry that did reach it resumes
+        from that readiness instead (see ``jobs/worker._resume_point``): the
+        corpus is the expensive part, and wiping it to retry a persona call is
+        how a finished PRO build was lost. Deleting the previous attempt's
+        sources/chunks/graph first keeps a from-scratch run from creating
         duplicate rows. Child tables cascade from `sources`, but we delete each
         explicitly so this is correct regardless of FK cascade direction.
 
@@ -481,9 +578,9 @@ class ExpertRepository:
         """Find the closest expert by name using trigram similarity."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
-                SELECT *, similarity(lower(name), lower($1)) AS sim
-                FROM experts
+                f"""
+                SELECT e.*, {_PICTURE_SQL}, similarity(lower(e.name), lower($1)) AS sim
+                FROM experts e {_PICTURE_JOIN}
                 ORDER BY sim DESC
                 LIMIT 1
                 """,
@@ -542,7 +639,8 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
         _raw_concepts = json.loads(_raw_concepts)
     key_concepts: list[str] = list(_raw_concepts) if _raw_concepts else []
 
-    # source_type_counts is a computed column present only in list_all queries.
+    # source_type_counts is a computed column, present only on queries a client
+    # renders from (the listings and the single-expert reads).
     source_type_counts: dict[str, int] = {}
     if "source_type_counts" in keys and row["source_type_counts"]:
         raw = row["source_type_counts"]
@@ -564,7 +662,19 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
         raw_summary = json.loads(raw_summary)
     build_summary = raw_summary if isinstance(raw_summary, dict) else None
 
+    # Absent from rows written before migration 026, and NULL for every expert
+    # whose owner has not chosen a picture — both mean "derive it".
+    raw_avatar = row["avatar"] if "avatar" in keys else None
+    if isinstance(raw_avatar, str):
+        raw_avatar = json.loads(raw_avatar)
+    avatar = raw_avatar if isinstance(raw_avatar, dict) else None
+
+    picture = row_to_picture(row, keys)
+
     catalog = _row_to_catalog(row, keys)
+
+    # Computed on the same queries as source_type_counts; None where not selected.
+    build_active = bool(row["build_active"]) if "build_active" in keys else None
 
     # Readiness comes from the row (migration 018); rows read before that
     # migration, or partial projections, fall back to 'pending'.
@@ -588,7 +698,10 @@ def _row_to_expert(row: asyncpg.Record) -> Expert:
         avg_quality=row["avg_quality"],
         key_concepts=key_concepts,
         build_summary=build_summary,
+        avatar=avatar,
+        picture=picture,
         source_type_counts=source_type_counts,
+        build_active=build_active,
         catalog=catalog,
         readiness=readiness,
         error=row["error"],
@@ -619,3 +732,13 @@ def _row_to_catalog(row: asyncpg.Record, keys) -> CatalogMeta:
         published_at=row["published_at"] if "published_at" in keys else None,
         published_by=str(published_by) if published_by else None,
     )
+
+
+def _as_claims(raw) -> list[str]:
+    """``sources.key_claims`` is JSONB, which asyncpg hands back as a string."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except ValueError:
+            return []
+    return [c for c in (raw or []) if isinstance(c, str)]

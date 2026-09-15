@@ -8,7 +8,10 @@ from peritus.graph.domain import EdgeType
 from peritus.graph.repository import GraphRepository
 from peritus.search.domain import SearchResult
 
-_MAX_CONCEPTS_PER_RESULT = 8
+# Four labels. Chunks anchor 2.2 concepts on average (p90 5), and before entity
+# resolution normalised labels the list of eight was often the same concept in
+# four spellings; no eval has shown the list changes an answer.
+_MAX_CONCEPTS_PER_RESULT = 4
 _MAX_EDGES_PER_RESULT = 5
 
 # The two relations a passage's annotation is worth spending lines on. Both say
@@ -56,12 +59,24 @@ class EnrichedResult:
         claims — the point or condition, written as a sentence about the
         subject. The old annotation was graph notation (``A --supports--> B``)
         that the model had to interpret and that no eval ever showed it read.
+
+        The passage is shown whole. It used to be cut at 800 characters while
+        the ``[n]`` citation resolved to the full chunk, so the model cited text
+        it had never been shown — 39% of retrieved text per answer.
+
+        Concepts are labels only, unless the corpus disputes or qualifies a claim
+        here: then the descriptions are what let the model say which sense of a
+        term the dispute is about.
         """
-        lines = [self.text[:800]]
+        lines = [self.text]
         if self.related_concepts:
-            lines.append("\nAbout:")
-            for c in self.related_concepts:
-                lines.append(f"  • {c['label']}: {c.get('description', '')}")
+            if self.contradiction_points or self.qualifications:
+                lines.append("\nAbout:")
+                for c in self.related_concepts:
+                    desc = (c.get("description") or "").strip()
+                    lines.append(f"  • {c['label']}: {desc}" if desc else f"  • {c['label']}")
+            else:
+                lines.append("\nAbout: " + "; ".join(c["label"] for c in self.related_concepts))
         if self.contradiction_points:
             lines.append("\nDisputed in this corpus:")
             lines.extend(f"  • {point}" for point in self.contradiction_points)
@@ -91,7 +106,13 @@ class GraphRetriever:
             return [EnrichedResult(result=r) for r in results]
 
         anchor_ids = [n["id"] for n in anchor_nodes]
-        neighbour_nodes, edges = await self._repo.get_neighbours(expert_id, anchor_ids, hops)
+        # One hop, whatever the tier asks for. `_enrich_one` keeps only edges
+        # touching a passage's own anchors, so a second hop was fetched and then
+        # discarded on every PRO turn. `hops` stays in the signature because
+        # expert configs snapshotted before this still carry `graph_hops=2`.
+        neighbour_nodes, edges = await self._repo.get_neighbours(
+            expert_id, anchor_ids, min(hops, 1)
+        )
         node_by_id = {n["id"]: n for n in neighbour_nodes}
 
         return [

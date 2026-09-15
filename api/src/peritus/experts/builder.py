@@ -42,6 +42,7 @@ cost the same.
 """
 
 import asyncio
+import contextlib
 import json
 import math
 import time
@@ -62,19 +63,29 @@ from peritus.core.logging import get_logger
 from peritus.experts.coverage import ConceptCoverage, CoverageReport, compute_coverage
 from peritus.experts.domain import Expert
 from peritus.experts.feedback import feedback_queries
+from peritus.experts.picture import PictureSkipped, find_picture
+from peritus.experts.picture_repository import ExpertPictureRepository
 from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
-from peritus.graph.reconciler import reconcile_claims
+from peritus.graph.reconciler import ReconcileStats, reconcile_claims
 from peritus.graph.repository import GraphRepository, node_embedding_text
+from peritus.graph.resolution import (
+    RESOLVE_THRESHOLD,
+    RESOLVE_THRESHOLD_SAME_HEAD,
+    canonical_merge_plan,
+    pair_threshold,
+)
 from peritus.infrastructure.anthropic_batch import (
     BuildExecution,
     build_execution,
     current_execution,
     provider_error_message,
+    record_provider_error,
     terminal_provider_error,
 )
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.embeddings import embed_in_batches
+from peritus.infrastructure.wikimedia import WikimediaClient
 from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_sources
 from peritus.search.readiness import Readiness, set_readiness
@@ -393,6 +404,10 @@ class ExpertBuilder:
         # validator. Held here so they reach the ledger as explicit drops with a
         # reason instead of disappearing between fetching and validation.
         self._content_duplicates: list[DroppedSource] = []
+        # The picture finder, started off `plan_ready` and awaited before the
+        # persona stage. Held on the instance so the `finally` in `build` can
+        # cancel it when the build is cancelled or fails.
+        self._picture_task: asyncio.Task | None = None
 
     def _build_fetchers(
         self,
@@ -441,8 +456,48 @@ class ExpertBuilder:
         has just deleted the previous corpus, so an expert being rebuilt must
         stop advertising itself as chattable until its new chunks land.
         """
-        execution = self._execution or resolve_execution(expert)
         await set_readiness(self._pool, expert.id, Readiness.PENDING)
+        return await self._run(expert, on_event, lambda: self._build(expert, on_event))
+
+    async def resume(
+        self,
+        expert: Expert,
+        from_readiness: Readiness,
+        on_event: EventCallback | None = None,
+    ) -> BuildResult:
+        """Finish a build whose corpus an earlier attempt already paid for.
+
+        A retry used to start from nothing: the worker wiped the corpus before
+        every attempt, so a persona call that failed four seconds into its stage
+        destroyed a finished PRO build (66 sources, 2,921 graph nodes) and then
+        re-ran planning into the same provider refusal. Readiness is recorded
+        as each stage lands, so a retry can start where the last attempt got to:
+
+        - ``graph_ready`` — only the persona is missing; run that and the gate.
+        - ``chat_ready``  — chunks are embedded; rebuild the graph from them
+          (whatever part of it the failed attempt wrote is discarded first),
+          then the persona.
+
+        Readiness is *not* reset to pending here: the corpus stays chattable
+        for the whole resumed attempt, which is the point.
+        """
+        if from_readiness is Readiness.PENDING:
+            return await self.build(expert, on_event)
+        await _emit_event(
+            on_event, {"type": "build_resumed", "from_readiness": from_readiness.value}
+        )
+        return await self._run(
+            expert, on_event, lambda: self._resume(expert, from_readiness, on_event)
+        )
+
+    async def _run(
+        self,
+        expert: Expert,
+        on_event: EventCallback | None,
+        body: Callable[[], Coroutine[Any, Any, BuildResult]],
+    ) -> BuildResult:
+        """The execution policy, fixed for the whole run, around a build body."""
+        execution = self._execution or resolve_execution(expert)
         await _emit_event(
             on_event,
             {
@@ -455,8 +510,17 @@ class ExpertBuilder:
         logger.info(
             "Building expert %d (%r) with execution=%s", expert.id, expert.name, execution.value
         )
-        with build_execution(execution):
-            return await self._build(expert, on_event)
+        try:
+            with build_execution(execution):
+                return await body()
+        finally:
+            # A cancelled or failed build must not leave an HTTP client and a
+            # pending write behind it. Cancelling a task that already finished
+            # is a no-op, which is the common case.
+            task = self._picture_task
+            self._picture_task = None
+            if task is not None and not task.done():
+                task.cancel()
 
     async def _build(
         self,
@@ -486,6 +550,15 @@ class ExpertBuilder:
                 "type": "plan_ready",
                 "key_concepts": key_concepts,
             },
+        )
+
+        # The expert's picture. Started here, the moment the topic and the key
+        # concepts both exist, so the rail's tile stops being a monogram within
+        # seconds rather than at the end of a build that takes minutes. It runs
+        # beside discovery, never blocks it, and cannot fail it — see
+        # `_find_and_store_picture`.
+        self._picture_task = asyncio.create_task(
+            self._find_and_store_picture(expert, topic, key_concepts, on_event)
         )
 
         weights = {name: p["weight"] for name, p in plan["fetcher_plans"].items()}
@@ -606,24 +679,211 @@ class ExpertBuilder:
             },
         )
 
-        # ── Best-effort enrichment ───────────────────────────────────────────
-        # From here on the expert already answers questions. A failure in graph
-        # extraction or persona generation must not fail — and via the worker's
-        # retry loop, *re-run* — a build whose corpus is fetched, validated,
-        # embedded and paid for. Each stage degrades independently: a graph
-        # failure leaves a chat-ready expert without graph expansion, a persona
-        # failure leaves a nameless one. Both are recoverable later without a
-        # rebuild (regenerate_persona; a future graph backfill), and both emit a
-        # `stage_degraded` event so the person watching knows what they got.
+        return await self._enrich_and_finish(
+            expert,
+            chunks_for_graph=all_chunks_for_graph,
+            persona_sources=[
+                (vs.title, vs.content_type, vs.quality_score, vs.key_claims) for vs in passed
+            ],
+            total_sources=total_sources,
+            total_chunks=total_chunks,
+            avg_quality=avg_quality,
+            dropped_count=len(dropped),
+            on_event=on_event,
+        )
 
+    async def _resume(
+        self,
+        expert: Expert,
+        from_readiness: Readiness,
+        on_event: EventCallback | None,
+    ) -> BuildResult:
+        """The enrichment stages only, off the corpus already in the database."""
+        current = await self._repo.get_by_id(expert.id) or expert
+        persona_sources = await self._repo.passed_source_digest(expert.id)
+        if not persona_sources:
+            raise IncompleteBuildError(["a corpus (nothing to resume from)"])
+
+        chunks_for_graph: list[tuple[TextChunk, int]] | None = None
+        if from_readiness is Readiness.CHAT_READY:
+            # A graph stage that died part-way may have written some of its
+            # nodes. The graph is built whole, so it is cleared whole.
+            await self._graph_repo.delete_graph(expert.id)
+            chunks_for_graph = await self._load_chunks(expert.id)
+            if not chunks_for_graph:
+                raise IncompleteBuildError(["chunks (nothing to resume from)"])
+
+        logger.info(
+            "Resuming expert %d from %s: %d source(s), %d chunk(s)",
+            expert.id, from_readiness.value, current.source_count, current.chunk_count,
+        )
+        return await self._enrich_and_finish(
+            expert,
+            chunks_for_graph=chunks_for_graph,
+            persona_sources=persona_sources,
+            total_sources=current.source_count,
+            total_chunks=current.chunk_count,
+            avg_quality=current.avg_quality,
+            dropped_count=0,
+            on_event=on_event,
+            existing_graph=(current.node_count, current.edge_count),
+        )
+
+    async def _enrich_and_finish(
+        self,
+        expert: Expert,
+        *,
+        chunks_for_graph: list[tuple[TextChunk, int]] | None,
+        persona_sources: list[tuple[str, str, float | None, list[str]]],
+        total_sources: int,
+        total_chunks: int,
+        avg_quality: float | None,
+        dropped_count: int,
+        on_event: EventCallback | None,
+        existing_graph: tuple[int, int] = (0, 0),
+    ) -> BuildResult:
+        """Graph, persona and the completeness gate, for a chat-ready corpus.
+
+        ``chunks_for_graph=None`` means the graph already exists (a resume from
+        ``graph_ready``) and ``existing_graph`` carries its counts.
+        """
+        topic = expert.topic
+
+        # ── Enrichment ───────────────────────────────────────────────────────
+        # From here on the expert already answers questions. Each stage below
+        # degrades rather than raising, so the corpus keeps the readiness it has
+        # reached; the completeness gate at the end decides whether the build
+        # succeeded. A retry of a build that fails the gate resumes from that
+        # readiness (see `resume`) rather than refetching the corpus.
+
+        node_count, edge_count = existing_graph
+        graph_built = chunks_for_graph is None
+        if chunks_for_graph is not None:
+            node_count, edge_count, graph_built = await self._graph_stage(
+                expert, chunks_for_graph, on_event
+            )
+
+        await self._repo.update_counts(
+            expert.id,
+            source_count=total_sources,
+            chunk_count=total_chunks,
+            node_count=node_count,
+            edge_count=edge_count,
+            avg_quality=avg_quality,
+        )
+
+        if graph_built and chunks_for_graph is not None:
+            # ── Graph-ready ──────────────────────────────────────────────────
+            # Retrieval transparently upgrades from here: the same chat request
+            # now finds anchor nodes for its hits, so passages arrive with
+            # neighbouring concepts, relationships, and contradiction flags. On
+            # a degraded graph the expert simply stays chat-ready.
+            await set_readiness(self._pool, expert.id, Readiness.GRAPH_READY)
+            await _emit_event(
+                on_event,
+                {
+                    "type": "graph_ready",
+                    "nodes": node_count,
+                    "edges": edge_count,
+                    "graph_expanded": True,
+                },
+            )
+
+        # In any real build this finished minutes ago, during discovery. The
+        # await exists so `picture_ready` is in the durable log before `done`,
+        # which is what a client replaying the log from seq 0 depends on.
+        await self._await_picture()
+
+        await _emit_event(on_event, {"type": "stage", "stage": 5, "name": "persona"})
+        persona_name: str | None = None
+        # Retried in place. The persona is one cheap call, and it is now required
+        # for the expert to be ready — so letting a single blip here condemn a
+        # finished corpus to a full rebuild would be absurdly expensive. The
+        # graph stage above is not retried this way: its calls already retry
+        # individually inside gather_claude_calls, and re-running all of it costs
+        # more than re-running the build.
+        for attempt in range(1, _PERSONA_ATTEMPTS + 1):
+            try:
+                top_nodes = await self._graph_repo.get_top_nodes(expert.id, 20)
+                persona = await _generate_persona(topic, persona_sources, top_nodes)
+                await self._repo.update_persona(
+                    expert.id,
+                    persona_name=persona["name"],
+                    persona_bio=persona["bio"],
+                    persona_style=persona["style"],
+                )
+                persona_name = persona["name"]
+                await _emit_event(on_event, {"type": "persona_ready", "name": persona_name})
+                break
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                record_provider_error(exc)
+                logger.warning(
+                    "Persona generation attempt %d/%d failed for expert %d (%s: %s)",
+                    attempt, _PERSONA_ATTEMPTS, expert.id, type(exc).__name__, exc,
+                    exc_info=attempt == _PERSONA_ATTEMPTS,
+                )
+                if attempt < _PERSONA_ATTEMPTS:
+                    await asyncio.sleep(2 ** (attempt - 1))
+
+        # ── Completeness gate ────────────────────────────────────────────────
+        # An expert is "ready" only with all three: concepts, a concept graph,
+        # and a persona. Short of that the job does not report success, so the
+        # expert is never advertised as ready on a half-finished build. The
+        # corpus survives the raise only because the worker's retry resumes from
+        # the recorded readiness instead of resetting — it used to reset, and a
+        # four-second persona failure wiped a finished PRO build that way.
+        #
+        # A persona that failed because the provider refused every request is
+        # not worth a retry at all: the retry meets the same refusal. That
+        # raises BuildError, which the worker does not retry, and says why.
+        missing: list[str] = []
+        if not graph_built or node_count <= 0:
+            missing.append("a concept graph")
+        if not persona_name:
+            missing.append("a persona/description")
+        if missing:
+            logger.error(
+                "Expert %d built %d source(s) and %d chunk(s) but is INCOMPLETE: "
+                "missing %s — not marking ready",
+                expert.id, total_sources, total_chunks, " and ".join(missing),
+            )
+            if not persona_name:
+                _raise_if_provider_down("Persona generation")
+            raise IncompleteBuildError(missing)
+
+        return BuildResult(
+            expert_id=expert.id,
+            source_count=total_sources,
+            dropped_count=dropped_count,
+            chunk_count=total_chunks,
+            node_count=node_count,
+            edge_count=edge_count,
+            avg_quality=avg_quality,
+            persona_name=persona_name,
+        )
+
+    async def _graph_stage(
+        self,
+        expert: Expert,
+        chunks_for_graph: list[tuple[TextChunk, int]],
+        on_event: EventCallback | None,
+    ) -> tuple[int, int, bool]:
+        """Extract, resolve and reconcile the concept graph.
+
+        Returns ``(node_count, edge_count, built)``. Degrades rather than
+        raising: a graph failure leaves a chat-ready corpus standing, and the
+        completeness gate decides what that means for the build.
+        """
         # Stage 4: Graph extraction
-        total_batches = math.ceil(len(all_chunks_for_graph) / settings.GRAPH_BATCH_SIZE)
+        total_batches = math.ceil(len(chunks_for_graph) / settings.GRAPH_BATCH_SIZE)
         await _emit_event(
             on_event, {"type": "stage", "stage": 4, "name": "graph", "total_batches": total_batches}
         )
 
-        chunks_only = [c for c, _ in all_chunks_for_graph]
-        ids_only = [i for _, i in all_chunks_for_graph]
+        chunks_only = [c for c, _ in chunks_for_graph]
+        ids_only = [i for _, i in chunks_for_graph]
 
         async def _on_graph_batch(labels: list[str], edge_count: int) -> None:
             await _emit_event(
@@ -631,10 +891,9 @@ class ExpertBuilder:
             )
 
         node_count = edge_count = 0
-        graph_built = False
         try:
             extractions = await extract_graph_from_chunks(
-                topic, chunks_only, ids_only, on_batch=_on_graph_batch
+                expert.topic, chunks_only, ids_only, on_batch=_on_graph_batch
             )
             node_count, edge_count = await self._graph_repo.bulk_insert_from_extractions(
                 expert.id, extractions, embedder=embed_in_batches
@@ -663,7 +922,7 @@ class ExpertBuilder:
             # Edge ordering is evidence counted off the corpus, not a weight the
             # model asserted, so it is computed here once the graph is final.
             await self._graph_repo.recompute_edge_evidence(expert.id)
-            graph_built = True
+            return node_count, edge_count, True
         except asyncio.CancelledError:
             raise  # cancellation/shutdown is the worker's business, not a degrade
         except Exception as exc:
@@ -680,96 +939,89 @@ class ExpertBuilder:
                     ),
                 },
             )
+        return node_count, edge_count, False
 
-        await self._repo.update_counts(
-            expert.id,
-            source_count=total_sources,
-            chunk_count=total_chunks,
-            node_count=node_count,
-            edge_count=edge_count,
-            avg_quality=avg_quality,
-        )
+    # ── the expert's picture ────────────────────────────────────────────────
 
-        if graph_built:
-            # ── Graph-ready ──────────────────────────────────────────────────
-            # Retrieval transparently upgrades from here: the same chat request
-            # now finds anchor nodes for its hits, so passages arrive with
-            # neighbouring concepts, relationships, and contradiction flags. On
-            # a degraded graph the expert simply stays chat-ready.
-            await set_readiness(self._pool, expert.id, Readiness.GRAPH_READY)
+    async def _find_and_store_picture(
+        self,
+        expert: Expert,
+        topic: str,
+        key_concepts: list[str],
+        on_event: EventCallback | None,
+    ) -> None:
+        """Find a licensed picture of the subject and store it. Never raises.
+
+        Everything about this is deliberately outside the build's contract. It
+        is not a stage, it does not participate in the completeness gate, and
+        the only trace it leaves either way is one durable event — so the build
+        log says which picture was chosen and why, or why there is none, and an
+        expert with no picture is simply an expert that still shows its
+        monogram.
+
+        The one exception re-raised is ``CancelledError``: cancellation is the
+        worker shutting the build down, and swallowing it would leave this
+        coroutine running after the build it belongs to has gone.
+        """
+        if not settings.PICTURE_ENABLED:
             await _emit_event(
-                on_event,
-                {
-                    "type": "graph_ready",
-                    "nodes": node_count,
-                    "edges": edge_count,
-                    "graph_expanded": True,
-                },
+                on_event, {"type": "picture_skipped", "reason": "disabled"}
             )
+            return
 
-        await _emit_event(on_event, {"type": "stage", "stage": 5, "name": "persona"})
-        persona_name: str | None = None
-        # Retried in place. The persona is one cheap call, and it is now required
-        # for the expert to be ready — so letting a single blip here condemn a
-        # finished corpus to a full rebuild would be absurdly expensive. The
-        # graph stage above is not retried this way: its calls already retry
-        # individually inside gather_claude_calls, and re-running all of it costs
-        # more than re-running the build.
-        for attempt in range(1, _PERSONA_ATTEMPTS + 1):
-            try:
-                top_nodes = await self._graph_repo.get_top_nodes(expert.id, 20)
-                persona = await _generate_persona(topic, passed, top_nodes)
-                await self._repo.update_persona(
-                    expert.id,
-                    persona_name=persona["name"],
-                    persona_bio=persona["bio"],
-                    persona_style=persona["style"],
-                )
-                persona_name = persona["name"]
-                await _emit_event(on_event, {"type": "persona_ready", "name": persona_name})
-                break
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                logger.warning(
-                    "Persona generation attempt %d/%d failed for expert %d (%s: %s)",
-                    attempt, _PERSONA_ATTEMPTS, expert.id, type(exc).__name__, exc,
-                    exc_info=attempt == _PERSONA_ATTEMPTS,
-                )
-                if attempt < _PERSONA_ATTEMPTS:
-                    await asyncio.sleep(2 ** (attempt - 1))
+        pictures = ExpertPictureRepository(self._pool)
+        try:
+            # A rebuild does not re-find: the topic has not changed, and the
+            # owner may have chosen this one. Only an explicit refresh does.
+            if await pictures.exists(expert.id):
+                return
 
-        # ── Completeness gate ────────────────────────────────────────────────
-        # An expert is "ready" only with all three: concepts, a concept graph,
-        # and a persona. Short of that the corpus stays exactly where it is —
-        # readiness is already recorded, so nothing is thrown away and chat still
-        # works — but the job does not report success, so the expert is never
-        # advertised as ready on a half-finished build. Raising here (rather than
-        # degrading, as these stages used to) routes through the worker's normal
-        # retry path.
-        missing: list[str] = []
-        if not graph_built or node_count <= 0:
-            missing.append("a concept graph")
-        if not persona_name:
-            missing.append("a persona/description")
-        if missing:
-            logger.error(
-                "Expert %d built %d source(s) and %d chunk(s) but is INCOMPLETE: "
-                "missing %s — not marking ready",
-                expert.id, total_sources, total_chunks, " and ".join(missing),
+            async with WikimediaClient() as client:
+                found = await find_picture(client, topic, key_concepts)
+            await pictures.upsert(expert.id, found, chosen_by="build")
+        except asyncio.CancelledError:
+            raise
+        except PictureSkipped as skip:
+            await _emit_event(
+                on_event, {"type": "picture_skipped", "reason": skip.reason}
             )
-            raise IncompleteBuildError(missing)
+            return
+        except Exception as exc:
+            logger.warning(
+                "Picture search failed for expert %d (%s: %s)",
+                expert.id, type(exc).__name__, exc,
+            )
+            await _emit_event(
+                on_event, {"type": "picture_skipped", "reason": "provider_unavailable"}
+            )
+            return
 
-        return BuildResult(
-            expert_id=expert.id,
-            source_count=total_sources,
-            dropped_count=len(dropped),
-            chunk_count=total_chunks,
-            node_count=node_count,
-            edge_count=edge_count,
-            avg_quality=avg_quality,
-            persona_name=persona_name,
+        logger.info(
+            "Picture for expert %d (%r): %s from %s (%s)",
+            expert.id, expert.name, found.file_name, found.page_title, found.license,
         )
+        await _emit_event(on_event, {
+            "type": "picture_ready",
+            "provider": found.provider,
+            "title": found.page_title,
+            "page_url": found.page_url,
+            "license": found.license,
+            "version": found.version,
+        })
+
+    async def _await_picture(self) -> None:
+        """Let the picture task finish, but never wait on it indefinitely.
+
+        ``find_picture`` already carries its own deadline, so this second bound
+        only covers the write and exists so a wedged task cannot hold a finished
+        build open. A timeout here abandons the task; the `finally` in `build`
+        cancels it.
+        """
+        task = self._picture_task
+        if task is None or task.done():
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(task), timeout=settings.PICTURE_TIMEOUT)
 
     # ── the discovery loop ──────────────────────────────────────────────────
 
@@ -1225,11 +1477,16 @@ class ExpertBuilder:
     async def _load_upload_chunks(
         self, expert_id: int
     ) -> list[tuple[TextChunk, int]]:
-        """Chunks belonging to user-supplied sources that survived the reset.
+        """Chunks belonging to user-supplied sources that survived the reset."""
+        return await self._load_chunks(expert_id, uploads_only=True)
 
-        Returns ``(TextChunk, chunk_db_id)`` pairs in the shape the graph stage
-        consumes. ``context_text`` is not needed — graph extraction reads the
-        chunk text — so it is not selected.
+    async def _load_chunks(
+        self, expert_id: int, uploads_only: bool = False
+    ) -> list[tuple[TextChunk, int]]:
+        """Stored chunks, as ``(TextChunk, chunk_db_id)`` pairs for the graph stage.
+
+        ``context_text`` is not needed — graph extraction reads the chunk text —
+        so it is not selected.
         """
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
@@ -1237,10 +1494,11 @@ class ExpertBuilder:
                 SELECT c.id, c.text, c.sequence_n, c.chunk_meta
                 FROM source_chunks c
                 JOIN sources s ON s.id = c.source_id
-                WHERE c.expert_id = $1 AND s.discovered_via = 'upload'
+                WHERE c.expert_id = $1
+                  AND (NOT $2 OR s.discovered_via = 'upload')
                 ORDER BY c.source_id, c.sequence_n
                 """,
-                expert_id,
+                expert_id, uploads_only,
             )
         out: list[tuple[TextChunk, int]] = []
         for r in rows:
@@ -1775,32 +2033,58 @@ async def _reconcile_claims(
     concepts and an index between them is already useful, so a failure here
     leaves that standing rather than degrading the whole stage and sending the
     build back through the worker's retry loop.
+
+    ``claims_reconciled`` is emitted on every run, including the ones that
+    insert nothing. It used to fire only when a relation was inserted, and
+    production reconciliation has never inserted one: the church-fathers build
+    spent 23 seconds in this stage — too short for ~120 model calls to have
+    run, and four seconds before the API refused its persona call — and the
+    log could not say whether the calls failed, returned nothing, or returned
+    relations that were all rejected. The event now says which.
     """
+    stats = ReconcileStats()
+    groups: list = []
+    inserted = 0
+    error: str | None = None
     try:
         groups = await graph_repo.claims_by_concept(expert_id)
-        if not groups:
-            return 0
-        relations = await reconcile_claims(topic, groups)
-        inserted = await graph_repo.insert_relations(expert_id, relations)
+        if groups:
+            relations = await reconcile_claims(topic, groups, stats=stats)
+            inserted = await graph_repo.insert_relations(expert_id, relations)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
         logger.warning("Claim reconciliation failed for expert %d: %s", expert_id, exc)
-        return 0
 
-    if inserted:
-        await _emit_event(
-            on_event,
-            {"type": "claims_reconciled", "concepts": len(groups), "relations": inserted},
+    parsed = stats.relations_returned - sum(stats.rejected.values())
+    event: dict[str, Any] = {
+        "type": "claims_reconciled",
+        "concepts": len(groups),
+        "relations": inserted,
+        **stats.as_event(),
+        # Parsed but refused at insert (endpoint types, missing property).
+        "relations_refused_at_insert": max(0, parsed - inserted),
+    }
+    if error:
+        event["error"] = error
+    await _emit_event(on_event, event)
+
+    if stats.concepts_examined and stats.calls_failed == stats.concepts_examined:
+        provider = terminal_provider_error()
+        logger.error(
+            "Reconciliation for expert %d: every one of %d call(s) failed%s",
+            expert_id, stats.calls_failed,
+            f" — {provider_error_message(provider)}" if provider else "",
         )
     logger.info(
-        "Reconciled %d concept(s) into %d claim relation(s) for expert %d",
-        len(groups), inserted, expert_id,
+        "Reconciliation for expert %d: %d concept group(s), %d eligible, %d examined, "
+        "%d call(s) failed, %d relation(s) returned, %d rejected %s, %d inserted",
+        expert_id, len(groups), stats.concepts_eligible, stats.concepts_examined,
+        stats.calls_failed, stats.relations_returned, sum(stats.rejected.values()),
+        dict(stats.rejected), inserted,
     )
     return inserted
-
-
-_RESOLVE_THRESHOLD = 0.93
 
 
 async def _resolve_entities(
@@ -1808,7 +2092,11 @@ async def _resolve_entities(
     graph_repo: GraphRepository,
     on_event: EventCallback | None = None,
 ) -> int:
-    """Merge semantically near-duplicate graph nodes using embedding cosine similarity."""
+    """Merge duplicate graph nodes: by canonical label, then by embedding.
+
+    See :mod:`peritus.graph.resolution` for the rules and why cosine alone was
+    not enough.
+    """
     try:
         import numpy as np
     except ImportError:
@@ -1819,11 +2107,32 @@ async def _resolve_entities(
     if len(nodes) < 2:
         return 0
 
-    labels = [n["label"] for n in nodes]
+    merge_count = 0
 
-    # Node embeddings are persisted at insert time; only nodes that missed
-    # embedding (e.g. an API blip during insert) get re-embedded here. Batched
-    # so a graph whose embeddings all failed at insert can't overflow one call.
+    async def _merge(keep: dict, drop: dict, how: str) -> None:
+        nonlocal merge_count
+        await graph_repo.merge_nodes(expert_id, keep["id"], drop["id"])
+        merge_count += 1
+        logger.debug("Merged node %r → %r (%s)", drop["label"], keep["label"], how)
+        if on_event and merge_count % 25 == 0:
+            await _emit_event(on_event, {"type": "resolve_progress", "merged": merge_count})
+
+    # 1. Same concept by label: "Varroa mites" / "Varroa mite",
+    #    "Deformed Wing Virus (DWV)" / "DWV (Deformed Wing Virus)".
+    label_merged: set[int] = set()
+    for keep, drops in canonical_merge_plan(nodes):
+        for drop in drops:
+            await _merge(keep, drop, "canonical label")
+            label_merged.add(drop["id"])
+    by_label = merge_count
+    nodes = [n for n in nodes if n["id"] not in label_merged]
+    if len(nodes) < 2:
+        return merge_count
+
+    # 2. Same thing by meaning. Node embeddings are persisted at insert time;
+    # only nodes that missed embedding (e.g. an API blip during insert) get
+    # re-embedded here. Batched so a graph whose embeddings all failed at insert
+    # can't overflow one call.
     missing = [i for i, n in enumerate(nodes) if n.get("embedding") is None]
     if missing:
         texts = [
@@ -1833,7 +2142,7 @@ async def _resolve_entities(
             fresh = await embed_in_batches(texts)
         except Exception as exc:
             logger.warning("Entity resolution embedding failed: %s", exc)
-            return 0
+            return merge_count
         for i, emb in zip(missing, fresh, strict=True):
             nodes[i]["embedding"] = emb
 
@@ -1843,37 +2152,30 @@ async def _resolve_entities(
     normalized = matrix / norms
     sim = normalized @ normalized.T  # (N, N)
 
-    # Find all above-threshold pairs at C speed (upper triangle, i < j). The old
-    # pure-Python O(N²) double loop had no ``await`` on the common no-merge path,
-    # so on a large graph it blocked the event loop — starving the job heartbeat
-    # and freezing the process — for the whole pass. np.where keeps row-major
-    # order (increasing i, then j), preserving the original merge semantics.
-    rows, cols = np.where(np.triu(sim >= _RESOLVE_THRESHOLD, k=1))
+    # Candidate pairs at C speed (upper triangle, i < j) at the lowest threshold
+    # any pair could use; the per-pair rule then decides. The old pure-Python
+    # O(N²) double loop had no ``await`` on the common no-merge path, so on a
+    # large graph it blocked the event loop — starving the job heartbeat — for
+    # the whole pass. np.where keeps row-major order (increasing i, then j).
+    floor = min(RESOLVE_THRESHOLD, RESOLVE_THRESHOLD_SAME_HEAD)
+    rows, cols = np.where(np.triu(sim >= floor, k=1))
 
     merged_away: set[int] = set()
-    merge_count = 0
-
     for i, j in zip(rows.tolist(), cols.tolist(), strict=True):
-        keep_id, drop_id = nodes[i]["id"], nodes[j]["id"]
-        if keep_id in merged_away or drop_id in merged_away:
+        keep, drop = nodes[i], nodes[j]
+        if keep["id"] in merged_away or drop["id"] in merged_away:
             continue
-        await graph_repo.merge_nodes(expert_id, keep_id, drop_id)
-        merged_away.add(drop_id)
-        merge_count += 1
-        logger.debug(
-            "Merged node %r → %r (sim=%.3f)",
-            labels[j],
-            labels[i],
-            float(sim[i, j]),
-        )
-        if on_event and merge_count % 25 == 0:
-            await _emit_event(on_event, {"type": "resolve_progress", "merged": merge_count})
+        threshold = pair_threshold(keep, drop)
+        if threshold is None or sim[i, j] < threshold:
+            continue
+        await _merge(keep, drop, f"sim={float(sim[i, j]):.3f}")
+        merged_away.add(drop["id"])
 
     if merge_count:
         logger.info(
-            "Entity resolution: merged %d duplicate nodes for expert %d",
-            merge_count,
-            expert_id,
+            "Entity resolution: merged %d duplicate nodes for expert %d "
+            "(%d by label, %d by embedding)",
+            merge_count, expert_id, by_label, merge_count - by_label,
         )
     return merge_count
 
@@ -2120,15 +2422,11 @@ async def generate_persona(
 
 async def _generate_persona(
     topic: str,
-    passed: list[ValidatedSource],
+    sources: list[tuple[str, str, float | None, list[str]]],
     top_nodes: list[dict],
 ) -> dict:
-    """Persona for a build that has the validated sources in hand."""
-    return await generate_persona(
-        topic,
-        [(vs.title, vs.content_type, vs.quality_score, vs.key_claims) for vs in passed],
-        top_nodes,
-    )
+    """The build's persona call — a seam tests patch."""
+    return await generate_persona(topic, sources, top_nodes)
 
 
 # A corpus that is overwhelmingly tertiary answers everything second-hand: it
@@ -2234,11 +2532,12 @@ _stage_started: ContextVar[tuple[str, float] | None] = ContextVar(
 # graph progress) are high-volume and already visible in the durable event log —
 # logging those too would bury the ones that matter.
 _LOGGED_EVENTS = frozenset({
-    "stage", "plan_ready", "discovery_started", "round_started",
+    "stage", "plan_ready", "picture_ready", "picture_skipped",
+    "discovery_started", "round_started",
     "feedback_queries", "dedup_done", "triage_done", "fetch_done",
     "validate_done", "coverage_report", "discovery_done", "snowball_done",
     "corpus_warning", "chat_ready", "graph_ready", "entities_resolved",
-    "claims_reconciled",
+    "claims_reconciled", "build_resumed",
     "persona_ready", "stage_degraded", "error", "cancelled", "done",
 })
 

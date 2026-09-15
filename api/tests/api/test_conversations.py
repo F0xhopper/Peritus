@@ -115,6 +115,7 @@ def test_title_short_question_verbatim():
 
 def test_title_collapses_whitespace():
     assert _title_from_question("  What\n is   virtue? ") == "What is virtue?"
+    assert _title_from_question("what is the potency") == "What is the potency"
 
 
 def test_title_truncates_at_word_boundary_with_ellipsis():

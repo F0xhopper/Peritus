@@ -1,0 +1,11 @@
+# The app itself is behind a session and returns a redirect to anyone without
+# one, so there is nothing for a crawler there — but saying so explicitly keeps
+# the marketing pages' crawl budget on the marketing pages.
+User-agent: *
+Allow: /
+Disallow: /experts
+Disallow: /chats
+Disallow: /settings
+Disallow: /admin
+Disallow: /login
+Disallow: /api/

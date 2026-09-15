@@ -328,6 +328,14 @@ pub enum ChatEvent {
 mod tests {
     use super::*;
 
+    #[test]
+    fn chat_done_parses_with_the_truncated_flag() {
+        // `done` gained `truncated` (the answer hit the length limit); an
+        // older client must still read it as `Done`, not `Unknown`.
+        let raw = r#"{"type": "done", "truncated": true}"#;
+        assert!(matches!(serde_json::from_str::<ChatEvent>(raw).unwrap(), ChatEvent::Done));
+    }
+
     // Payloads below are verbatim from a real server build stream — they pin
     // the serde field names against what builder.py/worker.py actually emit.
 

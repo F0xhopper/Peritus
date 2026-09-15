@@ -59,7 +59,7 @@ async def stream_expert_answer(
     # Retrieval pipeline (shared with ChatAgent.respond), statuses streamed.
     agent = ChatAgent(pool)
     ctx: RetrievedContext | None = None
-    async for kind, payload in agent.retrieve(expert, question):
+    async for kind, payload in agent.retrieve(expert, question, history):
         if kind == "status":
             yield {"type": "status", "message": payload}
         elif isinstance(payload, RetrievedContext):
@@ -88,6 +88,11 @@ async def stream_expert_answer(
         async for text in stream.text_stream:
             answer_parts.append(text)
             yield {"type": "token", "text": text}
+        # Why the model stopped. `max_tokens` means the answer was cut off at the
+        # tier's length limit: it ends mid-sentence, and without this it was
+        # stored and shown as a finished answer.
+        final = await stream.get_final_message()
+        truncated = final.stop_reason == "max_tokens"
 
     # Resolve citations: only passages the answer actually cited, with the
     # passage numbers preserved so inline [n] matches the rendered list.
@@ -125,6 +130,7 @@ async def stream_expert_answer(
             answer_text=answer_text,
             has_contradiction=ctx.has_contradiction,
             graph_ready=graph_ready,
+            dangling=dangling,
         )
         header, rows = audit_db_rows(audit_payload, expert.id, conversation_id, question)
         audit_id = await AuditService(pool).record_answer_audit(header, rows)
@@ -137,4 +143,6 @@ async def stream_expert_answer(
     except Exception:
         logger.warning("Retrieval audit unavailable for expert %d", expert.id, exc_info=True)
 
-    yield {"type": "done"}
+    # `truncated` rides on `done` rather than being its own event, so a client
+    # that predates it simply ignores an extra field.
+    yield {"type": "done", "truncated": truncated}

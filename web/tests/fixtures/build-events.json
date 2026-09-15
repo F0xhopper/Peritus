@@ -1,0 +1,216 @@
+{
+  "created": {
+    "type": "created",
+    "slug": "varroa-mite-control-in-temperate-beekeeping",
+    "expert_id": 41,
+    "job_id": 118,
+    "tier": "standard",
+    "topic": "Varroa mite control in temperate beekeeping"
+  },
+  "build_started": { "type": "build_started", "attempt": 1, "max_attempts": 3 },
+  "execution_mode": { "type": "execution_mode", "mode": "background", "batched": true },
+  "stage_plan": { "type": "stage", "stage": 0, "name": "plan" },
+  "plan_ready": {
+    "type": "plan_ready",
+    "key_concepts": [
+      "varroa biology",
+      "acaricide resistance",
+      "drone brood removal",
+      "viral co-infection"
+    ]
+  },
+  "picture_ready": {
+    "type": "picture_ready",
+    "provider": "wikipedia",
+    "title": "Varroa destructor",
+    "page_url": "https://en.wikipedia.org/wiki/Varroa_destructor",
+    "license": "CC BY-SA 2.0",
+    "version": "9f3a1c2b7d4e"
+  },
+  "picture_skipped": {
+    "type": "picture_skipped",
+    "reason": "no_candidate"
+  },
+  "discovery_started": {
+    "type": "discovery_started",
+    "fetchers": ["wikipedia", "arxiv", "openalex", "pubmed", "web", "pdf"],
+    "active": ["openalex", "pubmed", "web", "pdf"]
+  },
+  "round_started": { "type": "round_started", "round": 1, "reason": "coverage short" },
+  "fetcher_done": {
+    "type": "fetcher_done",
+    "round": 0,
+    "name": "openalex",
+    "count": 34,
+    "skipped": false,
+    "reason": null,
+    "queries": 3
+  },
+  "fetcher_skipped": {
+    "type": "fetcher_done",
+    "round": 0,
+    "name": "gutenberg",
+    "count": 0,
+    "skipped": true,
+    "reason": "no public-domain works on this topic",
+    "queries": 1
+  },
+  "dedup_done": {
+    "type": "dedup_done",
+    "round": 0,
+    "by_identifier": 6,
+    "by_url": 11,
+    "already_seen": 0
+  },
+  "triage_done": {
+    "type": "triage_done",
+    "round": 0,
+    "candidates": 104,
+    "ranked": 41,
+    "budget": 30
+  },
+  "fetch_progress": { "type": "fetch_progress", "round": 0, "fetched": 18, "budget": 30 },
+  "fetch_done": {
+    "type": "fetch_done",
+    "round": 0,
+    "fetched": 30,
+    "content_duplicates": 2,
+    "budget": 30,
+    "estimated_ingest_usd": 0.91
+  },
+  "stage_validate": {
+    "type": "stage",
+    "stage": 2,
+    "name": "validate",
+    "round": 0,
+    "total": 30
+  },
+  "source_validated_keep": {
+    "type": "source_validated",
+    "round": 0,
+    "title": "Varroa destructor and honeybee viral loads: a five-year cohort",
+    "source_type": "openalex",
+    "q": 8.5,
+    "r": 9.0,
+    "passed": true,
+    "drop_reason": null
+  },
+  "source_validated_drop": {
+    "type": "source_validated",
+    "round": 0,
+    "title": "Top 10 beekeeping tips for spring",
+    "source_type": "web",
+    "q": 2.5,
+    "r": 4.0,
+    "passed": false,
+    "drop_reason": "Secondary commentary; no primary data."
+  },
+  "source_reviewed": {
+    "type": "source_reviewed",
+    "round": 0,
+    "title": "Amitraz resistance in field populations, 2019-2024",
+    "source_type": "pubmed",
+    "first_q": 5.5,
+    "first_r": 5.5,
+    "q": 8.0,
+    "r": 8.5,
+    "passed": true,
+    "reversed": true,
+    "review_model": "claude-sonnet-5"
+  },
+  "validate_done": { "type": "validate_done", "round": 0, "passed": 21, "dropped": 9 },
+  "coverage_report": {
+    "type": "coverage_report",
+    "round": 0,
+    "concepts": [
+      { "concept": "varroa biology", "met": true, "sources": 4, "shortfall": 0 },
+      { "concept": "acaricide resistance", "met": false, "sources": 1, "shortfall": 1 }
+    ]
+  },
+  "feedback_queries": {
+    "type": "feedback_queries",
+    "round": 1,
+    "queries": [
+      "synthetic acaricide rotation efficacy",
+      "amitraz tolerance monitoring assay",
+      "flumethrin cross resistance"
+    ]
+  },
+  "snowball_done": { "type": "snowball_done", "round": 1, "candidates": 6 },
+  "discovery_done": {
+    "type": "discovery_done",
+    "rounds": 2,
+    "stop_reason": "targets_met",
+    "coverage_met": true
+  },
+  "corpus_warning": {
+    "type": "corpus_warning",
+    "message": "Two concepts are covered by a single source each."
+  },
+  "stage_chunk": { "type": "stage", "stage": 3, "name": "chunk", "total": 21 },
+  "source_ingested": {
+    "type": "source_ingested",
+    "title": "Varroa destructor and honeybee viral loads: a five-year cohort",
+    "chunks": 34,
+    "total_chunks": 34
+  },
+  "chat_ready": {
+    "type": "chat_ready",
+    "sources": 21,
+    "chunks": 412,
+    "graph_expanded": false
+  },
+  "stage_graph": { "type": "stage", "stage": 4, "name": "graph", "total_batches": 9 },
+  "graph_batch_done": {
+    "type": "graph_batch_done",
+    "labels": ["varroa destructor", "deformed wing virus", "amitraz"],
+    "edges": 14
+  },
+  "stage_resolve": { "type": "stage", "stage": 4, "name": "resolve" },
+  "resolve_progress": { "type": "resolve_progress", "merged": 7 },
+  "entities_resolved": { "type": "entities_resolved", "merged": 12 },
+  "stage_reconcile": { "type": "stage", "stage": 4, "name": "reconcile" },
+  "claims_reconciled": { "type": "claims_reconciled", "concepts": 63, "relations": 214 },
+  "graph_ready": {
+    "type": "graph_ready",
+    "nodes": 187,
+    "edges": 214,
+    "graph_expanded": true
+  },
+  "stage_persona": { "type": "stage", "stage": 5, "name": "persona" },
+  "persona_ready": { "type": "persona_ready", "name": "Dr. Marta Belen" },
+  "stage_degraded": {
+    "type": "stage_degraded",
+    "stage": "graph",
+    "message": "Concept-graph extraction failed. The corpus is retrievable, but an expert is not ready without its graph - this build will be retried."
+  },
+  "retry": {
+    "type": "retry",
+    "attempt": 1,
+    "max_attempts": 3,
+    "message": "Provider timed out during validation."
+  },
+  "done": {
+    "type": "done",
+    "expert_id": 41,
+    "source_count": 21,
+    "chunk_count": 412,
+    "node_count": 187,
+    "edge_count": 214,
+    "persona_name": "Dr. Marta Belen",
+    "avg_quality": 7.9
+  },
+  "error": { "type": "error", "message": "No sources survived validation." },
+  "error_capped": {
+    "type": "error",
+    "message": "Build exceeded its spend cap: $3.20 of $3.00.",
+    "code": "spend_cap_exceeded",
+    "spent_usd": 3.2012,
+    "cap_usd": 3.0
+  },
+  "cancelled": { "type": "cancelled", "message": "Build cancelled" },
+  "unknown_future_event": {
+    "type": "some_event_this_build_has_never_heard_of",
+    "payload": { "anything": true }
+  }
+}

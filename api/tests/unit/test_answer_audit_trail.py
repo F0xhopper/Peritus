@@ -198,3 +198,15 @@ def test_ungraphed_contradiction_persists_as_false_not_null():
     )
     header, _ = audit_db_rows(payload, expert_id=1, conversation_id=None, question="Q")
     assert header["contradiction_traversed"] is False
+
+
+def test_dangling_citations_are_persisted():
+    """Logged and streamed per answer, never stored — so their rate was unqueryable."""
+    payload = build_audit_payload(
+        trail=_trail([_step(1, 10, 100)]), passages=[_passage(1, 100)], cited={1},
+        answer_text="[1] and [47]", has_contradiction=False, graph_ready=True,
+        dangling={47, 12},
+    )
+    header, _ = audit_db_rows(payload, expert_id=1, conversation_id=None, question="Q")
+    assert payload["dangling_citations"] == [12, 47]
+    assert header["dangling_citations"] == [12, 47]

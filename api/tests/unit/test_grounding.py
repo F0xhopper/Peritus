@@ -2,6 +2,7 @@
 parsing, and citation resolution. These are the invariants the product rests on."""
 
 from peritus.chat.grounding import (
+    ANSWER_FORMAT,
     GROUNDING_CONTRACT,
     build_grounded_context,
     build_system_prompt,
@@ -96,3 +97,33 @@ def test_system_prompt_puts_contract_before_persona():
 def test_system_prompt_falls_back_without_persona():
     prompt = build_system_prompt(None, "naval history")
     assert "naval history" in prompt
+
+
+def test_system_prompt_asks_for_markdown_after_the_contract_and_before_the_persona():
+    # Every client renders Markdown, so the answer is asked to use it — but the
+    # layout rules can never sit above what counts as grounded.
+    prompt = build_system_prompt("Speak like a pirate.", "naval history")
+    assert ANSWER_FORMAT in prompt
+    assert "GitHub-flavoured Markdown" in ANSWER_FORMAT
+    assert prompt.index(GROUNDING_CONTRACT) < prompt.index(ANSWER_FORMAT)
+    assert prompt.index(ANSWER_FORMAT) < prompt.index("Speak like a pirate.")
+
+
+def test_passage_opens_with_its_contextual_note():
+    e = _enriched(1, text="The mite feeds on fat body tissue.")
+    e.result.context_text = "From a 2019 PNAS study of Varroa feeding;\n the section reporting its main finding."
+    block, passages = build_grounded_context([e], max_passages=5)
+    assert block.startswith(
+        "[1] Source 1 — Web · Q:8.0\n"
+        "(Where this passage sits: From a 2019 PNAS study of Varroa feeding; "
+        "the section reporting its main finding.)\n"
+        "The mite feeds on fat body tissue."
+    )
+    assert passages[0].chunk_id == 1
+    # The note is context for the model, not passage text a citation vouches for.
+    assert passages[0].text == "The mite feeds on fat body tissue."
+
+
+def test_passage_without_a_note_has_no_note_line():
+    block, _ = build_grounded_context([_enriched(1, text="Plain.")], max_passages=5)
+    assert block == "[1] Source 1 — Web · Q:8.0\nPlain."

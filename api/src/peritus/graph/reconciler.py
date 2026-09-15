@@ -15,6 +15,7 @@ bounded by claims-per-concept rather than chunks-squared, and it is the only
 place in the pipeline where a cross-source relationship can be seen at all.
 """
 
+from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -44,6 +45,34 @@ MIN_SOURCES_PER_CONCEPT = 2
 #: budget goes to the concepts whose claims span the most sources, because that
 #: is where a disagreement between sources can actually be found.
 MAX_CONCEPTS_PER_BUILD = 120
+
+
+@dataclass
+class ReconcileStats:
+    """What one reconciliation pass did, whether or not it inserted anything.
+
+    The pass used to report only when it inserted a relation, so a pass that
+    examined 90 concepts and found nothing, and a pass whose every call failed,
+    both looked exactly like success. Production had zero reconciled edges and
+    no way to say which of those it was.
+    """
+    concepts_eligible: int = 0
+    concepts_examined: int = 0
+    calls_failed: int = 0
+    relations_returned: int = 0
+    #: Relations the model returned that `parse_relations` would not accept,
+    #: by reason (bad index, missing point, unknown type…).
+    rejected: Counter = field(default_factory=Counter)
+
+    def as_event(self) -> dict[str, Any]:
+        return {
+            "concepts_eligible": self.concepts_eligible,
+            "concepts_examined": self.concepts_examined,
+            "calls_failed": self.calls_failed,
+            "relations_returned": self.relations_returned,
+            "relations_rejected": sum(self.rejected.values()),
+            "rejected_reasons": dict(self.rejected),
+        }
 
 
 @dataclass
@@ -193,30 +222,47 @@ def _params(topic: str, group: ConceptClaims, claims: list[ClaimRow]) -> dict[st
     }
 
 
-def parse_relations(resp: Any, claims: list[ClaimRow]) -> list[dict]:
+def parse_relations(
+    resp: Any, claims: list[ClaimRow], rejected: Counter | None = None
+) -> list[dict]:
     """Turn one model response into relation dicts, dropping what cannot stand.
 
     Rejected: indices outside the list, a claim related to itself, a relation
     type outside the three, and — the one that matters — a `contradicts` or
     `qualifies` with no stated point or condition. An unstated disagreement is
     the thing this whole surface exists to avoid publishing.
+
+    ``rejected`` counts each drop by reason, so a pass that returns relations
+    and keeps none of them says why.
     """
+    rejected = rejected if rejected is not None else Counter()
     if resp is None:
         return []
     block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
     if block is None:
+        rejected["no_tool_use"] += 1
         return []
 
     relations: list[dict] = []
-    for raw in dict(block.input).get("relations", []):
+    raw_relations = dict(block.input).get("relations", [])
+    if not isinstance(raw_relations, list):
+        rejected["relations_not_a_list"] += 1
+        return []
+    for raw in raw_relations:
+        if not isinstance(raw, dict):
+            rejected["not_an_object"] += 1
+            continue
         edge_type = coerce_edge_type(raw.get("relation"))
-        if edge_type not in CLAIM_RELATIONS:
+        if edge_type is None or edge_type not in CLAIM_RELATIONS:
+            rejected[f"relation:{raw.get('relation')}"] += 1
             continue
         try:
             from_i, to_i = int(raw["from_claim"]), int(raw["to_claim"])
         except (KeyError, TypeError, ValueError):
+            rejected["bad_claim_index"] += 1
             continue
         if not (0 <= from_i < len(claims) and 0 <= to_i < len(claims)) or from_i == to_i:
+            rejected["claim_index_out_of_range"] += 1
             continue
 
         properties: dict[str, Any] = {}
@@ -224,6 +270,7 @@ def parse_relations(resp: Any, claims: list[ClaimRow]) -> list[dict]:
         if key is not None:
             stated = raw.get(key)
             if not isinstance(stated, str) or not stated.strip():
+                rejected[f"missing_{key}"] += 1
                 continue
             properties[key] = stated.strip()
 
@@ -248,12 +295,18 @@ async def reconcile_claims(
     max_claims: int = MAX_CLAIMS_PER_CONCEPT,
     min_sources: int = MIN_SOURCES_PER_CONCEPT,
     max_concepts: int = MAX_CONCEPTS_PER_BUILD,
+    stats: ReconcileStats | None = None,
 ) -> list[dict]:
-    """One call per concept; returns claim-to-claim relations ready to insert."""
+    """One call per concept; returns claim-to-claim relations ready to insert.
+
+    Pass ``stats`` to learn what the pass did beyond the relations it returns.
+    """
+    stats = stats if stats is not None else ReconcileStats()
     eligible = sorted(
         (g for g in groups if len(g.claims) >= 2 and g.source_count >= min_sources),
         key=lambda g: (-g.source_count, -len(g.claims), g.concept_label),
     )
+    stats.concepts_eligible = len(eligible)
     if len(eligible) > max_concepts:
         logger.info(
             "Reconciling the %d concepts spanning the most sources, of %d eligible",
@@ -263,6 +316,7 @@ async def reconcile_claims(
         (group, _select_claims(group.claims, max_claims))
         for group in eligible[:max_concepts]
     ]
+    stats.concepts_examined = len(planned)
     if not planned:
         return []
 
@@ -275,11 +329,24 @@ async def reconcile_claims(
     relations: list[dict] = []
     for (group, claims), resp in zip(planned, responses, strict=True):
         if resp is None:
+            stats.calls_failed += 1
             logger.warning("Reconciliation failed for concept %r", group.concept_label)
             continue
         try:
-            relations.extend(parse_relations(resp, claims))
+            before = sum(stats.rejected.values())
+            parsed = parse_relations(resp, claims, stats.rejected)
+            block = next(
+                (b for b in resp.content if getattr(b, "type", None) == "tool_use"), None
+            )
+            raw = dict(block.input).get("relations") if block is not None else None
+            stats.relations_returned += len(raw) if isinstance(raw, list) else 0
+            relations.extend(parsed)
+            if sum(stats.rejected.values()) > before and not parsed:
+                logger.debug(
+                    "Reconciliation for %r kept none of its relations", group.concept_label
+                )
         except Exception as exc:
+            stats.rejected["parse_error"] += 1
             logger.warning(
                 "Reconciliation parse failed for concept %r: %s", group.concept_label, exc
             )
