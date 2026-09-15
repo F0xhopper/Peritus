@@ -1,18 +1,38 @@
 # Fly.io app config for the Peritus API + build worker.
-# Deployed by .github/workflows/deploy.yml on every push to main.
+# Deployed by .github/workflows/deploy.yml on pushes to main, after CI passes.
+#
+# Secrets (credentials) are set with `fly secrets` — see docs/deployment.md.
+# Everything in [env] below is non-secret configuration and lives in git.
 
 app = "peritus"
-primary_region = "iad"
+
+# London, next to the database (Supabase, aws eu-west-2). Every chat turn makes
+# many round trips to Postgres; from iad each one crossed the Atlantic.
+primary_region = "lhr"
+
+# SIGTERM makes the worker stop claiming, cancel in-flight builds and hand them
+# back to the queue (jobs/worker.py `_drain`), where they resume from their
+# readiness point. That takes well under a second, but the default 5s leaves no
+# margin for a slow database round trip; 30s does.
+kill_signal = "SIGTERM"
+kill_timeout = "30s"
 
 [build]
+  dockerfile = "Dockerfile"
 
 # Migrations run once per deploy, in their own machine, and a failure here aborts
-# the release before any new code serves traffic. Without this nothing applied
-# schema: `just migrate` is a local target, so every deploy silently assumed a
-# human had remembered to run it against production first, in the right order.
-# `apply.py` is idempotent — it skips what `_migrations` already records.
+# the release before any new code serves traffic. `apply.py` is idempotent — it
+# skips what `_migrations` already records.
 [deploy]
   release_command = "python migrations/apply.py"
+  strategy = "rolling"
+
+[env]
+  PERITUS_ENV = "production"
+  LOG_LEVEL = "INFO"
+  DATABASE_SSL = "true"
+  # CORS_ALLOW_ORIGINS is deliberately left at its localhost-only default: the
+  # browser never calls the API (web/docs/deploy.md, "The API").
 
 [processes]
   app = "peritus-server"
@@ -21,20 +41,36 @@ primary_region = "iad"
 [http_service]
   internal_port = 8000
   force_https = true
-  auto_stop_machines = "stop"
+  # The web app calls the API on every navigation; a cold start there is a
+  # visibly slow page. One machine always stays up.
+  auto_stop_machines = "off"
   auto_start_machines = true
   min_machines_running = 1
   processes = ["app"]
 
-[[http_service.checks]]
-  interval = "15s"
-  timeout = "5s"
-  grace_period = "10s"
-  method = "GET"
-  path = "/health"
+  # Chat and build streams are long-lived SSE connections, so the load-balancer
+  # counts connections rather than requests.
+  [http_service.concurrency]
+    type = "connections"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Liveness only. `/ready` (database reachable) is checked by the deploy
+  # workflow instead: failing it here would pull the only machine out of the
+  # pool on a database blip, turning a degraded API into an unreachable one.
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/health"
 
 [[vm]]
   size = "shared-cpu-1x"
+  # 512MB rather than the 256MB default: the API imports the same SDK stack as
+  # the worker (which idles at ~100MB resident) and then holds reranked
+  # passages and streamed answers for concurrent chats on top of it.
+  memory_mb = 512
   processes = ["app"]
 
 [[vm]]

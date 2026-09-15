@@ -3,6 +3,7 @@ import re
 import httpx
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.wikimedia import user_agent
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
 logger = get_logger(__name__)
@@ -10,9 +11,11 @@ logger = get_logger(__name__)
 _API_URL = "https://en.wikipedia.org/w/api.php"
 _MAX_CHARS = 80_000
 
-_HEADERS = {
-    "User-Agent": "Peritus/2.0 (research corpus builder)"
-}
+# Shared with the picture finder (infrastructure/wikimedia.py), which is the
+# other thing in this codebase that talks to Wikimedia. Their API policy asks
+# for a contact address in the agent, and one constant is the only way both
+# callers actually carry it.
+_HEADERS = {"User-Agent": user_agent()}
 
 _TAG_RE = re.compile(r"<[^>]+>")
 

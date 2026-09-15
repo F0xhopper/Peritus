@@ -6,13 +6,17 @@ import pytest
 
 from peritus.core.config import settings
 from peritus.experts.builder import ExpertBuilder, _safe_fetch_candidate
+from peritus.sources.canonical import matching_work
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.triage import (
     TriagedCandidate,
-    _matches_must_have,
     domain_adjustment,
     rank_candidates,
 )
+
+
+def _matches_must_have(title: str, wanted: list[str]) -> bool:
+    return matching_work(title, wanted) is not None
 
 
 def _candidate(
@@ -325,8 +329,6 @@ def test_a_must_have_work_is_fetched_before_anything_else():
 
 
 def test_triage_marks_a_must_have_work_not_merely_scores_it():
-    from peritus.sources.triage import _matches_must_have
-
     assert _matches_must_have("Summa Theologica", ["Summa Theologica"])
     # And the marking is what the fetch stage keys on, so it must survive onto
     # the candidate rather than living only in the score.

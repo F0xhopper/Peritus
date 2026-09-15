@@ -1,0 +1,19 @@
+# Only pyproject.toml, uv.lock, src/ and migrations/ belong in the image.
+# Everything else here either bloats the build context or must never ship —
+# .env holds production credentials, which reach Fly as secrets instead.
+.env
+.env.*
+!.env.example
+.venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.log
+tests/
+Dockerfile
+.dockerignore
+fly.toml

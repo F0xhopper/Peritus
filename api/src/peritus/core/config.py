@@ -106,6 +106,13 @@ class Settings:
     # chat is free to the user but not to us — every message is a planning call,
     # a rerank, a coverage call and a composition. This is the only ceiling on
     # what one authenticated account can spend, so it is on by default.
+    # Thinking for answer composition. Claude Sonnet 5 thinks by default and its
+    # thinking counts against max_tokens, so an answer request states both: the
+    # effort (low | medium | high | xhigh | max) and the tokens thinking may use
+    # on top of the tier's answer length.
+    CHAT_EFFORT: str = os.getenv("CHAT_EFFORT", "low").strip().lower()
+    CHAT_THINKING_HEADROOM_TOKENS: int = int(os.getenv("CHAT_THINKING_HEADROOM_TOKENS", "4096"))
+
     CHAT_RATE_LIMIT: int = int(os.getenv("CHAT_RATE_LIMIT", "20"))
     CHAT_RATE_WINDOW: float = float(os.getenv("CHAT_RATE_WINDOW", "60"))
 
@@ -113,6 +120,20 @@ class Settings:
     EXA_API_KEY: str = os.getenv("EXA_API_KEY", "")
     # OpenAlex needs no key; an email opts requests into its faster "polite pool".
     OPENALEX_MAILTO: str = os.getenv("OPENALEX_MAILTO", "")
+    # Semantic Scholar API key (free, from semanticscholar.org). Sent as
+    # `x-api-key` by the pdf fetcher and by citation snowballing. Without it
+    # both share the unauthenticated pool, which rate-limits hard: the pdf
+    # fetcher returned nothing on the Thomism build (job 53), almost certainly
+    # to 429s. Unset still works, and a 429 is now reported as `rate_limited`.
+    S2_API_KEY: str = os.getenv("S2_API_KEY", "")
+    # Project Gutenberg's catalogue CSV (~21 MB), downloaded once a week per
+    # worker so identifying a public-domain book is a local lookup rather than a
+    # call to Gutendex. Defaults to ~/.cache/peritus. Disable to fall back to
+    # Gutendex alone.
+    GUTENBERG_CATALOGUE_DIR: str = os.getenv("GUTENBERG_CATALOGUE_DIR", "")
+    GUTENBERG_CATALOGUE_ENABLED: bool = (
+        os.getenv("GUTENBERG_CATALOGUE_ENABLED", "true").lower() == "true"
+    )
     # Wall-clock cap on one full fetch of one candidate. Every fetcher already
     # sets httpx timeouts, but those are per-operation: a server that dribbles a
     # byte before each read timeout never trips one, and the fetch hangs forever
@@ -120,6 +141,33 @@ class Settings:
     # bound that makes a single bad URL cost one slot instead of the build. Sized
     # above the slowest legitimate fetch — PDF OCR allows itself 120s.
     SOURCE_FETCH_TIMEOUT: float = float(os.getenv("SOURCE_FETCH_TIMEOUT", "180"))
+
+    # ── Expert picture (found on Wikimedia at build time) ────────────────────
+    # A new expert gets a real picture of its subject — the lead image of the
+    # Wikipedia article, with its licence and attribution — instead of only a
+    # monogram. Nothing here can fail a build: the finder runs as a background
+    # task off `plan_ready`, has its own deadline, and emits `picture_skipped`
+    # with a reason when it comes up empty. See experts/picture.py.
+    PICTURE_ENABLED: bool = os.getenv("PICTURE_ENABLED", "true").lower() == "true"
+    # Whole-search deadline, per build. Five or six HTTP requests fit easily;
+    # this is the bound that keeps a slow Wikimedia from being the build's problem.
+    PICTURE_TIMEOUT: float = float(os.getenv("PICTURE_TIMEOUT", "20"))
+    # Refuse a thumbnail larger than this. Mirrored by a CHECK on the table, so
+    # raising it here alone will not let a bigger file through.
+    PICTURE_MAX_BYTES: int = int(os.getenv("PICTURE_MAX_BYTES", "400000"))
+    # The width asked of Wikimedia's thumbnail service. There is no resizing on
+    # our side (no Pillow): this is the size that gets stored and served.
+    PICTURE_THUMB_WIDTH: int = int(os.getenv("PICTURE_THUMB_WIDTH", "512"))
+    # heuristic — rank by article order, format and size (free, phase 1)
+    # model     — one FAST_MODEL call per build over up to six thumbnails
+    PICTURE_RANKER: str = os.getenv("PICTURE_RANKER", "heuristic").strip().lower()
+    # Phase 3 widens this to "wikipedia,commons,openverse".
+    PICTURE_PROVIDERS: str = os.getenv("PICTURE_PROVIDERS", "wikipedia")
+
+    # Wikimedia's API etiquette asks for a contact address in the User-Agent of
+    # anything making real volume. An email or a URL; empty still sends a
+    # descriptive agent, it just cannot be reached.
+    PERITUS_CONTACT: str = os.getenv("PERITUS_CONTACT", "")
 
     # Mistral OCR (PDF parsing)
     MISTRAL_API_KEY: str = os.getenv("MISTRAL_API_KEY", "")
@@ -138,6 +186,15 @@ class Settings:
     RERANK_WINDOW: int = int(os.getenv("RERANK_WINDOW", "8"))
     COHERE_API_KEY: str = os.getenv("COHERE_API_KEY", "")
     COHERE_RERANK_MODEL: str = os.getenv("COHERE_RERANK_MODEL", "rerank-v3.5")
+
+    # Relevance gate on reranker scores (chat/agent.py). A passage scoring below
+    # the floor is padding: it is kept out of the prompt unless that would leave
+    # fewer than RELEVANCE_MIN_PASSAGES, and fewer than that many above the
+    # floor is what triggers the fallback-query retrieval pass. Calibrated on
+    # the audit trail, where cited passages averaged 0.31 and uncited 0.22 —
+    # recalibrate from `answer_audit_passages` when the sample is larger.
+    RELEVANCE_FLOOR: float = float(os.getenv("RELEVANCE_FLOOR", "0.15"))
+    RELEVANCE_MIN_PASSAGES: int = int(os.getenv("RELEVANCE_MIN_PASSAGES", "3"))
 
     # Source validation concurrency limit
     VALIDATE_CONCURRENCY: int = int(os.getenv("VALIDATE_CONCURRENCY", "5"))
@@ -168,6 +225,26 @@ class Settings:
     # "false" to override for every execution mode.
     DISCOVERY_LOOP: str = os.getenv("DISCOVERY_LOOP", "auto").strip().lower()
 
+    # The triage score a candidate must reach to be fetched at all (priority
+    # candidates — must-have works, co-cited snowball finds — are exempt). The
+    # count budget stays as the ceiling; this is the quality bar beside it.
+    # Without it the fetch walked down the ranked tail until the count filled.
+    # If fewer than max(8, budget // 4) candidates reach it in round 0, round 0
+    # relaxes to FETCH_SCORE_FLOOR_RELAXED and says so (`floor_relaxed`). 6.0 is
+    # a starting point, not a measurement: the triage harness
+    # (eval/triage.py) is how it gets calibrated.
+    FETCH_SCORE_FLOOR: float = float(os.getenv("FETCH_SCORE_FLOOR", "6.0"))
+    # Share caps on a round's accepted sources, 0 = off (the default). The aim is
+    # primary texts present for every concept, not a small share of everything
+    # else; set these to cap abstract-only or tertiary sources anyway.
+    COMPOSITION_ABSTRACT_SHARE_CAP: float = float(os.getenv("COMPOSITION_ABSTRACT_SHARE_CAP", "0"))
+    COMPOSITION_TERTIARY_SHARE_CAP: float = float(os.getenv("COMPOSITION_TERTIARY_SHARE_CAP", "0"))
+    # The language the corpus is written in. A fetched source whose text is not
+    # in it is dropped before validation — the validator scores what it can read
+    # and a Spanish paper passed on a live rebuild. "any" turns the check off.
+    CORPUS_LANGUAGE: str = os.getenv("CORPUS_LANGUAGE", "en").strip().lower()
+    FETCH_SCORE_FLOOR_RELAXED: float = float(os.getenv("FETCH_SCORE_FLOOR_RELAXED", "5.0"))
+
     # Optional directory for screening captures. When set, every source that
     # reaches validation is written to <dir>/<expert_slug>/<job_id>.jsonl before
     # it is judged, which is the only way to rebuild a screening fixture later:
@@ -179,9 +256,18 @@ class Settings:
     # chunk text is now sent (not a 400-char preview) — large batches truncate the
     # tool_use JSON and the whole batch is lost.
     GRAPH_BATCH_SIZE: int = int(os.getenv("GRAPH_BATCH_SIZE", "10"))
+    # Chunks per source that graph extraction reads; the rest are embedded and
+    # retrievable but not read for concepts. A primary text cut to 200,000
+    # characters is ~200 chunks — a fifth of a STANDARD corpus's graph cost —
+    # and its opening chunks carry the concepts its later ones repeat. 0 = all.
+    GRAPH_MAX_CHUNKS_PER_SOURCE: int = int(os.getenv("GRAPH_MAX_CHUNKS_PER_SOURCE", "80"))
 
     # Chunking
-    CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1500"))
+    # ~1,000 chars: the whole chunk is shown to the model (it used to see only
+    # the first 800 of 1,500, while citing all of it), and a smaller unit is
+    # also the better one for a cross-encoder reranker to judge. The overlap is
+    # the longest trailing sentence carried into the next chunk.
+    CHUNK_SIZE_CHARS: int = int(os.getenv("CHUNK_SIZE_CHARS", "1000"))
     CHUNK_OVERLAP_CHARS: int = int(os.getenv("CHUNK_OVERLAP_CHARS", "200"))
 
     # API auth (legacy shared key — retained for backwards compatibility)

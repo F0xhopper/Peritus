@@ -270,7 +270,31 @@ def test_page_estimates_round_up_so_a_partial_page_is_still_billed():
     assert estimated_ocr_pages(3_001) == 2
 
 
-def test_a_pro_discovery_budget_buys_a_real_corpus_under_its_cap():
+@pytest.fixture
+def production_chunking(monkeypatch):
+    """The forecast reads chunking from settings, and a local api/.env can
+    override it (one set CHUNK_SIZE_CHARS=1500, which passed this suite locally
+    while CI and production, at the default 1000, failed it). Pin the defaults."""
+    from peritus.core.config import settings
+
+    monkeypatch.setattr(settings, "CHUNK_SIZE_CHARS", 1000)
+    monkeypatch.setattr(settings, "GRAPH_MAX_CHUNKS_PER_SOURCE", 80)
+    monkeypatch.setattr(settings, "GRAPH_BATCH_SIZE", 10)
+    monkeypatch.setattr(settings, "CONTEXT_ENABLED", True)
+    return settings
+
+
+def test_graph_cost_stops_at_the_chunks_graph_extraction_reads(production_chunking):
+    """Past GRAPH_MAX_CHUNKS_PER_SOURCE a longer text is embedded and
+    contextualised, never read by graph extraction — so only those grow."""
+    at_cap = estimated_ingest_cost_usd(80_000)
+    longer = estimated_ingest_cost_usd(160_000)
+    production_chunking.GRAPH_MAX_CHUNKS_PER_SOURCE = 0  # uncapped
+    uncapped = estimated_ingest_cost_usd(160_000)
+    assert at_cap < longer < uncapped
+
+
+def test_a_pro_discovery_budget_buys_a_real_corpus_under_its_cap(production_chunking):
     """The sizing check that matters: PRO's $7.00 discovery budget has to buy
     enough full-length papers to be worth having, and still leave room under the
     $12.00 cap for graph extraction, reconciliation and persona."""

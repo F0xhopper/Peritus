@@ -5,6 +5,8 @@ from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
 from peritus.sources.domain import Identifiers, RawSource, SourceCandidate, SourceType
+from peritus.sources.fetchers.base import note_search_failure
+from peritus.sources.fetchers.exa import classify_search_error
 from peritus.sources.identifiers import identifiers_from_url
 
 logger = get_logger(__name__)
@@ -97,6 +99,7 @@ async def _ddg_search(query: str, limit: int) -> list[dict]:
             return await asyncio.to_thread(_parse_ddg, resp.text, limit)
     except Exception as exc:
         logger.warning("DuckDuckGo search failed: %s", exc)
+        note_search_failure(*classify_search_error(exc, "DuckDuckGo"))
         return []
 
 

@@ -18,6 +18,12 @@ from peritus.sources.domain import (
     SourceType,
     resolved_identifiers,
 )
+from peritus.sources.fetchers.base import (
+    STATUS_ERROR,
+    STATUS_RATE_LIMITED,
+    STATUS_TIMEOUT,
+    note_search_failure,
+)
 
 logger = get_logger(__name__)
 
@@ -26,6 +32,18 @@ _PDF_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 _SS_FIELDS = "title,authors,year,openAccessPdf,abstract,externalIds"
 _HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 _MAX_CHARS = 200_000
+
+
+def semantic_scholar_headers() -> dict[str, str]:
+    """Headers for any Semantic Scholar API call, with the key when there is one.
+
+    Shared with snowballing: both hit the same API, and without a key both draw
+    on the same rate-limited unauthenticated pool.
+    """
+    headers = dict(_HEADERS)
+    if settings.S2_API_KEY:
+        headers["x-api-key"] = settings.S2_API_KEY
+    return headers
 
 
 class PdfFetcher:
@@ -136,14 +154,19 @@ async def _is_pdf_url(url: str) -> bool:
 async def _search_semantic_scholar(topic: str, limit: int) -> list[dict]:
     for attempt in range(3):
         try:
-            async with httpx.AsyncClient(timeout=20, headers=_HEADERS) as client:
+            async with httpx.AsyncClient(timeout=20, headers=semantic_scholar_headers()) as client:
                 resp = await client.get(
                     _SS_URL,
                     params={"query": topic, "fields": _SS_FIELDS, "limit": limit * 2},
                 )
                 if resp.status_code == 429:
                     wait = 5 * (attempt + 1)
-                    logger.debug("Semantic Scholar rate-limited, retrying in %ds", wait)
+                    # WARNING, and named: a pdf channel that returns nothing
+                    # because of this used to be invisible at DEBUG.
+                    logger.warning(
+                        "pdf fetcher: Semantic Scholar rate-limited (429%s), retrying in %ds",
+                        "" if settings.S2_API_KEY else ", no S2_API_KEY", wait,
+                    )
                     await asyncio.sleep(wait)
                     continue
                 resp.raise_for_status()
@@ -170,8 +193,18 @@ async def _search_semantic_scholar(topic: str, limit: int) -> list[dict]:
                             if (p.get("openAccessPdf") or {}).get("url")
                         ]
                 return with_pdf[:limit]
+        except httpx.TimeoutException as exc:
+            logger.warning("Semantic Scholar search timed out for %r: %s", topic, exc)
+            note_search_failure(STATUS_TIMEOUT, f"Semantic Scholar: {exc}")
+            return []
         except Exception as exc:
             logger.warning("Semantic Scholar search failed for %r: %s", topic, exc)
+            note_search_failure(STATUS_ERROR, f"Semantic Scholar: {type(exc).__name__}: {exc}")
             return []
-    logger.warning("Semantic Scholar gave up after retries for %r", topic)
+    logger.warning("pdf fetcher: Semantic Scholar gave up after retries for %r", topic)
+    note_search_failure(
+        STATUS_RATE_LIMITED,
+        "Semantic Scholar returned 429 after 3 attempts"
+        + ("" if settings.S2_API_KEY else " (no S2_API_KEY)"),
+    )
     return []

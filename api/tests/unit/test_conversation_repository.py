@@ -179,8 +179,15 @@ async def test_recents_filter_empties_and_order(db_pool):
     assert recents[0].expert_slug == "stoicism"
     assert recents[0].expert_status is not None
 
-    per_expert = await repo.list_for_expert(expert.id)
+    # Someone else's chat with the same expert (a shared or public one) is
+    # never in the owner's per-expert list, nor theirs in the owner's.
+    theirs = await repo.create(expert.id, OTHER)
+    await repo.add_user_message(theirs.id, "mine", "mine")
+
+    per_expert = await repo.list_for_expert(expert.id, OWNER, include_unowned=False)
     assert [c.id for c in per_expert] == [newer.id, older.id]
+    other = await repo.list_for_expert(expert.id, OTHER, include_unowned=False)
+    assert [c.id for c in other] == [theirs.id]
 
 
 @pytest.mark.asyncio

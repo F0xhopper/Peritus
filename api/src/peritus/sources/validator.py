@@ -27,8 +27,16 @@ from typing import Any
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
-from peritus.sources.domain import DroppedSource, RawSource, ValidatedSource
+from peritus.sources.domain import (
+    COUNTING_DEPTHS,
+    DEPTH_TREATS,
+    DEPTHS,
+    DroppedSource,
+    RawSource,
+    ValidatedSource,
+)
 from peritus.sources.preview import build_preview, build_review_preview
+from peritus.sources.substance import substance_of
 
 logger = get_logger(__name__)
 
@@ -48,7 +56,24 @@ REVIEW_BAND_R = (5.0, 7.0)
 # (sources/preview.py) rather than three fixed windows of raw text. The rubric's
 # thresholds did not move, but what the model is shown did, and screening runs
 # must be able to tell the two apart — the version is stamped on every source.
-RUBRIC_VERSION = "v5-structured-q5r6"
+#
+# v6: the rubric names the two failure cases the Thomism build (job 53) passed —
+# catalogue records and publisher blurbs scored as scholarship, and overview
+# sites scored on how well their title matched — and every source now carries a
+# substance (full / partial / abstract) that decides whether it counts toward
+# coverage. See docs/plans/source-selection.md §8.
+#
+# v7: the research plan's own definition of a primary source for the topic is
+# shown with every batch. "Primary" means the Summa for Thomism, a trial report
+# for a drug, a standard for a protocol; a generic definition let a secondary
+# paper on mental causation be tagged primary on a live rebuild.
+#
+# v8: concept tags are graded — sets_out / treats / mentions — and a source that
+# treats more than three concepts gives its three deepest. Tags used to be free,
+# so three long texts met a target meant to need three sources per concept
+# (docs/plans/syllabus.md, 4.A). And a page *about* an expected author is
+# tertiary, however well it presents their work (3.D).
+RUBRIC_VERSION = "v8-graded-tags-q5r6"
 _VALIDATE_BATCH_SIZE = 5
 
 # What a tier means, in the validator's words and the build's. A corpus can score
@@ -62,6 +87,16 @@ _TIER_DESCRIPTION = (
     "argument about primary material; "
     "tertiary = summaries, reviews, study guides, listicles, encyclopedia-style "
     "overviews, and other material that mainly restates what others have said."
+)
+
+# How deeply a source treats a concept (the depths are in sources/domain.py;
+# coverage counts sets_out and treats and never mentions).
+_DEPTH_DESCRIPTION = (
+    "sets_out = this source is where the concept is set out or argued at length (a "
+    "chapter, a section, the paper's subject); treats = a substantial discussion, "
+    "more than a passing page; mentions = referred to in passing. A source that "
+    "sets out or treats more than three of the listed concepts is probably a "
+    "survey: give its three deepest as sets_out or treats and the rest as mentions."
 )
 
 _SOURCE_TYPE_HINTS: dict[str, str] = {
@@ -81,12 +116,15 @@ _SOURCE_TYPE_HINTS: dict[str, str] = {
     "pubmed": (
         "This source is a biomedical research paper. Apply rigorous standards: look for clear "
         "methodology, evidence quality, and citation depth. An abstract-only record can still "
-        "pass if the abstract substantively states the finding."
+        "pass if the abstract substantively states the finding — a bare citation or a "
+        "one-line summary cannot."
     ),
     "openalex": (
         "This source is a scholarly work. Apply rigorous standards: look for clear methodology "
         "or argument, evidence quality, and citation depth. An abstract-only record can still "
-        "pass if the abstract substantively states the finding or argument."
+        "pass if the abstract substantively states the finding or argument. A publisher's "
+        "blurb, a table of contents or a library catalogue entry is not an abstract: it "
+        "describes a book without stating its argument."
     ),
     "gutenberg": (
         "This source is a classic or historical text. Evaluate relevance and historical "
@@ -114,7 +152,16 @@ _SYSTEM = (
     "samples of its body. Treat the stated facts as true — they come from the "
     "pipeline, not from the text — and use the samples to judge what the "
     "document actually argues. A short text is not automatically weak and a "
-    "long one is not automatically strong; judge the substance."
+    "long one is not automatically strong; judge the substance.\n\n"
+    "Two kinds of source pass a title match and must not pass on it. A library "
+    "catalogue record, a table of contents, a publisher's blurb or a short book "
+    "review is tertiary and scores at most 3 for quality, however important the "
+    "work it describes — it contains none of that work. A study guide, "
+    "encyclopedia-style overview or explainer site is tertiary, and its "
+    "relevance score should reflect the depth of what it actually says about "
+    "the topic, not how closely its title matches it.\n\n"
+    "Tag concepts by depth, and be sparing with sets_out: it means the concept is "
+    f"this source's subject or one of its chapters. {_DEPTH_DESCRIPTION}"
 )
 
 _REVIEW_SYSTEM = (
@@ -169,11 +216,21 @@ _BATCH_TOOL: dict[str, Any] = {
                         },
                         "covered_concepts": {
                             "type": "array",
-                            "items": {"type": "string"},
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "concept": {
+                                        "type": "string",
+                                        "description": "Copied verbatim from the provided list.",
+                                    },
+                                    "depth": {"type": "string", "enum": list(DEPTHS)},
+                                },
+                                "required": ["concept", "depth"],
+                            },
                             "description": (
-                                "Which of the listed key concepts this source substantively "
-                                "covers — copied verbatim from the provided list. Empty if "
-                                "none, or if no key concepts were provided."
+                                "The listed key concepts this source deals with, each with how "
+                                f"deeply. {_DEPTH_DESCRIPTION} Empty if none, or if no key "
+                                "concepts were provided."
                             ),
                         },
                         "drop_reason": {
@@ -205,21 +262,41 @@ def review_model() -> str:
     return settings.VALIDATE_REVIEW_MODEL or settings.CLAUDE_MODEL
 
 
-def _match_concepts(raw: list, key_concepts: list[str]) -> list[str]:
-    """Map model-reported concept tags back onto the canonical concept list.
+def _match_concepts(raw: list, key_concepts: list[str]) -> dict[str, str]:
+    """Map model-reported concept tags back onto the canonical concept list, with depths.
 
     Guards against paraphrased or invented tags: only concepts that casefold-match
-    a provided key concept survive, and they come back in canonical spelling.
+    a provided key concept survive, and they come back in canonical spelling, in
+    the order given. A tag given twice keeps its deeper depth. A bare string — the
+    pre-v8 shape, still possible from an old batch result — reads as ``treats``,
+    and so does an entry with no readable depth.
     """
     canonical = {c.casefold().strip(): c for c in key_concepts}
-    matched: list[str] = []
+    matched: dict[str, str] = {}
     for item in raw or []:
-        if not isinstance(item, str):
+        name: Any
+        if isinstance(item, str):
+            name, depth = item, DEPTH_TREATS
+        elif isinstance(item, dict):
+            name = item.get("concept")
+            depth = str(item.get("depth") or "").strip().casefold()
+            if depth not in DEPTHS:
+                depth = DEPTH_TREATS
+        else:
             continue
-        hit = canonical.get(item.casefold().strip())
-        if hit and hit not in matched:
-            matched.append(hit)
+        if not isinstance(name, str):
+            continue
+        hit = canonical.get(name.casefold().strip())
+        if not hit:
+            continue
+        if hit not in matched or DEPTHS.index(depth) < DEPTHS.index(matched[hit]):
+            matched[hit] = depth
     return matched
+
+
+def covered_names(depths: dict[str, str]) -> list[str]:
+    """The concepts a source covers: its tags at ``treats`` or deeper."""
+    return [concept for concept, depth in depths.items() if depth in COUNTING_DEPTHS]
 
 
 def _normalise_tier(raw) -> str | None:
@@ -287,6 +364,7 @@ async def validate_sources(
     key_concepts: list[str] | None = None,
     on_result=None,
     on_reviewed=None,
+    primary_definition: str | None = None,
 ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
     key_concepts = key_concepts or []
     batches = [
@@ -346,14 +424,16 @@ async def validate_sources(
     # (half price) when enabled, else concurrent live calls. Results are parsed
     # (and per-source progress emitted) as each batch lands, not after the set.
     await gather_claude_calls(
-        [_validate_params(topic, b, key_concepts) for b in batches],
+        [_validate_params(topic, b, key_concepts, primary_definition=primary_definition) for b in batches],
         live_concurrency=settings.VALIDATE_CONCURRENCY,
         description="validate",
         on_result=_on_batch_result,
     )
 
     all_pairs = [pair for i in sorted(batch_pairs) for pair in batch_pairs[i]]
-    reviewed = await _second_opinion(topic, all_pairs, key_concepts, on_reviewed)
+    reviewed = await _second_opinion(
+        topic, all_pairs, key_concepts, on_reviewed, primary_definition
+    )
 
     passed: list[ValidatedSource] = []
     dropped: list[DroppedSource] = []
@@ -371,6 +451,7 @@ async def validate_sources(
                 first_pass_relevance=first.get("relevance_score"),
             ))
         else:
+            depths = _match_concepts(result.get("covered_concepts", []), key_concepts)
             passed.append(ValidatedSource(
                 raw=source,
                 quality_score=result["quality_score"],
@@ -378,14 +459,14 @@ async def validate_sources(
                 content_type=result["content_type"],
                 difficulty=result["difficulty"],
                 key_claims=result["key_claims"],
-                covered_concepts=_match_concepts(
-                    result.get("covered_concepts", []), key_concepts,
-                ),
+                covered_concepts=covered_names(depths),
+                concept_depths=depths,
                 source_tier=_normalise_tier(result.get("source_tier")),
                 validator_model=result.get("model"),
                 review_model=result.get("review_model"),
                 first_pass_quality=first.get("quality_score"),
                 first_pass_relevance=first.get("relevance_score"),
+                substance=substance_of(source),
             ))
 
     unjudged = sum(1 for d in dropped if d.drop_reason == "validation error")
@@ -415,6 +496,7 @@ async def _second_opinion(
     pairs: list[tuple[RawSource, dict]],
     key_concepts: list[str],
     on_reviewed=None,
+    primary_definition: str | None = None,
 ) -> int:
     """Re-judge the borderline (and never-judged) sources in place.
 
@@ -455,7 +537,9 @@ async def _second_opinion(
 
     await gather_claude_calls(
         [
-            _validate_params(topic, [source], key_concepts, review=True)
+            _validate_params(
+                topic, [source], key_concepts, review=True, primary_definition=primary_definition
+            )
             for _index, source, _first in candidates
         ],
         live_concurrency=settings.VALIDATE_CONCURRENCY,
@@ -512,8 +596,10 @@ def _source_context(s: RawSource) -> str:
     leader = s.metadata.get("leader")
     if leader:
         lines.append(
-            f"Expected author: {leader}. If this content is not by {leader} or does not "
-            "substantively present their work, score relevance low."
+            f"Expected author: {leader}. If this is by {leader}, judge it as their own "
+            f"work. If it is about {leader} — an encyclopedia entry, a profile, a review "
+            "of their work — classify it tertiary; do not score relevance on how well it "
+            "presents their work. If it is neither by nor about them, score relevance low."
         )
     return ("\n".join(lines) + "\n") if lines else ""
 
@@ -523,6 +609,7 @@ def _validate_params(
     batch: list[RawSource],
     key_concepts: list[str],
     review: bool = False,
+    primary_definition: str | None = None,
 ) -> dict[str, Any]:
     """Request params for one validation call (consumed by gather_claude_calls)."""
     preview = build_review_preview if review else build_preview
@@ -539,6 +626,13 @@ def _validate_params(
         + "\n\n"
         if key_concepts else ""
     )
+    definition_block = (
+        "For this topic, a PRIMARY source is: "
+        f"{primary_definition.strip()}\n"
+        "Classify source_tier by that definition. A study, commentary or overview "
+        "of such a source is secondary or tertiary, however closely it quotes it.\n\n"
+        if primary_definition and primary_definition.strip() else ""
+    )
     return {
         "model": review_model() if review else settings.FAST_MODEL,
         "max_tokens": 512 * len(batch) + (512 if review else 0),
@@ -549,6 +643,7 @@ def _validate_params(
             "role": "user",
             "content": (
                 f"Topic: {topic}\n\n"
+                f"{definition_block}"
                 f"{concepts_block}"
                 f"{sources_block}\n\n"
                 + (

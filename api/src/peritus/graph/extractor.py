@@ -108,6 +108,64 @@ _SYSTEM = (
 BatchCallback = Callable[[list[str], int], Coroutine[Any, Any, None]]
 
 
+#: Concepts an orphaned claim is attached to, at most — the ones sharing the most
+#: chunks with it. Enough to put the claim in its concept's reconciliation group
+#: without turning every chunk's concept list into a claim's subject.
+_MAX_INFERRED_ABOUT = 3
+
+
+def attach_orphan_claims(data: dict) -> int:
+    """Give every claim an ``about`` edge, from the chunks it was extracted from.
+
+    The prompt says every claim gets one and nothing enforced it: 34% of claims
+    in production had none, which makes them invisible to reconciliation — it
+    groups claims by the concept they are about. A claim whose ``about`` edges
+    all name something this batch did not emit as a concept (the insert would
+    reject them as unresolved) is attached to the batch's concepts that share a
+    chunk with it. Deterministic, no model call. Mutates ``data``; returns the
+    number of edges added.
+    """
+    nodes = data.get("nodes", [])
+    concepts = [
+        n for n in nodes
+        if str(n.get("node_type", "")).strip().lower() == "concept" and n.get("label")
+    ]
+    concept_keys = {c["label"].lower().strip() for c in concepts}
+    about_from: set[str] = {
+        e["from_label"].lower().strip()
+        for e in data.get("edges", [])
+        if str(e.get("edge_type", "")).strip().lower() == "about"
+        and str(e.get("to_label", "")).lower().strip() in concept_keys
+    }
+
+    added = 0
+    for claim in nodes:
+        if str(claim.get("node_type", "")).strip().lower() != "claim" or not claim.get("label"):
+            continue
+        if claim["label"].lower().strip() in about_from:
+            continue
+        chunks = {i for i in claim.get("chunk_indices", []) if isinstance(i, int)}
+        if not chunks:
+            continue
+        overlap = sorted(
+            (
+                (len(chunks & {i for i in c.get("chunk_indices", []) if isinstance(i, int)}), c)
+                for c in concepts
+            ),
+            key=lambda pair: -pair[0],
+        )
+        for shared, concept in overlap[:_MAX_INFERRED_ABOUT]:
+            if shared == 0:
+                break
+            data.setdefault("edges", []).append({
+                "from_label": claim["label"],
+                "to_label": concept["label"],
+                "edge_type": "about",
+            })
+            added += 1
+    return added
+
+
 def attach_chunk_db_ids(data: dict, chunk_db_ids: list[int]) -> dict:
     """Map model-reported chunk indices to database ids, dropping out-of-range ones."""
     for node in data.get("nodes", []):
@@ -199,6 +257,16 @@ def _complete(entries: Any, required: tuple[str, ...] | list[str], kind: str) ->
     arrives as something that is not an object at all. Both are unusable and
     neither should cost the batch, so both are dropped with a count.
     """
+    if isinstance(entries, str):
+        # The model sometimes serialises a long array into a JSON string inside
+        # the tool call. Four of 144 batches on a live rebuild arrived that way
+        # and were discarded whole — every node in ten chunks, for a formatting
+        # choice. Decoded here, and repaired when the string was cut off.
+        decoded = decode_json_list(entries)
+        if decoded is None:
+            logger.warning("Graph extraction returned %s as an undecodable string", kind)
+            return []
+        entries = decoded
     if not isinstance(entries, list):
         logger.warning("Graph extraction returned %s as %s, not a list", kind, type(entries).__name__)
         return []
@@ -212,6 +280,35 @@ def _complete(entries: Any, required: tuple[str, ...] | list[str], kind: str) ->
             len(entries) - len(valid), kind,
         )
     return valid
+
+
+def decode_json_list(text: str) -> list | None:
+    """A JSON array from a string, recovering the complete objects of a truncated one."""
+    import json
+
+    text = text.strip()
+    try:
+        value = json.loads(text)
+        return value if isinstance(value, list) else None
+    except ValueError:
+        pass
+    if not text.startswith("["):
+        return None
+    # Truncated: keep everything up to the last complete top-level object.
+    decoder = json.JSONDecoder()
+    items: list = []
+    index = 1
+    while index < len(text):
+        while index < len(text) and text[index] in " \t\r\n,":
+            index += 1
+        if index >= len(text) or text[index] == "]":
+            break
+        try:
+            item, index = decoder.raw_decode(text, index)
+        except ValueError:
+            break
+        items.append(item)
+    return items or None
 
 
 def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
@@ -230,5 +327,8 @@ def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
     # and raised out of the batch, costing all ten of its chunks.
     data["nodes"] = _complete(data.get("nodes", []), _REQUIRED_NODE_KEYS, "node")
     data["edges"] = _complete(data.get("edges", []), _REQUIRED_EDGE_KEYS, "edge")
+    inferred = attach_orphan_claims(data)
+    if inferred:
+        logger.debug("Attached %d orphaned claim(s) to concepts from their chunks", inferred)
 
     return attach_chunk_db_ids(data, chunk_db_ids)

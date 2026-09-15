@@ -1,0 +1,523 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+/* Theme is driven by `data-theme` (next-themes `attribute="data-theme"`), with
+   "system" leaving the attribute off so `prefers-color-scheme` decides. Every
+   colour therefore has three declarations: the light default on bare `:root`,
+   the dark values under the media query guarded against an explicit light
+   choice, and the dark values again under `[data-theme=dark]` so the toggle
+   wins in both directions. No colour is ever defined only inside a block. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+:root {
+  /* Surface — light is the inverted ramp of the dark design (web-design.md §2).
+     The ground is a real grey rather than near-white: with the container
+     borders gone, a white panel on a #fafafa ground was a 2% step and the
+     cards, the rail and the sidebar all dissolved into the page. Depth here is
+     carried entirely by the surface, so the surfaces have to differ. */
+  --bg: #f4f4f5;
+  --panel: #ffffff;
+  --raised: #e9e9ec;
+  --border: #e0e0e6;
+  --border-soft: #eaeaee;
+
+  /* Text */
+  --fg: #17171a;
+  --fg-2: #4d4d55;
+  --fg-3: #62626a; /* ≥4.5:1 on ground, panel and raised — AA for the small text it carries */
+  --fg-4: #aaaab1;
+
+  /* The primary action, and it is **monochrome on purpose**.
+     Colour in this product is information: green/amber/red say what state a
+     build is in, and nothing else.
+     A violet primary button competed with both — it read as the loudest thing
+     on a page where it was never the most important, and against a wall of
+     violet-hashed avatars the whole app looked blue. Ink on paper, or paper on
+     ink, says "press this" without spending a colour to do it. */
+  --accent: #17171a;
+  --accent-fg: #fafafa;
+
+  /* Status — the only fixed colours left, because each one means something */
+  /* Deep enough to read as text on the ground, a card and a hover (≥4.5:1). */
+  --ok: #1a7033;
+  --warn: #7f5808;
+  --bad: #b42d2d;
+  /* Neutral, not blue: an informational notice is the *quietest* thing on a
+     page, and a blue one shouted as loudly as an error. */
+  --info: #4d4d55;
+
+  /* The avatar and identity tone. There are no per-expert colours, so this is
+     a neutral grey at a lightness the theme sets — dark enough for 4.5:1 on
+     the light canvas, light enough to read on the dark one. The name survives
+     because `text-expert`, `bg-expert-soft` and the monogram all read it. */
+  --expert-l: 0.48;
+  --expert: oklch(var(--expert-l) 0 0);
+  --expert-soft: oklch(var(--expert-l) 0 0 / 0.12);
+
+  /* Backdrop: flat, never blurred (web-design.md §9) */
+  --backdrop: rgb(0 0 0 / 0.5);
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0e0e10;
+    --panel: #141416;
+    --raised: #1b1b1e;
+    --border: #26262a;
+    --border-soft: #1f1f22;
+
+    --fg: #ececee;
+    --fg-2: #b0b0b7;
+    --fg-3: #8b8b93;
+    --fg-4: #45454c;
+
+    --accent: #ececee;
+    --accent-fg: #0e0e10;
+
+    --expert-l: 0.74;
+
+    --ok: #5cc47a;
+    --warn: #e0b24a;
+    --bad: #e05c5c;
+    --info: #a1a1a8;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #0e0e10;
+  --panel: #141416;
+  --raised: #1b1b1e;
+  --border: #26262a;
+  --border-soft: #1f1f22;
+
+  --fg: #ececee;
+  --fg-2: #b0b0b7;
+  --fg-3: #8b8b93;
+  --fg-4: #45454c;
+
+  --accent: #ececee;
+  --accent-fg: #0e0e10;
+
+  --expert-l: 0.74;
+
+  --ok: #5cc47a;
+  --warn: #e0b24a;
+  --bad: #e05c5c;
+  --info: #a1a1a8;
+
+  color-scheme: dark;
+}
+
+/* `inline` so the generated utilities emit `var(--bg)` rather than snapshotting
+   the light value at build time — which is what makes one utility class work in
+   both themes. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-raised: var(--raised);
+  --color-border: var(--border);
+  --color-border-soft: var(--border-soft);
+
+  --color-fg: var(--fg);
+  --color-fg-2: var(--fg-2);
+  --color-fg-3: var(--fg-3);
+  --color-fg-4: var(--fg-4);
+
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --color-info: var(--info);
+
+  --color-expert: var(--expert);
+  --color-expert-soft: var(--expert-soft);
+
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+
+  /* Type scale. Chrome sits at 13px; the reading surface is 14px (15px below
+     `md`, set on `body` in the base layer). */
+  --text-label: 0.6875rem; /* 11px */
+  --text-label--line-height: 1rem;
+  --text-label--letter-spacing: 0.04em;
+  --text-xs: 0.75rem; /* 12px */
+  --text-xs--line-height: 1.0625rem;
+  --text-sm: 0.8125rem; /* 13px */
+  --text-sm--line-height: 1.25rem;
+  --text-base: 0.875rem; /* 14px */
+  --text-base--line-height: 1.6;
+  --text-md: 0.9375rem; /* 15px — reading surface on phones */
+  --text-md--line-height: 1.6;
+  --text-lg: 1rem; /* 16px — section headings */
+  --text-lg--line-height: 1.4;
+  --text-title: 1.5rem; /* 24px — page title */
+  --text-title--line-height: 1.25;
+  --text-stat: 1.25rem; /* 20px — stat tile value */
+  --text-stat--line-height: 1.2;
+  --text-hero: 2rem; /* 32px — marketing headline */
+  --text-hero--line-height: 1.15;
+
+  /* Radius scale (web-design.md §3) */
+  --radius-chip: 6px;
+  --radius-row: 8px;
+  --radius-card: 10px;
+  --radius-panel: 12px;
+
+  /* Motion. Three durations, two easings, nothing else. */
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Fixed heights the skeletons and the shell grid both depend on.
+     The bar is deliberately taller than the control inside it: at 40px a 32px
+     action left 4px above and below and read as crammed into the chrome, and on
+     touch a 44px bar around a 44px control left *nothing* — the pill spanned
+     the bar edge to edge. 6px on a mouse, 4px on a thumb. */
+  --spacing-topbar: 44px;
+  --spacing-topbar-touch: 52px;
+  --spacing-rail: 56px;
+  --spacing-sidebar: 260px;
+  --spacing-context: 360px;
+}
+
+/* Reduced motion zeroes the two longer durations and keeps `--dur-1` so colour
+   and opacity still settle. Loops become static — see the `motion-safe:`
+   keyframes below. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+  }
+}
+
+@layer base {
+  :root {
+    /* Control metrics. The coarse-pointer block is the only place touch sizing
+       is defined, so a component never branches on device. */
+    --row-h: 32px;
+    --table-row-h: 28px;
+    --icon-btn: 32px;
+    --icon-btn-sm: 28px;
+    --chip-h: 20px;
+    /* The rail's slot: the avatar tile, and the pitch the active bar slides by.
+       The bar is positioned from this rather than measured, so the tile size
+       and the pitch have to come from the same place — and that place has to be
+       CSS, because the pitch changes with the pointer. */
+    --rail-item: 40px;
+    --rail-slot: calc(var(--rail-item) + 8px);
+    /* The tall button (a form's primary action). A literal height here was the
+       one control that did not grow on touch, which put the login card's
+       Continue button under the 44px floor. */
+    --btn-lg: 40px;
+    /* Written by `useVisualViewport` on iOS, where Safari resizes the visual
+       viewport and leaves the layout viewport alone. Zero everywhere else. */
+    --vv-offset: 0px;
+  }
+
+  @media (pointer: coarse) {
+    :root {
+      --row-h: 44px;
+      --table-row-h: 40px;
+      /* 44px, not the 40px web-design.md §8 suggests: §13's checklist sets a
+         44px floor for every control and is the stricter of the two, and it is
+         the one written as a gate the e2e suite enforces. */
+      --icon-btn: 44px;
+      --chip-h: 28px;
+      --btn-lg: 48px;
+      /* The small icon button — a row's ⋯, a section's +. Grows too, or the
+         densest controls in the product are the ones a thumb cannot hit. */
+      --icon-btn-sm: 44px;
+      /* The rail is only rendered from `md`, which on an iPad is a touch
+         device: 40px tiles there are the shell's own navigation sitting under
+         the tap-target floor. */
+      --rail-item: 44px;
+    }
+    /* 16px or iOS zooms the page on focus. */
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background-color: var(--bg);
+    color: var(--fg-2);
+    font-family: var(--font-sans);
+    font-size: var(--text-base);
+    /* Every number in the product lines up in a column. */
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The reading surface goes to 15px below `md`; chrome stays 13px. */
+  @media (max-width: 767px) {
+    body {
+      font-size: var(--text-md);
+    }
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    color: var(--fg);
+    font-weight: 500;
+    text-wrap: balance;
+  }
+
+  ::selection {
+    background: var(--expert-soft);
+  }
+
+  /* The focus ring is `--fg`, not the expert colour: it has to be the most
+     visible thing on the page at the moment it appears, and the expert tone is
+     a grey. */
+  :focus-visible {
+    outline: 2px solid var(--fg);
+    outline-offset: 1px;
+    transition: outline-color var(--dur-1) var(--ease-out);
+  }
+
+  /* Hide the ring for pointer clicks on things that manage their own. */
+  [data-focus-silent]:focus-visible {
+    outline: none;
+  }
+
+  /* The app shell never scrolls the window; each column scrolls itself. */
+  body[data-shell='app'] {
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  /* Hairlines are 1px, never thicker. */
+  hr {
+    border-color: var(--border-soft);
+  }
+}
+
+@layer components {
+  /* Named containers. Components that live in more than one column size
+     themselves from these, never from the viewport (web-design.md §8). */
+  .container-chat {
+    container: chat / inline-size;
+  }
+  .container-row {
+    container: row / inline-size;
+  }
+  .container-tile {
+    container: tile / inline-size;
+  }
+
+  /* Each shell column is its own scroll container. */
+  .scroll-col {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Lists pan vertically; the graph canvas takes every gesture itself. */
+  .pan-y {
+    touch-action: pan-y;
+  }
+
+  /* The one accepted layout animation: a collapsible under ~300px tall. */
+  .collapse-grid {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--dur-2) var(--ease-out);
+  }
+  .collapse-grid[data-open='true'] {
+    grid-template-rows: 1fr;
+  }
+  .collapse-grid > * {
+    overflow: hidden;
+    min-height: 0;
+  }
+
+  /* Long lists: off-screen rows and transcript cards skip layout and paint. */
+  .cv-auto {
+    content-visibility: auto;
+  }
+
+  /* Auto-scroll is done by hand so a growing card cannot fight the browser's
+     own scroll anchoring. */
+  .anchor-none {
+    overflow-anchor: none;
+  }
+
+  /* The route-change crossfade. 150ms, opacity only. */
+  ::view-transition-group(.vt-fade) {
+    animation-duration: 150ms;
+  }
+  ::view-transition-old(.vt-fade),
+  ::view-transition-new(.vt-fade) {
+    animation-duration: 150ms;
+    animation-timing-function: var(--ease-out);
+  }
+}
+
+@layer utilities {
+  /* The streaming caret, at the end of whatever the last Markdown element is:
+     a paragraph, a heading, the last item of a list, the last line of a quote. */
+  .md-caret > :is(p, h3, h4, h5):last-child::after,
+  .md-caret > :is(ul, ol):last-child > li:last-child::after,
+  .md-caret > blockquote:last-child > p:last-child::after {
+    content: '';
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 2px;
+    transform: translateY(0.15em);
+    background: var(--expert);
+    animation: peritus-caret 1s step-end infinite;
+  }
+
+  /* Pinned bottom elements clear the home indicator. */
+  .pb-safe {
+    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+  }
+  .pb-safe-4 {
+    padding-bottom: calc(max(env(safe-area-inset-bottom), 0px) + 1rem);
+  }
+  .pt-safe {
+    padding-top: max(env(safe-area-inset-top), 0px);
+  }
+  /* The composer adds the iOS keyboard inset on top of its own padding. The
+     0.75rem is that padding: this sets `padding-bottom` outright, so without it
+     the box sits flush against the bottom wherever both insets are zero. */
+  .pb-keyboard {
+    padding-bottom: calc(0.75rem + var(--vv-offset, 0px) + max(env(safe-area-inset-bottom), 0px));
+  }
+}
+
+/* ── Loops ──────────────────────────────────────────────────────────────────
+   Four pulses and the skeleton fade are the only looping animations in the
+   product. Each is defined under `motion-safe` and has a static form under
+   `motion-reduce`, so reduced motion sees a still dot rather than no dot. */
+
+@keyframes peritus-pulse-dot {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes peritus-caret {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes peritus-sweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(500%);
+  }
+}
+
+@keyframes peritus-skeleton {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes peritus-ring-once {
+  from {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  to {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@keyframes peritus-wash-decay {
+  from {
+    background-color: var(--expert-soft);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+@layer utilities {
+  .animate-pulse-dot {
+    animation: peritus-pulse-dot 2s var(--ease-out) infinite;
+  }
+  .animate-caret {
+    animation: peritus-caret 1s step-end infinite;
+  }
+  .animate-sweep {
+    animation: peritus-sweep 1.2s var(--ease-out) infinite;
+  }
+  .animate-skeleton {
+    animation: peritus-skeleton 1.6s var(--ease-out) infinite;
+  }
+  .animate-ring-once {
+    animation: peritus-ring-once 600ms var(--ease-out) 1 forwards;
+  }
+  .animate-wash-decay {
+    animation: peritus-wash-decay 1.2s var(--ease-out) 1 forwards;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-pulse-dot,
+    .animate-caret,
+    .animate-sweep,
+    .animate-skeleton,
+    .animate-ring-once,
+    .animate-wash-decay {
+      animation: none;
+    }
+    /* A still caret still marks the end of the stream. */
+    .animate-caret {
+      opacity: 1;
+    }
+    .md-caret *::after {
+      animation: none !important;
+    }
+    .animate-skeleton {
+      opacity: 0.7;
+    }
+    /* The sweep's static form is a half-fill, not an invisible one. */
+    .animate-sweep {
+      transform: none;
+      opacity: 0.4;
+    }
+    .animate-ring-once,
+    .animate-wash-decay {
+      display: none;
+    }
+    html {
+      scroll-behavior: auto !important;
+    }
+  }
+}

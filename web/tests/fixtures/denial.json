@@ -1,0 +1,27 @@
+{
+  "insufficient_credits": {
+    "code": "insufficient_credits",
+    "message": "This pro build costs 8 credits, and you have 2.",
+    "required_credits": 8,
+    "available_credits": 2,
+    "tier": "pro",
+    "plan": "free",
+    "remedy": {
+      "kind": "request_credits",
+      "label": "Request credits",
+      "detail": "Credits are issued manually while billing is in private beta."
+    }
+  },
+  "tier_not_in_plan": {
+    "code": "tier_not_in_plan",
+    "message": "The pro tier is not available on the Free plan.",
+    "tier": "pro",
+    "plan": "free",
+    "allowed_tiers": ["lite", "standard"],
+    "remedy": {
+      "kind": "change_tier",
+      "label": "Build at standard instead",
+      "detail": "Pick an included tier, or ask for an upgrade."
+    }
+  }
+}

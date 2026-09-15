@@ -47,12 +47,16 @@ def test_ownership_clause_admin_variant_still_ignores_visibility():
     assert "visibility" not in clause
 
 
-def test_readable_clause_adds_shared_visibilities_only():
+def test_readable_clause_adds_public_and_live_grants_only():
     clause, params = _readable_clause(OWNER, include_unowned=False, alias="e", idx=1)
     assert "e.owner_id = $1::uuid" in clause
-    assert "e.visibility IN ('public', 'unlisted')" in clause
-    # 'private' must never appear as a matching value.
+    assert "e.visibility = 'public'" in clause
+    # A grant counts only on a live link, for this user.
+    assert "l.revoked_at IS NULL" in clause
+    assert "g.user_id = $1::uuid" in clause
+    # 'private' must never appear as a matching value, and nothing reads by slug.
     assert "'private'" not in clause
+    assert "unlisted" not in clause
     assert params == [OWNER]
 
 
@@ -170,13 +174,17 @@ async def test_public_expert_is_readable_but_not_owned(db_pool):
 
 
 @pytest.mark.asyncio
-async def test_unlisted_is_reachable_by_slug_but_absent_from_the_shelf(db_pool):
-    repo = ExpertRepository(db_pool)
-    await _seed(db_pool, "quiet", OWNER, ExpertVisibility.UNLISTED)
+async def test_unlisted_is_no_longer_a_visibility(db_pool):
+    """Migration 031: a guessable slug is not a share link."""
+    import asyncpg
 
-    assert [e.name for e in await repo.list_catalog()] == []
-    assert await repo.get_public("quiet") is not None
-    assert await repo.get_for_user("quiet", OTHER, include_unowned=False) is not None
+    expert = await _seed(db_pool, "quiet", OWNER, ExpertVisibility.PRIVATE)
+    async with db_pool.acquire() as conn:
+        with pytest.raises(asyncpg.CheckViolationError):
+            await conn.execute(
+                "UPDATE experts SET visibility = 'unlisted' WHERE id = $1", expert.id
+            )
+    assert await ExpertRepository(db_pool).get_for_user("quiet", OTHER, include_unowned=False) is None
 
 
 @pytest.mark.asyncio

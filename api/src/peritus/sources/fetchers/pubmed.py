@@ -25,6 +25,8 @@ from peritus.sources.domain import (
     SourceType,
     resolved_identifiers,
 )
+from peritus.sources.fetchers.base import note_search_failure
+from peritus.sources.fetchers.exa import classify_search_error
 
 logger = get_logger(__name__)
 
@@ -73,6 +75,7 @@ class PubmedFetcher:
                 payload = resp.json()
         except Exception as exc:
             logger.warning("Europe PMC search failed for %r: %s", query, exc)
+            note_search_failure(*classify_search_error(exc, "Europe PMC"))
             return []
 
         results = payload.get("resultList", {}).get("result", []) or []

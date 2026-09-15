@@ -1,0 +1,35 @@
+{
+  "expert": {
+    "name": "varroa-mite-control-in-temperate-beekeeping",
+    "topic": "Varroa mite control in temperate beekeeping"
+  },
+  "computed": true,
+  "nodes": [
+    { "id": 5001, "label": "varroa destructor", "node_type": "concept", "degree": 24 },
+    { "id": 5002, "label": "deformed wing virus", "node_type": "concept", "degree": 13 },
+    { "id": 5003, "label": "amitraz", "node_type": "concept", "degree": 9 },
+    { "id": 5004, "label": "drone brood removal", "node_type": "concept", "degree": 7 },
+    {
+      "id": 5005,
+      "label": "Mechanical control alone did not prevent viral amplification in high-pressure years.",
+      "node_type": "claim",
+      "degree": 3
+    },
+    {
+      "id": 5006,
+      "label": "Drone brood removal reduced mite load by 43% relative to untreated controls.",
+      "node_type": "claim",
+      "degree": 3
+    }
+  ],
+  "edges": [
+    { "id": 9001, "source": 5001, "target": 5002, "edge_type": "about", "evidence": 6 },
+    { "id": 9002, "source": 5001, "target": 5003, "edge_type": "about", "evidence": 4 },
+    { "id": 9003, "source": 5004, "target": 5006, "edge_type": "about", "evidence": 2 },
+    { "id": 9004, "source": 5005, "target": 5006, "edge_type": "contradicts", "evidence": 3 },
+    { "id": 9005, "source": 5002, "target": 5005, "edge_type": "about", "evidence": 2 }
+  ],
+  "total_nodes": 187,
+  "total_edges": 214,
+  "truncated": true
+}

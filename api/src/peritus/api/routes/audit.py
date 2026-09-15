@@ -33,6 +33,7 @@ from peritus.audit.export import (
     sources_to_csv,
     sources_to_ris,
 )
+from peritus.audit.repository import AuditScope
 from peritus.audit.service import (
     DEFAULT_EXCERPT_CHARS,
     DEFAULT_PASSAGES_PER_SIDE,
@@ -64,6 +65,14 @@ async def _readable_expert(slug: str, user: AuthUser) -> Expert:
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     return expert
+
+
+def _audit_scope(expert: Expert, user: AuthUser) -> AuditScope:
+    return AuditScope(
+        caller_id=user.id,
+        include_unowned=user.is_admin,
+        owns_expert=expert.is_owned_by(user.id, include_unowned=user.is_admin),
+    )
 
 
 @router.get("/{slug}/corpus-report")
@@ -220,14 +229,20 @@ async def list_answer_audits(
     offset: int = Query(0, ge=0),
     user: AuthUser = Depends(require_user),
 ) -> dict[str, Any]:
-    """Retrieval trails for answers this expert has given.
+    """Retrieval trails for the caller's own answers from this expert.
 
     The durable half of the ``retrieval_audit`` event the chat stream emits, so
-    an answer can still be accounted for long after its stream closed.
+    an answer can still be accounted for long after its stream closed. Scoped
+    to the caller's conversations (see ``AuditScope``): a trail carries the
+    question, and a readable expert is not a licence to read other people's.
     """
     expert = await _readable_expert(slug, user)
     return await AuditService(get_pool()).list_answer_audits(
-        expert, limit=limit, offset=offset, conversation_id=conversation_id
+        expert,
+        limit=limit,
+        offset=offset,
+        conversation_id=conversation_id,
+        scope=_audit_scope(expert, user),
     )
 
 
@@ -238,7 +253,9 @@ async def get_answer_audit(
     """One answer's full retrieval trail, with per-passage disposition."""
     expert = await _readable_expert(slug, user)
     try:
-        audit = await AuditService(get_pool()).get_answer_audit(expert, audit_id)
+        audit = await AuditService(get_pool()).get_answer_audit(
+            expert, audit_id, scope=_audit_scope(expert, user)
+        )
     except Exception as exc:  # malformed uuid reaches Postgres as a cast error
         logger.info("Answer audit lookup failed for %r/%r: %s", slug, audit_id, exc)
         raise HTTPException(status_code=404, detail="Answer audit not found") from exc

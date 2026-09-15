@@ -15,6 +15,8 @@ from peritus.sources.domain import (
     SourceType,
     resolved_identifiers,
 )
+from peritus.sources.fetchers.base import note_search_failure
+from peritus.sources.fetchers.exa import classify_search_error
 
 logger = get_logger(__name__)
 
@@ -36,6 +38,7 @@ class ArxivFetcher:
             )
         except Exception as exc:
             logger.warning("ArXiv search failed for %r: %s", query, exc)
+            note_search_failure(*classify_search_error(exc, "arXiv"))
             return []
 
         return [_to_candidate(paper) for paper in papers]

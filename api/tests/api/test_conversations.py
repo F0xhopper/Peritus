@@ -115,6 +115,7 @@ def test_title_short_question_verbatim():
 
 def test_title_collapses_whitespace():
     assert _title_from_question("  What\n is   virtue? ") == "What is virtue?"
+    assert _title_from_question("what is the potency") == "What is the potency"
 
 
 def test_title_truncates_at_word_boundary_with_ellipsis():
@@ -293,7 +294,8 @@ async def test_expert_conversations_list(client):
 
     assert resp.status_code == 200
     assert len(resp.json()) == 1
-    mock_convs.list_for_expert.assert_awaited_once_with(1)
+    # Scoped to the caller: a shared or public expert has other people's chats.
+    mock_convs.list_for_expert.assert_awaited_once_with(1, ADMIN_ID, include_unowned=True)
 
 
 # ── the message stream ──
@@ -367,6 +369,20 @@ async def test_send_message_busy_claim_409(client):
         resp = await client.post(f"/conversations/{CONV_ID}/messages", json={"question": "hi"})
     assert resp.status_code == 409
     assert "already streaming" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_send_message_after_share_revoked_403(client):
+    """A viewer's chat outlives the link it came through, but cannot continue."""
+    mock_convs, mock_experts = _stream_mocks(_make_conversation())
+    mock_experts.is_readable_by = AsyncMock(return_value=False)
+    p1, p2, p3 = _patched(mock_convs, mock_experts)
+    with p1, p2, p3:
+        resp = await client.post(f"/conversations/{CONV_ID}/messages", json={"question": "hi"})
+    assert resp.status_code == 403
+    assert "no longer shared" in resp.json()["detail"]
+    mock_convs.claim_stream.assert_not_awaited()
+    mock_convs.add_user_message.assert_not_awaited()
 
 
 @pytest.mark.asyncio

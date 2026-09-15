@@ -1,27 +1,166 @@
-name: Deploy backend to Fly.io
+name: Deploy
 
+# Production release. On every push to main: run the whole CI suite, then
+# deploy the API to Fly.io if api/ changed, then the web app to Vercel if web/
+# changed — each followed by a smoke test against the live URL. Nothing deploys
+# unless CI passed, and the web app never ships ahead of the API it talks to.
+#
+# Run it by hand (Actions → Deploy → Run workflow) to redeploy without a commit.
 on:
   push:
     branches: [main]
-    paths:
-      - "api/**"
-      - ".github/workflows/deploy.yml"
+  workflow_dispatch:
+    inputs:
+      target:
+        description: What to deploy
+        type: choice
+        options: [both, api, web]
+        default: both
 
+permissions:
+  contents: read
+
+# One production release at a time, and never cancel one halfway: a cancelled
+# Fly deploy can leave the app and worker on different versions.
 concurrency:
-  group: fly-deploy
+  group: deploy-production
   cancel-in-progress: false
 
+env:
+  API_URL: https://peritus.fly.dev
+  WEB_URL: https://peritus-app.vercel.app
+
 jobs:
-  deploy:
-    name: Deploy
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
+  changes:
+    name: Detect changes
     runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      web: ${{ steps.filter.outputs.web }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+
+      # Deploying the API restarts the build worker, which hands every running
+      # build back to the queue. That is safe (builds resume) but not free, so a
+      # web-only change must not do it.
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'api/**'
+              - '.github/workflows/deploy.yml'
+            web:
+              - 'web/**'
+              - '.github/workflows/deploy.yml'
+
+  deploy-api:
+    name: Deploy API (Fly.io)
+    needs: [ci, changes]
+    if: >-
+      (github.event_name == 'push' && needs.changes.outputs.api == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target != 'web')
+    runs-on: ubuntu-latest
+    environment:
+      name: production-api
+      url: ${{ env.API_URL }}
+    steps:
+      - uses: actions/checkout@v7
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
+        with:
+          version: 0.4.87
 
-      - name: Deploy to Fly.io
+      # Builds on Fly's remote builder, runs `python migrations/apply.py` as the
+      # release_command (a failure there aborts before any machine is updated),
+      # then rolls the app and worker machines.
+      - name: Deploy
         working-directory: api
-        run: flyctl deploy --remote-only --config fly.toml --dockerfile Dockerfile
+        run: flyctl deploy --remote-only --image-label "git-${GITHUB_SHA::12}" --wait-timeout 10m
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+      # /health: the new process is serving. /ready: it can reach the database
+      # with the production credentials — the one thing CI cannot check.
+      - name: Smoke-test production
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 10 --retry-all-errors --retry-delay 3 "$API_URL/health"; echo
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 3 "$API_URL/ready"; echo
+
+  deploy-web:
+    name: Deploy web (Vercel)
+    needs: [ci, changes, deploy-api]
+    # `!cancelled()` lets this run when deploy-api was skipped (web-only change)
+    # while still refusing to run when CI or the API deploy failed.
+    if: >-
+      !cancelled() &&
+      needs.ci.result == 'success' &&
+      contains(fromJSON('["success", "skipped"]'), needs.deploy-api.result) &&
+      ((github.event_name == 'push' && needs.changes.outputs.web == 'true') ||
+       (github.event_name == 'workflow_dispatch' && inputs.target != 'api'))
+    runs-on: ubuntu-latest
+    environment:
+      name: production-web
+      url: ${{ env.WEB_URL }}
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PROJECT_ID }}
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install the Vercel CLI
+        run: npm install --global vercel@59.17.0
+
+      - name: Restore the build cache
+        uses: actions/cache@v6
+        with:
+          path: web/.next/cache
+          key: next-vercel-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}-${{ github.sha }}
+          restore-keys: |
+            next-vercel-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}-
+
+      # Production environment variables (PERITUS_API_URL, NEXT_PUBLIC_APP_URL)
+      # live in the Vercel project and are pulled here, because
+      # NEXT_PUBLIC_APP_URL is inlined into the bundle at build time.
+      # Not `vercel pull`: it cannot use a project-scoped token. See the script.
+      - name: Pull production settings
+        run: node ../.github/scripts/vercel-pull.mjs production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      # Build here and upload the output, rather than letting Vercel rebuild
+      # from git: what ships is the commit CI just passed, built once.
+      - name: Build
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        run: vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+
+      # The landing page renders, the auth gate redirects, and the route
+      # handlers reach the API through PERITUS_API_URL (auth/status is answered
+      # by FastAPI, not by Next).
+      - name: Smoke-test production
+        run: |
+          set -euo pipefail
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 3 -o /dev/null "$WEB_URL/"
+          test "$(curl -sS -o /dev/null -w '%{http_code}' "$WEB_URL/experts")" = 307
+          curl -fsS --retry 5 --retry-all-errors --retry-delay 3 "$WEB_URL/api/auth/status" \
+            | tee /dev/stderr | grep -q '"auth_enabled":true'

@@ -1,0 +1,49 @@
+{
+  "ci": {
+    "collect": {
+      "startServerCommand": "npx next start --port 3200",
+      "startServerReadyPattern": "Ready in",
+      "startServerReadyTimeout": 120000,
+      "url": [
+        "http://127.0.0.1:3200/experts",
+        "http://127.0.0.1:3200/chats/2f2b8a4e-1c9d-4f8a-9b1e-7c0d2a5f6e31"
+      ],
+      "numberOfRuns": 3,
+      "settings": {
+        "extraHeaders": {
+          "Cookie": "peritus_access_token=mock-access; peritus_refresh_token=mock-refresh"
+        },
+        "throttlingMethod": "devtools"
+      }
+    },
+    "assert": {
+      "assertions": {
+        "largest-contentful-paint": [
+          "error",
+          {
+            "maxNumericValue": 2500,
+            "aggregationMethod": "median"
+          }
+        ],
+        "cumulative-layout-shift": [
+          "error",
+          {
+            "maxNumericValue": 0.1,
+            "aggregationMethod": "median"
+          }
+        ],
+        "total-blocking-time": [
+          "error",
+          {
+            "maxNumericValue": 200,
+            "aggregationMethod": "median"
+          }
+        ]
+      }
+    },
+    "upload": {
+      "target": "filesystem",
+      "outputDirectory": ".lighthouseci"
+    }
+  }
+}

@@ -32,7 +32,7 @@ def test_tier_defaults_are_correct():
     assert pro.source_multiplier == 2.0
     assert pro.retrieval_top_k == 20
     assert pro.max_subqueries == 6
-    assert pro.graph_hops == 2
+    assert pro.graph_hops == 1  # a second hop was fetched and discarded
     assert pro.coverage_extra_k == 10
     assert pro.max_context_passages == 25
     assert pro.max_response_tokens == 4096

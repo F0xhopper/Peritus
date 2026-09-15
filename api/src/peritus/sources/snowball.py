@@ -37,12 +37,11 @@ import httpx
 from peritus.core.logging import get_logger
 from peritus.sources.dedup import SeenSet
 from peritus.sources.domain import Identifiers, SourceCandidate, SourceType, ValidatedSource
-from peritus.sources.fetchers.pdf import identifiers_from_external
+from peritus.sources.fetchers.pdf import identifiers_from_external, semantic_scholar_headers
 
 logger = get_logger(__name__)
 
 _S2 = "https://api.semanticscholar.org/graph/v1"
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
 
 # Semantic Scholar allows 500 ids per batch call; a build never approaches it,
 # but batching is what keeps the request count polite as seeds grow.
@@ -226,7 +225,7 @@ async def snowball(
     semaphore = asyncio.Semaphore(_SEED_CONCURRENCY)
 
     async with httpx.AsyncClient(
-        timeout=_REQUEST_TIMEOUT, headers=_HEADERS, follow_redirects=True
+        timeout=_REQUEST_TIMEOUT, headers=semantic_scholar_headers(), follow_redirects=True
     ) as http:
 
         async def _one(key: str, source: ValidatedSource) -> None:
@@ -289,6 +288,9 @@ async def _fetch_list(
             f"{_S2}/paper/{key}/{edge}",
             params={"fields": _FIELDS, "limit": limit},
         )
+        if resp.status_code == 429:
+            logger.warning("Snowball: Semantic Scholar rate-limited %s for %s (429)", edge, key)
+            return []
         if resp.status_code != 200:
             logger.debug("S2 %s for %s returned %d", edge, key, resp.status_code)
             return []

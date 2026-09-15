@@ -117,9 +117,9 @@ async def _llm_windowed_rerank(
     if not _warned_llm_fallback:
         _warned_llm_fallback = True
         logger.warning(
-            "COHERE_API_KEY not set — reranking falls back to ~%d windowed LLM "
-            "calls per query. Cohere rerank is cheaper (~$2 per 1K searches) and "
-            "higher quality; set COHERE_API_KEY to switch.",
+            "%s — reranking falls back to ~%d windowed LLM calls per query. Cohere "
+            "rerank is cheaper (~$2 per 1K searches) and higher quality.",
+            "Cohere rerank failed" if settings.COHERE_API_KEY else "COHERE_API_KEY not set",
             -(-n // window),
         )
     sem = asyncio.Semaphore(4)

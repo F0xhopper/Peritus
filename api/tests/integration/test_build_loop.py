@@ -22,6 +22,7 @@ from peritus.experts.builder import (
     ExpertBuilder,
 )
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
+from peritus.experts.feedback import Feedback
 from peritus.sources.domain import Identifiers, RawSource, SourceType, ValidatedSource
 
 pytestmark = pytest.mark.asyncio
@@ -126,7 +127,7 @@ class _Loop:
         with (
             patch(
                 "peritus.experts.builder.feedback_queries",
-                AsyncMock(return_value={c: [f"query for {c}"] for c in _CONCEPTS}),
+                AsyncMock(return_value=Feedback({c: [f"query for {c}"] for c in _CONCEPTS})),
             ),
             patch(
                 "peritus.experts.builder.snowball",
@@ -220,7 +221,7 @@ async def test_a_round_with_nowhere_left_to_search_stops_and_says_so():
 
     with (
         builder_patch,
-        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value={})),
+        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback())),
         patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
     ):
         outcome = await builder._run_discovery(_expert(), "Thomism", _PLAN, _on_event)
@@ -306,7 +307,7 @@ async def test_the_summary_carries_the_reason_and_the_final_coverage():
     assert summary["rounds"] == 3
     assert summary["accepted"] == 15
     assert summary["coverage"]["met"] is False
-    assert summary["rubric_version"].startswith("v5")
+    assert summary["rubric_version"].startswith("v8")
     assert summary["budget_usd"] > 0
 
 
@@ -375,3 +376,290 @@ async def test_budget_reserved_for_rejected_sources_is_released():
         "the rejected sources' reservation must be given back"
     )
     assert outcome.committed_usd > 0, "the accepted sources still cost something"
+
+
+# ── depth: the guaranteed round and the money kept for it ───────────────────
+
+
+async def test_standard_runs_its_feedback_round_even_when_round_0_meets_every_target():
+    """Job 53 met STANDARD's target after round 0 with 3 of 43 sources primary,
+    and the only round able to fix that never ran."""
+    loop = _Loop(_covers(*_CONCEPTS))
+    outcome = await loop.run(_expert(ExpertTier.STANDARD))
+
+    assert loop.rounds_run == [0, 1]
+    assert outcome.stop_reason == STOP_TARGETS_MET
+    feedback = [e for e in loop.events if e["type"] == "feedback_queries"]
+    assert feedback and feedback[0]["concepts"], (
+        "a round that runs with every target met searches the thinnest concepts"
+    )
+
+
+async def test_lite_still_stops_as_soon_as_its_targets_are_met():
+    loop = _Loop(_covers(*_CONCEPTS))
+    outcome = await loop.run(_expert(ExpertTier.LITE))
+    assert loop.rounds_run == [0]
+    assert outcome.stop_reason == STOP_TARGETS_MET
+
+
+async def test_round_0_may_not_commit_the_money_the_guaranteed_round_needs():
+    budgets: list[Decimal] = []
+    loop = _Loop(_covers(*_CONCEPTS))
+    inner = loop._round
+
+    async def _record(*args):
+        budgets.append(args[5])  # budget_usd
+        return await inner(*args)
+
+    loop._round = _record
+    outcome = await loop.run(_expert(ExpertTier.STANDARD))
+
+    assert budgets[0] == Decimal(str(outcome.budget_usd)) * Decimal("0.65")
+    assert budgets[1] > budgets[0], "the reserve is released to the later round"
+
+
+async def test_lite_keeps_no_reserve():
+    budgets: list[Decimal] = []
+    loop = _Loop(_covers("analogy"))
+    inner = loop._round
+
+    async def _record(*args):
+        budgets.append(args[5])
+        return await inner(*args)
+
+    loop._round = _record
+    outcome = await loop.run(_expert(ExpertTier.LITE))
+    assert budgets[0] == Decimal(str(outcome.budget_usd))
+
+
+async def test_the_summary_reports_corpus_composition():
+    loop = _Loop(_covers("analogy"))
+    outcome = await loop.run(_expert())
+    corpus = outcome.summary()["corpus"]
+    assert corpus["primary_share"] == 1.0
+    assert corpus["concepts_without_primary"] == ["participation"]
+    assert corpus["must_have"] == []
+
+
+# ── one real round: outcomes, retry, floor, ledger ───────────────────────────
+
+
+def _english_text(seed: str) -> str:
+    """English-looking prose, different enough per seed that simhash keeps them apart."""
+    import random
+
+    rng = random.Random(seed)
+    nouns = [f"{seed.lower()}{n}" for n in range(60)] + [
+        "law", "reason", "nature", "being", "cause", "form", "matter", "act", "end", "good",
+    ]
+    return " ".join(
+        f"the {rng.choice(nouns)} of {rng.choice(nouns)} is what {rng.choice(nouns)} was"
+        for _ in range(300)
+    )
+
+
+class _Channel:
+    """A fetcher whose search is scripted per call."""
+
+    def __init__(self, scripts):
+        self.scripts = list(scripts)
+        self.calls = 0
+
+    async def search(self, query, max_results):
+        from peritus.sources.fetchers.base import note_search_failure
+
+        self.calls += 1
+        script = self.scripts.pop(0) if self.scripts else []
+        if isinstance(script, tuple):
+            note_search_failure(*script)
+            return []
+        return script
+
+    async def fetch(self, candidate):
+        return RawSource(
+            # Distinct English text per source, or content fingerprinting
+            # merges them and the language check drops them.
+            candidate.source_type, candidate.url, candidate.title, None,
+            _english_text(candidate.title),
+            metadata=dict(candidate.metadata),
+        )
+
+
+def _hit(title: str, source_type: SourceType = SourceType.WEB):
+    from peritus.sources.domain import SourceCandidate
+
+    return SourceCandidate(source_type, f"https://x.test/{title}", title, None, "snippet")
+
+
+async def test_a_round_retries_a_timed_out_channel_relaxes_a_thin_floor_and_writes_its_ledger():
+    from peritus.sources.dedup import SeenSet
+    from peritus.sources.fetchers.base import STATUS_OK, STATUS_TIMEOUT
+    from peritus.sources.triage import TriagedCandidate
+
+    gutenberg = _Channel([(STATUS_TIMEOUT, "Gutendex timed out"), [_hit("Summa", SourceType.GUTENBERG)]])
+    web = _Channel([[_hit("strong"), _hit("middling"), _hit("junk")]])
+
+    builder = ExpertBuilder(MagicMock())
+    builder._fetchers = {"gutenberg": (gutenberg, 4), "web": (web, 3)}
+    builder._ledger_expert_id = 1
+    builder._repo.insert_candidate_screenings = AsyncMock()
+
+    scores = {"Summa": 9.0, "strong": 8.0, "middling": 5.5, "junk": 1.0}
+
+    async def _triage(topic, concepts, must_haves, candidates):
+        return [
+            TriagedCandidate(c, scores[c.title], model_score=scores[c.title]) for c in candidates
+        ]
+
+    events: list[dict] = []
+
+    async def _on_event(e):
+        events.append(e)
+
+    with patch("peritus.experts.builder.triage_candidates", _triage):
+        sources, _ = await builder._discovery_round(
+            "Thomism", _PLAN, {"gutenberg": ["q"], "web": ["q"]}, [], 60, Decimal(3),
+            SeenSet(), [], {}, {}, _on_event, 0, False,
+        )
+
+    assert gutenberg.calls == 2, "a timed-out channel is retried once"
+    done = [e for e in events if e["type"] == "fetcher_done" and e["name"] == "gutenberg"]
+    assert [(e["status"], e["attempt"]) for e in done] == [(STATUS_TIMEOUT, 0), (STATUS_OK, 1)]
+    assert done[0]["error"] == "Gutendex timed out"
+
+    relaxed = [e for e in events if e["type"] == "floor_relaxed"]
+    assert relaxed and relaxed[0]["relaxed_to"] == 5.0, "three candidates cannot fill round 0"
+    assert {s.title for s in sources} == {"Summa", "strong", "middling"}
+
+    [(expert_id, job_id, rows)] = [c.args for c in builder._repo.insert_candidate_screenings.call_args_list]
+    by_title = {r["title"]: r for r in rows}
+    assert by_title["junk"]["fetch_outcome"] == "below_floor"
+    assert by_title["junk"]["fetch_rank"] is None
+    assert by_title["Summa"]["fetch_outcome"] == "fetched"
+    assert by_title["Summa"]["fetch_rank"] == 1
+    assert all(r["round"] == 0 for r in rows)
+
+
+# ── a provider that refuses every call is not a quality finding ─────────────
+
+
+async def test_refused_validation_stops_the_build_instead_of_reporting_a_collapse():
+    from peritus.core.exceptions import BuildError
+    from peritus.infrastructure import anthropic_batch
+    from peritus.sources.domain import DroppedSource
+
+    loop = _Loop(_covers("analogy"), per_round=10, accepted_per_round=0)
+
+    async def _validate(expert, topic, raws, concepts, on_event, n):
+        return [], [DroppedSource(raw, 0.0, 0.0, "validation error") for raw in raws]
+
+    loop._validate = _validate
+    with patch.object(
+        anthropic_batch, "terminal_provider_error",
+        lambda: RuntimeError("Your credit balance is too low"),
+    ), patch(
+        "peritus.experts.builder.terminal_provider_error",
+        lambda: RuntimeError("Your credit balance is too low"),
+    ), pytest.raises(BuildError, match="credit balance"):
+        await loop.run(_expert())
+
+
+async def test_unjudged_sources_do_not_count_toward_an_acceptance_collapse():
+    from peritus.sources.domain import DroppedSource
+
+    loop = _Loop(_covers("analogy"), per_round=10, accepted_per_round=2)
+    inner = loop._validate
+
+    async def _validate(expert, topic, raws, concepts, on_event, n):
+        accepted, _ = await inner(expert, topic, raws, concepts, on_event, n)
+        # 8 of 10 never judged (a failed batch); the 2 judged both passed.
+        return accepted, [DroppedSource(raw, 0.0, 0.0, "validation error") for raw in raws[2:]]
+
+    loop._validate = _validate
+    outcome = await loop.run(_expert(ExpertTier.PRO))
+    assert outcome.stop_reason != STOP_ACCEPTANCE_COLLAPSED
+
+
+# ── the syllabus: facets and the named-text gate (docs/plans/syllabus.md) ───
+
+
+async def test_a_later_round_searches_the_facet_that_is_not_met():
+    """Two facets, one fully met: round 1's concepts all come from the other."""
+    concepts = ["act", "essence", "neo-thomism", "analytic thomism"]
+    plan = {
+        **_PLAN,
+        "key_concepts": concepts,
+        "facets": [
+            {"name": "Metaphysics", "concepts": ["act", "essence"]},
+            {"name": "History", "concepts": ["neo-thomism", "analytic thomism"]},
+        ],
+    }
+    loop = _Loop(_covers("act", "essence"))
+    builder = ExpertBuilder(MagicMock())
+    builder._fetchers = {"exa": (None, 5), "web": (None, 3)}
+    builder._discovery_round = loop._round
+    builder._validate_round = loop._validate
+
+    async def _on_event(event: dict) -> None:
+        loop.events.append(event)
+
+    with (
+        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback())),
+        patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
+        patch("peritus.experts.builder.discovery_loop_enabled", lambda: True),
+    ):
+        outcome = await builder._run_discovery(_expert(), "Thomism", plan, _on_event)
+
+    feedback = [e for e in loop.events if e["type"] == "feedback_queries"]
+    assert set(feedback[0]["concepts"]) == {"neo-thomism", "analytic thomism"}
+    facets = {f["name"]: f["met"] for f in outcome.summary()["coverage"]["facets"]}
+    assert facets == {"Metaphysics": True, "History": False}
+
+
+async def test_a_concept_whose_named_text_is_missing_is_unmet_on_treats_tagged_primaries():
+    """Natural law on expert 60: primary sources tagged with it, its named text absent."""
+    plan = {
+        **_PLAN,
+        "key_concepts": ["natural law"],
+        "concept_primary_texts": [{
+            "concept": "natural law", "title": "Summa Theologiae", "author": "Aquinas",
+            "kind": "text", "public_domain": True, "sections": "I-II qq. 90-97",
+        }],
+    }
+    loop = _Loop(_covers("natural law"))
+    inner = loop._validate
+
+    async def _validate(expert, topic, raws, concepts, on_event, n):
+        accepted, dropped = await inner(expert, topic, raws, concepts, on_event, n)
+        for source in accepted:
+            source.concept_depths = {"natural law": "treats"}
+        return accepted, dropped
+
+    loop._validate = _validate
+    builder = ExpertBuilder(MagicMock())
+    builder._fetchers = {"exa": (None, 5), "web": (None, 3)}
+    builder._discovery_round = loop._round
+    builder._validate_round = loop._validate
+    builder._resolve_canonical = AsyncMock(return_value=[])
+
+    async def _on_event(event: dict) -> None:
+        loop.events.append(event)
+
+    with (
+        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback())),
+        patch("peritus.experts.builder.suggest_primary_texts", AsyncMock(return_value=[])),
+        patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
+        patch("peritus.experts.builder.discovery_loop_enabled", lambda: True),
+    ):
+        outcome = await builder._run_discovery(_expert(), "Thomism", plan, _on_event)
+
+    [concept] = outcome.coverage.concepts
+    assert concept.primary > 0, "the sources are primary and tagged with the concept"
+    assert concept.named_text == "missing"
+    assert not concept.has_primary and not concept.met
+    assert outcome.stop_reason == STOP_MAX_ROUNDS
+    corpus = outcome.summary()["corpus"]
+    assert corpus["concepts_without_primary"] == ["natural law"]
+    assert corpus["concepts_missing_named_text"] == [
+        {"concept": "natural law", "texts": ["Summa Theologiae I-II qq. 90-97"]}
+    ]

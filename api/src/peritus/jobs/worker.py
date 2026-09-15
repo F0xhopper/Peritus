@@ -38,6 +38,7 @@ from peritus.experts.domain import ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
 from peritus.jobs.domain import BuildJob
 from peritus.jobs.repository import JobRepository
+from peritus.search.readiness import Readiness
 from peritus.uploads.service import ingest_upload, summary_event
 
 logger = get_logger(__name__)
@@ -95,6 +96,26 @@ def _log_environment_banner() -> None:
         ", ".join(sorted(n for n, v in keys.items() if v)) or "none",
         ", ".join(sorted(n for n, v in keys.items() if not v)) or "none",
     )
+
+
+def _resume_point(job: BuildJob, expert, builder: Any) -> Readiness | None:
+    """Where a retry of this job can pick up, or None to start from scratch.
+
+    Only a *retry* resumes. The first attempt of a job is a (re)build and must
+    start clean, whatever the expert's readiness says about its previous corpus.
+    On a later attempt, readiness was written by an earlier attempt of this same
+    job, so ``chat_ready`` or better means the corpus that attempt fetched,
+    validated and embedded is in the database and paid for. Resetting it — which
+    every attempt used to do — threw that away to re-run a stage that had
+    already succeeded.
+    """
+    if job.attempts <= 1 or not hasattr(builder, "resume"):
+        return None
+    try:
+        readiness = Readiness(expert.readiness)
+    except ValueError:
+        return None
+    return readiness if readiness.can_chat else None
 
 
 class _JobCancelled(Exception):
@@ -326,12 +347,16 @@ class BuildWorker:
             else None
         )
         try:
+            builder = self._builder_factory(job.source_filter)
+            resume_from = _resume_point(job, expert, builder)
             await expert_repo.update_status(expert.id, ExpertStatus.BUILDING)
-            await expert_repo.reset_build_state(expert.id)
+            if resume_from is None:
+                await expert_repo.reset_build_state(expert.id)
             await self._jobs.append_event(job.id, "build_started", {
                 "type": "build_started",
                 "attempt": job.attempts,
                 "max_attempts": job.max_attempts,
+                **({"resumed_from": resume_from.value} if resume_from else {}),
             })
 
             async def on_event(event: dict[str, Any]) -> None:
@@ -341,13 +366,16 @@ class BuildWorker:
                     meter.observe_event(event)
                 await self._jobs.append_event(job.id, event["type"], event)
 
-            builder = self._builder_factory(job.source_filter)
             # Only used to name screening capture files, and only when capture
             # is switched on — set after construction so the factory signature
             # (which tests substitute) does not have to know about it.
             if hasattr(builder, "_job_id"):
                 builder._job_id = job.id
-            build_task = asyncio.create_task(builder.build(expert, on_event=on_event))
+            build_task = asyncio.create_task(
+                builder.resume(expert, resume_from, on_event=on_event)
+                if resume_from is not None
+                else builder.build(expert, on_event=on_event)
+            )
             try:
                 result: BuildResult = await build_task
             except asyncio.CancelledError:

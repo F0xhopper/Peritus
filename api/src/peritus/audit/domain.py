@@ -24,6 +24,9 @@ from typing import Any
 DISCOVERY_PLAN = "plan"
 DISCOVERY_SNOWBALL = "snowball"
 DISCOVERY_GAPFILL = "gapfill"
+# A must-have work the research plan named, found by the canonical-work resolver
+# (sources/canonical.py) rather than by a search query.
+DISCOVERY_CANONICAL = "canonical"
 DISCOVERY_UNKNOWN = "unknown"
 
 # Citation directions, as ``snowball:<direction>``. Backward is what an accepted
@@ -32,7 +35,9 @@ DISCOVERY_UNKNOWN = "unknown"
 SNOWBALL_BACKWARD = "backward"
 SNOWBALL_FORWARD = "forward"
 
-KNOWN_DISCOVERY_METHODS = (DISCOVERY_PLAN, DISCOVERY_SNOWBALL, DISCOVERY_GAPFILL)
+KNOWN_DISCOVERY_METHODS = (
+    DISCOVERY_PLAN, DISCOVERY_SNOWBALL, DISCOVERY_GAPFILL, DISCOVERY_CANONICAL,
+)
 
 
 def parse_discovery_method(discovered_via: str | None) -> tuple[str, str | None]:

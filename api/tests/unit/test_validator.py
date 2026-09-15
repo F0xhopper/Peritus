@@ -192,10 +192,11 @@ async def test_reviewed_callback_reports_both_verdicts_and_the_reversal(monkeypa
 # ── provenance ───────────────────────────────────────────────────────────────
 
 
-def test_the_rubric_version_names_the_structured_preview():
-    """The preview changed even though the thresholds did not, and a screening
-    run has to be able to tell v4 from v5."""
-    assert RUBRIC_VERSION == "v5-structured-q5r6"
+def test_the_rubric_version_names_the_graded_tags_rubric():
+    """What the validator is asked changed (concept tags carry a depth, and an
+    about-page on the thought-leader channel is tertiary) even though the
+    thresholds did not, and a screening run has to be able to tell v7 from v8."""
+    assert RUBRIC_VERSION == "v8-graded-tags-q5r6"
     assert "q5r6" in RUBRIC_VERSION
 
 

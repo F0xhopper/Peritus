@@ -103,3 +103,54 @@ async def test_build_error_is_not_retried(db_pool):
     reloaded = await ExpertRepository(db_pool).get_by_id(expert.id)
     assert reloaded.status is ExpertStatus.FAILED
     assert "no sources" in (reloaded.error or "")
+
+
+class _ResumableBuilder(_FakeBuilder):
+    """Fails attempt 1 after the corpus is chat-ready, then must be resumed."""
+
+    def __init__(self, pool):
+        super().__init__(fail_times=1)
+        self.pool = pool
+        self.resumed_from = None
+
+    async def build(self, expert, on_event=None):
+        from peritus.core.exceptions import IncompleteBuildError
+        from peritus.search.readiness import Readiness, set_readiness
+
+        self.calls += 1
+        async with self.pool.acquire() as conn:
+            await conn.execute(
+                "INSERT INTO sources (expert_id, source_type, url, title, passed) "
+                "VALUES ($1, 'web', 'https://example.org/a', 'A', true)",
+                expert.id,
+            )
+        await set_readiness(self.pool, expert.id, Readiness.GRAPH_READY)
+        raise IncompleteBuildError(["a persona/description"])
+
+    async def resume(self, expert, from_readiness, on_event=None):
+        self.resumed_from = from_readiness
+        return _result(expert.id)
+
+
+async def test_retry_after_chat_ready_resumes_without_wiping_the_corpus(db_pool):
+    jobs = JobRepository(db_pool)
+    expert, _ = await _seed(db_pool, "worker-resume")
+    builder = _ResumableBuilder(db_pool)
+    worker = await _worker(db_pool, builder)
+
+    job1 = await jobs.claim(worker.worker_id)
+    await worker._run_job(job1)
+    assert (await jobs.get_job(job1.id)).status is JobStatus.QUEUED
+
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE build_jobs SET available_at = NOW() WHERE id=$1", job1.id)
+
+    job2 = await jobs.claim(worker.worker_id)
+    await worker._run_job(job2)
+
+    assert builder.calls == 1  # never rebuilt from scratch
+    assert builder.resumed_from is not None and builder.resumed_from.value == "graph_ready"
+    async with db_pool.acquire() as conn:
+        kept = await conn.fetchval("SELECT count(*) FROM sources WHERE expert_id=$1", expert.id)
+    assert kept == 1
+    assert (await jobs.get_job(job2.id)).status is JobStatus.SUCCEEDED

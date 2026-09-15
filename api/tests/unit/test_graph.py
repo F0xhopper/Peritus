@@ -315,3 +315,162 @@ def test_a_non_list_where_a_list_was_expected_yields_nothing_rather_than_raising
     result = _parse_extract_response(_Response({"nodes": "none found", "edges": None}), [1])
     assert result["nodes"] == []
     assert result["edges"] == []
+
+
+async def test_context_block_shows_the_whole_passage():
+    """It used to show text[:800] while the citation resolved to the full chunk."""
+    long = SearchResult(
+        chunk_id=100, expert_id=1, source_id=1, text="x" * 1400, context_text=None,
+        score=0.5, source_ref=SourceRef(source_id=1, title="T", source_type="web", quality_score=7.0),
+    )
+    enriched = await _retriever().expand([long], expert_id=1)
+    assert "x" * 1400 in enriched[0].context_block()
+
+
+async def test_concepts_are_labels_only_unless_something_is_disputed():
+    enriched = await _retriever().expand([_result(100), _result(200)], expert_id=1)
+    by_chunk = {e.result.chunk_id: e for e in enriched}
+    # Chunk 200 carries no dispute: the concept is named, not described.
+    assert "About: D" in by_chunk[200].context_block()
+    assert "D: d" not in by_chunk[200].context_block()
+    # Chunk 100's claim is contradicted, so the description is worth its tokens.
+    assert "  • D: d" in by_chunk[100].context_block()
+
+
+async def test_expand_fetches_one_hop_even_when_the_tier_asks_for_two():
+    retriever = _retriever()
+    seen: list[int] = []
+    original = retriever._repo.get_neighbours
+
+    async def spy(expert_id, node_ids, hops=1):
+        seen.append(hops)
+        return await original(expert_id, node_ids, hops)
+
+    retriever._repo.get_neighbours = spy
+    await retriever.expand([_result(100)], expert_id=1, hops=2)
+    assert seen == [1]
+
+
+# ── orphaned claims (R4) ──
+
+
+def test_orphan_claim_is_attached_to_concepts_sharing_its_chunk():
+    from peritus.graph.extractor import attach_orphan_claims
+
+    data = {
+        "nodes": [
+            {"label": "Varroa suppresses immunity", "node_type": "claim", "chunk_indices": [0]},
+            {"label": "Varroa destructor", "node_type": "concept", "chunk_indices": [0, 1]},
+            {"label": "Immune response", "node_type": "concept", "chunk_indices": [0]},
+            {"label": "Queen rearing", "node_type": "concept", "chunk_indices": [2]},
+        ],
+        # An `about` edge to a concept this batch never emitted resolves to nothing.
+        "edges": [{"from_label": "Varroa suppresses immunity", "to_label": "Mites",
+                   "edge_type": "about"}],
+    }
+    assert attach_orphan_claims(data) == 2
+    inferred = {(e["from_label"], e["to_label"]) for e in data["edges"][1:]}
+    assert inferred == {
+        ("Varroa suppresses immunity", "Varroa destructor"),
+        ("Varroa suppresses immunity", "Immune response"),
+    }
+
+
+def test_claim_with_a_resolvable_about_edge_is_left_alone():
+    from peritus.graph.extractor import attach_orphan_claims
+
+    data = {
+        "nodes": [
+            {"label": "Varroa suppresses immunity", "node_type": "claim", "chunk_indices": [0]},
+            {"label": "varroa destructor", "node_type": "concept", "chunk_indices": [0]},
+            {"label": "Immune response", "node_type": "concept", "chunk_indices": [0]},
+        ],
+        "edges": [{"from_label": "varroa suppresses immunity", "to_label": "Varroa Destructor",
+                   "edge_type": "about"}],
+    }
+    assert attach_orphan_claims(data) == 0
+    assert len(data["edges"]) == 1
+
+
+def test_orphan_claim_with_no_shared_chunk_stays_orphaned():
+    from peritus.graph.extractor import attach_orphan_claims
+
+    data = {
+        "nodes": [
+            {"label": "A claim", "node_type": "claim", "chunk_indices": [3]},
+            {"label": "A concept", "node_type": "concept", "chunk_indices": [0]},
+        ],
+        "edges": [],
+    }
+    assert attach_orphan_claims(data) == 0
+
+
+# ── reconciliation stats (R4) ──
+
+
+def test_parse_relations_counts_every_rejection_by_reason():
+    from collections import Counter
+    from types import SimpleNamespace
+
+    from peritus.graph.reconciler import ClaimRow, parse_relations
+
+    claims = [ClaimRow(node_id=1, label="a", source_id=1), ClaimRow(node_id=2, label="b", source_id=2)]
+    block = SimpleNamespace(type="tool_use", input={"relations": [
+        {"from_claim": 0, "to_claim": 1, "relation": "contradicts"},             # no point
+        {"from_claim": 0, "to_claim": 9, "relation": "supports"},                # out of range
+        {"from_claim": 0, "to_claim": 1, "relation": "refines"},                 # unknown type
+        {"from_claim": 1, "to_claim": 0, "relation": "qualifies", "condition": "only in winter"},
+    ]})
+    rejected: Counter = Counter()
+    kept = parse_relations(SimpleNamespace(content=[block]), claims, rejected)
+
+    assert [r["edge_type"] for r in kept] == ["qualifies"]
+    assert rejected == Counter({
+        "missing_point": 1, "claim_index_out_of_range": 1, "relation:refines": 1,
+    })
+
+
+async def test_reconcile_stats_distinguish_failed_calls_from_empty_answers():
+    from unittest.mock import AsyncMock, patch
+
+    from peritus.graph.reconciler import ClaimRow, ConceptClaims, ReconcileStats, reconcile_claims
+
+    def group(cid):
+        return ConceptClaims(concept_id=cid, concept_label=f"c{cid}", claims=[
+            ClaimRow(node_id=cid * 10, label="x", source_id=1),
+            ClaimRow(node_id=cid * 10 + 1, label="y", source_id=2),
+        ])
+
+    stats = ReconcileStats()
+    with patch("peritus.graph.reconciler.gather_claude_calls", AsyncMock(return_value=[None, None])):
+        relations = await reconcile_claims("bees", [group(1), group(2)], stats=stats)
+
+    assert relations == []
+    assert (stats.concepts_eligible, stats.concepts_examined, stats.calls_failed) == (2, 2, 2)
+    assert stats.as_event()["relations_returned"] == 0
+
+
+async def test_reconcile_stage_reports_a_pass_that_inserted_nothing():
+    """Silence used to look like success: the event fired only on inserts."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from peritus.experts.builder import _reconcile_claims
+    from peritus.graph.reconciler import ClaimRow, ConceptClaims
+
+    repo = MagicMock()
+    repo.claims_by_concept = AsyncMock(return_value=[ConceptClaims(
+        concept_id=1, concept_label="c",
+        claims=[ClaimRow(node_id=1, label="x", source_id=1), ClaimRow(node_id=2, label="y", source_id=2)],
+    )])
+    repo.insert_relations = AsyncMock(return_value=0)
+    events: list[dict] = []
+
+    async def on_event(e):
+        events.append(e)
+
+    with patch("peritus.graph.reconciler.gather_claude_calls", AsyncMock(return_value=[None])):
+        assert await _reconcile_claims("bees", 7, repo, on_event) == 0
+
+    [event] = [e for e in events if e["type"] == "claims_reconciled"]
+    assert event["relations"] == 0
+    assert event["concepts_examined"] == 1 and event["calls_failed"] == 1

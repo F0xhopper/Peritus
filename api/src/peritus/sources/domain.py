@@ -183,6 +183,27 @@ class RawSource:
     identifiers: Identifiers = field(default_factory=Identifiers)
 
 
+# How deeply a source treats a key concept (docs/plans/syllabus.md, 4.A), graded
+# by the validator and counted by coverage: sets_out and treats count toward a
+# concept's target, a passing mention never does.
+DEPTH_SETS_OUT = "sets_out"
+DEPTH_TREATS = "treats"
+DEPTH_MENTIONS = "mentions"
+DEPTHS: tuple[str, ...] = (DEPTH_SETS_OUT, DEPTH_TREATS, DEPTH_MENTIONS)
+COUNTING_DEPTHS: frozenset[str] = frozenset({DEPTH_SETS_OUT, DEPTH_TREATS})
+
+# The status of a concept's named primary text (4.C). Written by the resolver's
+# outcome, read by coverage's "has primary" gate.
+NAMED_FOUND = "found"
+NAMED_PARTIAL = "partial"
+NAMED_MISSING = "missing"
+NAMED_NONE = "none_named"
+
+# A named figure whose own writing reached the corpus (3.E).
+FIGURE_OWN_VOICE = "own_voice"
+FIGURE_ABOUT_ONLY = "about_only"
+
+
 @dataclass
 class ValidatedSource:
     raw: RawSource
@@ -207,6 +228,15 @@ class ValidatedSource:
     review_model: str | None = None
     first_pass_quality: float | None = None
     first_pass_relevance: float | None = None
+    # full | partial | abstract — how much of the work the text actually is.
+    # ``None`` for a source built by hand, which is treated as counting. See
+    # :func:`peritus.sources.substance.substance_of`.
+    substance: str | None = None
+    # How deeply this source treats each key concept it was tagged with:
+    # sets_out | treats | mentions (docs/plans/syllabus.md, 4.A).
+    # ``covered_concepts`` is the names at ``treats`` or deeper. Empty for a
+    # source validated before graded tags, whose tags coverage reads as ``treats``.
+    concept_depths: dict[str, str] = field(default_factory=dict)
 
     @property
     def source_type(self) -> SourceType:

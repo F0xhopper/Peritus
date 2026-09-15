@@ -9,6 +9,7 @@ the existing event order, and it must never carry a score for the answer.
 
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -67,7 +68,7 @@ def _context() -> RetrievedContext:
 def _agent_with(context: RetrievedContext):
     agent = MagicMock()
 
-    async def _retrieve(_expert, _question):
+    async def _retrieve(_expert, _question, _history=None):
         yield ("status", "Planning search queries…")
         yield ("context", context)
 
@@ -75,13 +76,16 @@ def _agent_with(context: RetrievedContext):
     return agent
 
 
-def _anthropic_streaming(text: str):
+def _anthropic_streaming(text: str, stop_reason: str = "end_turn"):
     client = MagicMock()
 
     class _Stream:
         @property
         async def text_stream(self):
             yield text
+
+        async def get_final_message(self):
+            return SimpleNamespace(stop_reason=stop_reason)
 
     @asynccontextmanager
     async def _stream(**_kwargs):
@@ -91,7 +95,9 @@ def _anthropic_streaming(text: str):
     return client
 
 
-async def _collect(context=None, readiness=Readiness.GRAPH_READY, audit_id="aud-1"):
+async def _collect(
+    context=None, readiness=Readiness.GRAPH_READY, audit_id="aud-1", stop_reason="end_turn"
+):
     from peritus.chat import streaming
 
     service = MagicMock()
@@ -103,7 +109,7 @@ async def _collect(context=None, readiness=Readiness.GRAPH_READY, audit_id="aud-
     with (
         patch.object(streaming, "ChatAgent", return_value=_agent_with(context or _context())),
         patch.object(streaming, "get_anthropic_client",
-                     return_value=_anthropic_streaming(ANSWER)),
+                     return_value=_anthropic_streaming(ANSWER, stop_reason)),
         patch.object(streaming, "get_readiness", new=_get_readiness),
         patch.object(streaming, "AuditService", return_value=service),
     ):
@@ -121,6 +127,17 @@ def _find(events, type_):
 
 
 # ── event ordering ──
+
+@pytest.mark.asyncio
+async def test_done_says_whether_the_answer_was_cut_off_at_the_length_limit():
+    """A `max_tokens` stop ends the answer mid-sentence; `done` carries that so
+    the stateful route can store it as interrupted rather than as complete."""
+    events, _ = await _collect(stop_reason="max_tokens")
+    assert _find(events, "done")["truncated"] is True
+
+    events, _ = await _collect()
+    assert _find(events, "done")["truncated"] is False
+
 
 @pytest.mark.asyncio
 async def test_audit_event_sits_between_sources_and_done():

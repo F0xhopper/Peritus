@@ -36,3 +36,16 @@ async def db_pool():
         await conn.execute("TRUNCATE accounts RESTART IDENTITY CASCADE")
     yield pool
     await pool.close()
+
+
+@pytest.fixture(autouse=True)
+def _no_live_primary_text_suggestions(monkeypatch):
+    """The feedback round's primary-text suggestion is a strong-model call.
+
+    Tests that exercise the discovery loop must not reach the API through it;
+    a test about suggestions patches it with its own stub over this one.
+    """
+    async def _none(*_args, **_kwargs):
+        return []
+
+    monkeypatch.setattr("peritus.experts.builder.suggest_primary_texts", _none)

@@ -111,6 +111,98 @@ def refresh_persona(name: str = typer.Argument(..., help="Expert name or fuzzy m
     _run(_inner())
 
 
+# A local command has no build waiting on it, so it lets a throttled Wikimedia
+# finish rather than reporting a timeout the operator would only retry by hand.
+_CLI_PICTURE_DEADLINE = 90.0
+
+
+@app.command("refresh-picture")
+def refresh_picture(name: str = typer.Argument(..., help="Expert name or fuzzy match")) -> None:
+    """Find this expert's picture again on Wikimedia.
+
+    A build finds a picture once and then leaves it alone, so this is the way to
+    get one for an expert built before pictures existed, or a different one when
+    the first pick was wrong. No model tokens — five or six HTTP requests.
+    """
+    async def _inner():
+        from peritus.experts.picture import PictureSkipped
+
+        svc = await _service()
+        try:
+            expert = await svc.get(name)
+        except NotFoundError:
+            print_error(f"No expert found matching {name!r}")
+            raise typer.Exit(1) from None
+
+        console.print(f"Searching Wikimedia for a picture of [bold]{expert.topic}[/bold]…")
+        try:
+            updated = await svc.refresh_picture(expert.id, deadline=_CLI_PICTURE_DEADLINE)
+        except PictureSkipped as skip:
+            print_error(f"No picture found for {expert.name!r} ({skip.reason}).")
+            raise typer.Exit(1) from None
+
+        picture = updated.picture
+        assert picture is not None  # refresh_picture raises rather than returning empty
+        print_success(f"Picture found: {picture.page_title}")
+        console.print(
+            f"[dim]{picture.artist or 'Unknown artist'} · {picture.license} · "
+            f"{picture.file_page_url}[/dim]"
+        )
+
+    _run(_inner())
+
+
+@app.command("backfill-pictures")
+def backfill_pictures(
+    limit: int = typer.Option(50, "--limit", help="Maximum experts to process"),
+    sleep: float = typer.Option(1.0, "--sleep", help="Seconds to pause between experts"),
+) -> None:
+    """Give every picture-less expert a picture, paced.
+
+    Run once by hand after deploying, never automatically: a deploy that fired
+    hundreds of unattended requests at Wikimedia would be exactly the behaviour
+    their API policy asks tools not to have. The pause between experts is the
+    whole point of the command — raise ``--sleep`` rather than lowering it.
+    """
+    async def _inner():
+        from peritus.experts.picture import PictureSkipped
+        from peritus.experts.picture_repository import ExpertPictureRepository
+
+        svc = await _service()
+        pictures = ExpertPictureRepository(get_pool())
+        missing = await pictures.list_missing(limit)
+        if not missing:
+            console.print("[dim]Every expert already has a picture.[/dim]")
+            return
+
+        console.print(f"Finding pictures for {len(missing)} expert(s)…\n")
+        found = skipped = 0
+        for i, (expert_id, slug, topic) in enumerate(missing):
+            if i:
+                await asyncio.sleep(sleep)
+            try:
+                updated = await svc.refresh_picture(
+                    expert_id, deadline=_CLI_PICTURE_DEADLINE
+                )
+            except PictureSkipped as skip:
+                skipped += 1
+                console.print(f"  [yellow]—[/yellow] {slug} [dim]({skip.reason})[/dim]")
+                continue
+            except Exception as exc:  # one bad expert must not end the run
+                skipped += 1
+                console.print(f"  [red]✗[/red] {slug} [dim]({type(exc).__name__}: {exc})[/dim]")
+                continue
+            found += 1
+            picture = updated.picture
+            title = picture.page_title if picture else topic
+            license_name = picture.license if picture else "?"
+            console.print(f"  [green]✓[/green] {slug} → {title} [dim]({license_name})[/dim]")
+
+        console.print(f"\n{found} found, {skipped} skipped.")
+
+    _run(_inner())
+
+
 @app.command("delete")
 def delete_expert(
     name: str = typer.Argument(..., help="Expert name or fuzzy match"),

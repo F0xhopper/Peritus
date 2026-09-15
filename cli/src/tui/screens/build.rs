@@ -557,7 +557,7 @@ impl BuildScreen {
                         LogLevel::Success,
                     );
                 }
-                BuildEvent::FetcherDone { name, count, skipped, reason, round } => {
+                BuildEvent::FetcherDone { name, count, skipped, reason, round, status, error, attempt } => {
                     // Summed, not replaced: the same fetcher runs in several
                     // rounds and the funnel should show what it contributed in
                     // total, not what it found last.
@@ -571,12 +571,28 @@ impl BuildScreen {
                         FetcherState::Done(previous + count)
                     };
                     self.fetchers.insert(name.clone(), state);
-                    if *skipped {
+                    let retry = if *attempt > 0 { " (retry)" } else { "" };
+                    let failed = match status.as_str() {
+                        "timeout" => Some("timed out"),
+                        "rate_limited" => Some("rate-limited"),
+                        "error" => Some("failed"),
+                        _ => None,
+                    };
+                    if let Some(what) = failed {
+                        // Not "0 sources": a channel that did not answer says
+                        // nothing about the topic, and reading it as if it did
+                        // is how a build lost its only primary-text channel.
+                        let why = if error.is_empty() { String::new() } else { format!(" — {}", error) };
+                        self.log(
+                            format!("{}{}{}: {}{}", round_prefix(*round), name, retry, what, why),
+                            LogLevel::Error,
+                        );
+                    } else if *skipped {
                         let why = if reason.is_empty() { String::new() } else { format!(" ({})", reason) };
                         self.log(format!("{}{}: skipped{}", round_prefix(*round), name, why), LogLevel::Info);
                     } else {
                         self.log(
-                            format!("{}{}: {} sources", round_prefix(*round), name, count),
+                            format!("{}{}{}: {} sources", round_prefix(*round), name, retry, count),
                             LogLevel::Success,
                         );
                     }
@@ -783,6 +799,15 @@ impl BuildScreen {
                     let msg = if message.is_empty() { "Build cancelled" } else { message.as_str() };
                     self.error = Some(msg.to_string());
                     self.log(msg.to_string(), LogLevel::Error);
+                }
+                BuildEvent::FloorRelaxed { round, floor, relaxed_to, reaching, needed } => {
+                    self.log(
+                        format!(
+                            "{}Only {} of {} candidates scored ≥ {} — fetching down to {} this round",
+                            round_prefix(*round), reaching, needed, floor, relaxed_to,
+                        ),
+                        LogLevel::Info,
+                    );
                 }
                 BuildEvent::Unknown => {}
             }

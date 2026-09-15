@@ -53,13 +53,14 @@ async def assess_faithfulness(
 ) -> dict | None:
     """Return ``{"groundedness": float, "unsupported_claims": [str]}`` or ``None``.
 
-    The auditor sees exactly the evidence the answer was meant to draw from.
+    The auditor sees exactly the evidence the answer was meant to draw from —
+    the whole passage, as the composer now sees it, not an 800-char preview.
     """
     if not answer_text.strip() or not passages or not settings.ANTHROPIC_API_KEY:
         return None
     try:
         passage_block = "\n\n".join(
-            f"[{p.index}] {p.citation}\n{p.text[:800]}"
+            f"[{p.index}] {p.citation}\n{p.text}"
             for p in passages
         )
         client = get_anthropic_client()

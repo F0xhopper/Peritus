@@ -6,6 +6,10 @@ from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
+from peritus.sources.fetchers.base import note_search_failure
+
+# Enough of the page for triage to see a description rather than only a title.
+_SNIPPET_CHARS = 400
 
 logger = get_logger(__name__)
 
@@ -20,13 +24,17 @@ class YoutubeFetcher:
             from exa_py import Exa  # type: ignore
             client = Exa(api_key=settings.EXA_API_KEY)
             results = await asyncio.to_thread(
-                client.search,
+                client.search_and_contents,
                 f"{query} site:youtube.com",
                 num_results=max_results,
                 type="neural",
+                text={"max_characters": _SNIPPET_CHARS},
             )
         except Exception as exc:
+            from peritus.sources.fetchers.exa import classify_search_error
+
             logger.warning("YouTube discovery via Exa failed: %s", exc)
+            note_search_failure(*classify_search_error(exc, "Exa (youtube)"))
             return []
 
         candidates = []
@@ -36,12 +44,13 @@ class YoutubeFetcher:
             if not vid_id:
                 continue
             title = r.title or url
+            description = (getattr(r, "text", None) or "").strip()
             candidates.append(SourceCandidate(
                 source_type=SourceType.YOUTUBE,
                 url=f"https://www.youtube.com/watch?v={vid_id}",
                 title=title,
                 author=None,
-                snippet=title,
+                snippet=f"{title}\n{description}" if description else title,
                 metadata={"video_id": vid_id},
             ))
         return candidates

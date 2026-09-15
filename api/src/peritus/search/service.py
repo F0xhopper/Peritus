@@ -41,6 +41,16 @@ def _distance_expr() -> tuple[str, str]:
 # migration 022 — a mismatch silently costs the index, not correctness.
 _FTS_EXPR = "coalesce(sc.context_text, '') || ' ' || sc.text"
 
+# The keyword arm's query: any of the terms, not all of them. `plainto_tsquery`
+# ANDs every lexeme, and the planner writes four-to-seven-word subqueries, so a
+# chunk had to contain every word of one to match at all — measured on real
+# planner subqueries, 0 hits for 5 of 6 against 300–900 with OR. The lexemes
+# still come from `plainto_tsquery` (stemming, stop words and punctuation are
+# Postgres's job, and no user text is ever parsed as tsquery syntax); only the
+# operator is swapped. `ts_rank_cd` still ranks a chunk matching four of six
+# terms above one matching two.
+_FTS_QUERY = "replace(plainto_tsquery('english', $4)::text, '&', '|')::tsquery"
+
 
 class SearchService:
     def __init__(self, pool: asyncpg.Pool) -> None:
@@ -68,17 +78,15 @@ class SearchService:
         results = [_row_to_result(r) for r in hits]
 
         if rerank_on and len(results) > 1:
-            ranking = await rerank(query, [r.text for r in results], top_n=top_k)
-            reranked = []
-            for idx, score in ranking:
-                hit = results[idx]
-                hit.score = round(float(score), 4)
-                reranked.append(hit)
-            results = reranked
+            results, scored = _apply_ranking(
+                results, await rerank(query, [r.text for r in results], top_n=top_k)
+            )
         else:
-            results = results[:top_k]
+            results, scored = results[:top_k], False
 
-        return SearchResponse(query=query, results=results, total=len(results))
+        return SearchResponse(
+            query=query, results=results, total=len(results), reranked=scored
+        )
 
     async def batch_search(
         self,
@@ -86,10 +94,22 @@ class SearchService:
         question: str,
         queries: list[str],
         top_k: int = 10,
+        include_question: bool = True,
     ) -> SearchResponse:
+        """Hybrid-search every query, fuse, and rerank against ``question``.
+
+        ``include_question`` searches the question itself as one more query.
+        The planner's subqueries are retrieval phrasings of it, and a short
+        factual question often matches its own wording better than any
+        paraphrase; RRF-summing already rewards a chunk that the question and a
+        subquery both find. It costs one embedding. A follow-up pass over the
+        same question turns it off — the primary pass already searched it.
+        """
         rerank_on = settings.RERANK_ENABLED and bool(settings.ANTHROPIC_API_KEY)
         fetch_k = max(settings.RERANK_CANDIDATES, top_k) if rerank_on else top_k
         candidate_k = max(fetch_k * 4, 100)
+        if include_question:
+            queries = _with_question(question, queries)
 
         embeddings = await asyncio.gather(*[embed_query(q) for q in queries])
 
@@ -108,17 +128,15 @@ class SearchService:
         merged = merged[:max(fetch_k, top_k)]
 
         if rerank_on and len(merged) > 1:
-            ranking = await rerank(question, [r.text for r in merged], top_n=top_k)
-            reranked = []
-            for idx, score in ranking:
-                hit = merged[idx]
-                hit.score = round(float(score), 4)
-                reranked.append(hit)
-            merged = reranked
+            merged, scored = _apply_ranking(
+                merged, await rerank(question, [r.text for r in merged], top_n=top_k)
+            )
         else:
-            merged = merged[:top_k]
+            merged, scored = merged[:top_k], False
 
-        return SearchResponse(query=question, results=merged, total=len(merged))
+        return SearchResponse(
+            query=question, results=merged, total=len(merged), reranked=scored
+        )
 
     async def _hybrid_search(
         self,
@@ -162,12 +180,12 @@ class SearchService:
                     SELECT sc.id,
                            ts_rank_cd(
                                to_tsvector('english', {_FTS_EXPR}),
-                               plainto_tsquery('english', $4)
+                               {_FTS_QUERY}
                            ) AS rank
                     FROM source_chunks sc
                     WHERE sc.expert_id = $2
                       AND to_tsvector('english', {_FTS_EXPR})
-                          @@ plainto_tsquery('english', $4)
+                          @@ {_FTS_QUERY}
                     ORDER BY rank DESC
                     LIMIT $3
                 ) matched
@@ -235,6 +253,33 @@ def _row_to_result(row) -> SearchResult:
             quality_score=row["quality_score"],
         ),
     )
+
+
+def _apply_ranking(
+    hits: list[SearchResult], ranking: list[tuple[int, float]]
+) -> tuple[list[SearchResult], bool]:
+    """Reorder ``hits`` by the reranker's ranking and adopt its scores.
+
+    Returns the ranked hits and whether the scores are real relevance scores.
+    `rerank` degrades to an identity ranking with every score 0.0 when no
+    reranker could run, and no real cross-encoder scores a whole candidate set
+    at exactly zero — so all-zero means "not scored", and a relevance floor must
+    not read it as "nothing relevant".
+    """
+    ranked = []
+    for idx, score in ranking:
+        hit = hits[idx]
+        hit.score = round(float(score), 4)
+        ranked.append(hit)
+    return ranked, any(score > 0 for _, score in ranking)
+
+
+def _with_question(question: str, queries: list[str]) -> list[str]:
+    """``queries`` plus the question, unless one of them already is it."""
+    wanted = question.strip()
+    if not wanted or any(q.strip().casefold() == wanted.casefold() for q in queries):
+        return list(queries)
+    return [*queries, wanted]
 
 
 def _merge_hits(all_hits: list[list[SearchResult]]) -> list[SearchResult]:

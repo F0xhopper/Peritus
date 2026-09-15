@@ -18,6 +18,7 @@ Query notes:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
@@ -63,6 +64,37 @@ _CHUNK_COUNT_LATERAL = """
         WHERE sc.source_id = s.id
     ) c ON true
 """
+
+
+@dataclass(frozen=True)
+class AuditScope:
+    """Whose answer trails a caller may see.
+
+    An answer audit stores the *question*, so it is as private as the chat it
+    came from. Readable-expert is not enough: a public or shared expert answers
+    many people, and neither its owner nor its other viewers may read their
+    questions. A caller sees the trails of their own conversations, and the
+    expert's owner additionally sees stateless answers (``POST
+    /experts/{slug}/chat``), which have no conversation to own them.
+    """
+
+    caller_id: str
+    include_unowned: bool
+    owns_expert: bool
+
+    def params(self) -> tuple[str, bool, bool]:
+        return (self.caller_id, self.include_unowned, self.owns_expert)
+
+
+# Formatted with the placeholder numbers of the three AuditScope params.
+_AUDIT_SCOPE_SQL = """(
+    EXISTS (
+        SELECT 1 FROM conversations c
+        WHERE c.id = a.conversation_id
+          AND (c.owner_id = {caller}::uuid OR ({unowned}::boolean AND c.owner_id IS NULL))
+    )
+    OR (a.conversation_id IS NULL AND {owns}::boolean)
+)"""
 
 _SOURCE_COLUMNS = """
     s.id, s.passed, s.source_type, s.url, s.title, s.author,
@@ -421,6 +453,52 @@ class AuditRepository:
             )
         return [dict(r) for r in rows]
 
+    async def screening_ledger(self, expert_id: int) -> dict[str, Any] | None:
+        """The most recent build's candidate ledger, counted (migration 029).
+
+        ``None`` when no build of this expert has written one — every expert
+        built before the ledger existed.
+        """
+        async with self._pool.acquire() as conn:
+            latest = await conn.fetchrow(
+                """
+                SELECT job_id, MAX(created_at) AS written_at
+                FROM candidate_screenings
+                WHERE expert_id = $1
+                GROUP BY job_id
+                ORDER BY written_at DESC
+                LIMIT 1
+                """,
+                expert_id,
+            )
+            if latest is None:
+                return None
+            rows = await conn.fetch(
+                """
+                SELECT round, fetch_outcome, triage_status, COUNT(*) AS n,
+                       AVG(triage_score) AS mean_score
+                FROM candidate_screenings
+                WHERE expert_id = $1 AND job_id IS NOT DISTINCT FROM $2
+                GROUP BY round, fetch_outcome, triage_status
+                ORDER BY round, fetch_outcome, triage_status
+                """,
+                expert_id, latest["job_id"],
+            )
+        return {
+            "job_id": latest["job_id"],
+            "rows": [
+                {
+                    "round": r["round"],
+                    "fetch_outcome": r["fetch_outcome"],
+                    "triage_status": r["triage_status"],
+                    "count": r["n"],
+                    "mean_triage_score": round(float(r["mean_score"]), 2)
+                    if r["mean_score"] is not None else None,
+                }
+                for r in rows
+            ],
+        }
+
     async def build_summary(self, expert_id: int) -> dict[str, Any] | None:
         """What the discovery loop recorded about its own run, if anything.
 
@@ -734,12 +812,14 @@ class AuditRepository:
                     expert_id, conversation_id, question, subqueries, followup_queries,
                     coverage_satisfied, second_pass, retrieved_passages, duplicate_hits,
                     unique_passages, context_passages, cited_passages, context_cap,
-                    sources_in_context, sources_cited, contradiction_traversed, answer_chars
+                    sources_in_context, sources_cited, contradiction_traversed, answer_chars,
+                    dangling_citations
                 ) VALUES (
                     $1, $2::uuid, $3, $4::jsonb, $5::jsonb,
                     $6, $7, $8, $9,
                     $10, $11, $12, $13,
-                    $14, $15, $16, $17
+                    $14, $15, $16, $17,
+                    $18::integer[]
                 )
                 RETURNING id
                 """,
@@ -760,6 +840,7 @@ class AuditRepository:
                 int(header.get("sources_cited") or 0),
                 bool(header.get("contradiction_traversed")),
                 int(header.get("answer_chars") or 0),
+                [int(n) for n in header.get("dangling_citations") or []],
             )
             if passages:
                 await conn.executemany(
@@ -795,57 +876,62 @@ class AuditRepository:
         limit: int,
         offset: int,
         conversation_id: str | None = None,
+        *,
+        scope: AuditScope,
     ) -> list[dict[str, Any]]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(
-                """
+                f"""
                 SELECT id, expert_id, conversation_id, question, subqueries,
                        followup_queries, coverage_satisfied, second_pass,
                        retrieved_passages, duplicate_hits, unique_passages,
                        context_passages, cited_passages, context_cap,
                        sources_in_context, sources_cited, contradiction_traversed,
                        answer_chars, created_at
-                FROM answer_audits
-                WHERE expert_id = $1
-                  AND ($2::uuid IS NULL OR conversation_id = $2::uuid)
+                FROM answer_audits a
+                WHERE a.expert_id = $1
+                  AND ($2::uuid IS NULL OR a.conversation_id = $2::uuid)
+                  AND {_AUDIT_SCOPE_SQL.format(caller="$5", unowned="$6", owns="$7")}
                 ORDER BY created_at DESC, id
                 LIMIT $3 OFFSET $4
                 """,
-                expert_id, conversation_id, limit, offset,
+                expert_id, conversation_id, limit, offset, *scope.params(),
             )
         return [dict(r) for r in rows]
 
     async def count_answer_audits(
-        self, expert_id: int, conversation_id: str | None = None
+        self, expert_id: int, conversation_id: str | None = None, *, scope: AuditScope
     ) -> int:
         async with self._pool.acquire() as conn:
             n = await conn.fetchval(
-                """
-                SELECT count(*)::int FROM answer_audits
-                WHERE expert_id = $1
-                  AND ($2::uuid IS NULL OR conversation_id = $2::uuid)
+                f"""
+                SELECT count(*)::int FROM answer_audits a
+                WHERE a.expert_id = $1
+                  AND ($2::uuid IS NULL OR a.conversation_id = $2::uuid)
+                  AND {_AUDIT_SCOPE_SQL.format(caller="$3", unowned="$4", owns="$5")}
                 """,
-                expert_id, conversation_id,
+                expert_id, conversation_id, *scope.params(),
             )
         return int(n or 0)
 
     async def get_answer_audit(
-        self, expert_id: int, audit_id: str
+        self, expert_id: int, audit_id: str, *, scope: AuditScope
     ) -> dict[str, Any] | None:
         """Fetch one trail, scoped to the expert the caller already resolved."""
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
-                """
+                f"""
                 SELECT id, expert_id, conversation_id, question, subqueries,
                        followup_queries, coverage_satisfied, second_pass,
                        retrieved_passages, duplicate_hits, unique_passages,
                        context_passages, cited_passages, context_cap,
                        sources_in_context, sources_cited, contradiction_traversed,
                        answer_chars, created_at
-                FROM answer_audits
-                WHERE expert_id = $1 AND id = $2::uuid
+                FROM answer_audits a
+                WHERE a.expert_id = $1 AND a.id = $2::uuid
+                  AND {_AUDIT_SCOPE_SQL.format(caller="$3", unowned="$4", owns="$5")}
                 """,
-                expert_id, audit_id,
+                expert_id, audit_id, *scope.params(),
             )
         return dict(row) if row else None
 

@@ -1,4 +1,4 @@
-"""Chat agent — plan → batch_search → graph_expand → assess_coverage → respond.
+"""Chat agent — plan → batch_search → graph_expand → relevance gate → respond.
 
 The retrieval pipeline lives once, in :meth:`ChatAgent.retrieve`, an async
 generator that yields human-readable status updates and finally the assembled
@@ -99,6 +99,26 @@ _PLAN_TOOL: dict[str, Any] = {
                 "maxItems": 4,
                 "description": "2–4 declarative retrieval-phrased subqueries.",
             },
+            "fallback_queries": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 2,
+                "description": (
+                    "Up to two broader or differently-angled retrieval phrasings, "
+                    "used only if the subqueries find little. Not paraphrases of "
+                    "the subqueries: approach the question from a wider concept, "
+                    "a neighbouring term of art, or the underlying mechanism."
+                ),
+            },
+            "standalone_question": {
+                "type": "string",
+                "description": (
+                    "The question rewritten to stand on its own, with every "
+                    "reference to the conversation ('the second one', 'he', "
+                    "'that method') replaced by what it refers to. Identical to "
+                    "the question when it already stands alone."
+                ),
+            },
             "asker_level": {
                 "type": "string",
                 "enum": list(ASKER_LEVELS),
@@ -134,21 +154,10 @@ _PLAN_TOOL: dict[str, Any] = {
     },
 }
 
-_COVERAGE_TOOL: dict[str, Any] = {
-    "name": "coverage_assessment",
-    "description": "Assess whether retrieved passages adequately answer the question.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "satisfied": {"type": "boolean"},
-            "suggested_queries": {
-                "type": "array",
-                "items": {"type": "string"},
-            },
-        },
-        "required": ["satisfied", "suggested_queries"],
-    },
-}
+# How much of a previous turn the planner sees. Enough to resolve "the second
+# one" or "and how does Fisher differ?"; not so much that planning a follow-up
+# costs more than planning a first question by a meaningful margin.
+_PLAN_HISTORY_CHARS = 400
 
 
 @dataclass(frozen=True)
@@ -170,6 +179,12 @@ class QueryPlan:
     asker_level: str = "informed"
     question_type: str = "open_ended"
     answer_directive: str = _DEFAULT_DIRECTIVE
+    #: Broader phrasings for the follow-up pass, asked for in the same call so
+    #: a weak first pass does not need a second planning step.
+    fallback_queries: list[str] = field(default_factory=list)
+    #: The question with its references to the conversation resolved. What the
+    #: question itself is searched and reranked as; None means "as asked".
+    standalone_question: str | None = None
 
     @classmethod
     def fallback(cls, question: str) -> "QueryPlan":
@@ -191,8 +206,19 @@ class QueryPlan:
         level = data.get("asker_level")
         qtype = data.get("question_type")
         directive = data.get("answer_directive")
+        fallbacks = [
+            f.strip() for f in data.get("fallback_queries") or []
+            if isinstance(f, str) and f.strip()
+        ]
+        standalone = data.get("standalone_question")
 
         return cls(
+            fallback_queries=fallbacks[:2],
+            standalone_question=(
+                standalone.strip()
+                if isinstance(standalone, str) and standalone.strip()
+                else None
+            ),
             subqueries=subqueries or [question],
             asker_level=level if level in ASKER_LEVELS else "informed",
             question_type=qtype if qtype in QUESTION_TYPES else "open_ended",
@@ -232,7 +258,7 @@ class RetrievalStep:
     quality_score: float | None
     rank: int          # 1-based, in the order retrieval produced it
     score: float       # fused RRF score, or the reranker's score when reranking ran
-    via: str           # "primary" | "coverage_followup"
+    via: str           # "primary" | "coverage_followup" (the fallback-query pass)
 
 
 @dataclass
@@ -247,6 +273,8 @@ class RetrievalTrail:
 
     subqueries: list[str] = field(default_factory=list)
     followup_queries: list[str] = field(default_factory=list)
+    #: Whether the first pass cleared the relevance gate. None when the scores
+    #: were not a reranker's, so there was nothing to judge by.
     coverage_satisfied: bool | None = None
     second_pass: bool = False
     context_cap: int = 0
@@ -344,6 +372,40 @@ def build_user_message(
     }
 
 
+# Models that think adaptively — and, for Sonnet 5 and later, by default when
+# the request says nothing. Everything else takes the plain request.
+_ADAPTIVE_THINKING_PREFIXES = (
+    "claude-sonnet-5", "claude-opus-5", "claude-fable", "claude-mythos",
+    "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+)
+
+
+def composition_params(model: str, max_answer_tokens: int) -> dict[str, Any]:
+    """``max_tokens``, ``thinking`` and ``output_config`` for composing an answer.
+
+    ``max_answer_tokens`` is the tier's answer length. It used to be sent as the
+    request's whole ``max_tokens``, which was right when the model did not think.
+    Claude Sonnet 5 thinks unless told otherwise, the thinking is hidden, and
+    thinking tokens count against ``max_tokens``: a question like "What is the end
+    of man?" spent all 2,048 tokens of a STANDARD answer thinking, produced no
+    text at all, and the conversation stored the question with no answer — every
+    first question, on every expert, looked like a dropped connection.
+
+    So the thinking is stated rather than defaulted: adaptive, at the effort
+    ``CHAT_EFFORT`` names (a grounded answer from retrieved passages does not
+    need deep reasoning, and a long silence before the first token is the
+    visible cost of it), with ``CHAT_THINKING_HEADROOM_TOKENS`` added on top of
+    the answer's own length so thinking can never consume it.
+    """
+    if not model.startswith(_ADAPTIVE_THINKING_PREFIXES):
+        return {"max_tokens": max_answer_tokens}
+    return {
+        "max_tokens": max_answer_tokens + max(0, settings.CHAT_THINKING_HEADROOM_TOKENS),
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": settings.CHAT_EFFORT},
+    }
+
+
 def build_cached_system(persona_style: str | None, topic: str) -> list[TextBlockParam]:
     """System prompt as a block list with a prompt-cache breakpoint.
 
@@ -437,15 +499,16 @@ def _build_trail(
     primary_count: int,
     subqueries: list[str],
     followup_queries: list[str],
-    coverage: dict,
+    coverage_satisfied: bool | None,
     context_cap: int,
 ) -> RetrievalTrail:
     """Record every retrieved passage once, in retrieval order.
 
     A chunk can be returned by both retrieval passes; ``build_grounded_context``
     de-duplicates it down to a single numbered passage, so the trail keeps the
-    first occurrence and counts the rest as duplicate hits. That keeps the
-    trail's passage list and the model's numbering in one-to-one correspondence.
+    first occurrence and counts the rest as duplicate hits. Passages the
+    relevance floor kept out of the prompt stay in the trail, in their retrieval
+    position — the audit resolves each step to its passage number by chunk id.
     """
     steps: list[RetrievalStep] = []
     seen: set[int] = set()
@@ -474,17 +537,82 @@ def _build_trail(
             )
         )
 
-    satisfied = coverage.get("satisfied")
     return RetrievalTrail(
         subqueries=list(subqueries),
         followup_queries=list(followup_queries),
-        coverage_satisfied=satisfied if isinstance(satisfied, bool) else None,
+        coverage_satisfied=coverage_satisfied,
         second_pass=bool(followup_queries),
         context_cap=context_cap,
         duplicate_hits=duplicates,
         graph_expanded=graph_expanded,
         steps=steps,
     )
+
+
+def _strong_count(results: list, floor: float) -> int:
+    """Passages whose reranker score clears the relevance floor."""
+    return sum(1 for r in results if r.score >= floor)
+
+
+def apply_relevance_floor(
+    enriched: list,
+    scored: list[bool],
+    floor: float,
+    min_keep: int,
+) -> list:
+    """Drop passages a reranker judged irrelevant, keeping at least ``min_keep``.
+
+    ``scored[i]`` says whether ``enriched[i]``'s score is a reranker's; an
+    unscored passage is never dropped, since an RRF score says nothing about
+    relevance. Retrieval order is preserved. When too few clear the floor, the
+    best-ranked of the rest are kept to make up ``min_keep`` unique chunks — a
+    hard question with weak evidence still gets something to reason from, and
+    the grounding contract covers what to do when it is not enough.
+
+    Measured on audited answers, cited passages averaged a Cohere score of 0.31
+    and uncited ones 0.22; ranks 6–10 are cited a third of the time, so the
+    floor is set low enough to keep those and cut only the padding.
+    """
+    keep = [not s or e.result.score >= floor for e, s in zip(enriched, scored, strict=True)]
+    kept_chunks = {e.result.chunk_id for e, k in zip(enriched, keep, strict=True) if k}
+    if len(kept_chunks) < min_keep:
+        for i, e in enumerate(enriched):
+            if len(kept_chunks) >= min_keep:
+                break
+            if not keep[i]:
+                keep[i] = True
+                kept_chunks.add(e.result.chunk_id)
+    return [e for e, k in zip(enriched, keep, strict=True) if k]
+
+
+def _conversation_block(history: list[dict] | None) -> str:
+    """The last exchange, trimmed, for the planner to resolve references against."""
+    if not history:
+        return ""
+    lines: list[str] = []
+    for message in history[-2:]:
+        role = message.get("role")
+        if role not in ("user", "assistant"):
+            continue
+        text = _message_text(message.get("content")).strip()
+        if not text:
+            continue
+        if len(text) > _PLAN_HISTORY_CHARS:
+            text = text[:_PLAN_HISTORY_CHARS].rsplit(" ", 1)[0] + " …"
+        lines.append(f"{'User' if role == 'user' else 'Expert'}: {text}")
+    return "\n".join(lines)
+
+
+def _message_text(content: Any) -> str:
+    """Text of a message whose content is a string or a list of blocks."""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        )
+    return ""
 
 
 # Yielded items: ("status", str) progress updates, then exactly one
@@ -501,23 +629,32 @@ class ChatAgent:
         self,
         expert: Expert,
         question: str,
+        history: list[dict] | None = None,
     ) -> AsyncIterator[RetrieveEvent]:
         """Run the full retrieval pipeline, yielding status updates along the way.
+
+        ``history`` is the conversation so far; only its last exchange is used,
+        to plan a follow-up question on what it refers to.
 
         The final yielded item is always ``("context", RetrievedContext)``.
         """
         cfg = expert.config
+        floor = settings.RELEVANCE_FLOOR
+        min_strong = settings.RELEVANCE_MIN_PASSAGES
 
         # 1. Plan subqueries, and read who is asking for what
         yield ("status", "Planning search queries…")
-        plan = await self._plan(question, expert.topic, cfg.max_subqueries)
+        plan = await self._plan(question, expert.topic, cfg.max_subqueries, history)
         subqueries = plan.subqueries
+        # A follow-up is searched and reranked as the question it stands for.
+        search_question = plan.standalone_question or question
 
-        # 2. Parallel hybrid search
-        yield ("status", f"Searching knowledge base across {len(subqueries)} queries…")
+        # 2. Parallel hybrid search (the subqueries plus the question itself)
+        noun = "query" if len(subqueries) == 1 else "queries"
+        yield ("status", f"Searching knowledge base across {len(subqueries)} {noun}…")
         search_resp = await self._search.batch_search(
             expert_id=expert.id,
-            question=question,
+            question=search_question,
             queries=subqueries,
             top_k=cfg.retrieval_top_k,
         )
@@ -525,57 +662,75 @@ class ChatAgent:
         # 3. Graph expansion
         yield ("status", "Expanding knowledge graph…")
         enriched = await self._graph.expand(search_resp.results, expert.id, hops=cfg.graph_hops)
+        scored = [search_resp.reranked] * len(enriched)
 
-        # 4. Coverage assessment, with one follow-up retrieval pass if unsatisfied
-        yield ("status", "Assessing coverage…")
-        passages = [{"text": e.text, "citation": e.citation} for e in enriched]
-        coverage = await self._assess_coverage(question, passages, cfg.max_context_passages)
-
+        # 4. The relevance gate. The reranker has already scored every passage
+        # against the question; too few above the floor means retrieval was
+        # weak, and only then does the second pass run — on the planner's
+        # fallback phrasings, which approach the question from another angle.
+        # This replaced an LLM judge that read 600-char previews on every turn
+        # (~1.7K tokens), said "unsatisfied" on 43% of them, and proposed
+        # follow-ups that paraphrased the first set; none of its passages were
+        # ever cited in the audited sample.
+        #
         # Everything retrieved so far came from the planned subqueries; anything
-        # appended below came from the coverage follow-up. Tracking the boundary
-        # here is what lets the trail say which pass produced each passage.
+        # appended below came from the follow-up. Tracking the boundary here is
+        # what lets the trail say which pass produced each passage.
         primary_count = len(enriched)
         followup_queries: list[str] = []
+        coverage_satisfied: bool | None = None
+        if search_resp.reranked:
+            coverage_satisfied = _strong_count(search_resp.results, floor) >= min_strong
 
-        if not coverage["satisfied"] and coverage.get("suggested_queries"):
+        if coverage_satisfied is False and plan.fallback_queries:
             yield ("status", "Retrieving additional context…")
-            followup_queries = coverage["suggested_queries"][:cfg.max_subqueries // 2]
+            followup_queries = plan.fallback_queries[: max(1, cfg.max_subqueries // 2)]
             extra_resp = await self._search.batch_search(
                 expert_id=expert.id,
-                question=question,
+                question=search_question,
                 queries=followup_queries,
                 top_k=cfg.coverage_extra_k,
+                include_question=False,
             )
             extra_enriched = await self._graph.expand(
                 extra_resp.results, expert.id, hops=cfg.graph_hops
             )
             enriched = enriched + extra_enriched
+            scored = scored + [extra_resp.reranked] * len(extra_enriched)
 
-        # 5. Numbered, deduplicated context block
+        # 5. Numbered, deduplicated context block — below-floor padding removed
         yield ("status", "Composing response…")
-        context_block, indexed = build_grounded_context(enriched, cfg.max_context_passages)
+        in_context = apply_relevance_floor(enriched, scored, floor, min_strong)
+        context_block, indexed = build_grounded_context(in_context, cfg.max_context_passages)
         trail = _build_trail(
             enriched=enriched,
             primary_count=primary_count,
             subqueries=subqueries,
             followup_queries=followup_queries,
-            coverage=coverage,
+            coverage_satisfied=coverage_satisfied,
             context_cap=cfg.max_context_passages,
         )
+        shown = {p.chunk_id for p in indexed}
         yield ("context", RetrievedContext(
             context_block=context_block,
             passages=indexed,
-            has_contradiction=any(e.has_contradiction for e in enriched),
+            # What the prompt carries, so only the passages it carries count.
+            has_contradiction=any(
+                e.has_contradiction for e in in_context if e.result.chunk_id in shown
+            ),
             contradiction_points=_dedupe(
-                p for e in enriched for p in e.contradiction_points
+                p for e in in_context if e.result.chunk_id in shown
+                for p in e.contradiction_points
             ),
             trail=trail,
             plan=plan,
         ))
 
-    async def gather_context(self, expert: Expert, question: str) -> RetrievedContext:
+    async def gather_context(
+        self, expert: Expert, question: str, history: list[dict] | None = None
+    ) -> RetrievedContext:
         """Run :meth:`retrieve` discarding status updates."""
-        async for kind, payload in self.retrieve(expert, question):
+        async for kind, payload in self.retrieve(expert, question, history):
             if kind == "context":
                 assert isinstance(payload, RetrievedContext)
                 return payload
@@ -588,7 +743,7 @@ class ChatAgent:
         history: list[dict],
     ) -> Answer:
         """Non-streaming answer (used by the Rich CLI)."""
-        ctx = await self.gather_context(expert, question)
+        ctx = await self.gather_context(expert, question, history)
 
         client = get_anthropic_client()
         messages = build_composition_messages(
@@ -597,9 +752,9 @@ class ChatAgent:
         )
         resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.CLAUDE_MODEL,
-            max_tokens=expert.config.max_response_tokens,
             system=build_cached_system(expert.persona_style, expert.topic),
             messages=messages,
+            **composition_params(settings.CLAUDE_MODEL, expert.config.max_response_tokens),
         )
         answer_text = "".join(b.text for b in resp.content if hasattr(b, "text"))
 
@@ -613,67 +768,59 @@ class ChatAgent:
             has_contradiction=ctx.has_contradiction,
         )
 
-    async def _plan(self, question: str, topic: str, max_subqueries: int = 4) -> QueryPlan:
+    async def _plan(
+        self,
+        question: str,
+        topic: str,
+        max_subqueries: int = 4,
+        history: list[dict] | None = None,
+    ) -> QueryPlan:
         """Decompose the question for retrieval and read who is asking for what.
 
         One call on the fast model does both. A failure here must not cost the
         answer, so it degrades to :meth:`QueryPlan.fallback` — the question
         searched verbatim, shaped on neutral defaults — rather than raising.
+
+        The planner sees the last exchange of the conversation. Without it a
+        follow-up ("what about the second one?") was decomposed with no idea
+        what it referred to, and retrieval searched for the words of the
+        reference rather than the thing.
         """
         try:
             tool = copy.deepcopy(_PLAN_TOOL)
             tool["input_schema"]["properties"]["subqueries"]["maxItems"] = max_subqueries
             tool["input_schema"]["properties"]["subqueries"]["minItems"] = min(2, max_subqueries)
 
+            conversation = _conversation_block(history)
+            content = (
+                f"Conversation so far:\n{conversation}\n\nQuestion: {question}"
+                if conversation else f"Question: {question}"
+            )
+
             client = get_anthropic_client()
             resp = await client.messages.create(  # type: ignore[call-overload]
                 model=settings.FAST_MODEL,
-                max_tokens=512,
+                max_tokens=768,
                 system=(
-                    f"You plan answers for a {topic} expert. Two jobs, one call.\n"
-                    f"1. Decompose the question into 2–{max_subqueries} declarative "
+                    f"You plan answers for a {topic} expert. Three jobs, one call.\n"
+                    "1. If there is a conversation, resolve what the question refers "
+                    "to in it, and write the question so it stands alone.\n"
+                    f"2. Decompose the question into 2–{max_subqueries} declarative "
                     "retrieval subqueries — phrases a relevant passage would "
-                    "contain, not questions.\n"
-                    "2. Read the question: how much background the asker has, what "
+                    "contain, not questions — each self-contained, never relying on "
+                    "the conversation for meaning. Add up to two fallback queries "
+                    "that come at it from a broader or neighbouring angle.\n"
+                    "3. Read the question: how much background the asker has, what "
                     "kind of answer would satisfy them, and one imperative sentence "
                     "saying what this answer must do. Judge the asker from the "
                     "question as written, not from how technical the field is."
                 ),
                 tools=[tool],
                 tool_choice={"type": "tool", "name": "create_plan"},
-                messages=[{"role": "user", "content": f"Question: {question}"}],
+                messages=[{"role": "user", "content": content}],
             )
             block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
             return QueryPlan.from_tool_input(dict(block.input), question)
         except Exception as exc:
             logger.warning("Planning failed: %s", exc)
             return QueryPlan.fallback(question)
-
-    async def _assess_coverage(
-        self, question: str, passages: list[dict], max_passages: int = 15
-    ) -> dict:
-        try:
-            client = get_anthropic_client()
-            passage_block = "\n\n".join(
-                f"[{i}] {p['citation']}\n{p['text'][:600]}"
-                for i, p in enumerate(passages[:max_passages])
-            )
-            resp = await client.messages.create(  # type: ignore[call-overload]
-                model=settings.FAST_MODEL,
-                max_tokens=256,
-                system=(
-                    "You assess retrieval coverage. Mark satisfied=true only when passages "
-                    "provide direct substantive evidence. Suggest follow-up queries for gaps."
-                ),
-                tools=[_COVERAGE_TOOL],
-                tool_choice={"type": "tool", "name": "coverage_assessment"},
-                messages=[{
-                    "role": "user",
-                    "content": f"Question: {question}\n\nPassages:\n\n{passage_block}",
-                }],
-            )
-            block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-            return dict(block.input)
-        except Exception as exc:
-            logger.warning("Coverage assessment failed: %s", exc)
-            return {"satisfied": True, "suggested_queries": []}

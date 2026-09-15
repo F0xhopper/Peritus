@@ -1,0 +1,52 @@
+{
+  "id": 41,
+  "name": "varroa-mite-control-in-temperate-beekeeping",
+  "topic": "Varroa mite control in temperate beekeeping",
+  "status": "ready",
+  "tier": "standard",
+  "readiness": "graph_ready",
+  "graph_expanded": true,
+  "persona_name": "Dr. Marta Belen",
+  "persona_bio": "An apiculture researcher who has spent fifteen years on mite population dynamics in temperate climates, and is blunt about how much of the practitioner advice in the field is untested.",
+  "persona_style": "measured, cites primary sources, names what is still unknown",
+  "avg_quality": 7.9,
+  "key_concepts": [
+    "varroa biology",
+    "acaricide resistance",
+    "drone brood removal",
+    "viral co-infection",
+    "monitoring thresholds"
+  ],
+  "source_count": 21,
+  "chunk_count": 412,
+  "node_count": 187,
+  "edge_count": 214,
+  "source_type_counts": { "openalex": 9, "pubmed": 5, "web": 4, "pdf": 3 },
+  "avatar": null,
+  "picture": {
+    "version": "9f3a1c2b7d4e",
+    "width": 512,
+    "height": 341,
+    "provider": "wikipedia",
+    "title": "Varroa destructor",
+    "artist": "Gilles San Martin",
+    "license": "CC BY-SA 2.0",
+    "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+    "page_url": "https://en.wikipedia.org/wiki/Varroa_destructor",
+    "file_page_url": "https://commons.wikimedia.org/wiki/File:Varroa_destructor_on_honeybee_host.jpg",
+    "attribution_required": true
+  },
+  "access": "owner",
+  "created_at": "2026-09-08T12:14:02.118Z",
+  "error": null,
+  "updated_at": "2026-09-08T12:31:44.902Z",
+  "catalog": {
+    "visibility": "private",
+    "is_featured": false,
+    "catalog_rank": null,
+    "blurb": null,
+    "category": null,
+    "tags": [],
+    "published_at": null
+  }
+}

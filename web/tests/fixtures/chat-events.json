@@ -1,0 +1,71 @@
+{
+  "meta": {
+    "type": "meta",
+    "conversation_id": "2f2b8a4e-1c9d-4f8a-9b1e-7c0d2a5f6e31",
+    "title": "How effective is drone brood removal on its own?"
+  },
+  "status_planning": { "type": "status", "message": "Reading the question" },
+  "status_searching": { "type": "status", "message": "Searching 412 passages" },
+  "status_composing": { "type": "status", "message": "Composing the answer" },
+  "token": { "type": "token", "text": "Drone brood removal " },
+  "sources": {
+    "type": "sources",
+    "citations": [
+      {
+        "n": 1,
+        "label": "Drone brood removal as mechanical control: a randomised trial - removal reduced mite load by 43% relative to untreated controls over one season.",
+        "source_id": 812
+      },
+      {
+        "n": 3,
+        "label": "Varroa destructor and honeybee viral loads: a five-year cohort - mechanical control alone did not prevent viral amplification in high-pressure years.",
+        "source_id": 804
+      }
+    ],
+    "has_contradiction": true,
+    "dangling_citations": [7]
+  },
+  "retrieval_audit": {
+    "type": "retrieval_audit",
+    "audit_id": "a3e9c1d2-88bb-4a11-9f30-0c5a7b2d4e18",
+    "persisted": true,
+    "passages_considered": 23,
+    "passages_in_prompt": 15,
+    "passages_cited": 2,
+    "subqueries": [
+      "drone brood removal efficacy without acaricide",
+      "mechanical varroa control viral load"
+    ],
+    "follow_ups": ["seasonal timing of drone brood removal"],
+    "coverage_verdict": "adequate",
+    "graph_expanded": true,
+    "passages": [
+      {
+        "n": 1,
+        "chunk_id": 9912,
+        "source_id": 812,
+        "source_title": "Drone brood removal as mechanical control: a randomised trial",
+        "source_type": "openalex",
+        "quality_score": 7.5,
+        "retrieval_rank": 1,
+        "retrieval_score": 0.8134,
+        "retrieved_via": "semantic",
+        "disposition": "cited"
+      },
+      {
+        "n": 2,
+        "chunk_id": 9944,
+        "source_id": 804,
+        "source_title": "Varroa destructor and honeybee viral loads: a five-year cohort",
+        "source_type": "openalex",
+        "quality_score": 8.5,
+        "retrieval_rank": 2,
+        "retrieval_score": 0.7781,
+        "retrieved_via": "graph",
+        "disposition": "considered"
+      }
+    ]
+  },
+  "done": { "type": "done" },
+  "error": { "type": "error", "message": "The expert hit an internal error while answering." }
+}

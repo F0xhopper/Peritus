@@ -25,7 +25,7 @@ from peritus.audit.domain import (
     round_or_none,
     safe_mean,
 )
-from peritus.audit.repository import AuditRepository
+from peritus.audit.repository import AuditRepository, AuditScope
 from peritus.audit.screening import UNPERSISTED, DiscoveryFunnel, derive_discovery_funnel
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
@@ -288,6 +288,7 @@ class AuditService:
         by_search = await self._repo.search_provenance(expert.id)
         gapfill_rows = await self._repo.gapfill_sources(expert.id)
         build_summary = await self._repo.build_summary(expert.id)
+        ledger = await self._repo.screening_ledger(expert.id)
 
         assessed = int(totals.get("total") or 0)
         included = int(totals.get("accepted") or 0)
@@ -380,6 +381,7 @@ class AuditService:
                 },
             },
             "discovery": _discovery_block(funnel, build_summary),
+            "selection": _selection_block(build_summary, ledger),
             "gap_fill": {
                 **_gapfill_block(funnel),
                 "rounds": _gapfill_rounds(gapfill_rows),
@@ -429,8 +431,19 @@ class AuditService:
         # reviewer needs to see that rather than have it quietly dropped.
         off_plan = [c for c in grouped if c not in key_concepts]
 
+        # What the build measured, concept by concept: its primary count and the
+        # status of the concept's named primary text (docs/plans/syllabus.md,
+        # 4.D). Read off the stored build summary; absent for older builds.
+        measured = {
+            str(c.get("concept")): c
+            for c in ((expert.build_summary or {}).get("coverage") or {}).get("concepts") or []
+            if isinstance(c, dict)
+        }
         concepts = [
-            _concept_block(c, grouped.get(c, []), gapfill_by_concept.get(c))
+            {
+                **_concept_block(c, grouped.get(c, []), gapfill_by_concept.get(c)),
+                **_measured_primary(measured.get(c)),
+            }
             for c in key_concepts
         ]
         concepts += [
@@ -661,11 +674,13 @@ class AuditService:
         limit: int = 25,
         offset: int = 0,
         conversation_id: str | None = None,
+        *,
+        scope: AuditScope,
     ) -> dict[str, Any]:
         rows = await self._repo.list_answer_audits(
-            expert.id, limit, offset, conversation_id
+            expert.id, limit, offset, conversation_id, scope=scope
         )
-        total = await self._repo.count_answer_audits(expert.id, conversation_id)
+        total = await self._repo.count_answer_audits(expert.id, conversation_id, scope=scope)
         return {
             "expert": _expert_stub(expert),
             "disposition_meanings": DISPOSITION_MEANINGS,
@@ -680,9 +695,9 @@ class AuditService:
         }
 
     async def get_answer_audit(
-        self, expert: Expert, audit_id: str
+        self, expert: Expert, audit_id: str, *, scope: AuditScope
     ) -> dict[str, Any] | None:
-        row = await self._repo.get_answer_audit(expert.id, audit_id)
+        row = await self._repo.get_answer_audit(expert.id, audit_id, scope=scope)
         if row is None:
             return None
         passages = await self._repo.answer_audit_passages(str(row["id"]))
@@ -1017,6 +1032,47 @@ def _discovery_block(
     }
 
 
+def _selection_block(
+    build_summary: dict[str, Any] | None,
+    ledger: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """What the corpus is made of, and what happened to every candidate triage saw.
+
+    The composition is the build's own count (``build_summary.corpus``); the
+    ledger is one row per candidate, so "was this fetched, and if not why not"
+    has an answer for candidates that never became sources.
+    """
+    summary = build_summary or {}
+    corpus = summary.get("corpus") or None
+    if corpus is None and ledger is None:
+        return {
+            "available": False,
+            "unavailable_reason": (
+                "This expert was built before corpus composition and the candidate "
+                "screening ledger were recorded (migration 029). Rebuild it to see them."
+            ),
+        }
+    return {
+        "available": True,
+        "corpus": corpus,
+        "figures": (corpus or {}).get("figures") or [],
+        "concepts_missing_named_text": (corpus or {}).get("concepts_missing_named_text") or [],
+        "failed_channels": summary.get("failed_channels") or {},
+        "candidate_ledger": ledger,
+        "note": (
+            "junk_fetched counts fetched sources the validator scored 3 or less for "
+            "relevance — candidates triage should not have sent to fetch. An "
+            "abstract-only source ships to the corpus but never counts toward "
+            "coverage. Must-have works are judged on the accepted corpus: "
+            "found_partial means only a section or volume of the work passed, and "
+            "not_obtainable means an in-copyright work with no free text, not a "
+            "failed search. A figure is own_voice only when a source in their own "
+            "voice passed as primary or secondary; about_only means only pages "
+            "about them did."
+        ),
+    }
+
+
 def _first_number(*values: Any) -> float | None:
     """The first value that is actually a number. Zero is a number."""
     for value in values:
@@ -1064,6 +1120,19 @@ def _gapfill_block(funnel: DiscoveryFunnel | None) -> dict[str, Any]:
             "targeted re-search. Concepts still listed in still_uncovered_after "
             "have no accepted source at all."
         ),
+    }
+
+
+def _measured_primary(measured: dict[str, Any] | None) -> dict[str, Any]:
+    """The build's own primary count and named-text status for one concept."""
+    if not measured:
+        return {"primary_sources": None, "has_primary": None, "named_text": None}
+    return {
+        "primary_sources": measured.get("primary"),
+        "has_primary": measured.get("has_primary"),
+        # found | partial | missing | none_named. "missing" with primary_sources
+        # above zero is a concept whose named text never reached the corpus.
+        "named_text": measured.get("named_text"),
     }
 
 

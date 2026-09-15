@@ -27,15 +27,36 @@ class ExpertVisibility(StrEnum):
     of visibility — see ``ExpertRepository.get_owned_for_user``.
     """
 
-    PRIVATE  = "private"    # owner only (admins also see legacy owner-less rows)
-    UNLISTED = "unlisted"   # anyone with the slug; never appears in the catalog
-    PUBLIC   = "public"     # anyone; appears in the curated catalog
+    PRIVATE  = "private"    # owner, plus anyone holding a grant on a live share link
+    PUBLIC   = "public"     # anyone; appears in the curated catalog (admin-published)
 
 
-# Visibility levels that make an expert readable/chattable beyond its owner.
-SHARED_VISIBILITIES: frozenset[str] = frozenset(
-    {ExpertVisibility.UNLISTED.value, ExpertVisibility.PUBLIC.value}
-)
+class ExpertAccess(StrEnum):
+    """The caller's relationship to an expert they can read (migration 031).
+
+    Echoed on every expert response so a client can hide the controls a viewer
+    cannot use. It is a rendering hint only — every mutating route re-checks
+    ownership itself.
+    """
+
+    OWNER  = "owner"
+    VIEWER = "viewer"
+
+
+# Share tokens: 192 random bits, URL-safe. Mirrored by a length CHECK in 031.
+SHARE_TOKEN_BYTES = 24
+
+
+@dataclass(frozen=True)
+class ShareLink:
+    """One share link. At most one per expert has ``revoked_at`` unset."""
+
+    id: str
+    expert_id: int
+    token: str
+    created_at: datetime
+    created_by: str | None = None
+    revoked_at: datetime | None = None
 
 # Readiness values (migration 018) at which an expert can answer a question.
 # The catalog lists on this rather than on job status: a public expert whose
@@ -66,14 +87,31 @@ class ExpertConfig:
     coverage_min_sources: int = 2
     coverage_min_source_types: int = 2
     coverage_require_non_tertiary: bool = True
+    # Every concept needs a primary source (docs/plans/source-selection.md §9).
+    # Defaulted False so a row snapshotted before it existed is not re-graded.
+    coverage_require_primary: bool = False
     # Discovery rounds *after* the first. 1 is today's behaviour: one pass, then
     # one targeted round for what it missed.
     discovery_max_rounds: int = 2
+    # Rounds after the first that must run before meeting the targets can stop
+    # the loop. Defaulted 0 for the same reason as coverage_require_primary.
+    discovery_min_rounds: int = 0
     # Snowball references followed per round, and how many hops deep. Two hops
     # means an accepted snowball find seeds the next round's snowball, which the
     # discovery loop gives for free.
     snowball_max_per_round: int = 10
     snowball_hops: int = 1
+    # How many of the plan's per-concept primary texts the build looks for by
+    # title (docs/plans/source-selection.md, "primary texts per concept").
+    # Defaulted 0 so a config snapshotted before it existed builds as it did.
+    concept_primary_texts: int = 0
+    # The most key concepts the planner may name (docs/plans/syllabus.md,
+    # phase 2). Defaulted 8 — the old fixed cap — so a snapshotted config plans
+    # as it did.
+    max_key_concepts: int = 8
+    # How many of the plan's named figures get one of their works looked up by
+    # title (phase 3.A). Defaulted 0 so an old snapshot builds as it did.
+    figure_texts: int = 0
 
     @classmethod
     def from_tier(cls, tier: ExpertTier) -> "ExpertConfig":
@@ -87,6 +125,8 @@ class ExpertConfig:
             min_source_types=self.coverage_min_source_types,
             require_non_tertiary=self.coverage_require_non_tertiary,
             max_rounds=self.discovery_max_rounds,
+            require_primary=self.coverage_require_primary,
+            min_rounds=self.discovery_min_rounds,
         )
 
 
@@ -104,9 +144,14 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_min_sources=1,
         coverage_min_source_types=1,
         coverage_require_non_tertiary=False,
+        coverage_require_primary=False,
         discovery_max_rounds=1,
+        discovery_min_rounds=0,
         snowball_max_per_round=3,
         snowball_hops=1,
+        concept_primary_texts=3,
+        max_key_concepts=8,
+        figure_texts=0,
     ),
     ExpertTier.STANDARD: ExpertConfig(
         source_multiplier=1.0,
@@ -116,27 +161,43 @@ _TIER_DEFAULTS: dict[ExpertTier, ExpertConfig] = {
         coverage_extra_k=5,
         max_context_passages=15,
         max_response_tokens=2048,
-        coverage_min_sources=2,
+        # Three counting sources and a primary text per concept, and a feedback
+        # round that always runs. The old target (two sources, two types, one
+        # non-tertiary) was met by the Thomism corpus after round 0 with 3 of
+        # 43 sources primary, and the round that could have fixed that never ran.
+        coverage_min_sources=3,
         coverage_min_source_types=2,
         coverage_require_non_tertiary=True,
+        coverage_require_primary=True,
         discovery_max_rounds=2,
+        discovery_min_rounds=1,
         snowball_max_per_round=10,
         snowball_hops=1,
+        concept_primary_texts=8,
+        max_key_concepts=10,
+        figure_texts=3,
     ),
     ExpertTier.PRO: ExpertConfig(
         source_multiplier=2.0,
         retrieval_top_k=20,
         max_subqueries=6,
-        graph_hops=2,
+        # 1, not 2: passage annotation only uses edges touching the passage's
+        # own anchors, so a second hop was fetched and discarded.
+        graph_hops=1,
         coverage_extra_k=10,
         max_context_passages=25,
         max_response_tokens=4096,
-        coverage_min_sources=3,
+        coverage_min_sources=4,
         coverage_min_source_types=2,
         coverage_require_non_tertiary=True,
+        coverage_require_primary=True,
         discovery_max_rounds=3,
+        discovery_min_rounds=1,
         snowball_max_per_round=20,
         snowball_hops=2,
+        concept_primary_texts=16,
+        max_key_concepts=14,
+        figure_texts=6,
     ),
 }
 
@@ -220,6 +281,59 @@ class CatalogMeta:
 BLURB_MAX_CHARS = 280
 
 
+# Licences that need no credit line beside the picture. Everything else we
+# accept (CC BY, CC BY-SA) requires attribution wherever the picture is shown as
+# an identity, which is why this is a property of the record rather than a
+# judgement made in the web client.
+_NO_ATTRIBUTION_PREFIXES: tuple[str, ...] = ("public domain", "pd", "cc0")
+
+
+@dataclass(frozen=True)
+class ExpertPicture:
+    """A found, licensed picture of what an expert is *about* (migration 027).
+
+    Deliberately not the avatar. ``Expert.avatar`` is the owner's rendering
+    recipe and stays authoritative; this is the default an expert arrives with,
+    and it sits between that recipe and the derived monogram:
+
+        avatar (chosen) -> picture (found) -> sigil (derived)
+
+    The bytes are not here. Every list query would carry 100 KB per row for
+    something only one endpoint serves, so the blob lives behind
+    ``ExpertPictureRepository.get_blob`` and this record carries what a client
+    needs to *render* it: a version for the cache-busting URL, dimensions, and
+    the provenance that has to be shown beside it.
+    """
+
+    provider: str
+    file_url: str
+    file_page_url: str
+    license: str
+    sha256: str
+    width: int = 0
+    height: int = 0
+    byte_size: int = 0
+    file_name: str | None = None
+    page_url: str | None = None
+    page_title: str | None = None
+    artist: str | None = None
+    license_url: str | None = None
+    query: str | None = None
+    chosen_by: str = "build"
+    found_at: datetime | None = None
+
+    @property
+    def version(self) -> str:
+        """Short content hash. The ``?v=`` that makes an immutable cache safe."""
+        return self.sha256[:12]
+
+    @property
+    def attribution_required(self) -> bool:
+        """False for public domain and CC0; true for every CC BY variant."""
+        name = self.license.strip().casefold()
+        return not any(name.startswith(p) for p in _NO_ATTRIBUTION_PREFIXES)
+
+
 @dataclass
 class Expert:
     id: int
@@ -242,7 +356,18 @@ class Expert:
     # Survives the corpus wipe a rebuild performs, so a rebuild can say what the
     # previous build concluded — see builder._log_previous_build.
     build_summary: dict | None = None
+    # The owner's chosen picture avatar (migration 026), or None for "derive it
+    # from the persona name" — which is what every expert starts as and what
+    # every expert built before this column stays as. See ExpertAvatar.
+    avatar: dict | None = None
+    # The picture found for this expert's subject (migration 027), or None.
+    # Joined on by the list/detail/catalog queries; never selected with its
+    # bytes. Outranked by `avatar` and outranks the derived monogram.
+    picture: ExpertPicture | None = None
     source_type_counts: dict[str, int] = field(default_factory=dict)  # computed, not stored
+    # Computed, not stored: whether a build job is queued or running right now.
+    # None where the query did not select it.
+    build_active: bool | None = None
     catalog: CatalogMeta = field(default_factory=CatalogMeta)
     # Retrieval readiness (migration 018): pending | chat_ready | graph_ready.
     # Held as a plain string so this module stays free of a search/ dependency;
