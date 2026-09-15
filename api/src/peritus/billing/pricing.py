@@ -240,12 +240,19 @@ def estimated_ingest_cost_usd(
 
     total += embedding_cost_usd(core_settings.EMBED_MODEL, int(_tokens(text_chars)))
 
+    # Graph extraction reads only the first GRAPH_MAX_CHUNKS_PER_SOURCE chunks of
+    # a source (builder._graph_chunk_limit); the rest are embedded, not read.
+    # Charging every chunk overstated a 120,000-character paper's graph cost by
+    # half and made the discovery loop stop at a corpus smaller than it can afford.
+    graph_limit = core_settings.GRAPH_MAX_CHUNKS_PER_SOURCE
+    graph_chunks = int(chunks) if graph_limit <= 0 else min(int(chunks), graph_limit)
+    graph_chars = min(text_chars, graph_chunks * chunk_size)
     graph_batches = Decimal(
-        max(1, -(-int(chunks) // max(1, core_settings.GRAPH_BATCH_SIZE)))
+        max(1, -(-graph_chunks // max(1, core_settings.GRAPH_BATCH_SIZE)))
     )
     total += graph_batches * message_cost_usd(
         core_settings.GRAPH_MODEL,
-        input_tokens=int(_tokens(text_chars) / graph_batches),
+        input_tokens=int(_tokens(graph_chars) / graph_batches),
         output_tokens=int(_GRAPH_OUTPUT_TOKENS),
         batch=batch,
     )
