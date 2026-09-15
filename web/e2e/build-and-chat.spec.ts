@@ -327,3 +327,16 @@ test('the command palette finds an expert and jumps to it', async ({ page }, tes
     timeout: 15_000,
   })
 })
+
+test('the sidebar search opens the palette where the top bar has no search button', async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    isPhoneProject(testInfo.project.name) || testInfo.project.name === 'ipad-portrait',
+    'below lg there is no sidebar; the top bar search icon is the trigger',
+  )
+
+  await page.goto('/experts')
+  await page.getByRole('button', { name: 'Search', exact: true }).click()
+  await expect(page.getByLabel('Search experts, chats and actions')).toBeVisible()
+})

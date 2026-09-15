@@ -73,6 +73,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               experts={experts}
               conversations={conversations}
               credits={credits}
+              showSearch
               className="scroll-col hidden lg:flex"
             />
 

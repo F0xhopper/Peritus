@@ -6,15 +6,17 @@ import {
   MessageSquare,
   Network,
   Plus,
+  Search,
   Settings as SettingsIcon,
   Table,
   Wallet,
 } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useSyncExternalStore } from 'react'
 
 import { Avatar } from '@/components/identity/avatar'
+import { useShell } from '@/components/shell/shell-context'
 import { Input } from '@/components/ui/input'
 import { StatusDot, dotState } from '@/components/ui/status-dot'
 import { RelativeTime } from '@/components/ui/relative-time'
@@ -45,6 +47,13 @@ export interface ExpertSidebarProps {
   experts: ExpertSummary[]
   conversations: ConversationSummary[]
   credits: CreditState | null
+  /**
+   * The palette trigger at the top of the column. Only the layout's inline
+   * sidebar shows it: inside the nav drawer the page's top bar already has the
+   * search button, and opening the palette from within the drawer would stack
+   * one modal on another.
+   */
+  showSearch?: boolean
   className?: string
 }
 
@@ -57,6 +66,7 @@ export function ExpertSidebar({
   experts,
   conversations,
   credits,
+  showSearch = false,
   className,
 }: ExpertSidebarProps) {
   // A chat belongs to an expert even though its URL does not name one, so the
@@ -66,6 +76,7 @@ export function ExpertSidebar({
 
   return (
     <div className={cn('flex h-full min-h-0 flex-col bg-panel', className)}>
+      {showSearch && <SearchTrigger />}
       {selected ? (
         <ExpertForm
           expert={selected}
@@ -289,6 +300,49 @@ function HomeForm({
     </>
   )
 }
+
+// ── search ──────────────────────────────────────────────────────────────────
+
+/**
+ * Opens the ⌘K palette. From `lg` up the top bar has no search button, so
+ * without this the palette was reachable only by a shortcut nothing on screen
+ * mentioned.
+ *
+ * Drawn as a field because that is what it does, but it is a button: typing
+ * happens in the palette, which already owns the filtering and the keyboard.
+ * The shortcut hint waits for the client — the server cannot know whether to
+ * say ⌘ or Ctrl — and is hidden on a coarse pointer, where there is no keyboard
+ * to press it on.
+ */
+function SearchTrigger() {
+  const { openPalette } = useShell()
+  const shortcut = useSyncExternalStore(
+    noopSubscribe,
+    () => (/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'),
+    () => null,
+  )
+
+  return (
+    <div className="shrink-0 px-2 pt-2">
+      <button
+        type="button"
+        onClick={openPalette}
+        className={cn(
+          'flex h-(--row-h) w-full items-center gap-2 rounded-row border border-border bg-raised px-2 text-sm text-fg-3',
+          'transition-colors duration-(--dur-1) hover:border-fg-4 hover:text-fg-2',
+        )}
+      >
+        <Search className="size-4 shrink-0" />
+        <span className="min-w-0 flex-1 truncate text-left">Search</span>
+        {shortcut && (
+          <kbd aria-hidden className="hidden font-sans text-xs text-fg-3 pointer-fine:inline">{shortcut}</kbd>
+        )}
+      </button>
+    </div>
+  )
+}
+
+const noopSubscribe = () => () => {}
 
 // ── rows ────────────────────────────────────────────────────────────────────
 
