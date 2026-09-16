@@ -1,18 +1,43 @@
-# Peritus
+<h1 align="center">Peritus</h1>
 
-[![CI](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml/badge.svg)](https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-3776ab.svg)](https://www.python.org/downloads/)
-[![Next.js 16](https://img.shields.io/badge/next.js-16-000000.svg)](https://nextjs.org)
+<p align="center">
+  <strong>Give it a topic. Peritus builds a vetted library on it, then answers your questions from
+  that library — opening the passage behind every claim.</strong>
+</p>
 
-**Peritus turns a topic into a small, vetted library — and then into an expert you can question.**
+<p align="center">
+  <a href="https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://www.python.org/downloads/"><img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12+-3776ab.svg"></a>
+  <a href="https://nextjs.org"><img alt="Next.js 16" src="https://img.shields.io/badge/next.js-16-000000.svg"></a>
+  <a href="https://www.rust-lang.org"><img alt="Rust stable" src="https://img.shields.io/badge/rust-stable-dea584.svg"></a>
+  <a href="#status"><img alt="Status: pre-1.0" src="https://img.shields.io/badge/status-pre--1.0-8a8a8a.svg"></a>
+</p>
 
-Give it a topic. It plans a search strategy, runs it across eleven kinds of source, judges every
-candidate against a versioned rubric, and keeps only what holds up. The survivors are chunked,
-embedded, linked into a concept graph and given a persona, so you can ask them questions and get
-answers with per-passage citations.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#what-it-does">How it works</a> ·
+  <a href="#architecture">Architecture</a> ·
+  <a href="docs/README.md">Documentation</a>
+</p>
 
-The point is not the answer at the end. The point is being able to show how the evidence behind it
-was assembled — every source considered, kept or dropped, with the score and the reason.
+---
+
+It plans a search strategy, runs it across eleven kinds of source, reads and judges every candidate
+against a versioned rubric, and keeps only what holds up. What survives is chunked, embedded,
+linked into a concept graph and given a persona — so you can ask it questions and get answers with
+per-passage citations.
+
+Three things follow from that, and they are why this exists rather than a prompt:
+
+- **An answer is composed only from retrieved passages.** Every `[n]` is checked against the
+  passage list before it is rendered; a marker that resolves to nothing is shown as plain text,
+  never dressed up as a reference.
+- **The search holds itself to a plan.** The key concepts written *before* searching are the
+  standard the corpus is measured against at the end: concepts that come up short get a targeted
+  second round, and any still uncovered are reported rather than hidden.
+- **The whole record is queryable and exportable.** Every source considered, kept or dropped, with
+  its scores, its rubric version, the search that found it and how much of it was read — as JSON,
+  or as CSV, RIS and BibTeX for Zotero, Covidence, EndNote and LaTeX.
 
 ---
 
@@ -61,10 +86,15 @@ flowchart LR
 
 ### What "judged" actually means
 
-Every source carries a quality score, a relevance score, the rubric version used, the search that
-produced it, the concepts it covers, and — if it was dropped — why. That record is queryable
-(`GET /experts/{slug}/corpus-report`) and exportable as CSV or RIS, which is what Covidence and
-Zotero import.
+Every source carries a quality score, a relevance score, the rubric version used, the model whose
+verdict stands, the search that produced it, the concepts it covers, how much of its text was
+actually read, and — if it was dropped — why. That record is queryable
+(`GET /experts/{slug}/corpus-report`, `/screening-flow`, `/coverage`, `/answer-audits`) and
+exportable as CSV, RIS or BibTeX.
+
+The **app** reads more lightly than the record does: it shows the sources an expert answers from
+and what each one covers, and leaves the screening arithmetic to the API and the export — a record
+for the reviewer who wants it, not a caption on every row.
 
 One convention carries the whole evidence surface: **a count the system did not record is `null`
 with a reason, never zero.** A fabricated zero in an evidence record is worse than a visible gap.
@@ -270,6 +300,11 @@ nobody is watching route through the Anthropic Message Batches API at half price
 Peritus is an actively developed personal project, deployed and in use, but pre-1.0: schemas,
 endpoints and prices move. There is no payment provider — credits are issued by hand
 (`peritus credits grant`) behind a provider-agnostic seam.
+
+It is **auditable first-pass triage**, not systematic-review software: screening is one model pass
+with a second read on borderline cases, with no dual human review and no calibration set — so no
+sensitivity, recall or precision figures are published, because any number there would be
+invented.
 
 No licence is granted. This repository is public to be read, not to be reused; all rights are
 reserved by the copyright holder. Open an issue if you want to do something with it.
