@@ -8,7 +8,13 @@ links to the deep-dive doc or code that is authoritative for the details.
 |---|---|
 | [build-flow.md](build-flow.md) | The build pipeline stage by stage: queue, worker, events, degradation |
 | [audit-api.md](audit-api.md) | The read-only evidence record: corpus report, screening flow, coverage, contradictions, answer audits |
+| [api-reference.md](api-reference.md) | Every HTTP endpoint, the auth model, SSE streams and error shapes |
 | [catalog-and-credits.md](catalog-and-credits.md) | The public catalog, plans, credits, and build denial payloads |
+| [graph-relationships.md](graph-relationships.md) | The concept graph: node and edge model, extraction, resolution |
+| [sharing.md](sharing.md) | Share links, grants and visibility |
+| [development.md](development.md) | Local setup, the task runner, tests, and the conventions that matter |
+| [configuration.md](configuration.md) | Where settings live and the ones worth knowing about |
+| [deployment.md](deployment.md) | Production: Fly + Vercel + Supabase, the release pipeline, secrets, rollback |
 | [plans/](plans/) | Design documents for individual features (point-in-time, may be stale) |
 
 ## What Peritus is
@@ -86,7 +92,8 @@ and ungated, because the build already paid for the corpus.
 `POST /experts/build {"topic": "..."}` is a complete request. The server
 derives the slug, resolves the deepest tier the caller's plan and balance
 afford (`lite`/`standard`/`pro` — tier scales the fetch budget 0.5×/1×/2× on a
-base of 30 sources and the per-build spend cap), takes an idempotent credit
+base of 60 sources, giving ceilings of 30/60/120, and scales the per-build spend
+cap alongside it), takes an idempotent credit
 hold, enqueues a durable job, and returns an SSE tail of the event log. The
 worker claims the job and runs the pipeline; disconnecting changes nothing, and
 reconnecting replays from a cursor.
