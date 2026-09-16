@@ -4,6 +4,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from peritus.infrastructure.http import blocked_url_reason
+
 # Matches the ceiling `infrastructure/pdf_parser` already enforces on a PDF, so a
 # file that would fail OCR is refused at the door with a clear message rather
 # than accepted, queued, and failed minutes later in a worker.
@@ -23,13 +25,26 @@ class AddUrlRequest(BaseModel):
 
     @field_validator("url")
     @classmethod
-    def _must_be_http(cls, v: str) -> str:
-        """Only http(s). Without this the fetcher would happily be pointed at
-        ``file://`` or an internal address, turning an upload box into a
-        server-side request forgery primitive."""
+    def _must_be_public_http(cls, v: str) -> str:
+        """Only http(s), and only somewhere on the public internet.
+
+        Without this the fetcher would happily be pointed at ``file://``, at
+        ``127.0.0.1``, or at the cloud metadata endpoint on ``169.254.169.254``,
+        turning an upload box into a server-side request forgery primitive.
+
+        This is the cheap half of the guard: it settles scheme, IP literals and
+        internal hostnames without a DNS lookup, so an obviously bad URL gets a
+        422 here instead of being accepted and failed inside a worker. The
+        resolving half — which also covers a public host that redirects
+        somewhere private — runs at fetch time in
+        ``infrastructure.http.guarded_client``.
+        """
         v = v.strip()
         if not v.lower().startswith(("http://", "https://")):
             raise ValueError("URL must start with http:// or https://")
+        reason = blocked_url_reason(v)
+        if reason is not None:
+            raise ValueError(f"That URL cannot be fetched: {reason}")
         return v
 
 

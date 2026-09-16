@@ -112,8 +112,23 @@ async def test_extract_pdf_failure_is_user_facing(monkeypatch):
     assert "502" not in str(exc.value)
 
 
+@pytest.fixture
+def allow_any_url(monkeypatch):
+    """Skip the SSRF guard's DNS lookup.
+
+    `example.test` is reserved and resolves nowhere, which the guard is right to
+    refuse — but these tests are about extraction dispatch, not about the guard.
+    `test_http_guard.py` covers the guard itself.
+    """
+
+    async def _allow(url: str) -> None:
+        return None
+
+    monkeypatch.setattr(extract_mod, "assert_public_url", _allow)
+
+
 @pytest.mark.asyncio
-async def test_extract_url_reports_an_unfetchable_page(monkeypatch):
+async def test_extract_url_reports_an_unfetchable_page(monkeypatch, allow_any_url):
     class _Fetcher:
         async def fetch(self, candidate):
             return None
@@ -124,7 +139,7 @@ async def test_extract_url_reports_an_unfetchable_page(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_extract_url_uses_the_fetched_text(monkeypatch):
+async def test_extract_url_uses_the_fetched_text(monkeypatch, allow_any_url):
     class _Raw:
         text = "A long article about value investing. " * 20
 
@@ -137,6 +152,28 @@ async def test_extract_url_uses_the_fetched_text(monkeypatch):
     raw = await extract(_upload(UploadKind.URL, url="https://example.test/a"))
     assert raw.url == "https://example.test/a"
     assert "value investing" in raw.text
+
+
+@pytest.mark.asyncio
+async def test_extract_url_refuses_a_private_address(monkeypatch):
+    """The worker-side half of the SSRF guard, and the message it produces.
+
+    The request handler already refuses this shape with a 422, so reaching here
+    means the URL was stored before the guard existed, or the host resolved
+    privately only at fetch time. Either way the fetcher is never called.
+    """
+    called = False
+
+    class _Fetcher:
+        async def fetch(self, candidate):
+            nonlocal called
+            called = True
+            return
+
+    monkeypatch.setattr(extract_mod, "WebFetcher", _Fetcher)
+    with pytest.raises(IngestionError, match="not reachable from the public internet"):
+        await extract(_upload(UploadKind.URL, url="http://169.254.169.254/latest/meta-data/"))
+    assert not called
 
 
 @pytest.mark.asyncio

@@ -10,6 +10,7 @@ import httpx
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import guarded_client
 from peritus.infrastructure.pdf_parser import parse_pdf_url
 from peritus.sources.domain import (
     Identifiers,
@@ -143,13 +144,12 @@ async def _is_pdf_url(url: str) -> bool:
     if url.lower().endswith(".pdf"):
         return True
     try:
-        async with httpx.AsyncClient(
-            timeout=10, headers=_PDF_HEADERS, follow_redirects=True
-        ) as client:
+        async with guarded_client(timeout=10, headers=_PDF_HEADERS) as client:
             resp = await client.head(url)
             ct = resp.headers.get("content-type", "")
             return "pdf" in ct.lower()
-    except Exception:
+    except Exception as exc:
+        logger.debug("PDF content-type probe failed for %r: %s", url, exc)
         return False
 
 

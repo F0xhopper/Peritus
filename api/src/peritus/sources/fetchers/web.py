@@ -4,6 +4,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import guarded_client
 from peritus.sources.domain import Identifiers, RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.base import note_search_failure
 from peritus.sources.fetchers.exa import classify_search_error
@@ -21,7 +22,7 @@ class WebFetcher:
         return [_to_candidate(hit) for hit in hits]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HEADERS) as client:
+        async with guarded_client(timeout=20, headers=_HEADERS) as client:
             try:
                 text, title = await _fetch_page(client, candidate.url)
             except Exception as exc:
@@ -133,6 +134,6 @@ async def _fetch_page(
 
 async def fetch_page_text(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
     """Page text for a URL, with its own client. Raises on transport failure."""
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HEADERS) as client:
+    async with guarded_client(timeout=20, headers=_HEADERS) as client:
         text, _title = await _fetch_page(client, url, max_chars)
     return text

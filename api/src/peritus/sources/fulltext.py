@@ -22,10 +22,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import httpx
-
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import guarded_client
 from peritus.sources.domain import Identifiers, SourceCandidate
 
 logger = get_logger(__name__)
@@ -194,7 +193,7 @@ async def _from_arxiv(arxiv_id: str) -> FullText | None:
     from peritus.sources.fetchers.arxiv import fetch_ar5iv
 
     try:
-        async with httpx.AsyncClient(timeout=30, headers=HEADERS, follow_redirects=True) as http:
+        async with guarded_client(timeout=30, headers=HEADERS) as http:
             text = await fetch_ar5iv(http, arxiv_id)
         if _long_enough(text):
             return FullText(text[:MAX_FULL_TEXT], METHOD_AR5IV)
@@ -234,7 +233,7 @@ async def _from_europe_pmc(ids: Identifiers, hints: FullTextHints | None = None)
     if not pmcid:
         return None
     try:
-        async with httpx.AsyncClient(timeout=30, headers=HEADERS, follow_redirects=True) as http:
+        async with guarded_client(timeout=30, headers=HEADERS) as http:
             text = await fetch_full_text(http, pmcid)
     except Exception as exc:
         logger.debug("Europe PMC full text failed for %s: %s", pmcid, exc)

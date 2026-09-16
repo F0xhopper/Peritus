@@ -12,6 +12,7 @@ deciding whether to re-export their PDF.
 
 from peritus.core.exceptions import IngestionError
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import BlockedURLError, assert_public_url
 from peritus.infrastructure.pdf_parser import parse_pdf_bytes
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.web import WebFetcher
@@ -95,6 +96,17 @@ def _extract_text(upload: PendingUpload) -> str:
 async def _extract_url(upload: PendingUpload) -> str:
     if not upload.url:
         raise IngestionError("No URL was provided.")
+    # The request handler already refused the obvious cases. This is the
+    # resolving check, here rather than only inside the fetcher so that a
+    # blocked address produces its own message instead of the generic
+    # "could not fetch that page" that a swallowed transport error gives.
+    try:
+        await assert_public_url(upload.url)
+    except BlockedURLError as exc:
+        logger.warning("Refused URL upload %r: %s", upload.url, exc.reason)
+        raise IngestionError(
+            "That address is not reachable from the public internet, so it cannot be fetched."
+        ) from exc
     candidate = SourceCandidate(
         source_type=SourceType.WEB,
         url=upload.url,
