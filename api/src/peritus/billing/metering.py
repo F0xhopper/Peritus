@@ -34,8 +34,8 @@ traffic through the same clients is unaffected.
 import asyncio
 import contextlib
 import threading
-from collections.abc import AsyncIterator
-from contextvars import ContextVar
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
@@ -237,17 +237,20 @@ class BuildMeter:
 # later stage transition must be visible through the same object reference.
 _current_meter: ContextVar[BuildMeter | None] = ContextVar("peritus_build_meter", default=None)
 
+#: What a flush hands its persister: the rows `BuildMeter.drain` gave up.
+UsagePersist = Callable[[list[tuple[UsageKey, UsageBucket]]], Awaitable[None]]
+
 
 def current_meter() -> BuildMeter | None:
     return _current_meter.get()
 
 
-def set_meter(meter: BuildMeter | None):
+def set_meter(meter: BuildMeter | None) -> Token[BuildMeter | None]:
     """Bind a meter to the current task's context. Returns the reset token."""
     return _current_meter.set(meter)
 
 
-def reset_meter(token) -> None:
+def reset_meter(token: Token[BuildMeter | None]) -> None:
     with contextlib.suppress(ValueError):
         _current_meter.reset(token)
 
@@ -416,7 +419,9 @@ def install_instrumentation() -> bool:
         return ok
 
 
-async def flush_periodically(meter: BuildMeter, persist, interval: float | None = None) -> None:
+async def flush_periodically(
+    meter: BuildMeter, persist: UsagePersist, interval: float | None = None
+) -> None:
     """Background task: persist the meter's accumulated usage on a cadence.
 
     ``persist`` is an async callable taking the drained rows. On failure the
@@ -428,7 +433,7 @@ async def flush_periodically(meter: BuildMeter, persist, interval: float | None 
         await flush_once(meter, persist)
 
 
-async def flush_once(meter: BuildMeter, persist) -> None:
+async def flush_once(meter: BuildMeter, persist: UsagePersist) -> None:
     rows = meter.drain()
     if not rows:
         return

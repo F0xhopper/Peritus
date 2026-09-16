@@ -76,12 +76,12 @@ async def _shared_expert(token: str, repo: ExpertRepo) -> Expert:
 
 
 @router.get("/experts/{slug}/share", response_model=ShareStateOut)
-async def get_share(expert: OwnedExpert, shares: Shares):
+async def get_share(expert: OwnedExpert, shares: Shares) -> ShareStateOut:
     return await _state(shares, expert, await shares.get_active(expert.id))
 
 
 @router.put("/experts/{slug}/share", response_model=ShareStateOut)
-async def enable_share(expert: OwnedExpert, user: CurrentUser, shares: Shares):
+async def enable_share(expert: OwnedExpert, user: CurrentUser, shares: Shares) -> ShareStateOut:
     """Turn the link on. Idempotent: a live link is returned, never replaced."""
     link = await shares.enable(expert.id, user.id)
     logger.info("Share link on for expert %d", expert.id)
@@ -89,7 +89,7 @@ async def enable_share(expert: OwnedExpert, user: CurrentUser, shares: Shares):
 
 
 @router.post("/experts/{slug}/share/reset", response_model=ShareStateOut)
-async def reset_share(expert: OwnedExpert, user: CurrentUser, shares: Shares):
+async def reset_share(expert: OwnedExpert, user: CurrentUser, shares: Shares) -> ShareStateOut:
     """Replace the link. Everyone who opened the old one loses access."""
     link = await shares.reset(expert.id, user.id)
     logger.info("Share link reset for expert %d", expert.id)
@@ -97,7 +97,7 @@ async def reset_share(expert: OwnedExpert, user: CurrentUser, shares: Shares):
 
 
 @router.delete("/experts/{slug}/share", status_code=204)
-async def disable_share(expert: OwnedExpert, shares: Shares):
+async def disable_share(expert: OwnedExpert, shares: Shares) -> None:
     """Turn the link off. Everyone who opened it loses access; their own chats
     are kept but can no longer be continued."""
     await shares.disable(expert.id)
@@ -108,7 +108,7 @@ async def disable_share(expert: OwnedExpert, shares: Shares):
 
 
 @router.delete("/experts/{slug}/access", status_code=204)
-async def leave_shared_expert(expert: ReadableExpert, user: CurrentUser, shares: Shares):
+async def leave_shared_expert(expert: ReadableExpert, user: CurrentUser, shares: Shares) -> None:
     """Remove a shared expert from the caller's workspace.
 
     The owner cannot "leave" their own expert — that would be a delete, which
@@ -123,7 +123,7 @@ async def leave_shared_expert(expert: ReadableExpert, user: CurrentUser, shares:
 
 
 @router.get("/share/{token}", response_model=SharedExpertOut)
-async def get_shared_expert(token: str, response: Response, repo: ExpertRepo):
+async def get_shared_expert(token: str, response: Response, repo: ExpertRepo) -> SharedExpertOut:
     """The share card. Readable without a session, so a link can unfurl."""
     expert = await _shared_expert(token, repo)
     response.headers.update(_ANONYMOUS_HEADERS)
@@ -148,7 +148,9 @@ async def get_shared_expert(token: str, response: Response, repo: ExpertRepo):
 
 
 @router.get("/share/{token}/picture")
-async def get_shared_picture(token: str, request: Request, repo: ExpertRepo, pictures: Pictures):
+async def get_shared_picture(
+    token: str, request: Request, repo: ExpertRepo, pictures: Pictures
+) -> Response:
     """The picture's bytes for the share page and its link preview.
 
     Revalidated on every use (``no-cache`` with an ETag) rather than cached
@@ -172,7 +174,9 @@ async def get_shared_picture(token: str, request: Request, repo: ExpertRepo, pic
 
 
 @router.post("/share/{token}/accept", response_model=ShareAcceptOut)
-async def accept_share(token: str, user: CurrentUser, repo: ExpertRepo, shares: Shares):
+async def accept_share(
+    token: str, user: CurrentUser, repo: ExpertRepo, shares: Shares
+) -> ShareAcceptOut:
     """Open the link as a signed-in user: record a grant, return the slug.
 
     Idempotent. The owner opening their own link gets no grant — they already

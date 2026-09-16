@@ -26,6 +26,7 @@ whole job is to get someone to a good answer in five seconds.
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from peritus.billing.settings import settings
 from peritus.experts.domain import ExpertTier, tier_economics
@@ -218,12 +219,12 @@ class EntitlementError(Exception):
     #: HTTP status the API layer maps this to.
     status_code = 402
 
-    def __init__(self, message: str, **details) -> None:
+    def __init__(self, message: str, **details: Any) -> None:
         super().__init__(message)
         self.message = message
         self.details = details
 
-    def to_payload(self) -> dict:
+    def to_payload(self) -> dict[str, Any]:
         return {"error": {"code": self.code, "message": self.message, **self.details}}
 
 

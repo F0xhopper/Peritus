@@ -132,7 +132,7 @@ def install_error_handlers(app: FastAPI) -> None:
     """Uniform JSON error bodies, each carrying the request id."""
 
     @app.exception_handler(StarletteHTTPException)
-    async def _http_error(request: Request, exc: StarletteHTTPException):
+    async def _http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         # HTTPException detail is deliberate, author-written text (or, for
         # entitlement denials, a structured payload) — pass it through as-is.
         request_id = _request_id(request)
@@ -143,7 +143,7 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def _validation_error(request: Request, exc: RequestValidationError):
+    async def _validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
         request_id = _request_id(request)
         return JSONResponse(
             status_code=422,
@@ -152,7 +152,7 @@ def install_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(Exception)
-    async def _unhandled(request: Request, exc: Exception):
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
         request_id = _request_id(request)
         # Bind it before logging so the filter stamps this record with the same
         # id the response carries — see _request_id on why it may be unset here.

@@ -145,6 +145,13 @@ warn_unused_ignores = false
 no_implicit_optional = true
 ignore_missing_imports = true
 
+# Packages where annotation coverage is already complete, held there by the
+# checker rather than by memory. The list grows as packages are finished; it is
+# how `strict` arrives without a flag day.
+[[tool.mypy.overrides]]
+module = ["peritus.api.*", "peritus.billing.*", "peritus.jobs.*"]
+disallow_untyped_defs = true
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]

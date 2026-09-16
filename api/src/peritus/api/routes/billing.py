@@ -23,6 +23,7 @@ from peritus.api.schemas.experts import (
 )
 from peritus.billing.domain import (
     PLANS,
+    Plan,
     credit_cost,
     get_plan,
     spend_cap_usd,
@@ -36,7 +37,7 @@ logger = get_logger(__name__)
 router = APIRouter(tags=["billing"])
 
 
-def _plan_out(plan) -> PlanOut:
+def _plan_out(plan: Plan) -> PlanOut:
     return PlanOut(
         name=plan.name,
         display_name=plan.display_name,
@@ -47,7 +48,7 @@ def _plan_out(plan) -> PlanOut:
 
 
 @router.get("/billing/me", response_model=CreditStateOut)
-async def get_credit_state(user: CurrentUser, entitlements: Entitlements):
+async def get_credit_state(user: CurrentUser, entitlements: Entitlements) -> CreditStateOut:
     """The caller's plan, credit balance, and the price of each tier.
 
     Provisions the account on first call, which is where the free plan's signup
@@ -78,7 +79,7 @@ async def get_credit_ledger(
     user: CurrentUser,
     entitlements: Entitlements,
     limit: int = Query(50, ge=1, le=200),
-):
+) -> list[LedgerEntryOut]:
     entries = await entitlements.ledger(user.id, limit)
     return [
         LedgerEntryOut(

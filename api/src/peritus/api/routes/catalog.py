@@ -40,7 +40,7 @@ async def list_catalog(
     featured: bool = Query(False),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
-):
+) -> list[CatalogEntry]:
     """The curated public shelf. Readable without a session."""
     experts = await repo.list_catalog(
         category=category, tag=tag, featured_only=featured, limit=limit, offset=offset
@@ -49,12 +49,12 @@ async def list_catalog(
 
 
 @router.get("/catalog/categories", response_model=list[CatalogCategory])
-async def list_catalog_categories(repo: ExpertRepo):
+async def list_catalog_categories(repo: ExpertRepo) -> list[CatalogCategory]:
     return [CatalogCategory(name=n, count=c) for n, c in await repo.list_catalog_categories()]
 
 
 @router.get("/catalog/{slug}", response_model=CatalogEntry)
-async def get_catalog_expert(slug: str, repo: ExpertRepo):
+async def get_catalog_expert(slug: str, repo: ExpertRepo) -> CatalogEntry:
     """One catalog card. Public experts only — sharing a private expert is a
     token link (``GET /share/{token}``), never its slug."""
     expert = await repo.get_public(slug)

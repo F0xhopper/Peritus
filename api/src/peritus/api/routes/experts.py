@@ -88,7 +88,7 @@ def _entitlement_http_error(exc: EntitlementError) -> HTTPException:
 
 
 @router.get("/experts", response_model=list[ExpertSummary])
-async def list_experts(user: CurrentUser, repo: ExpertRepo):
+async def list_experts(user: CurrentUser, repo: ExpertRepo) -> list[ExpertSummary]:
     """The caller's workspace — their own experts only.
 
     Deliberately does not fold in the public catalog: "my experts" must not grow
@@ -105,7 +105,7 @@ async def build_expert(
     user: CurrentUser,
     experts: Experts,
     jobs: Jobs,
-):
+) -> EventSourceResponse:
     """Enqueue a durable build job and stream its progress.
 
     The build runs in a worker (separate process or in-process), not in this
@@ -140,7 +140,7 @@ async def build_expert(
 
 
 @router.get("/experts/{slug}", response_model=ExpertWithCatalog)
-async def get_expert(expert: ReadableExpert, user: CurrentUser):
+async def get_expert(expert: ReadableExpert, user: CurrentUser) -> ExpertWithCatalog:
     """Expert detail. Readable if the caller owns it, it is public, or it is
     shared with them through a live link. ``access`` says which."""
     return with_catalog(expert, user)
@@ -149,7 +149,7 @@ async def get_expert(expert: ReadableExpert, user: CurrentUser):
 @router.patch("/experts/{slug}/catalog", response_model=ExpertWithCatalog)
 async def update_expert_catalog(
     expert: OwnedExpert, req: CatalogUpdateRequest, user: CurrentUser, repo: ExpertRepo
-):
+) -> ExpertWithCatalog:
     """Curate an expert: publish/unpublish, blurb, category, tags, featured, rank.
 
     Owner-scoped: a public expert is readable by everyone and curatable only by
@@ -200,7 +200,7 @@ async def update_expert_catalog(
 @router.put("/experts/{slug}/avatar", response_model=ExpertWithCatalog)
 async def set_expert_avatar(
     expert: OwnedExpert, req: SetAvatarRequest, user: CurrentUser, repo: ExpertRepo
-):
+) -> ExpertWithCatalog:
     """Pin this expert's picture avatar, or reset it to the generated default.
 
     Owner-scoped, like every other mutation: a published expert is readable by
@@ -239,7 +239,9 @@ _picture_refresh_limiter = SlidingWindowLimiter(limit=6, window=60.0)
 
 
 @router.get("/experts/{slug}/picture")
-async def get_expert_picture(expert: ReadableExpert, request: Request, pictures: Pictures):
+async def get_expert_picture(
+    expert: ReadableExpert, request: Request, pictures: Pictures
+) -> Response:
     """The picture's bytes.
 
     Cached hard and forever under a versioned URL: the ``?v=`` the client
@@ -270,7 +272,9 @@ async def get_expert_picture(expert: ReadableExpert, request: Request, pictures:
 
 
 @router.post("/experts/{slug}/picture/refresh", response_model=ExpertWithCatalog)
-async def refresh_expert_picture(expert: OwnedExpert, user: CurrentUser, experts: Experts):
+async def refresh_expert_picture(
+    expert: OwnedExpert, user: CurrentUser, experts: Experts
+) -> ExpertWithCatalog:
     """Search Wikimedia again and store whatever it finds. Owner only.
 
     Synchronous: it is five or six HTTP requests and no model call, so it
@@ -300,7 +304,7 @@ async def refresh_expert_picture(expert: OwnedExpert, user: CurrentUser, experts
 
 
 @router.delete("/experts/{slug}/picture", status_code=204)
-async def delete_expert_picture(expert: OwnedExpert, pictures: Pictures):
+async def delete_expert_picture(expert: OwnedExpert, pictures: Pictures) -> None:
     """Remove the found picture; the expert falls back to its recipe or sigil.
 
     Distinct from picking a sigil style in the avatar picker, which writes a
@@ -326,7 +330,7 @@ _PICTURE_SKIP_MESSAGES: dict[str, str] = {
 
 
 @router.delete("/experts/{slug}", status_code=204)
-async def delete_expert(expert: OwnedExpert, repo: ExpertRepo, jobs: Jobs):
+async def delete_expert(expert: OwnedExpert, repo: ExpertRepo, jobs: Jobs) -> None:
     # Cancel any in-flight build first so the worker aborts cooperatively instead of
     # racing the cascade delete of the expert's rows.
     await jobs.request_cancel(expert.id)
@@ -339,7 +343,7 @@ async def build_events(
     request: Request,
     jobs: Jobs,
     after: int = Query(0, ge=0),
-):
+) -> EventSourceResponse:
     """Reconnect to (or re-watch) a build's progress from a cursor. Multiple clients
     can tail the same build; pass the last `seq` you saw as `after` to resume.
     """

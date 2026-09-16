@@ -23,7 +23,7 @@ from peritus.api.schemas.experts import (
     ExpertSummary,
     ExpertWithCatalog,
 )
-from peritus.experts.domain import ExpertPicture
+from peritus.experts.domain import Expert, ExpertPicture
 
 
 def picture_out(picture: ExpertPicture | None) -> ExpertPictureOut | None:
@@ -50,14 +50,14 @@ def picture_out(picture: ExpertPicture | None) -> ExpertPictureOut | None:
     )
 
 
-def access_for(e, user: AuthUser) -> ExpertAccess:
+def access_for(e: Expert, user: AuthUser) -> ExpertAccess:
     """The caller's relationship to an expert they have already been allowed to read."""
     if e.is_owned_by(user.id, include_unowned=user.is_admin):
         return ExpertAccess.OWNER
     return ExpertAccess.VIEWER
 
 
-def summary_fields(e, user: AuthUser) -> dict[str, Any]:
+def summary_fields(e: Expert, user: AuthUser) -> dict[str, Any]:
     return {
         "id": e.id,
         "name": e.name,
@@ -84,11 +84,11 @@ def summary_fields(e, user: AuthUser) -> dict[str, Any]:
     }
 
 
-def to_summary(e, user: AuthUser) -> ExpertSummary:
+def to_summary(e: Expert, user: AuthUser) -> ExpertSummary:
     return ExpertSummary(**summary_fields(e, user))
 
 
-def catalog_meta(e) -> CatalogMetaOut:
+def catalog_meta(e: Expert) -> CatalogMetaOut:
     c = e.catalog
     return CatalogMetaOut(
         visibility=c.visibility.value,
@@ -101,7 +101,7 @@ def catalog_meta(e) -> CatalogMetaOut:
     )
 
 
-def with_catalog(e, user: AuthUser) -> ExpertWithCatalog:
+def with_catalog(e: Expert, user: AuthUser) -> ExpertWithCatalog:
     return ExpertWithCatalog(
         **summary_fields(e, user),
         error=e.error,
@@ -110,7 +110,7 @@ def with_catalog(e, user: AuthUser) -> ExpertWithCatalog:
     )
 
 
-def to_catalog_entry(e) -> CatalogEntry:
+def to_catalog_entry(e: Expert) -> CatalogEntry:
     """Project an expert down to what a stranger may see.
 
     Nothing here identifies the owner or exposes build internals: a catalog card

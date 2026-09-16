@@ -13,7 +13,8 @@ import asyncio
 import contextlib
 import json
 import uuid
-from typing import Annotated
+from collections.abc import AsyncIterator
+from typing import Annotated, Any
 
 import anthropic
 import asyncpg
@@ -109,7 +110,7 @@ OwnedConversation = Annotated[Conversation, Depends(_owned_conversation)]
 @router.post("/experts/{slug}/conversations", response_model=ConversationSummary)
 async def create_conversation(
     expert: ReadableExpert, user: CurrentUser, convs: Conversations, pool: Pool
-):
+) -> ConversationSummary:
     """Create an empty conversation. The web client calls this on the first
     send, so empties are transient; recents filter them out regardless."""
     # Retrieval readiness, not job status — see routes/chat.py.
@@ -124,7 +125,7 @@ async def create_conversation(
 @router.get("/experts/{slug}/conversations", response_model=list[ConversationSummary])
 async def list_expert_conversations(
     expert: ReadableExpert, user: CurrentUser, convs: Conversations
-):
+) -> list[ConversationSummary]:
     rows = await convs.list_for_expert(expert.id, user.id, include_unowned=user.is_admin)
     return [_to_summary(c) for c in rows]
 
@@ -134,13 +135,13 @@ async def list_recent_conversations(
     user: CurrentUser,
     convs: Conversations,
     limit: int = Query(20, ge=1, le=50),
-):
+) -> list[ConversationSummary]:
     rows = await convs.list_recent_for_user(user.id, include_unowned=user.is_admin, limit=limit)
     return [_to_summary(c) for c in rows]
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
-async def get_conversation(conv: OwnedConversation, convs: Conversations):
+async def get_conversation(conv: OwnedConversation, convs: Conversations) -> ConversationDetail:
     messages = await convs.get_messages(conv.id)
     summary = _to_summary(conv)
     return ConversationDetail(
@@ -166,7 +167,7 @@ async def rename_conversation(
     req: RenameConversationRequest,
     user: CurrentUser,
     convs: Conversations,
-):
+) -> ConversationSummary:
     renamed = await convs.rename(
         str(conversation_id), user.id, include_unowned=user.is_admin, title=req.title
     )
@@ -178,7 +179,9 @@ async def rename_conversation(
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(conversation_id: uuid.UUID, user: CurrentUser, convs: Conversations):
+async def delete_conversation(
+    conversation_id: uuid.UUID, user: CurrentUser, convs: Conversations
+) -> None:
     deleted = await convs.delete(str(conversation_id), user.id, include_unowned=user.is_admin)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -193,7 +196,7 @@ async def send_message(
     experts: ExpertRepo,
     pool: Pool,
     user: AuthUser = Depends(chat_rate_limit),
-):
+) -> EventSourceResponse:
     """Send a question and stream the answer (SSE), persisting both turns.
 
     Event protocol is the stateless endpoint's plus a leading ``meta`` event
@@ -289,7 +292,7 @@ async def _stream_and_persist(
     expert: Expert,
     question: str,
     history: list[dict],
-):
+) -> AsyncIterator[dict[str, Any]]:
     """Wrap the shared stream body with persistence for every exit path.
 
     - ``done``: assistant message persisted (citations + contradiction flag),

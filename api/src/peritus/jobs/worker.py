@@ -21,6 +21,9 @@ import asyncpg
 from peritus.billing.domain import SpendCapExceeded
 from peritus.billing.metering import (
     BuildMeter,
+    UsageBucket,
+    UsageKey,
+    UsagePersist,
     flush_once,
     flush_periodically,
     install_instrumentation,
@@ -34,7 +37,7 @@ from peritus.core.config import settings
 from peritus.core.exceptions import BuildError, IngestionError
 from peritus.core.logging import get_logger, job_context
 from peritus.experts.builder import BuildResult, ExpertBuilder
-from peritus.experts.domain import ExpertStatus, ExpertTier
+from peritus.experts.domain import Expert, ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
 from peritus.jobs.domain import BuildJob
 from peritus.jobs.repository import JobRepository
@@ -110,7 +113,7 @@ def _log_environment_banner() -> None:
     )
 
 
-def _resume_point(job: BuildJob, expert, builder: Any) -> Readiness | None:
+def _resume_point(job: BuildJob, expert: Expert, builder: Any) -> Readiness | None:
     """Where a retry of this job can pick up, or None to start from scratch.
 
     Only a *retry* resumes. The first attempt of a job is a (re)build and must
@@ -525,7 +528,7 @@ class BuildWorker:
         finally:
             await supervision.aclose()
 
-    async def _run_ingest_job(self, job: BuildJob, expert) -> None:
+    async def _run_ingest_job(self, job: BuildJob, expert: Expert) -> None:
         """Ingest one user-supplied document.
 
         Shares the queue's durability with a build — claimed, heartbeaten,
@@ -630,7 +633,7 @@ class BuildWorker:
         )
         await self._jobs.mark_failed(job.id, self.worker_id, message)
 
-    async def _start_meter(self, job: BuildJob, expert) -> "BuildMeter | None":
+    async def _start_meter(self, job: BuildJob, expert: Expert) -> BuildMeter | None:
         """Build the cost meter for a job, or None if metering can't be set up.
 
         Metering is observability plus a safety valve — never a reason a build
@@ -654,10 +657,10 @@ class BuildWorker:
             logger.warning("Could not start cost metering for job %d: %s", job.id, exc)
             return None
 
-    def _persist_usage(self, meter: "BuildMeter"):
+    def _persist_usage(self, meter: BuildMeter) -> UsagePersist:
         repo = BillingRepository(self._pool)
 
-        async def persist(rows) -> None:
+        async def persist(rows: list[tuple[UsageKey, UsageBucket]]) -> None:
             await repo.record_usage(meter.job_id, meter.expert_id, meter.owner_id, rows)
 
         return persist

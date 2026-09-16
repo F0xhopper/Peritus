@@ -1,4 +1,6 @@
 import json
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
@@ -22,7 +24,7 @@ async def chat_stream(
     pool: Pool,
     repo: ExpertRepo,
     user: AuthUser = Depends(chat_rate_limit),
-):
+) -> EventSourceResponse:
     """Stateless chat — the TUI/CLI contract. History arrives in the request
     body and nothing is persisted; the stateful web flow lives in
     ``routes/conversations.py``. Both share ``chat.streaming``.
@@ -45,7 +47,7 @@ async def chat_stream(
 
     history = [{"role": m.role, "content": m.content} for m in req.history]
 
-    async def stream_generator():
+    async def stream_generator() -> AsyncIterator[dict[str, Any]]:
         try:
             from peritus.chat.streaming import stream_expert_answer
 
