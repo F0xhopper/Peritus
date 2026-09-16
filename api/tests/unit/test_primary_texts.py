@@ -57,6 +57,7 @@ from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.language import english_share, is_expected_language
 from peritus.sources.sections import apply_sections, parse_hint, select_sections
 from peritus.sources.triage import TriagedCandidate, domain_adjustment
+from tests.conftest import tool_use_response
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -619,37 +620,42 @@ async def test_suggestions_are_held_to_the_concepts_asked_about_and_not_repeated
         class messages:
             @staticmethod
             async def create(**_kwargs):
-                block = MagicMock(type="tool_use")
-                block.input = {
-                    "texts": [
-                        {
-                            "concept": "ORBITS",
-                            "title": "Principia",
-                            "kind": "text",
-                            "public_domain": True,
-                        },
-                        {
-                            "concept": "orbits",
-                            "title": "Already Tried",
-                            "kind": "text",
-                            "public_domain": True,
-                        },
-                        {"concept": "made up", "title": "X", "kind": "text", "public_domain": True},
-                        {
-                            "concept": "orbits",
-                            "title": "Second",
-                            "kind": "weird",
-                            "public_domain": "yes",
-                        },
-                        {
-                            "concept": "orbits",
-                            "title": "Third",
-                            "kind": "text",
-                            "public_domain": True,
-                        },
-                    ]
-                }
-                return MagicMock(content=[block])
+                return tool_use_response(
+                    {
+                        "texts": [
+                            {
+                                "concept": "ORBITS",
+                                "title": "Principia",
+                                "kind": "text",
+                                "public_domain": True,
+                            },
+                            {
+                                "concept": "orbits",
+                                "title": "Already Tried",
+                                "kind": "text",
+                                "public_domain": True,
+                            },
+                            {
+                                "concept": "made up",
+                                "title": "X",
+                                "kind": "text",
+                                "public_domain": True,
+                            },
+                            {
+                                "concept": "orbits",
+                                "title": "Second",
+                                "kind": "weird",
+                                "public_domain": "yes",
+                            },
+                            {
+                                "concept": "orbits",
+                                "title": "Third",
+                                "kind": "text",
+                                "public_domain": True,
+                            },
+                        ]
+                    }
+                )
 
     with patch.object(feedback, "get_anthropic_client", _Client):
         out = await feedback.suggest_primary_texts("t", "def", ["orbits"], ["already tried"])
@@ -694,25 +700,15 @@ def test_pirate_mirrors_are_penalised_hard():
 def test_nodes_sent_as_a_json_string_are_decoded_not_discarded():
     from peritus.graph.extractor import _parse_extract_response
 
-    class _Block:
-        type = "tool_use"
-
-        def __init__(self, payload):
-            self.input = payload
-
-    class _Response:
-        stop_reason = "tool_use"
-
-        def __init__(self, payload):
-            self.content = [_Block(payload)]
-
     nodes = [{"label": "Inertia", "node_type": "concept", "description": "d", "chunk_indices": [0]}]
-    result = _parse_extract_response(_Response({"nodes": json.dumps(nodes), "edges": "[]"}), [7])
+    result = _parse_extract_response(
+        tool_use_response({"nodes": json.dumps(nodes), "edges": "[]"}), [7]
+    )
     assert [n["label"] for n in result["nodes"]] == ["Inertia"]
     assert result["nodes"][0]["chunk_db_ids"] == [7]
 
     truncated = json.dumps(nodes + nodes)[:-20]
-    result = _parse_extract_response(_Response({"nodes": truncated, "edges": []}), [7])
+    result = _parse_extract_response(tool_use_response({"nodes": truncated, "edges": []}), [7])
     assert [n["label"] for n in result["nodes"]] == ["Inertia"], (
         "complete objects of a cut-off string survive"
     )

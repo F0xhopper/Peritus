@@ -27,6 +27,7 @@ from typing import Any
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 from peritus.sources.domain import (
     COUNTING_DEPTHS,
     DEPTH_TREATS,
@@ -733,8 +734,8 @@ def _parse_validate_response(resp: Any, batch_len: int) -> list[dict]:
     :func:`needs_second_opinion` treats as unjudged — so the source is re-asked
     properly instead of being dropped for the model's formatting.
     """
-    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    raw = block.input.get("validations", [])
+    block = tool_input(resp) or {}
+    raw = block.get("validations", [])
     validations: list[dict] = []
     for entry in raw if isinstance(raw, list) else []:
         if isinstance(entry, dict):

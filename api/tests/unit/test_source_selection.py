@@ -10,6 +10,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
+from anthropic.types import Message
 
 from peritus.core.config import settings
 from peritus.experts.builder import (
@@ -81,6 +82,7 @@ from peritus.sources.triage import (
     rank_candidates,
     triage_candidates,
 )
+from tests.conftest import tool_use_response
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -98,16 +100,8 @@ def _candidate(
     )
 
 
-class _Block:
-    type = "tool_use"
-
-    def __init__(self, scores):
-        self.input = {"scores": scores}
-
-
-class _Response:
-    def __init__(self, scores):
-        self.content = [_Block(scores)]
+def _response(scores) -> Message:
+    return tool_use_response({"scores": scores})
 
 
 def _scripted_triage(*scripts):
@@ -134,7 +128,7 @@ def _scripted_triage(*scripts):
                 responses.append(None)
                 continue
             responses.append(
-                _Response(
+                _response(
                     [
                         {"id": f"candidate_{i}", "expected_value": script[t]}
                         for i, t in enumerate(titles)
@@ -153,7 +147,7 @@ def _scripted_triage(*scripts):
 def test_scores_map_by_id_not_position():
     """A response that skips one entry in the middle must not shift every later
     score onto the wrong candidate."""
-    resp = _Response(
+    resp = _response(
         [
             {"id": "candidate_0", "expected_value": 8},
             {"id": "candidate_2", "expected_value": 1},
@@ -164,7 +158,7 @@ def test_scores_map_by_id_not_position():
 
 
 def test_unreadable_duplicate_and_out_of_range_entries_are_ignored():
-    resp = _Response(
+    resp = _response(
         [
             {"id": "candidate_0", "expected_value": 4},
             {"id": "candidate_0", "expected_value": 9},  # repeat: first wins

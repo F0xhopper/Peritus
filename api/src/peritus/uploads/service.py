@@ -13,6 +13,7 @@ as it was, still answering questions from the corpus it already had.
 from typing import Any
 
 import asyncpg
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
 from peritus.core.exceptions import IngestionError
@@ -21,7 +22,7 @@ from peritus.experts.domain import Expert
 from peritus.graph.extractor import extract_graph_from_chunks
 from peritus.graph.reconciler import reconcile_claims
 from peritus.graph.repository import GraphRepository
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.pipeline import ingest_sources
 from peritus.sources.domain import RawSource, ValidatedSource
@@ -30,7 +31,7 @@ from peritus.uploads.repository import UploadRepository
 
 logger = get_logger(__name__)
 
-_TAG_TOOL: dict[str, Any] = {
+_TAG_TOOL: ToolParam = {
     "name": "tag_document",
     "description": "Describe an uploaded document so it fits the corpus index.",
     "input_schema": {
@@ -213,28 +214,28 @@ async def _tag_document(raw: RawSource, expert: Expert) -> dict[str, Any]:
     )
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=1024,
             system=_TAG_SYSTEM,
             tools=[_TAG_TOOL],
-            tool_choice={"type": "tool", "name": "tag_document"},
+            tool_choice=ToolChoiceToolParam(type="tool", name="tag_document"),
             messages=[
-                {
-                    "role": "user",
-                    "content": (
+                MessageParam(
+                    role="user",
+                    content=(
                         f"Corpus topic: {expert.topic}\n\n"
                         f"{concept_block}"
                         f"Document title: {raw.title}\n"
                         f"Opening text:\n{raw.text[:_TAG_PREVIEW_CHARS]}"
                     ),
-                }
+                )
             ],
         )
-        block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
+        block = tool_input(resp)
         if block is None:
             return dict(_UNTAGGED)
-        data = dict(block.input)
+        data = dict(block)
         # Only concepts the expert actually declares may be recorded, or
         # coverage statistics start counting concepts nothing ever planned for.
         allowed = set(concepts)

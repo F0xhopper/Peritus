@@ -13,6 +13,7 @@ from typing import Any
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 from peritus.ingestion.chunker import TextChunk
 
 logger = get_logger(__name__)
@@ -129,8 +130,8 @@ def _job_params(job: ContextJob) -> list[tuple[dict[str, Any], int]]:
 
 
 def _parse_contexts(resp: Any, batch_len: int) -> list[str]:
-    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    contexts = list(block.input.get("contexts", []))
+    block = tool_input(resp) or {}
+    contexts = list(block.get("contexts", []))
     while len(contexts) < batch_len:
         contexts.append("")
     return contexts[:batch_len]

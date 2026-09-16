@@ -18,12 +18,13 @@ The fallback when the call fails is the old behaviour — ``f"{topic} {concept}"
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.coverage import ConceptCoverage
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.sources.domain import ValidatedSource
 
 logger = get_logger(__name__)
@@ -34,7 +35,7 @@ _DIGEST_SOURCES = 12
 _MAX_QUERIES_PER_CONCEPT = 2
 _CLAIM_CHARS = 180
 
-_FEEDBACK_TOOL: dict[str, Any] = {
+_FEEDBACK_TOOL: ToolParam = {
     "name": "write_followup_queries",
     "description": (
         "Write follow-up search queries for the concepts this corpus covers "
@@ -237,26 +238,26 @@ async def feedback_queries(
 
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=1024,
             system=_SYSTEM,
             tools=[_FEEDBACK_TOOL],
-            tool_choice={"type": "tool", "name": "write_followup_queries"},
+            tool_choice=ToolChoiceToolParam(type="tool", name="write_followup_queries"),
             messages=[
-                {
-                    "role": "user",
-                    "content": (
+                MessageParam(
+                    role="user",
+                    content=(
                         f"Topic: {topic}\n\n"
                         f"{weak_block}\n\n"
                         f"Sources already accepted:\n{_digest(accepted)}\n\n"
                         "Write follow-up queries for each weak concept."
                     ),
-                }
+                )
             ],
         )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        payload = dict(block.input)
+        block = tool_input(resp) or {}
+        payload = dict(block)
     except Exception as exc:
         logger.warning(
             "Feedback query generation failed (%s: %s) — falling back to "
@@ -305,7 +306,7 @@ def _normalise(
 
 # ── primary texts for concepts that have none ────────────────────────────────
 
-_PRIMARY_TOOL: dict[str, Any] = {
+_PRIMARY_TOOL: ToolParam = {
     "name": "name_primary_texts",
     "description": (
         "Name the primary texts in which each listed concept is actually set out, so "
@@ -371,16 +372,16 @@ async def suggest_primary_texts(
         return []
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.PLAN_MODEL,
             max_tokens=1500,
             system=_PRIMARY_SYSTEM,
             tools=[_PRIMARY_TOOL],
-            tool_choice={"type": "tool", "name": "name_primary_texts"},
+            tool_choice=ToolChoiceToolParam(type="tool", name="name_primary_texts"),
             messages=[
-                {
-                    "role": "user",
-                    "content": (
+                MessageParam(
+                    role="user",
+                    content=(
                         f"Topic: {topic}\n\n"
                         "Primary sources for this topic are: "
                         f"{primary_definition or 'the original works, not analysis of them'}\n\n"
@@ -393,11 +394,11 @@ async def suggest_primary_texts(
                             else ""
                         )
                     ),
-                }
+                )
             ],
         )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        raw = block.input.get("texts") or []
+        block = tool_input(resp) or {}
+        raw = block.get("texts") or []
     except Exception as exc:
         logger.warning(
             "Primary-text suggestion failed (%s: %s) — the round searches without it",

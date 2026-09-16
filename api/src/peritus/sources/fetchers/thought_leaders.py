@@ -17,11 +17,12 @@ for "Jacques Maritain Thomism" ranks the entry about him first
 """
 
 import asyncio
-from typing import Any
+
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.dedup import normalise_url
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
@@ -37,7 +38,7 @@ _MAX_CHARS = 50_000
 _RESULTS_PER_SEARCH = 3
 _MAX_PEOPLE = 6
 
-_IDENTIFY_TOOL: dict[str, Any] = {
+_IDENTIFY_TOOL: ToolParam = {
     "name": "identify_thought_leaders",
     "description": "Identify the top thought leaders, authors, and practitioners for a topic.",
     "input_schema": {
@@ -155,7 +156,7 @@ def _mentions_leader(name: str, title: str, text: str) -> bool:
 async def _identify_leaders(topic: str) -> list[dict]:
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=512,
             system=(
@@ -163,19 +164,19 @@ async def _identify_leaders(topic: str) -> list[dict]:
                 "for educational topics. Return real people with verifiable published work."
             ),
             tools=[_IDENTIFY_TOOL],
-            tool_choice={"type": "tool", "name": "identify_thought_leaders"},
+            tool_choice=ToolChoiceToolParam(type="tool", name="identify_thought_leaders"),
             messages=[
-                {
-                    "role": "user",
-                    "content": (
+                MessageParam(
+                    role="user",
+                    content=(
                         "Who are the 4–6 most important thought leaders, authors, "
                         f"or practitioners for: {topic}?"
                     ),
-                }
+                )
             ],
         )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        leaders = block.input.get("leaders", [])
+        block = tool_input(resp) or {}
+        leaders = block.get("leaders", [])
         logger.info(
             "Identified %d thought leaders for %r: %s",
             len(leaders),

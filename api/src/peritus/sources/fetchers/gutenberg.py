@@ -14,14 +14,14 @@ has its own short timeout, and a timeout keeps the books already resolved.
 
 import asyncio
 import re
-from typing import Any
 
 import httpx
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 from bs4 import BeautifulSoup
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.infrastructure.gutenberg_catalogue import load_catalogue, title_matches
 from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
@@ -46,7 +46,7 @@ _START_RE = re.compile(
 )
 _END_RE = re.compile(r"\*{3}\s*END OF (THE|THIS) PROJECT GUTENBERG EBOOK.+?\*{3}", re.IGNORECASE)
 
-_BOOK_TOOL: dict[str, Any] = {
+_BOOK_TOOL: ToolParam = {
     "name": "identify_canonical_books",
     "description": (
         "Identify canonical books and primary texts for a topic that are available in "
@@ -244,7 +244,7 @@ async def _identify_books(topic: str) -> list[dict]:
     """One Haiku call — returns a list of {title, author, search_query} dicts."""
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=400,
             system=(
@@ -254,11 +254,11 @@ async def _identify_books(topic: str) -> list[dict]:
                 "If there are no relevant public-domain books for this topic, return an empty list."
             ),
             tools=[_BOOK_TOOL],
-            tool_choice={"type": "tool", "name": "identify_canonical_books"},
-            messages=[{"role": "user", "content": f"Topic: {topic}"}],
+            tool_choice=ToolChoiceToolParam(type="tool", name="identify_canonical_books"),
+            messages=[MessageParam(role="user", content=f"Topic: {topic}")],
         )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        books = block.input.get("books", [])
+        block = tool_input(resp) or {}
+        books = block.get("books", [])
         if books:
             logger.info(
                 "Gutenberg book identification for %r: %s",

@@ -9,17 +9,17 @@ other side — what this corpus cannot be trusted to say — and the two are sho
 together.
 """
 
-from typing import Any
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.sources.domain import ValidatedSource
 
 logger = get_logger(__name__)
 
 
-_PERSONA_TOOL: dict[str, Any] = {
+_PERSONA_TOOL: ToolParam = {
     "name": "generate_persona",
     "description": "Generate a named expert persona grounded in the corpus.",
     "input_schema": {
@@ -125,7 +125,7 @@ async def generate_persona(
     concept_list = ", ".join(n["label"] for n in top_nodes[:20])
 
     client = get_anthropic_client()
-    resp = await client.messages.create(  # type: ignore[call-overload]
+    resp = await client.messages.create(
         model=settings.CLAUDE_MODEL,
         # 1024 was enough when `style` was a sentence about how the expert cites.
         # A teaching profile is several paragraphs, and `style` is the last field
@@ -135,20 +135,20 @@ async def generate_persona(
         max_tokens=3072,
         system=_PERSONA_SYSTEM,
         tools=[_PERSONA_TOOL],
-        tool_choice={"type": "tool", "name": "generate_persona"},
+        tool_choice=ToolChoiceToolParam(type="tool", name="generate_persona"),
         messages=[
-            {
-                "role": "user",
-                "content": (
+            MessageParam(
+                role="user",
+                content=(
                     f"Topic: {topic}\n\n"
                     f"Sources ingested:\n{_persona_digest(sources)}\n\n"
                     f"Top concepts extracted: {concept_list}"
                 ),
-            }
+            )
         ],
     )
-    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    persona = dict(block.input)
+    block = tool_input(resp) or {}
+    persona = dict(block)
 
     # A tool call cut off by the token budget still parses — it just arrives
     # missing its trailing fields. Catching it here names the cause; letting it

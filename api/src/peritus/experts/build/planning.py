@@ -14,13 +14,15 @@ title, produces a build that spends real money fetching the wrong things.
 
 from typing import Any
 
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.build.constants import (
     _FETCHER_NAMES,
     _MAX_QUERIES_PER_FETCHER,
 )
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.sources.canonical import WORK_KINDS, title_key
 from peritus.sources.orientation import OrientationPack, build_orientation_pack
 
@@ -117,7 +119,7 @@ _MAX_CONCEPTS_PER_FACET = 4
 _MAX_FIGURES = 6
 
 
-def _plan_tool(max_concepts: int) -> dict[str, Any]:
+def _plan_tool(max_concepts: int) -> ToolParam:
     return {
         "name": "create_research_plan",
         "description": (
@@ -358,16 +360,15 @@ async def _plan_research(topic: str, max_concepts: int = 8) -> dict:
     raw_plan: dict = {}
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.PLAN_MODEL,
             max_tokens=4000,
             system=_plan_system(max_concepts),
             tools=[_plan_tool(max_concepts)],
-            tool_choice={"type": "tool", "name": "create_research_plan"},
-            messages=[{"role": "user", "content": plan_user_message(topic, orientation)}],
+            tool_choice=ToolChoiceToolParam(type="tool", name="create_research_plan"),
+            messages=[MessageParam(role="user", content=plan_user_message(topic, orientation))],
         )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        raw_plan = dict(block.input)
+        raw_plan = tool_input(resp) or {}
     except Exception as exc:
         logger.warning(
             "Research planning failed (%s: %s) — falling back to raw topic. The build "

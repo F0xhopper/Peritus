@@ -60,6 +60,7 @@ from peritus.sources.orientation import (
 )
 from peritus.sources.triage import TriagedCandidate, rank_candidates
 from peritus.sources.validator import _match_concepts, covered_names
+from tests.conftest import tool_use_response
 
 
 def _candidate(
@@ -373,8 +374,7 @@ class _PlanClient:
 
     async def create(self, **kwargs):
         self.calls.append(kwargs)
-        block = MagicMock(type="tool_use", input=self.plan)
-        return MagicMock(content=[block])
+        return tool_use_response(self.plan)
 
 
 async def _plan_with(pack: OrientationPack, plan: dict, max_concepts: int = 10):

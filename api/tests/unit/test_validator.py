@@ -5,10 +5,11 @@ No network: ``gather_claude_calls`` is stubbed, so what is under test is the
 decision logic rather than the model.
 """
 
-from typing import Any, ClassVar
+from typing import Any
 from unittest.mock import patch
 
 import pytest
+from anthropic.types import Message
 
 from peritus.core.config import settings
 from peritus.sources import validator as validator_module
@@ -20,20 +21,13 @@ from peritus.sources.validator import (
     needs_second_opinion,
     validate_sources,
 )
+from tests.conftest import tool_use_response
 
 # ── stubs ────────────────────────────────────────────────────────────────────
 
 
-class _Block:
-    type = "tool_use"
-
-    def __init__(self, validations: list[dict]) -> None:
-        self.input = {"validations": validations}
-
-
-class _Response:
-    def __init__(self, validations: list[dict]) -> None:
-        self.content = [_Block(validations)]
+def _response(validations: list[Any]) -> Message:
+    return tool_use_response({"validations": validations})
 
 
 def _verdict(q: float, r: float, **overrides) -> dict:
@@ -67,7 +61,7 @@ def _stub_calls(first_pass: list[list[dict] | None], review: list[list[dict] | N
         responses = []
         for i, _p in enumerate(params):
             entry = queue[i] if i < len(queue) else None
-            resp = None if entry is None else _Response(entry)
+            resp = None if entry is None else _response(entry)
             responses.append(resp)
             if on_result:
                 await on_result(i, resp)
@@ -219,14 +213,9 @@ async def test_a_string_where_a_verdict_was_expected_does_not_take_the_batch(mon
     sources = [_source("a"), _source("b")]
 
     # Batch returns one good verdict and one bare string.
-    class _MixedBlock:
-        type = "tool_use"
-        input: ClassVar[dict[str, Any]] = {"validations": [_verdict(9.0, 9.0), "looks fine to me"]}
+    mixed = _response([_verdict(9.0, 9.0), "looks fine to me"])
 
-    class _MixedResponse:
-        content: ClassVar[list[Any]] = [_MixedBlock()]
-
-    queues = {"validate": [_MixedResponse()], "validate-review": [_Response([_verdict(8.0, 8.0)])]}
+    queues = {"validate": [mixed], "validate-review": [_response([_verdict(8.0, 8.0)])]}
 
     async def _gather(params, live_concurrency=None, description="", on_result=None):
         out = []

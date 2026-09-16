@@ -27,6 +27,7 @@ from peritus.graph.domain import (
     coerce_edge_type,
 )
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 
 logger = get_logger(__name__)
 
@@ -243,13 +244,13 @@ def parse_relations(
     rejected = rejected if rejected is not None else Counter()
     if resp is None:
         return []
-    block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
+    block = tool_input(resp)
     if block is None:
         rejected["no_tool_use"] += 1
         return []
 
     relations: list[dict] = []
-    raw_relations = dict(block.input).get("relations", [])
+    raw_relations = dict(block).get("relations", [])
     if not isinstance(raw_relations, list):
         rejected["relations_not_a_list"] += 1
         return []
@@ -342,8 +343,8 @@ async def reconcile_claims(
         try:
             before = sum(stats.rejected.values())
             parsed = parse_relations(resp, claims, stats.rejected)
-            block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
-            raw = dict(block.input).get("relations") if block is not None else None
+            block = tool_input(resp)
+            raw = dict(block).get("relations") if block is not None else None
             stats.relations_returned += len(raw) if isinstance(raw, list) else 0
             relations.extend(parsed)
             if sum(stats.rejected.values()) > before and not parsed:

@@ -9,7 +9,9 @@
   contradiction flag are local to each passage, not global)
 """
 
-from types import SimpleNamespace
+from typing import Any
+
+from anthropic.types import Message
 
 from peritus.graph.domain import EdgeType, NodeType, edge_is_valid
 from peritus.graph.extractor import attach_chunk_db_ids
@@ -17,6 +19,7 @@ from peritus.graph.reconciler import ClaimRow, _select_claims, parse_relations
 from peritus.graph.repository import merge_node_extractions, node_embedding_text
 from peritus.graph.retriever import GraphRetriever
 from peritus.search.domain import SearchResult, SourceRef
+from tests.conftest import tool_use_response
 
 # --- the vocabulary ---------------------------------------------------------
 
@@ -136,10 +139,8 @@ def _claim(node_id: int, source_id: int) -> ClaimRow:
     return ClaimRow(node_id=node_id, label=f"claim {node_id}", source_id=source_id)
 
 
-def _response(relations: list[dict]):
-    return SimpleNamespace(
-        content=[SimpleNamespace(type="tool_use", input={"relations": relations})]
-    )
+def _response(relations: list[Any]) -> Message:
+    return tool_use_response({"relations": relations})
 
 
 def test_select_claims_spreads_the_budget_across_sources():
@@ -326,17 +327,8 @@ async def test_expand_no_anchor_nodes_returns_bare_results():
 # with it — ten chunks' worth of graph, or five sources' worth of validation.
 
 
-class _Block:
-    type = "tool_use"
-
-    def __init__(self, payload: dict) -> None:
-        self.input = payload
-
-
-class _Response:
-    def __init__(self, payload: dict) -> None:
-        self.content = [_Block(payload)]
-        self.stop_reason = "tool_use"
+def _extract_response(payload: dict) -> Message:
+    return tool_use_response(payload)
 
 
 def test_a_string_where_a_node_was_expected_does_not_take_the_batch_with_it():
@@ -350,7 +342,7 @@ def test_a_string_where_a_node_was_expected_does_not_take_the_batch_with_it():
         ],
         "edges": [],
     }
-    result = _parse_extract_response(_Response(payload), [1, 2])
+    result = _parse_extract_response(_extract_response(payload), [1, 2])
     assert [n["label"] for n in result["nodes"]] == ["Analogy", "Esse"]
 
 
@@ -364,14 +356,14 @@ def test_a_string_where_an_edge_was_expected_is_dropped_the_same_way():
             "Analogy -> Esse",
         ],
     }
-    result = _parse_extract_response(_Response(payload), [1])
+    result = _parse_extract_response(_extract_response(payload), [1])
     assert len(result["edges"]) == 1
 
 
 def test_a_non_list_where_a_list_was_expected_yields_nothing_rather_than_raising():
     from peritus.graph.extractor import _parse_extract_response
 
-    result = _parse_extract_response(_Response({"nodes": "none found", "edges": None}), [1])
+    result = _parse_extract_response(_extract_response({"nodes": "none found", "edges": None}), [1])
     assert result["nodes"] == []
     assert result["edges"] == []
 
@@ -480,7 +472,6 @@ def test_orphan_claim_with_no_shared_chunk_stays_orphaned():
 
 def test_parse_relations_counts_every_rejection_by_reason():
     from collections import Counter
-    from types import SimpleNamespace
 
     from peritus.graph.reconciler import ClaimRow, parse_relations
 
@@ -488,24 +479,21 @@ def test_parse_relations_counts_every_rejection_by_reason():
         ClaimRow(node_id=1, label="a", source_id=1),
         ClaimRow(node_id=2, label="b", source_id=2),
     ]
-    block = SimpleNamespace(
-        type="tool_use",
-        input={
-            "relations": [
-                {"from_claim": 0, "to_claim": 1, "relation": "contradicts"},  # no point
-                {"from_claim": 0, "to_claim": 9, "relation": "supports"},  # out of range
-                {"from_claim": 0, "to_claim": 1, "relation": "refines"},  # unknown type
-                {
-                    "from_claim": 1,
-                    "to_claim": 0,
-                    "relation": "qualifies",
-                    "condition": "only in winter",
-                },
-            ]
-        },
+    response = _response(
+        [
+            {"from_claim": 0, "to_claim": 1, "relation": "contradicts"},  # no point
+            {"from_claim": 0, "to_claim": 9, "relation": "supports"},  # out of range
+            {"from_claim": 0, "to_claim": 1, "relation": "refines"},  # unknown type
+            {
+                "from_claim": 1,
+                "to_claim": 0,
+                "relation": "qualifies",
+                "condition": "only in winter",
+            },
+        ]
     )
     rejected: Counter = Counter()
-    kept = parse_relations(SimpleNamespace(content=[block]), claims, rejected)
+    kept = parse_relations(response, claims, rejected)
 
     assert [r["edge_type"] for r in kept] == ["qualifies"]
     assert rejected == Counter(

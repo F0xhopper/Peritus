@@ -23,6 +23,7 @@ from typing import Any
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 from peritus.sources.canonical import classify_extent, matching_work, title_key
 from peritus.sources.domain import SourceCandidate, SourceType
 from peritus.sources.hosts import host_and_path, suffix_matches
@@ -582,8 +583,8 @@ def _parse_triage_response(resp: Any, batch_len: int) -> dict[int, float]:
     the batch, a repeat of an id already scored, or no numeric value is ignored —
     its candidate simply stays unscored, which the caller re-asks.
     """
-    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    raw_scores = block.input.get("scores", [])
+    block = tool_input(resp) or {}
+    raw_scores = block.get("scores", [])
     scores: dict[int, float] = {}
     for entry in raw_scores if isinstance(raw_scores, list) else []:
         if not isinstance(entry, dict):

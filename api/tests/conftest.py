@@ -187,3 +187,30 @@ def lazy_dep(app, provider):
             app.dependency_overrides.pop(provider, None)
         else:
             app.dependency_overrides[provider] = previous
+
+
+def tool_use_response(payload: dict):
+    """A Claude response whose one content block is a real `ToolUseBlock`.
+
+    A `MagicMock(type="tool_use", input=…)` used to be enough, because the code
+    picked the block out with `getattr(b, "type", None)`. It narrows with
+    `isinstance` now (see `infrastructure.anthropic_client.tool_input`), which
+    is what let the fourteen `# type: ignore[call-overload]` comments on those
+    model calls go away — and an ignore on a model call silences a misspelled
+    parameter as readily as a type it could not infer.
+
+    So the stub has to be the real shape. That is the point rather than the
+    cost: a fake that does not match the SDK is exactly what lets a mismatch
+    through to production.
+    """
+    from anthropic.types import Message, ToolUseBlock
+
+    return Message(
+        id="msg_test",
+        model="claude-test",
+        role="assistant",
+        type="message",
+        content=[ToolUseBlock(id="toolu_test", name="test_tool", type="tool_use", input=payload)],
+        stop_reason="tool_use",
+        usage={"input_tokens": 0, "output_tokens": 0},
+    )

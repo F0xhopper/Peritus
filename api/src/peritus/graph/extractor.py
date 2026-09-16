@@ -15,6 +15,7 @@ from typing import Any
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 from peritus.ingestion.chunker import TextChunk
 
 logger = get_logger(__name__)
@@ -318,10 +319,10 @@ def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
         logger.warning(
             "Graph extraction batch hit max_tokens — output truncated, some nodes/edges lost"
         )
-    block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
+    block = tool_input(resp)
     if block is None:
         raise ValueError("Graph extraction response contained no tool_use block")
-    data = dict(block.input)
+    data = dict(block)
 
     # Both lists are filtered rather than trusted. A truncated tool call arrives
     # missing its trailing fields, and a malformed one arrives with a bare

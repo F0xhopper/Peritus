@@ -6,14 +6,13 @@ context. Both the non-streaming :meth:`respond` (Rich CLI) and the streaming SSE
 route consume it, so the two paths cannot drift.
 """
 
-import copy
 import math
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 import asyncpg
-from anthropic.types import MessageParam, TextBlockParam
+from anthropic.types import MessageParam, TextBlockParam, ToolChoiceToolParam, ToolParam
 
 from peritus.chat.grounding import (
     Passage,
@@ -26,7 +25,7 @@ from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.graph.retriever import GraphRetriever
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.search.service import SearchService
 
 logger = get_logger(__name__)
@@ -83,73 +82,84 @@ _TYPE_GUIDANCE: dict[str, str] = {
 
 _DEFAULT_DIRECTIVE = "Answer the question directly and concretely, organised by the subject."
 
-_PLAN_TOOL: dict[str, Any] = {
-    "name": "create_plan",
-    "description": ("Plan the answer: how to search for evidence, and who is asking for what."),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "subqueries": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 2,
-                "maxItems": 4,
-                "description": "2–4 declarative retrieval-phrased subqueries.",
+
+def _plan_tool(max_subqueries: int) -> ToolParam:
+    """The planner's tool, with the subquery bounds this turn allows.
+
+    A builder rather than a module constant that gets `deepcopy`'d and poked:
+    the bounds are the only thing that varies, and reaching four levels into a
+    schema by string key to set them is not something a type can check — mypy
+    says so, and it is right. Depth also does not survive being read: the old
+    form put `maxItems` a long way from the description that explains it.
+    """
+    return {
+        "name": "create_plan",
+        "description": ("Plan the answer: how to search for evidence, and who is asking for what."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subqueries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": min(2, max_subqueries),
+                    "maxItems": max_subqueries,
+                    "description": "2–4 declarative retrieval-phrased subqueries.",
+                },
+                "fallback_queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 2,
+                    "description": (
+                        "Up to two broader or differently-angled retrieval phrasings, "
+                        "used only if the subqueries find little. Not paraphrases of "
+                        "the subqueries: approach the question from a wider concept, "
+                        "a neighbouring term of art, or the underlying mechanism."
+                    ),
+                },
+                "standalone_question": {
+                    "type": "string",
+                    "description": (
+                        "The question rewritten to stand on its own, with every "
+                        "reference to the conversation ('the second one', 'he', "
+                        "'that method') replaced by what it refers to. Identical to "
+                        "the question when it already stands alone."
+                    ),
+                },
+                "asker_level": {
+                    "type": "string",
+                    "enum": list(ASKER_LEVELS),
+                    "description": (
+                        "How much background the asker has, judged from the question "
+                        "itself: how they use (or avoid) terminology, and anything "
+                        "they say about themselves. When a question is broad and "
+                        "plainly worded, 'novice' is usually right; do not read "
+                        "'expert' into a question just because the topic is technical."
+                    ),
+                },
+                "question_type": {
+                    "type": "string",
+                    "enum": list(QUESTION_TYPES),
+                    "description": (
+                        "What kind of answer would satisfy them: 'orientation' for "
+                        "getting into a subject, 'specific_fact' for one definite "
+                        "thing, 'comparison' for how options differ, 'how_to' for "
+                        "doing something, 'open_ended' when none of those fit."
+                    ),
+                },
+                "answer_directive": {
+                    "type": "string",
+                    "description": (
+                        "One sentence, imperative, telling the answering expert what "
+                        "this particular answer has to do — the substance to lead "
+                        "with and what would make it useful. About the subject, never "
+                        "about the sources or the search."
+                    ),
+                },
             },
-            "fallback_queries": {
-                "type": "array",
-                "items": {"type": "string"},
-                "maxItems": 2,
-                "description": (
-                    "Up to two broader or differently-angled retrieval phrasings, "
-                    "used only if the subqueries find little. Not paraphrases of "
-                    "the subqueries: approach the question from a wider concept, "
-                    "a neighbouring term of art, or the underlying mechanism."
-                ),
-            },
-            "standalone_question": {
-                "type": "string",
-                "description": (
-                    "The question rewritten to stand on its own, with every "
-                    "reference to the conversation ('the second one', 'he', "
-                    "'that method') replaced by what it refers to. Identical to "
-                    "the question when it already stands alone."
-                ),
-            },
-            "asker_level": {
-                "type": "string",
-                "enum": list(ASKER_LEVELS),
-                "description": (
-                    "How much background the asker has, judged from the question "
-                    "itself: how they use (or avoid) terminology, and anything "
-                    "they say about themselves. When a question is broad and "
-                    "plainly worded, 'novice' is usually right; do not read "
-                    "'expert' into a question just because the topic is technical."
-                ),
-            },
-            "question_type": {
-                "type": "string",
-                "enum": list(QUESTION_TYPES),
-                "description": (
-                    "What kind of answer would satisfy them: 'orientation' for "
-                    "getting into a subject, 'specific_fact' for one definite "
-                    "thing, 'comparison' for how options differ, 'how_to' for "
-                    "doing something, 'open_ended' when none of those fit."
-                ),
-            },
-            "answer_directive": {
-                "type": "string",
-                "description": (
-                    "One sentence, imperative, telling the answering expert what "
-                    "this particular answer has to do — the substance to lead "
-                    "with and what would make it useful. About the subject, never "
-                    "about the sources or the search."
-                ),
-            },
+            "required": ["subqueries", "asker_level", "question_type", "answer_directive"],
         },
-        "required": ["subqueries", "asker_level", "question_type", "answer_directive"],
-    },
-}
+    }
+
 
 # How much of a previous turn the planner sees. Enough to resolve "the second
 # one" or "and how does Fisher differ?"; not so much that planning a follow-up
@@ -766,7 +776,7 @@ class ChatAgent:
             ctx.has_contradiction,
             ctx.contradiction_points,
         )
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.CLAUDE_MODEL,
             system=build_cached_system(expert.persona_style, expert.topic),
             messages=messages,
@@ -803,9 +813,7 @@ class ChatAgent:
         reference rather than the thing.
         """
         try:
-            tool = copy.deepcopy(_PLAN_TOOL)
-            tool["input_schema"]["properties"]["subqueries"]["maxItems"] = max_subqueries
-            tool["input_schema"]["properties"]["subqueries"]["minItems"] = min(2, max_subqueries)
+            tool = _plan_tool(max_subqueries)
 
             conversation = _conversation_block(history)
             content = (
@@ -815,7 +823,7 @@ class ChatAgent:
             )
 
             client = get_anthropic_client()
-            resp = await client.messages.create(  # type: ignore[call-overload]
+            resp = await client.messages.create(
                 model=settings.FAST_MODEL,
                 max_tokens=768,
                 system=(
@@ -833,11 +841,11 @@ class ChatAgent:
                     "question as written, not from how technical the field is."
                 ),
                 tools=[tool],
-                tool_choice={"type": "tool", "name": "create_plan"},
-                messages=[{"role": "user", "content": content}],
+                tool_choice=ToolChoiceToolParam(type="tool", name="create_plan"),
+                messages=[MessageParam(role="user", content=content)],
             )
-            block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-            return QueryPlan.from_tool_input(dict(block.input), question)
+            block = tool_input(resp) or {}
+            return QueryPlan.from_tool_input(dict(block), question)
         except Exception as exc:
             logger.warning("Planning failed: %s", exc)
             return QueryPlan.fallback(question)
