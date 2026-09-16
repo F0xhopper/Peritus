@@ -9,7 +9,6 @@ import {
   formatElapsed,
   formatNumber,
   formatPercent,
-  formatScore,
   formatUsd,
   hostOf,
   humanise,
@@ -32,7 +31,7 @@ const DASH = notRecorded()
 
 describe('null is never rendered as zero', () => {
   it('holds for every numeric formatter', () => {
-    for (const format of [formatNumber, formatScore, formatPercent, formatUsd, formatCredits]) {
+    for (const format of [formatNumber, formatPercent, formatUsd, formatCredits]) {
       expect(format(null)).toBe(DASH)
       expect(format(undefined)).toBe(DASH)
     }
@@ -41,7 +40,6 @@ describe('null is never rendered as zero', () => {
   it('but a genuine zero is rendered as zero', () => {
     // A corpus that truly accepted nothing must say 0, not "not recorded".
     expect(formatNumber(0)).toBe('0')
-    expect(formatScore(0)).toBe('0.0')
     expect(formatPercent(0)).toBe('0%')
     expect(formatUsd(0)).toBe('$0.00')
     expect(formatCredits(0)).toBe('0 credits')
@@ -96,13 +94,6 @@ describe('dates are formatted without Intl', () => {
     expect(formatDate('not a date')).toBe(DASH)
     expect(formatDateTime('not a date')).toBe(DASH)
     expect(formatClock('not a date')).toBe('--:--:--')
-  })
-})
-
-describe('formatScore', () => {
-  it('always shows one decimal, so a column of scores aligns', () => {
-    expect(formatScore(8)).toBe('8.0')
-    expect(formatScore(7.45)).toBe('7.5')
   })
 })
 

@@ -20,12 +20,7 @@ import { describeBuildFailure } from '@/lib/build/copy'
 import { cn } from '@/lib/cn'
 import { chatTitle, plural } from '@/lib/format'
 import { displayName } from '@/lib/persona'
-import type {
-  BuildStatus,
-  ConversationSummary,
-  CorpusReport,
-  ExpertWithCatalog,
-} from '@/lib/api/types'
+import type { BuildStatus, ConversationSummary, ExpertWithCatalog } from '@/lib/api/types'
 
 /**
  * The expert's Overview: a document, not a dashboard.
@@ -58,12 +53,10 @@ export function OverviewPage({
   expert,
   conversations,
   buildStatus,
-  report,
 }: {
   expert: ExpertWithCatalog
   conversations: ConversationSummary[]
   buildStatus: BuildStatus | null
-  report: CorpusReport | null
 }) {
   const name = displayName(expert)
   const owner = canManage(expert)
@@ -239,11 +232,11 @@ export function OverviewPage({
 
           {askFirst && ask}
 
-          <OverviewProperties expert={expert} report={report} failed={failed} />
+          <OverviewProperties expert={expert} failed={failed} />
 
           {!failed && (
             <>
-              <OverviewCoverage expert={expert} report={report} />
+              <OverviewCoverage expert={expert} />
 
               {!askFirst && ask}
             </>

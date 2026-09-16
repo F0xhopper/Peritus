@@ -31,9 +31,9 @@ const ITEMS: { question: string; answer: React.ReactNode }[] = [
       <>
         An answer is composed only from passages that were actually retrieved, and each inline
         <span className="mx-1 font-mono text-xs text-accent">[n]</span> marker points at one of
-        them. Opening it shows the passage, the source it came from, its scores, and how much of
-        that source was read. If an answer ever cites a number that resolves to nothing, it is shown
-        as plain text rather than dressed up as a reference.
+        them. Opening it shows the passage and the source it came from. If an answer ever cites a
+        number that resolves to nothing, it is shown as plain text rather than dressed up as a
+        reference.
       </>
     ),
   },

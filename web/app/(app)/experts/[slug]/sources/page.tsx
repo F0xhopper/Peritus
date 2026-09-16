@@ -1,6 +1,6 @@
 import { LedgerPage } from '@/components/ledger/ledger-page'
-import { getCorpusReport, getExpert, getScreeningFlow } from '@/lib/api/data'
-import type { SourceDecision, SourceSort } from '@/lib/api/types'
+import { getCorpusReport, getExpert } from '@/lib/api/data'
+import type { SourceSort } from '@/lib/api/types'
 import { displayName } from '@/lib/persona'
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
@@ -8,16 +8,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return { title: `Sources — ${displayName(await getExpert(slug))}` }
 }
 
-const DECISIONS = new Set<SourceDecision>(['all', 'accepted', 'rejected'])
-const SORTS = new Set<SourceSort>([
-  'decision',
-  'quality',
-  'relevance',
-  'title',
-  'type',
-  'discovered_via',
-  'added',
-])
+const SORTS = new Set<SourceSort>(['title', 'type', 'added'])
 
 const PAGE_SIZE = 100
 
@@ -27,7 +18,6 @@ export default async function SourcesPage({
 }: {
   params: Promise<{ slug: string }>
   searchParams: Promise<{
-    decision?: string
     sort?: string
     page?: string
     concept?: string
@@ -39,35 +29,30 @@ export default async function SourcesPage({
   // Every query value is validated against the API's own vocabulary before it
   // is forwarded — an unrecognised `sort` would be a 422 from upstream, and a
   // URL someone edited by hand should fall back rather than break the page.
-  const decision = DECISIONS.has(query.decision as SourceDecision)
-    ? (query.decision as SourceDecision)
-    : 'all'
-  const sort = SORTS.has(query.sort as SourceSort) ? (query.sort as SourceSort) : 'decision'
+  const sort = SORTS.has(query.sort as SourceSort) ? (query.sort as SourceSort) : 'title'
   const page = Math.max(1, Number(query.page) || 1)
 
-  const [expert, report, flow] = await Promise.all([
+  const [expert, report] = await Promise.all([
     getExpert(slug),
+    // The page shows the sources this expert answers from; the API still holds
+    // the rest of the screening record.
     getCorpusReport(slug, {
-      decision,
+      decision: 'accepted',
       sort,
       limit: PAGE_SIZE,
       offset: (page - 1) * PAGE_SIZE,
     }),
-    // Null on failure: the selection block annotates the ledger, never gates it.
-    getScreeningFlow(slug),
   ])
 
   return (
     <LedgerPage
       expert={expert}
       report={report}
-      decision={decision}
       sort={sort}
       page={page}
       pageSize={PAGE_SIZE}
       conceptFilter={query.concept ?? null}
       focusSourceId={Number(query.source) || null}
-      selection={flow?.selection ?? null}
     />
   )
 }

@@ -190,10 +190,9 @@ test('the overview reads correctly and gates chat on readiness', async ({ page }
   // Properties, read off the real payload.
   // Status and readiness are one line now, not two rows saying the same thing.
   await expect(content(page).getByText('Ready · concept map built')).toBeVisible()
-  await expect(content(page).getByText('21 kept of 30 screened')).toBeVisible()
-  // The acceptance rate and the rubric are stated, not implied.
-  await expect(content(page).getByText(/70.0%/)).toBeVisible()
-  await expect(content(page).getByText('v5-structured-q5r6', { exact: false })).toBeVisible()
+  // The source count, off the expert payload rather than a screening report.
+  await expect(content(page).getByRole('term').filter({ hasText: 'Sources' })).toBeVisible()
+  await expect(content(page).getByRole('definition').filter({ hasText: /^21$/ })).toBeVisible()
 
   // Chat is offered, because readiness is past pending.
   await expect(page.getByRole('heading', { name: /^Ask Dr\. Marta Belen$/ })).toBeVisible()

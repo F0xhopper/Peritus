@@ -11,11 +11,10 @@ import {
 } from './helpers'
 
 /**
- * The sources ledger.
+ * The sources page.
  *
- * The claim the whole product rests on is that you can see what it threw away,
- * so these tests care most about the rejected half being first-class: present
- * by default, filterable to on its own, and carrying its reason.
+ * It lists the sources an expert answers from: what they are, how many passages
+ * each contributed, and a way into the record behind any one of them.
  */
 
 const SLUG = 'varroa-mite-control-in-temperate-beekeeping'
@@ -25,75 +24,54 @@ test.beforeEach(async ({ page }) => {
   await signIn(page)
 })
 
-test('the ledger shows kept and dropped sources together', async ({ page }, testInfo) => {
+test('the page lists the sources the expert answers from', async ({ page }, testInfo) => {
   await page.goto(`/experts/${SLUG}/sources`)
 
   await expect(
     visibleContent(page).getByText('Varroa destructor and honeybee viral loads').first()
   ).toBeVisible()
-  // A dropped source, with its reason — not hidden behind a debug toggle.
-  await expect(
-    visibleContent(page).getByText('Top 10 beekeeping tips for spring').first()
-  ).toBeVisible()
-  await expect(
-    visibleContent(page).getByText('Secondary commentary; no primary data.').first()
-  ).toBeVisible()
 
-  // The acceptance rate is stated on the page, not left to be inferred.
-  await expect(visibleContent(page).getByText(/70.0% kept/)).toBeVisible()
+  // Only the kept sources: a dropped candidate is not part of the corpus.
+  await expect(visibleContent(page).getByText('Top 10 beekeeping tips for spring')).toHaveCount(0)
+
+  // The count is the whole corpus, not the rows this page happened to return.
+  await expect(visibleContent(page).getByText('21 sources')).toBeVisible()
 
   await expectResponsive(page, isTouchProject(testInfo.project.name))
 })
 
-test('the decision filter is URL state, so a filtered ledger is a link', async ({ page }) => {
+test('sort is URL state, so a sorted list is a link', async ({ page }, testInfo) => {
   await page.goto(`/experts/${SLUG}/sources`)
 
-  await page.getByRole('radio', { name: /Dropped/ }).click()
-  await expect(page).toHaveURL(/decision=rejected/, { timeout: 15_000 })
-  await expect(
-    visibleContent(page).getByText('Top 10 beekeeping tips for spring').first()
-  ).toBeVisible()
-  await expect(
-    visibleContent(page).getByText('Varroa destructor and honeybee viral loads')
-  ).toHaveCount(0)
+  if (isPhoneProject(testInfo.project.name)) {
+    await page.getByLabel('Sort by').selectOption('added')
+  } else {
+    await page.getByRole('columnheader', { name: /Kind/ }).getByRole('button').click()
+  }
+
+  await expect(page).toHaveURL(/sort=(added|type)/, { timeout: 15_000 })
 
   // And it survives a reload, because it is in the URL.
   await page.reload()
-  await expect(page.getByRole('radio', { name: /Dropped/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(
+    visibleContent(page).getByText('Varroa destructor and honeybee viral loads').first()
+  ).toBeVisible()
 })
 
-test('the counts on the filter are true totals, not page counts', async ({ page }) => {
-  await page.goto(`/experts/${SLUG}/sources`)
-  // 30 considered, 21 kept, 9 dropped — computed over the whole corpus even
-  // though the page returns three rows.
-  await expect(page.getByRole('radio', { name: 'All 30' })).toBeVisible()
-  await expect(page.getByRole('radio', { name: 'Kept 21' })).toBeVisible()
-  await expect(page.getByRole('radio', { name: 'Dropped 9' })).toBeVisible()
-})
-
-test('a row opens its full record, including the second-read provenance', async ({ page }) => {
+test('a row opens its record', async ({ page }) => {
   await page.goto(`/experts/${SLUG}/sources`)
 
-  // The reviewed row: a borderline first pass re-read by a stronger model.
   await visibleContent(page).getByText('Amitraz resistance in field populations').first().click()
 
   const panel = page
     .getByRole('complementary', { name: 'Source' })
     .or(page.getByRole('dialog', { name: 'Source' }))
-  await expect(panel.getByText('Reviewed a second time')).toBeVisible({ timeout: 15_000 })
-  await expect(panel.getByText(/First pass scored q5.5 r5.5/)).toBeVisible()
-  // And the abstract-only warning, which is the first thing a reviewer asks.
-  await expect(panel.getByText(/Abstract only/)).toBeVisible()
-  // Rubric version lives here rather than in the list.
-  await expect(panel.getByText('v5-structured-q5r6')).toBeVisible()
-})
-
-test('a duplicate’s zero scores are explained, not left as a verdict', async ({ page }) => {
-  await page.goto(`/experts/${SLUG}/sources`)
-  // The exclusion summary states it; a reader must not read 0.0 as "bad".
-  await expect(
-    visibleContent(page).getByText(/duplicate of https:\/\/example.org\/varroa-cohort/)
-  ).toBeVisible()
+  await expect(panel.getByRole('heading', { name: /Amitraz resistance/ })).toBeVisible({
+    timeout: 15_000,
+  })
+  // What it covers, and the identifiers — the two things worth opening a row for.
+  await expect(panel.getByText('Covers')).toBeVisible()
+  await expect(panel.getByText('acaricide resistance').first()).toBeVisible()
 })
 
 test('the export menu offers CSV and RIS, and the download works', async ({ page }) => {
@@ -149,14 +127,13 @@ test('the upload tab refuses an oversized file before sending it', async ({ page
   await expect(page.getByText(/larger than the 20 MB limit|21.0 MB/)).toBeVisible()
 })
 
-test('the ledger is a card list on a phone and a table above it', async ({ page }, testInfo) => {
+test('the sources are a card list on a phone and a table above it', async ({ page }, testInfo) => {
   await page.goto(`/experts/${SLUG}/sources`)
   const phone = isPhoneProject(testInfo.project.name)
 
   if (phone) {
-    // Cards, with the same fields as the table except rubric and identifiers.
     await expect(page.getByRole('table')).toBeHidden()
-    await expect(page.getByRole('button', { name: /Top 10 beekeeping tips/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Varroa destructor/ })).toBeVisible()
   } else {
     await expect(page.getByRole('table')).toBeVisible()
     await expect(page.getByRole('columnheader', { name: /Source/ })).toBeVisible()
@@ -164,7 +141,7 @@ test('the ledger is a card list on a phone and a table above it', async ({ page 
   await expectResponsive(page, isTouchProject(testInfo.project.name))
 })
 
-test('a concept link from the overview filters the ledger', async ({ page }) => {
+test('a concept link from the overview filters the list', async ({ page }) => {
   await page.goto(`/experts/${SLUG}`)
   await page.getByRole('link', { name: 'acaricide resistance' }).click()
 
@@ -176,14 +153,7 @@ test('a concept link from the overview filters the ledger', async ({ page }) => 
   await expect(
     visibleContent(page).getByText('Amitraz resistance in field populations').first()
   ).toBeVisible()
-  await expect(visibleContent(page).getByText('Top 10 beekeeping tips for spring')).toHaveCount(0)
-})
-
-test('the provenance note is surfaced rather than dropped', async ({ page }) => {
-  await page.goto(`/experts/${SLUG}/sources`)
-  // The fixture's corpus is complete, so the method statement is what shows —
-  // the caveat banner is the same component keyed on `provenance.complete`.
   await expect(
-    visibleContent(page).getByText(/Screening is a single language-model pass/)
-  ).toBeVisible()
+    visibleContent(page).getByText('Varroa destructor and honeybee viral loads')
+  ).toHaveCount(0)
 })

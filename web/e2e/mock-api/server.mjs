@@ -384,10 +384,18 @@ async function handle(req, res) {
         decision === 'all'
           ? report.sources
           : report.sources.filter((source) => source.decision === decision)
+      // `total_matching` counts the whole corpus under this filter, as the API
+      // does — not the handful of rows the fixture carries.
+      const matching =
+        decision === 'accepted'
+          ? report.totals.accepted
+          : decision === 'rejected'
+            ? report.totals.rejected
+            : report.totals.considered
       return json(res, 200, {
         ...report,
         expert: { name: expert.name, topic: expert.topic, tier: expert.tier },
-        page: { ...report.page, decision, returned: sources.length },
+        page: { ...report.page, decision, returned: sources.length, total_matching: matching },
         sources,
       })
     }

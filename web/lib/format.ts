@@ -20,12 +20,6 @@ export function formatNumber(value: number | null | undefined): string {
   return value.toLocaleString('en-GB')
 }
 
-/** A 0–10 score to one decimal. */
-export function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined) return NOT_RECORDED
-  return value.toFixed(1)
-}
-
 export function formatPercent(value: number | null | undefined, digits = 0): string {
   if (value === null || value === undefined) return NOT_RECORDED
   return `${(value * 100).toFixed(digits)}%`

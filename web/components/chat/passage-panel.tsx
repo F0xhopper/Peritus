@@ -4,15 +4,14 @@ import { ExternalLink, MessageSquare } from 'lucide-react'
 import Link from 'next/link'
 
 import { Button } from '@/components/ui/button'
-import { formatScore, hostOf, humanise } from '@/lib/format'
+import { hostOf, humanise } from '@/lib/format'
 import type { Citation, LedgerSource } from '@/lib/api/types'
 
 /**
  * The cited passage, in the context panel.
  *
  * The citation label the stream sends is the passage's own text plus its
- * source's title; the ledger row behind it — scores, how much of the source was
- * actually read, why it was accepted — is fetched by the page and passed in
+ * source's title; the source row behind it is fetched by the page and passed in
  * where it is known. Where it is not, the label alone is still worth showing:
  * a citation that opens nothing is worse than a citation that opens a quote.
  */
@@ -46,20 +45,7 @@ export function PassagePanel({
 
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
             <Field label="Type">{humanise(source.source_type)}</Field>
-            <Field label="Quality">{formatScore(source.quality_score)}</Field>
-            <Field label="Relevance">{formatScore(source.relevance_score)}</Field>
             {source.source_tier && <Field label="Tier">{humanise(source.source_tier)}</Field>}
-            {source.full_text_method && (
-              <Field label="Text read">
-                {source.full_text_method === 'abstract' ? (
-                  // Worth flagging: an abstract-only source was judged, and is
-                  // answering questions, on its abstract alone.
-                  <span className="text-warn">abstract only</span>
-                ) : (
-                  humanise(source.full_text_method)
-                )}
-              </Field>
-            )}
             {source.doi && <Field label="DOI">{source.doi}</Field>}
           </dl>
 

@@ -30,7 +30,7 @@ import { useLeaveExpert } from '@/hooks/use-leave-expert'
 import { useStartChat } from '@/hooks/use-start-chat'
 import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
-import { firstSentence, formatScore } from '@/lib/format'
+import { firstSentence } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
 import type { ExpertSummary } from '@/lib/api/types'
 import { useApiAction } from '@/hooks/use-api-action'
@@ -144,10 +144,6 @@ export function ExpertCard({
             <div className="flex shrink-0 items-center gap-1">
               <dt className="text-fg-3">Sources</dt>
               <dd className="text-fg-2">{expert.source_count}</dd>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <dt className="text-fg-3">Quality</dt>
-              <dd className="text-fg-2">{formatScore(expert.avg_quality)}</dd>
             </div>
             {chattable && (
               // Straight into a new chat from Home, composer focused — no stop at
