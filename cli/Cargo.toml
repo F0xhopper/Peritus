@@ -50,8 +50,12 @@ comparison_chain = "allow"
 
 [dependencies]
 ratatui = { version = "0.30.2", features = ["crossterm", "unstable-rendered-line-info"] }
-crossterm = "0.28"
-tokio = { version = "1", features = ["full"] }
+# Must track the version ratatui-crossterm resolves, or both get compiled in.
+crossterm = "0.29"
+# Enumerated rather than "full": the TUI drives a runtime, spawns tasks, selects
+# on channels and sleeps. It never touches tokio's process, signal, fs or
+# io-std support, and "full" compiles all of it.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
 bytes = "1"
