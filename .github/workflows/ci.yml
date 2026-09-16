@@ -239,8 +239,10 @@ jobs:
       # avatar resolver. The fixture tests are the schema check: there is no
       # codegen between the Python schemas and `lib/api/types.ts`, so a payload
       # that drifts fails here rather than in a user's browser.
+      # `--coverage` over `lib/**` only: components are Playwright's job, and a
+      # number that counted them would be measuring the wrong suite.
       - name: Unit tests
-        run: npx vitest run
+        run: npx vitest run --coverage
 
       - name: Build
         run: npx next build
