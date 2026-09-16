@@ -33,7 +33,7 @@ def get_anthropic_client() -> anthropic.AsyncAnthropic:
     return _client
 
 
-def tool_input(response: Message) -> dict[str, Any] | None:
+def tool_input(response: Message | None) -> dict[str, Any] | None:
     """The arguments of the first tool call in ``response``, or None.
 
     Eighteen call sites picked the block out by hand with
@@ -49,8 +49,12 @@ def tool_input(response: Message) -> dict[str, Any] | None:
 
     None rather than raising when the model answered with prose instead of
     calling the tool. That is a real outcome — a refusal, a truncated response —
-    and every caller already has to decide what to do about it.
+    and every caller already has to decide what to do about it. `None` in is the
+    same outcome one step earlier: `gather_claude_calls` returns None for a call
+    that failed, and "no response" and "no tool call" are the same thing here.
     """
+    if response is None:
+        return None
     for block in response.content:
         if isinstance(block, ToolUseBlock):
             # `input` is `object` in the SDK because it is whatever the tool's

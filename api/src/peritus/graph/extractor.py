@@ -12,6 +12,8 @@ once per concept, with the claims from every source in front of it.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
@@ -207,7 +209,7 @@ async def extract_graph_from_chunks(
 
     parsed: dict[int, dict] = {}
 
-    async def _on_result(i: int, resp: Any) -> None:
+    async def _on_result(i: int, resp: Message | None) -> None:
         if resp is None:
             logger.warning("Graph extraction failed for batch %d", i)
             return
@@ -314,8 +316,8 @@ def decode_json_list(text: str) -> list | None:
     return items or None
 
 
-def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
-    if resp.stop_reason == "max_tokens":
+def _parse_extract_response(resp: Message | None, chunk_db_ids: list[int]) -> dict:
+    if resp is not None and resp.stop_reason == "max_tokens":
         logger.warning(
             "Graph extraction batch hit max_tokens — output truncated, some nodes/edges lost"
         )

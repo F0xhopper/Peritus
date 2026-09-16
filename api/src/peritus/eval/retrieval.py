@@ -40,6 +40,7 @@ from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 
 logger = get_logger(__name__)
 
@@ -213,11 +214,8 @@ async def generate(
     responses = await gather_claude_calls(params, description="retrieval-golden")
     items: list[GoldItem] = []
     for batch, resp in zip(batches, responses, strict=True):
-        block = next(
-            (b for b in (resp.content if resp else []) if getattr(b, "type", None) == "tool_use"),
-            None,
-        )
-        for q in dict(block.input).get("questions", []) if block else []:
+        payload = tool_input(resp) if resp else None
+        for q in (payload or {}).get("questions", []):
             idx, question = q.get("index"), q.get("question")
             if not isinstance(idx, int) or not 0 <= idx < len(batch):
                 continue

@@ -24,6 +24,8 @@ drop if that fails too.
 
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
@@ -399,7 +401,7 @@ async def validate_sources(
     # the validator's verdict or the validator's absence.
     errored_batches: set[int] = set()
 
-    async def _on_batch_result(i: int, resp: Any) -> None:
+    async def _on_batch_result(i: int, resp: Message | None) -> None:
         batch = batches[i]
         if resp is None:
             errored_batches.add(i)
@@ -565,7 +567,7 @@ async def _second_opinion(
     reviewed = 0
     results: dict[int, dict] = {}
 
-    async def _on_review(n: int, resp: Any) -> None:
+    async def _on_review(n: int, resp: Message | None) -> None:
         index, source, _first = candidates[n]
         if resp is None:
             return
@@ -720,7 +722,7 @@ _MISSING_VALIDATION: dict[str, Any] = {
 }
 
 
-def _parse_validate_response(resp: Any, batch_len: int) -> list[dict]:
+def _parse_validate_response(resp: Message | None, batch_len: int) -> list[dict]:
     """Exactly ``batch_len`` validation dicts, whatever the model returned.
 
     The tool schema asks for an array of objects and a model can still return an

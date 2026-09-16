@@ -32,6 +32,7 @@ from contextvars import ContextVar
 from enum import StrEnum
 from typing import Any, cast
 
+from anthropic.types import Message
 from anthropic.types.message_create_params import MessageCreateParamsNonStreaming
 
 from peritus.core.config import settings
@@ -180,7 +181,7 @@ def should_batch(request_count: int) -> bool:
     )
 
 
-ResultCallback = Callable[[int, Any], Coroutine[Any, Any, None]]
+ResultCallback = Callable[[int, Message | None], Coroutine[Any, Any, None]]
 
 
 async def gather_claude_calls(
@@ -189,7 +190,7 @@ async def gather_claude_calls(
     live_concurrency: int = 4,
     description: str = "claude-calls",
     on_result: ResultCallback | None = None,
-) -> list[Any | None]:
+) -> list[Message | None]:
     """Run every ``messages.create(**params)`` in ``params_list``.
 
     Returns one entry per input, in order: the ``Message`` or ``None``.
@@ -247,7 +248,7 @@ async def gather_claude_calls(
     return results
 
 
-async def _report(on_result: ResultCallback, index: int, msg: Any) -> None:
+async def _report(on_result: ResultCallback, index: int, msg: Message | None) -> None:
     try:
         await on_result(index, msg)
     except Exception:
@@ -259,7 +260,7 @@ async def _run_live(
     concurrency: int,
     on_result: ResultCallback | None = None,
     description: str = "claude-calls",
-) -> list[Any | None]:
+) -> list[Message | None]:
     """Run the set as live concurrent calls, retrying each up to _LIVE_ATTEMPTS.
 
     Logging here is deliberately loud, because this is where a provider outage
@@ -283,8 +284,8 @@ async def _run_live(
     )
     started = time.monotonic()
 
-    async def one(index: int, params: dict[str, Any]) -> Any | None:
-        msg: Any | None = None
+    async def one(index: int, params: dict[str, Any]) -> Message | None:
+        msg: Message | None = None
         async with sem:
             for attempt in range(_LIVE_ATTEMPTS):
                 try:
@@ -376,7 +377,7 @@ async def _run_live(
 async def _run_batch(
     params_list: list[dict[str, Any]],
     description: str,
-) -> list[Any | None]:
+) -> list[Message | None]:
     """Submit one Messages Batch and wait for it; harvest whatever finished.
 
     Raises on submission failure so the caller can fall back to live calls.
@@ -414,7 +415,7 @@ async def _run_batch(
             batch = await _await_ended(client, batch.id)
             break
 
-    results: list[Any | None] = [None] * len(params_list)
+    results: list[Message | None] = [None] * len(params_list)
     async for entry in await client.messages.batches.results(batch.id):
         try:
             idx = int(entry.custom_id.removeprefix("req-"))

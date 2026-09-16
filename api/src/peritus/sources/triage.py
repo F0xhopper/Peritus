@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
@@ -576,7 +578,7 @@ def _triage_params(
 _ID_RE = re.compile(r"(\d+)\s*>?\s*$")
 
 
-def _parse_triage_response(resp: Any, batch_len: int) -> dict[int, float]:
+def _parse_triage_response(resp: Message | None, batch_len: int) -> dict[int, float]:
     """``{position in batch: score}`` for the entries the model actually scored.
 
     Keyed by the id each entry names. An entry with no readable id, an id outside

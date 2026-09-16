@@ -10,6 +10,8 @@ submitted batch.
 from dataclasses import dataclass
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
@@ -129,7 +131,7 @@ def _job_params(job: ContextJob) -> list[tuple[dict[str, Any], int]]:
     return params
 
 
-def _parse_contexts(resp: Any, batch_len: int) -> list[str]:
+def _parse_contexts(resp: Message | None, batch_len: int) -> list[str]:
     block = tool_input(resp) or {}
     contexts = list(block.get("contexts", []))
     while len(contexts) < batch_len:

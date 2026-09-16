@@ -19,6 +19,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.graph.domain import (
@@ -229,7 +231,7 @@ def _params(topic: str, group: ConceptClaims, claims: list[ClaimRow]) -> dict[st
 
 
 def parse_relations(
-    resp: Any, claims: list[ClaimRow], rejected: Counter | None = None
+    resp: Message | None, claims: list[ClaimRow], rejected: Counter | None = None
 ) -> list[dict]:
     """Turn one model response into relation dicts, dropping what cannot stand.
 
