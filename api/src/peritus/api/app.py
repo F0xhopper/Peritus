@@ -53,6 +53,18 @@ async def lifespan(app: FastAPI):
             "includes {{ .Token }} so users receive a 6-digit code."
         )
 
+    # Both configured means the HS256 fallback in auth._decode stays reachable
+    # beside the JWKS path it exists to precede. The fallback is there for
+    # self-hosters on a project that never published asymmetric keys; where JWKS
+    # works, a live shared secret is one more thing that can leak and still
+    # mint a valid token.
+    if settings.SUPABASE_URL and settings.SUPABASE_JWT_SECRET:
+        logger.warning(
+            "Both SUPABASE_URL and SUPABASE_JWT_SECRET are set. Token verification "
+            "uses JWKS; the HS256 shared-secret fallback stays live behind it. Unset "
+            "SUPABASE_JWT_SECRET unless this project has not published asymmetric keys."
+        )
+
     await init_pool()
 
     worker = None
