@@ -1,8 +1,8 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
+    Frame,
 };
 
 use crate::tui::theme::Theme;
@@ -105,8 +105,16 @@ impl LoginScreen {
         };
         f.render_widget(
             Paragraph::new(format!("Email:  {}", email_val))
-                .style(if email_active { Theme::accent() } else { Theme::dim() })
-                .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::dim())),
+                .style(if email_active {
+                    Theme::accent()
+                } else {
+                    Theme::dim()
+                })
+                .block(
+                    Block::default()
+                        .borders(Borders::BOTTOM)
+                        .border_style(Theme::dim()),
+                ),
             chunks[1],
         );
 
@@ -118,8 +126,16 @@ impl LoginScreen {
         };
         f.render_widget(
             Paragraph::new(format!("Code:   {}", code_val))
-                .style(if code_active { Theme::accent() } else { Theme::dim() })
-                .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::dim())),
+                .style(if code_active {
+                    Theme::accent()
+                } else {
+                    Theme::dim()
+                })
+                .block(
+                    Block::default()
+                        .borders(Borders::BOTTOM)
+                        .border_style(Theme::dim()),
+                ),
             chunks[2],
         );
 
@@ -128,10 +144,16 @@ impl LoginScreen {
             msg_lines.push(Line::from(Span::styled("  Working…", Theme::dim())));
         }
         if let Some(status) = &self.status {
-            msg_lines.push(Line::from(Span::styled(format!("  {}", status), Theme::success())));
+            msg_lines.push(Line::from(Span::styled(
+                format!("  {}", status),
+                Theme::success(),
+            )));
         }
         if let Some(err) = &self.error {
-            msg_lines.push(Line::from(Span::styled(format!("  {}", err), Theme::warning())));
+            msg_lines.push(Line::from(Span::styled(
+                format!("  {}", err),
+                Theme::warning(),
+            )));
         }
         f.render_widget(Paragraph::new(msg_lines), chunks[3]);
 

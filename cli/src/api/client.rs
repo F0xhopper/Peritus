@@ -83,16 +83,23 @@ impl ApiClient {
     }
 
     pub async fn list_experts(&self) -> Result<Vec<ExpertSummary>> {
-        let resp = self.auth(self.client.get(format!("{}/experts", self.base_url)))
+        let resp = self
+            .auth(self.client.get(format!("{}/experts", self.base_url)))
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         json_or_err(resp).await
     }
 
     pub async fn delete_expert(&self, slug: &str) -> Result<()> {
-        let resp = self.auth(self.client.delete(format!("{}/experts/{}", self.base_url, slug)))
+        let resp = self
+            .auth(
+                self.client
+                    .delete(format!("{}/experts/{}", self.base_url, slug)),
+            )
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         expect_success(resp).await
     }
 
@@ -100,22 +107,34 @@ impl ApiClient {
     /// dropped connection can be resumed via [`build_events_stream`].
     /// `tier: None` lets the server resolve the deepest tier the account affords.
     pub async fn build_stream(
-        &self, topic: String, tier: Option<String>,
+        &self,
+        topic: String,
+        tier: Option<String>,
     ) -> Result<SeqStream<BuildEvent>> {
         let req = BuildRequest { topic, tier };
-        let resp = self.auth(self.client.post(format!("{}/experts/build", self.base_url)))
+        let resp = self
+            .auth(self.client.post(format!("{}/experts/build", self.base_url)))
             .json(&req)
-            .send().await?;
+            .send()
+            .await?;
         let resp = stream_or_err(resp).await?;
         Ok(parse_sse_stream_with_seq(resp.bytes_stream()))
     }
 
     /// Reconnect to an in-flight (or finished) build's durable event log, resuming
     /// after the last `seq` already seen. Used to survive dropped connections.
-    pub async fn build_events_stream(&self, slug: &str, after: u64) -> Result<SeqStream<BuildEvent>> {
-        let resp = self.auth(self.client.get(
-            format!("{}/experts/{}/build/events?after={}", self.base_url, slug, after)))
-            .send().await?;
+    pub async fn build_events_stream(
+        &self,
+        slug: &str,
+        after: u64,
+    ) -> Result<SeqStream<BuildEvent>> {
+        let resp = self
+            .auth(self.client.get(format!(
+                "{}/experts/{}/build/events?after={}",
+                self.base_url, slug, after
+            )))
+            .send()
+            .await?;
         let resp = stream_or_err(resp).await?;
         Ok(parse_sse_stream_with_seq(resp.bytes_stream()))
     }
@@ -123,16 +142,26 @@ impl ApiClient {
     /// Cancel the active build for an expert. The terminal 'cancelled' event
     /// arrives via the event stream, so callers only need to fire this.
     pub async fn cancel_build(&self, slug: &str) -> Result<()> {
-        let resp = self.auth(self.client.post(format!("{}/experts/{}/build/cancel", self.base_url, slug)))
+        let resp = self
+            .auth(
+                self.client
+                    .post(format!("{}/experts/{}/build/cancel", self.base_url, slug)),
+            )
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         expect_success(resp).await
     }
 
     pub async fn chat_stream(&self, slug: &str, req: ChatRequest) -> Result<SseStream<ChatEvent>> {
-        let resp = self.auth(self.client.post(format!("{}/experts/{}/chat", self.base_url, slug)))
+        let resp = self
+            .auth(
+                self.client
+                    .post(format!("{}/experts/{}/chat", self.base_url, slug)),
+            )
             .json(&req)
-            .send().await?;
+            .send()
+            .await?;
         let resp = stream_or_err(resp).await?;
         Ok(parse_sse_stream(resp.bytes_stream()))
     }
@@ -140,44 +169,67 @@ impl ApiClient {
     // ── Auth (public backend-for-frontend endpoints) ─────────────────────────
 
     pub async fn otp_request(&self, email: &str) -> Result<()> {
-        let resp = self.client.post(format!("{}/auth/otp", self.base_url))
-            .json(&OtpRequestBody { email: email.to_string() })
+        let resp = self
+            .client
+            .post(format!("{}/auth/otp", self.base_url))
+            .json(&OtpRequestBody {
+                email: email.to_string(),
+            })
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         expect_success(resp).await
     }
 
     pub async fn otp_verify(&self, email: &str, code: &str) -> Result<Session> {
-        let resp = self.client.post(format!("{}/auth/verify", self.base_url))
-            .json(&VerifyBody { email: email.to_string(), token: code.to_string() })
+        let resp = self
+            .client
+            .post(format!("{}/auth/verify", self.base_url))
+            .json(&VerifyBody {
+                email: email.to_string(),
+                token: code.to_string(),
+            })
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         json_or_err(resp).await
     }
 
     /// The corpus behind an expert. Ordered by the server; the caller renders
     /// them as-is.
     pub async fn list_sources(&self, slug: &str) -> Result<Vec<SourceOut>> {
-        let resp = self.auth(self.client.get(format!("{}/experts/{}/sources", self.base_url, slug)))
+        let resp = self
+            .auth(
+                self.client
+                    .get(format!("{}/experts/{}/sources", self.base_url, slug)),
+            )
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         json_or_err(resp).await
     }
 
     pub async fn refresh(&self, refresh_token: &str) -> Result<Session> {
-        let resp = self.client.post(format!("{}/auth/refresh", self.base_url))
-            .json(&RefreshBody { refresh_token: refresh_token.to_string() })
+        let resp = self
+            .client
+            .post(format!("{}/auth/refresh", self.base_url))
+            .json(&RefreshBody {
+                refresh_token: refresh_token.to_string(),
+            })
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         json_or_err(resp).await
     }
 
     /// Revoke the current session server-side. Best-effort: the caller clears the
     /// local session regardless, so a network error here is not fatal.
     pub async fn logout(&self) -> Result<()> {
-        let resp = self.auth(self.client.post(format!("{}/auth/logout", self.base_url)))
+        let resp = self
+            .auth(self.client.post(format!("{}/auth/logout", self.base_url)))
             .timeout(REQUEST_TIMEOUT)
-            .send().await?;
+            .send()
+            .await?;
         expect_success(resp).await
     }
 }
@@ -279,7 +331,14 @@ async fn error_from(resp: reqwest::Response, status: reqwest::StatusCode) -> Api
         })
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
-            if body.is_empty() { status.to_string() } else { body }
+            if body.is_empty() {
+                status.to_string()
+            } else {
+                body
+            }
         });
-    ApiError { status: status.as_u16(), detail }
+    ApiError {
+        status: status.as_u16(),
+        detail,
+    }
 }

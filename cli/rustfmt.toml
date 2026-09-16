@@ -1,0 +1,3 @@
+# Matches the 100-column budget the Python and TypeScript sides use.
+max_width = 100
+edition = "2021"

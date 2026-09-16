@@ -49,10 +49,7 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             Event::End(TagEnd::Heading(level)) => {
                 flush!();
                 if level == HeadingLevel::H1 {
-                    lines.push(Line::from(Span::styled(
-                        "─".repeat(48),
-                        Theme::dim(),
-                    )));
+                    lines.push(Line::from(Span::styled("─".repeat(48), Theme::dim())));
                 }
                 lines.push(Line::from(""));
                 heading = None;
@@ -68,10 +65,18 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             }
 
             // ── Inline emphasis ───────────────────────────────────────────
-            Event::Start(Tag::Strong) => { bold = true; }
-            Event::End(TagEnd::Strong) => { bold = false; }
-            Event::Start(Tag::Emphasis) => { italic = true; }
-            Event::End(TagEnd::Emphasis) => { italic = false; }
+            Event::Start(Tag::Strong) => {
+                bold = true;
+            }
+            Event::End(TagEnd::Strong) => {
+                bold = false;
+            }
+            Event::Start(Tag::Emphasis) => {
+                italic = true;
+            }
+            Event::End(TagEnd::Emphasis) => {
+                italic = false;
+            }
 
             // ── Links ─────────────────────────────────────────────────────
             // Render the link text underlined, then append the destination so the
@@ -97,7 +102,9 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             }
 
             // ── Fenced / indented code blocks ─────────────────────────────
-            Event::Start(Tag::CodeBlock(_)) => { in_code_block = true; }
+            Event::Start(Tag::CodeBlock(_)) => {
+                in_code_block = true;
+            }
             Event::End(TagEnd::CodeBlock) => {
                 if !spans.is_empty() {
                     flush!();
@@ -119,11 +126,15 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
                 lines.push(Line::from(""));
             }
             Event::Start(Tag::TableHead) | Event::End(TagEnd::TableHead) => {}
-            Event::Start(Tag::TableRow) => { current_row.clear(); }
+            Event::Start(Tag::TableRow) => {
+                current_row.clear();
+            }
             Event::End(TagEnd::TableRow) => {
                 table_rows.push(std::mem::take(&mut current_row));
             }
-            Event::Start(Tag::TableCell) => { current_cell = Some(String::new()); }
+            Event::Start(Tag::TableCell) => {
+                current_cell = Some(String::new());
+            }
             Event::End(TagEnd::TableCell) => {
                 if let Some(cell) = current_cell.take() {
                     current_row.push(cell);
@@ -131,7 +142,9 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             }
 
             // ── Lists ─────────────────────────────────────────────────────
-            Event::Start(Tag::List(_)) => { list_depth += 1; }
+            Event::Start(Tag::List(_)) => {
+                list_depth += 1;
+            }
             Event::End(TagEnd::List(_)) => {
                 list_depth = list_depth.saturating_sub(1);
                 if list_depth == 0 {
@@ -140,10 +153,7 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             }
             Event::Start(Tag::Item) => {
                 let indent = "  ".repeat(list_depth.saturating_sub(1));
-                spans.push(Span::styled(
-                    format!("{}• ", indent),
-                    Theme::accent(),
-                ));
+                spans.push(Span::styled(format!("{}• ", indent), Theme::accent()));
             }
             Event::End(TagEnd::Item) => {
                 if !spans.is_empty() {
@@ -177,8 +187,12 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
                         Theme::source().add_modifier(Modifier::UNDERLINED)
                     } else {
                         let mut s = Theme::normal();
-                        if bold { s = s.add_modifier(Modifier::BOLD); }
-                        if italic { s = s.add_modifier(Modifier::ITALIC); }
+                        if bold {
+                            s = s.add_modifier(Modifier::BOLD);
+                        }
+                        if italic {
+                            s = s.add_modifier(Modifier::ITALIC);
+                        }
                         s
                     };
                     spans.push(Span::styled(text.into_string(), style));
@@ -186,8 +200,12 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             }
 
             // ── Breaks ───────────────────────────────────────────────────
-            Event::SoftBreak => { spans.push(Span::raw(" ")); }
-            Event::HardBreak => { flush!(); }
+            Event::SoftBreak => {
+                spans.push(Span::raw(" "));
+            }
+            Event::HardBreak => {
+                flush!();
+            }
 
             // ── Horizontal rule ───────────────────────────────────────────
             Event::Rule => {
@@ -208,10 +226,14 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
 
 /// Render a buffered table with padded, aligned columns.
 fn render_table(lines: &mut Vec<Line<'static>>, rows: &[Vec<String>]) {
-    if rows.is_empty() { return; }
+    if rows.is_empty() {
+        return;
+    }
 
     let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
-    if col_count == 0 { return; }
+    if col_count == 0 {
+        return;
+    }
 
     // Compute the minimum width needed for each column. Widths are in chars,
     // not bytes — `{:<width$}` pads by chars, and byte-measuring non-ASCII
@@ -245,9 +267,12 @@ fn render_table(lines: &mut Vec<Line<'static>>, rows: &[Vec<String>]) {
 
         // Divider between header and body.
         if row_idx == 0 {
-            let sep_width: usize = col_widths.iter().take(col_count).sum::<usize>()
-                + col_count.saturating_sub(1) * 5;
-            lines.push(Line::from(Span::styled("─".repeat(sep_width), Theme::dim())));
+            let sep_width: usize =
+                col_widths.iter().take(col_count).sum::<usize>() + col_count.saturating_sub(1) * 5;
+            lines.push(Line::from(Span::styled(
+                "─".repeat(sep_width),
+                Theme::dim(),
+            )));
         }
     }
 }

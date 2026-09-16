@@ -39,9 +39,19 @@ pub fn tone_for(label: &str) -> Color {
 pub fn lines(label: &str, is_selected: bool) -> Vec<Line<'static>> {
     let tone = tone_for(label);
     let (frame, letters) = if is_selected {
-        (tone, Style::default().fg(Color::Rgb(235, 238, 250)).add_modifier(Modifier::BOLD))
+        (
+            tone,
+            Style::default()
+                .fg(Color::Rgb(235, 238, 250))
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
-        (scale(tone, 0.55), Style::default().fg(scale(tone, 0.9)).add_modifier(Modifier::BOLD))
+        (
+            scale(tone, 0.55),
+            Style::default()
+                .fg(scale(tone, 0.9))
+                .add_modifier(Modifier::BOLD),
+        )
     };
     let frame_style = Style::default().fg(frame);
 
@@ -64,9 +74,28 @@ pub fn lines(label: &str, is_selected: bool) -> Vec<Line<'static>> {
 /// falls back to its slug ("stoic-philosophy" → "SP").
 fn initials(label: &str) -> String {
     const HONORIFICS: &[&str] = &[
-        "dr", "prof", "professor", "sir", "dame", "rev", "fr", "st", "mx",
-        "mr", "mrs", "ms", "lord", "lady", "capt", "captain", "maj", "major",
-        "col", "colonel", "gen", "general",
+        "dr",
+        "prof",
+        "professor",
+        "sir",
+        "dame",
+        "rev",
+        "fr",
+        "st",
+        "mx",
+        "mr",
+        "mrs",
+        "ms",
+        "lord",
+        "lady",
+        "capt",
+        "captain",
+        "maj",
+        "major",
+        "col",
+        "colonel",
+        "gen",
+        "general",
     ];
 
     let mut words: Vec<&str> = label
@@ -88,7 +117,11 @@ fn initials(label: &str) -> String {
         .flat_map(|c| c.to_uppercase())
         .collect();
 
-    if letters.is_empty() { "?".to_string() } else { letters }
+    if letters.is_empty() {
+        "?".to_string()
+    } else {
+        letters
+    }
 }
 
 /// Darken an RGB colour by a factor. Non-RGB colours pass through unchanged

@@ -1,17 +1,18 @@
-use std::sync::Arc;
+use crate::tui::markdown;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use futures_util::StreamExt;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span, Text},
     widgets::{
-        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+        Block, BorderType, Borders, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+        Wrap,
     },
+    Frame,
 };
-use crate::tui::markdown;
+use std::sync::Arc;
 use tokio::sync::mpsc;
-use futures_util::StreamExt;
 
 use crate::api::client::ApiClient;
 use crate::api::types::{ChatEvent, ChatMessage, ChatRequest, ExpertSummary, SourceCitation};
@@ -22,7 +23,11 @@ use crate::tui::widgets::spinner;
 
 /// What the app loop should do after a key reaches the chat screen.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum ChatExit { Stay, Back, Quit }
+pub enum ChatExit {
+    Stay,
+    Back,
+    Quit,
+}
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -139,21 +144,25 @@ impl ChatScreen {
             (KeyCode::Right, CTRL) | (KeyCode::Right, ALT) | (KeyCode::Char('f'), ALT) => {
                 self.input.word_right()
             }
-            (KeyCode::Left, _)  => self.input.left(),
+            (KeyCode::Left, _) => self.input.left(),
             (KeyCode::Right, _) => self.input.right(),
-            (KeyCode::Home, _)  => self.input.home(),
+            (KeyCode::Home, _) => self.input.home(),
 
             // Scrolling. End moves the cursor while typing, snaps to bottom otherwise.
-            (KeyCode::Up, _)     => self.scroll_offset = self.scroll_offset.saturating_add(1),
-            (KeyCode::Down, _)   => self.scroll_offset = self.scroll_offset.saturating_sub(1),
+            (KeyCode::Up, _) => self.scroll_offset = self.scroll_offset.saturating_add(1),
+            (KeyCode::Down, _) => self.scroll_offset = self.scroll_offset.saturating_sub(1),
             (KeyCode::PageUp, _) => self.scroll_offset = self.scroll_offset.saturating_add(10),
             (KeyCode::PageDown, _) => self.scroll_offset = self.scroll_offset.saturating_sub(10),
             (KeyCode::End, _) => {
-                if self.input.is_empty() { self.scroll_offset = 0; } else { self.input.end(); }
+                if self.input.is_empty() {
+                    self.scroll_offset = 0;
+                } else {
+                    self.input.end();
+                }
             }
 
             (KeyCode::Backspace, _) => self.input.backspace(),
-            (KeyCode::Delete, _)    => self.input.delete(),
+            (KeyCode::Delete, _) => self.input.delete(),
 
             // Every printable char — j, k, q, n, d, etc. — goes to the input buffer.
             // Other Ctrl-chords are deliberately ignored rather than inserted.
@@ -170,7 +179,9 @@ impl ChatScreen {
     /// interrupted message (matching the web client); zero tokens leaves only
     /// the question, which re-sends cleanly via history recall.
     fn stop_stream(&mut self) {
-        if let Some(task) = self.task.take() { task.abort(); }
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
         self.rx = None;
         self.current_status = None;
         self.started = None;
@@ -189,9 +200,14 @@ impl ChatScreen {
     }
 
     fn recall_prev(&mut self) {
-        if self.sent.is_empty() { return; }
+        if self.sent.is_empty() {
+            return;
+        }
         let idx = match self.recall {
-            None => { self.draft = self.input.text(); self.sent.len() - 1 }
+            None => {
+                self.draft = self.input.text();
+                self.sent.len() - 1
+            }
             Some(i) => i.saturating_sub(1),
         };
         self.recall = Some(idx);
@@ -215,13 +231,20 @@ impl ChatScreen {
 
     async fn submit(&mut self) {
         let question = self.input.text().trim().to_string();
-        if question.is_empty() || self.rx.is_some() { return; }
+        if question.is_empty() || self.rx.is_some() {
+            return;
+        }
 
         // History is the conversation BEFORE this question — the server appends the
         // question itself, so including it here would send it twice.
-        let history: Vec<ChatMessage> = self.messages.iter()
+        let history: Vec<ChatMessage> = self
+            .messages
+            .iter()
             .filter(|m| !m.content.is_empty())
-            .map(|m| ChatMessage { role: m.role.clone(), content: m.content.clone() })
+            .map(|m| ChatMessage {
+                role: m.role.clone(),
+                content: m.content.clone(),
+            })
             .collect();
 
         self.messages.push(Message {
@@ -254,20 +277,41 @@ impl ChatScreen {
                 Ok(mut stream) => {
                     while let Some(result) = stream.next().await {
                         match result {
-                            Ok(ev)  => { let _ = tx.send(ev).await; }
-                            Err(e)  => { let _ = tx.send(ChatEvent::Error { message: e.to_string() }).await; break; }
+                            Ok(ev) => {
+                                let _ = tx.send(ev).await;
+                            }
+                            Err(e) => {
+                                let _ = tx
+                                    .send(ChatEvent::Error {
+                                        message: e.to_string(),
+                                    })
+                                    .await;
+                                break;
+                            }
                         }
                     }
                 }
-                Err(e) => { let _ = tx.send(ChatEvent::Error { message: e.to_string() }).await; }
+                Err(e) => {
+                    let _ = tx
+                        .send(ChatEvent::Error {
+                            message: e.to_string(),
+                        })
+                        .await;
+                }
             }
         }));
     }
 
     pub async fn tick(&mut self) {
         let events: Vec<ChatEvent> = match &mut self.rx {
-            Some(rx) => { let mut b = Vec::new(); while let Ok(ev) = rx.try_recv() { b.push(ev); } b }
-            None     => return,
+            Some(rx) => {
+                let mut b = Vec::new();
+                while let Ok(ev) = rx.try_recv() {
+                    b.push(ev);
+                }
+                b
+            }
+            None => return,
         };
         let mut close_rx = false;
         for event in events {
@@ -280,9 +324,14 @@ impl ChatScreen {
                 }
                 ChatEvent::Token { text } => {
                     self.current_status = None; // status replaced by actual text
-                    if let Some(b) = &mut self.current_stream { b.push_str(&text); }
+                    if let Some(b) = &mut self.current_stream {
+                        b.push_str(&text);
+                    }
                 }
-                ChatEvent::Sources { citations, dangling_citations } => {
+                ChatEvent::Sources {
+                    citations,
+                    dangling_citations,
+                } => {
                     self.pending_sources = citations;
                     self.pending_dangling = dangling_citations;
                 }
@@ -326,7 +375,11 @@ impl ChatScreen {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, tick: u64) {
-        let expert_name = self.expert.persona_name.as_deref().unwrap_or(&self.expert.name);
+        let expert_name = self
+            .expert
+            .persona_name
+            .as_deref()
+            .unwrap_or(&self.expert.name);
         // Same per-expert tone as the home-screen avatar, so the identity
         // established by the card follows the expert into the conversation.
         let expert_style = Style::default()
@@ -345,7 +398,11 @@ impl ChatScreen {
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(5), Constraint::Length(3), Constraint::Length(1)])
+            .constraints([
+                Constraint::Min(5),
+                Constraint::Length(3),
+                Constraint::Length(1),
+            ])
             .split(inner);
 
         // -1 width so the Scrollbar can occupy the rightmost column of chunks[0].
@@ -386,12 +443,17 @@ impl ChatScreen {
                     }
                 }
                 if !msg.dangling.is_empty() {
-                    let nums = msg.dangling.iter()
+                    let nums = msg
+                        .dangling
+                        .iter()
                         .map(|n| format!("[{}]", n))
                         .collect::<Vec<_>>()
                         .join(" ");
                     lines.push(Line::from(Span::styled(
-                        format!("⚠ {} resolve to no source — treat those claims with care", nums),
+                        format!(
+                            "⚠ {} resolve to no source — treat those claims with care",
+                            nums
+                        ),
                         Theme::warning().add_modifier(Modifier::ITALIC),
                     )));
                 }
@@ -406,7 +468,8 @@ impl ChatScreen {
                 // No tokens yet — show the current pipeline status with a spinner
                 // and how long the question has been waiting.
                 let label = self.current_status.as_deref().unwrap_or("Thinking…");
-                let elapsed = self.started
+                let elapsed = self
+                    .started
                     .map(|t| format!("  ({}s)", t.elapsed().as_secs()))
                     .unwrap_or_default();
                 lines.push(Line::from(vec![
@@ -418,9 +481,13 @@ impl ChatScreen {
                 // Tokens arriving — render markdown and attach the pulse cursor.
                 let mut md_lines = markdown::render(buf);
                 if let Some(last) = md_lines.last_mut() {
-                    last.spans.push(Span::styled(spinner::pulse(tick), Theme::accent()));
+                    last.spans
+                        .push(Span::styled(spinner::pulse(tick), Theme::accent()));
                 } else {
-                    md_lines.push(Line::from(Span::styled(spinner::pulse(tick), Theme::accent())));
+                    md_lines.push(Line::from(Span::styled(
+                        spinner::pulse(tick),
+                        Theme::accent(),
+                    )));
                 }
                 lines.extend(md_lines);
             }
@@ -441,7 +508,9 @@ impl ChatScreen {
             self.scroll_offset += total_rendered - self.last_total;
         }
         self.last_total = total_rendered;
-        if self.scroll_offset > max_scroll { self.scroll_offset = max_scroll; }
+        if self.scroll_offset > max_scroll {
+            self.scroll_offset = max_scroll;
+        }
 
         // scroll_offset=0 → show the end; scroll_offset=max → show the beginning.
         let scroll_from_top = max_scroll.saturating_sub(self.scroll_offset);
@@ -464,13 +533,22 @@ impl ChatScreen {
         // Input box — a real block cursor while idle, a busy spinner while streaming.
         let mut input_line = vec![Span::styled("> ", Theme::accent())];
         let input_w = chunks[1].width.saturating_sub(4) as usize;
-        input_line.extend(self.input.spans(input_w, Theme::normal(), self.rx.is_none()));
+        input_line.extend(
+            self.input
+                .spans(input_w, Theme::normal(), self.rx.is_none()),
+        );
         if self.rx.is_some() {
-            input_line.push(Span::styled(format!(" {}", spinner::dots(tick)), Theme::accent()));
+            input_line.push(Span::styled(
+                format!(" {}", spinner::dots(tick)),
+                Theme::accent(),
+            ));
         }
         f.render_widget(
-            Paragraph::new(Line::from(input_line))
-                .block(Block::default().borders(Borders::TOP).border_style(Theme::normal_border())),
+            Paragraph::new(Line::from(input_line)).block(
+                Block::default()
+                    .borders(Borders::TOP)
+                    .border_style(Theme::normal_border()),
+            ),
             chunks[1],
         );
 
@@ -483,7 +561,11 @@ impl ChatScreen {
         } else {
             "[Enter] Send  [Esc] Back  [Alt+↑↓] History  [Ctrl+L] New chat  [↑↓/PgUp/PgDn] Scroll"
         };
-        let footer_style = if self.confirm_clear { Theme::warning() } else { Theme::dim() };
+        let footer_style = if self.confirm_clear {
+            Theme::warning()
+        } else {
+            Theme::dim()
+        };
         f.render_widget(Paragraph::new(footer).style(footer_style), chunks[2]);
     }
 }
@@ -500,12 +582,18 @@ mod tests {
                 "persona_name":"Br. Anselm","persona_bio":null,"persona_style":null,
                 "avg_quality":null,"source_count":1,"chunk_count":1,"node_count":0,
                 "edge_count":0,"created_at":"now"}"#,
-        ).unwrap()
+        )
+        .unwrap()
     }
 
     fn buffer_text(screen: &mut ChatScreen, w: u16, h: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(w, h)).unwrap();
-        terminal.draw(|f| { let area = f.area(); screen.render(f, area, 0); }).unwrap();
+        terminal
+            .draw(|f| {
+                let area = f.area();
+                screen.render(f, area, 0);
+            })
+            .unwrap();
         let buf = terminal.backend().buffer().clone();
         let mut out = String::new();
         for y in 0..h {
@@ -534,13 +622,25 @@ mod tests {
             content: "Act is whatever is realized in a thing, while potency is what \
                       remains unrealized [1][3].\n\nOnly God is pure act."
                 .into(),
-            sources: vec![SourceCitation { n: 1, label: "De ente et essentia".into() }],
+            sources: vec![SourceCitation {
+                n: 1,
+                label: "De ente et essentia".into(),
+            }],
             dangling: vec![],
         });
         let text = buffer_text(&mut screen, 100, 30);
-        assert!(text.contains("act/potency"), "user question missing:\n{text}");
-        assert!(text.contains("Act is whatever is realized"), "answer text missing:\n{text}");
-        assert!(text.contains("De ente et essentia"), "citation missing:\n{text}");
+        assert!(
+            text.contains("act/potency"),
+            "user question missing:\n{text}"
+        );
+        assert!(
+            text.contains("Act is whatever is realized"),
+            "answer text missing:\n{text}"
+        );
+        assert!(
+            text.contains("De ente et essentia"),
+            "citation missing:\n{text}"
+        );
     }
 
     /// Mid-stream: the partial buffer must render, not just the spinner.
@@ -550,7 +650,10 @@ mod tests {
         let mut screen = ChatScreen::new(expert(), api);
         screen.current_stream = Some("Act is whatever is realized".into());
         let text = buffer_text(&mut screen, 100, 20);
-        assert!(text.contains("Act is whatever is realized"), "partial answer missing:\n{text}");
+        assert!(
+            text.contains("Act is whatever is realized"),
+            "partial answer missing:\n{text}"
+        );
     }
 
     fn screen() -> ChatScreen {
@@ -619,14 +722,18 @@ mod tests {
         const CTRL: KeyModifiers = KeyModifiers::CONTROL;
         let mut s = screen();
         s.messages.push(Message {
-            role: "user".into(), content: "q".into(), sources: vec![], dangling: vec![],
+            role: "user".into(),
+            content: "q".into(),
+            sources: vec![],
+            dangling: vec![],
         });
 
         s.handle_raw(key(KeyCode::Char('l'), CTRL)).await;
         assert!(s.confirm_clear && !s.messages.is_empty());
 
         // Any other key disarms without clearing.
-        s.handle_raw(key(KeyCode::Char('x'), KeyModifiers::NONE)).await;
+        s.handle_raw(key(KeyCode::Char('x'), KeyModifiers::NONE))
+            .await;
         assert!(!s.confirm_clear && !s.messages.is_empty());
 
         s.handle_raw(key(KeyCode::Char('l'), CTRL)).await;

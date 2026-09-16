@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 // Mirrors the API's ExpertSummary schema; some fields are deserialized but not
 // (yet) rendered anywhere.
@@ -34,16 +34,19 @@ pub struct ExpertSummary {
     pub created_at: String,
 }
 
-fn default_tier() -> String { "standard".to_string() }
-fn default_readiness() -> String { "pending".to_string() }
+fn default_tier() -> String {
+    "standard".to_string()
+}
+fn default_readiness() -> String {
+    "pending".to_string()
+}
 
 impl ExpertSummary {
     /// Whether this expert can answer questions right now — matches the
     /// server's gate (`readiness.can_chat`), with a status fallback for older
     /// servers that don't send readiness.
     pub fn can_chat(&self) -> bool {
-        matches!(self.readiness.as_str(), "chat_ready" | "graph_ready")
-            || self.status == "ready"
+        matches!(self.readiness.as_str(), "chat_ready" | "graph_ready") || self.status == "ready"
     }
 }
 
@@ -135,35 +138,71 @@ pub enum BuildEvent {
     /// First event in the durable log: which expert this stream belongs to.
     /// The server-assigned slug is authoritative (collisions auto-suffix), so
     /// clients must prefer it over their own slugified guess.
-    Created { slug: String, #[serde(default)] tier: String },
-    BuildStarted { attempt: u32, max_attempts: u32 },
-    ExecutionMode { mode: String, #[serde(default)] batched: bool },
-    Stage { stage: u8, name: String, #[serde(default)] total: u64, #[serde(default)] total_batches: u64 },
-    PlanReady { key_concepts: Vec<String> },
-    DiscoveryStarted { fetchers: Vec<String>, active: Vec<String> },
+    Created {
+        slug: String,
+        #[serde(default)]
+        tier: String,
+    },
+    BuildStarted {
+        attempt: u32,
+        max_attempts: u32,
+    },
+    ExecutionMode {
+        mode: String,
+        #[serde(default)]
+        batched: bool,
+    },
+    Stage {
+        stage: u8,
+        name: String,
+        #[serde(default)]
+        total: u64,
+        #[serde(default)]
+        total_batches: u64,
+    },
+    PlanReady {
+        key_concepts: Vec<String>,
+    },
+    DiscoveryStarted {
+        fetchers: Vec<String>,
+        active: Vec<String>,
+    },
     /// Discovery iterates: round 0 searches the research plan, later rounds
     /// target the concepts furthest from their coverage target. Every per-round
     /// event carries `round`, and it defaults to 0 so a build from before the
     /// loop shipped still parses.
     RoundStarted {
-        #[serde(default)] round: u64,
-        #[serde(default)] budget: u64,
-        #[serde(default)] budget_usd: f64,
-        #[serde(default)] weakest: Vec<String>,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        budget: u64,
+        #[serde(default)]
+        budget_usd: f64,
+        #[serde(default)]
+        weakest: Vec<String>,
     },
     FeedbackQueries {
-        #[serde(default)] round: u64,
-        #[serde(default)] concepts: Vec<String>,
-        #[serde(default)] queries: Vec<String>,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        concepts: Vec<String>,
+        #[serde(default)]
+        queries: Vec<String>,
     },
     /// Candidates removed as duplicates before anything was downloaded.
     DedupDone {
-        #[serde(default)] round: u64,
-        #[serde(default)] candidates: u64,
-        #[serde(default)] identity_merged: u64,
-        #[serde(default)] url_merged: u64,
-        #[serde(default)] seen_skipped: u64,
-        #[serde(default)] kept: u64,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        candidates: u64,
+        #[serde(default)]
+        identity_merged: u64,
+        #[serde(default)]
+        url_merged: u64,
+        #[serde(default)]
+        seen_skipped: u64,
+        #[serde(default)]
+        kept: u64,
     },
     /// `status` says why a channel came back empty: `empty` means it answered
     /// with nothing, `timeout`/`rate_limited`/`error` mean it did not answer,
@@ -173,98 +212,194 @@ pub enum BuildEvent {
         name: String,
         count: u64,
         skipped: bool,
-        #[serde(default)] reason: String,
-        #[serde(default)] round: u64,
-        #[serde(default)] status: String,
-        #[serde(default)] error: String,
-        #[serde(default)] attempt: u64,
+        #[serde(default)]
+        reason: String,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        status: String,
+        #[serde(default)]
+        error: String,
+        #[serde(default)]
+        attempt: u64,
     },
     /// Round 0 found too few candidates above the fetch floor and fetched down
     /// to a lower one.
     FloorRelaxed {
-        #[serde(default)] round: u64,
-        #[serde(default)] floor: f64,
-        #[serde(default)] relaxed_to: f64,
-        #[serde(default)] reaching: u64,
-        #[serde(default)] needed: u64,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        floor: f64,
+        #[serde(default)]
+        relaxed_to: f64,
+        #[serde(default)]
+        reaching: u64,
+        #[serde(default)]
+        needed: u64,
     },
-    TriageDone { candidates: u64, ranked: u64, budget: u64, #[serde(default)] round: u64 },
+    TriageDone {
+        candidates: u64,
+        ranked: u64,
+        budget: u64,
+        #[serde(default)]
+        round: u64,
+    },
     /// One per fetch wave. `attempted` counts candidates tried (failures
     /// included); `fetched` counts those that yielded a source.
-    FetchProgress { fetched: u64, attempted: u64, budget: u64, #[serde(default)] round: u64 },
+    FetchProgress {
+        fetched: u64,
+        attempted: u64,
+        budget: u64,
+        #[serde(default)]
+        round: u64,
+    },
     FetchDone {
         fetched: u64,
         budget: u64,
-        #[serde(default)] round: u64,
-        #[serde(default)] content_duplicates: u64,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        content_duplicates: u64,
     },
     SnowballDone {
         added: u64,
-        #[serde(default)] round: u64,
-        #[serde(default)] backward: u64,
-        #[serde(default)] forward: u64,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        backward: u64,
+        #[serde(default)]
+        forward: u64,
     },
     // Validator scores are 0–10 (see validator.py's rubric).
-    SourceValidated { title: String, passed: bool, #[serde(default)] q: f64, #[serde(default)] r: f64 },
+    SourceValidated {
+        title: String,
+        passed: bool,
+        #[serde(default)]
+        q: f64,
+        #[serde(default)]
+        r: f64,
+    },
     /// A borderline first-pass verdict re-examined by a stronger model, whose
     /// score replaces it. `first_q`/`first_r` are null when the first pass
     /// errored rather than scored.
     SourceReviewed {
         title: String,
         passed: bool,
-        #[serde(default)] q: f64,
-        #[serde(default)] r: f64,
-        #[serde(default)] first_q: Option<f64>,
-        #[serde(default)] first_r: Option<f64>,
-        #[serde(default)] reversed: bool,
+        #[serde(default)]
+        q: f64,
+        #[serde(default)]
+        r: f64,
+        #[serde(default)]
+        first_q: Option<f64>,
+        #[serde(default)]
+        first_r: Option<f64>,
+        #[serde(default)]
+        reversed: bool,
     },
-    ValidateDone { passed: u64, dropped: u64, #[serde(default)] round: u64 },
+    ValidateDone {
+        passed: u64,
+        dropped: u64,
+        #[serde(default)]
+        round: u64,
+    },
     /// The corpus measured against this tier's per-concept coverage targets,
     /// once per round.
     CoverageReport {
-        #[serde(default)] round: u64,
-        #[serde(default)] met: bool,
-        #[serde(default)] concepts: Vec<ConceptCoverage>,
-        #[serde(default)] spent_usd: f64,
-        #[serde(default)] budget_usd: f64,
+        #[serde(default)]
+        round: u64,
+        #[serde(default)]
+        met: bool,
+        #[serde(default)]
+        concepts: Vec<ConceptCoverage>,
+        #[serde(default)]
+        spent_usd: f64,
+        #[serde(default)]
+        budget_usd: f64,
     },
     /// Terminal for discovery, not for the build. `stop_reason` says whether
     /// the search finished or gave up, and why.
     DiscoveryDone {
-        #[serde(default)] rounds: u64,
-        #[serde(default)] stop_reason: String,
-        #[serde(default)] accepted: u64,
-        #[serde(default)] rejected: u64,
-        #[serde(default)] spent_usd: f64,
-        #[serde(default)] budget_usd: f64,
+        #[serde(default)]
+        rounds: u64,
+        #[serde(default)]
+        stop_reason: String,
+        #[serde(default)]
+        accepted: u64,
+        #[serde(default)]
+        rejected: u64,
+        #[serde(default)]
+        spent_usd: f64,
+        #[serde(default)]
+        budget_usd: f64,
     },
-    CoverageGaps { gaps: Vec<String> },
-    GapfillDone { added: u64, #[serde(default)] still_uncovered: Vec<String> },
-    CorpusWarning { message: String },
-    SourceIngested { title: String, chunks: u64 },
+    CoverageGaps {
+        gaps: Vec<String>,
+    },
+    GapfillDone {
+        added: u64,
+        #[serde(default)]
+        still_uncovered: Vec<String>,
+    },
+    CorpusWarning {
+        message: String,
+    },
+    SourceIngested {
+        title: String,
+        chunks: u64,
+    },
     /// The expert answers questions from here on — a full stage before `done`.
-    ChatReady { sources: u64, chunks: u64 },
-    GraphBatchDone { labels: Vec<String>, edges: u64 },
-    ResolveProgress { merged: u64 },
-    EntitiesResolved { merged: u64 },
-    GraphReady { nodes: u64, edges: u64 },
+    ChatReady {
+        sources: u64,
+        chunks: u64,
+    },
+    GraphBatchDone {
+        labels: Vec<String>,
+        edges: u64,
+    },
+    ResolveProgress {
+        merged: u64,
+    },
+    EntitiesResolved {
+        merged: u64,
+    },
+    GraphReady {
+        nodes: u64,
+        edges: u64,
+    },
     /// An enrichment stage (graph/persona) failed; the build continues degraded.
-    StageDegraded { stage: String, message: String },
-    PersonaReady { name: String },
-    Retry { attempt: u32, max_attempts: u32, message: String },
+    StageDegraded {
+        stage: String,
+        message: String,
+    },
+    PersonaReady {
+        name: String,
+    },
+    Retry {
+        attempt: u32,
+        max_attempts: u32,
+        message: String,
+    },
     Done {
         source_count: u64,
         chunk_count: u64,
         node_count: u64,
-        #[serde(default)] edge_count: u64,
-        #[serde(default)] persona_name: Option<String>,
+        #[serde(default)]
+        edge_count: u64,
+        #[serde(default)]
+        persona_name: Option<String>,
     },
-    Cancelled { #[serde(default)] message: String },
+    Cancelled {
+        #[serde(default)]
+        message: String,
+    },
     Error {
         message: String,
-        #[serde(default)] code: Option<String>,
-        #[serde(default)] spent_usd: Option<f64>,
-        #[serde(default)] cap_usd: Option<f64>,
+        #[serde(default)]
+        code: Option<String>,
+        #[serde(default)]
+        spent_usd: Option<f64>,
+        #[serde(default)]
+        cap_usd: Option<f64>,
     },
     #[serde(other)]
     Unknown,
@@ -273,7 +408,10 @@ pub enum BuildEvent {
 impl BuildEvent {
     /// Terminal events end the build stream; after one, no reconnect is attempted.
     pub fn is_terminal(&self) -> bool {
-        matches!(self, BuildEvent::Done { .. } | BuildEvent::Error { .. } | BuildEvent::Cancelled { .. })
+        matches!(
+            self,
+            BuildEvent::Done { .. } | BuildEvent::Error { .. } | BuildEvent::Cancelled { .. }
+        )
     }
 }
 
@@ -323,8 +461,12 @@ pub struct SourceCitation {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEvent {
-    Token { text: String },
-    Status { message: String },
+    Token {
+        text: String,
+    },
+    Status {
+        message: String,
+    },
     // The payload also carries `has_contradiction`; serde drops unlisted
     // fields, and no client surface renders it any more (see chat.rs).
     Sources {
@@ -332,10 +474,13 @@ pub enum ChatEvent {
         // `[n]` markers the model invented that resolve to no real passage.
         // The server flags them so clients can mark them, not render them as
         // legitimate citations.
-        #[serde(default)] dangling_citations: Vec<u32>,
+        #[serde(default)]
+        dangling_citations: Vec<u32>,
     },
     Done,
-    Error { message: String },
+    Error {
+        message: String,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -349,7 +494,10 @@ mod tests {
         // `done` gained `truncated` (the answer hit the length limit); an
         // older client must still read it as `Done`, not `Unknown`.
         let raw = r#"{"type": "done", "truncated": true}"#;
-        assert!(matches!(serde_json::from_str::<ChatEvent>(raw).unwrap(), ChatEvent::Done));
+        assert!(matches!(
+            serde_json::from_str::<ChatEvent>(raw).unwrap(),
+            ChatEvent::Done
+        ));
     }
 
     // Payloads below are verbatim from a real server build stream — they pin
@@ -369,7 +517,8 @@ mod tests {
 
     #[test]
     fn chat_ready_event_parses() {
-        let raw = r#"{"type": "chat_ready", "chunks": 576, "sources": 18, "graph_expanded": false}"#;
+        let raw =
+            r#"{"type": "chat_ready", "chunks": 576, "sources": 18, "graph_expanded": false}"#;
         match serde_json::from_str::<BuildEvent>(raw).unwrap() {
             BuildEvent::ChatReady { sources, chunks } => {
                 assert_eq!((sources, chunks), (18, 576));
@@ -382,7 +531,12 @@ mod tests {
     fn spend_cap_error_parses() {
         let raw = r#"{"code": "spend_cap_exceeded", "type": "error", "cap_usd": 1.0, "message": "Build exceeded its spend cap: $1.02 of $1.00.", "spent_usd": 1.0226}"#;
         match serde_json::from_str::<BuildEvent>(raw).unwrap() {
-            BuildEvent::Error { code, spent_usd, cap_usd, .. } => {
+            BuildEvent::Error {
+                code,
+                spent_usd,
+                cap_usd,
+                ..
+            } => {
                 assert_eq!(code.as_deref(), Some("spend_cap_exceeded"));
                 assert!(spent_usd.unwrap() > 1.0 && cap_usd.unwrap() == 1.0);
             }
@@ -424,30 +578,51 @@ mod tests {
             "weakest":["apatheia"]}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(started).unwrap(),
-            BuildEvent::RoundStarted { round: 1, budget: 15, .. }
+            BuildEvent::RoundStarted {
+                round: 1,
+                budget: 15,
+                ..
+            }
         ));
 
         let dedup = r#"{"type":"dedup_done","round":1,"candidates":40,"identity_merged":3,
             "url_merged":2,"seen_skipped":9,"kept":26}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(dedup).unwrap(),
-            BuildEvent::DedupDone { round: 1, identity_merged: 3, seen_skipped: 9, .. }
+            BuildEvent::DedupDone {
+                round: 1,
+                identity_merged: 3,
+                seen_skipped: 9,
+                ..
+            }
         ));
 
         let validate = r#"{"type":"validate_done","round":2,"passed":7,"dropped":4}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(validate).unwrap(),
-            BuildEvent::ValidateDone { round: 2, passed: 7, dropped: 4 }
+            BuildEvent::ValidateDone {
+                round: 2,
+                passed: 7,
+                dropped: 4
+            }
         ));
 
         let done = r#"{"type":"discovery_done","rounds":2,"stop_reason":"targets_met",
             "accepted":21,"rejected":13,"spent_usd":1.2,"estimated_ingest_usd":0.9,
             "budget_usd":3.0,"rubric_version":"v5-structured-q5r6","coverage":{}}"#;
         match serde_json::from_str::<BuildEvent>(done).unwrap() {
-            BuildEvent::DiscoveryDone { rounds, stop_reason, accepted, .. } => {
+            BuildEvent::DiscoveryDone {
+                rounds,
+                stop_reason,
+                accepted,
+                ..
+            } => {
                 assert_eq!(rounds, 2);
                 assert_eq!(accepted, 21);
-                assert_eq!(stop_reason_text(&stop_reason), "every key concept reached its coverage target");
+                assert_eq!(
+                    stop_reason_text(&stop_reason),
+                    "every key concept reached its coverage target"
+                );
             }
             other => panic!("expected DiscoveryDone, got {:?}", other),
         }
@@ -460,12 +635,21 @@ mod tests {
         let triage = r#"{"type":"triage_done","candidates":50,"ranked":30,"budget":30}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(triage).unwrap(),
-            BuildEvent::TriageDone { round: 0, candidates: 50, .. }
+            BuildEvent::TriageDone {
+                round: 0,
+                candidates: 50,
+                ..
+            }
         ));
         let snowball = r#"{"type":"snowball_done","added":3}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(snowball).unwrap(),
-            BuildEvent::SnowballDone { added: 3, round: 0, backward: 0, forward: 0 }
+            BuildEvent::SnowballDone {
+                added: 3,
+                round: 0,
+                backward: 0,
+                forward: 0
+            }
         ));
     }
 
@@ -481,8 +665,12 @@ mod tests {
             BuildEvent::PlanReady { key_concepts } => assert_eq!(key_concepts, vec!["natural law"]),
             other => panic!("expected PlanReady, got {:?}", other),
         }
-        let suggested = r#"{"type":"primary_texts_suggested","round":1,"concepts":["x"],"texts":[]}"#;
-        assert!(matches!(serde_json::from_str::<BuildEvent>(suggested).unwrap(), BuildEvent::Unknown));
+        let suggested =
+            r#"{"type":"primary_texts_suggested","round":1,"concepts":["x"],"texts":[]}"#;
+        assert!(matches!(
+            serde_json::from_str::<BuildEvent>(suggested).unwrap(),
+            BuildEvent::Unknown
+        ));
     }
 
     #[test]
@@ -491,7 +679,13 @@ mod tests {
             "skipped":false,"reason":"Gutendex timed out after 10s","status":"timeout",
             "error":"Gutendex timed out after 10s","attempt":0,"elapsed":10.2,"queries":1}"#;
         match serde_json::from_str::<BuildEvent>(raw).unwrap() {
-            BuildEvent::FetcherDone { status, error, attempt, count, .. } => {
+            BuildEvent::FetcherDone {
+                status,
+                error,
+                attempt,
+                count,
+                ..
+            } => {
                 assert_eq!(status, "timeout");
                 assert!(error.contains("Gutendex"));
                 assert_eq!((attempt, count), (0, 0));
@@ -501,13 +695,21 @@ mod tests {
         let old = r#"{"type":"fetcher_done","name":"exa","count":12,"skipped":false,"reason":""}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(old).unwrap(),
-            BuildEvent::FetcherDone { count: 12, attempt: 0, .. }
+            BuildEvent::FetcherDone {
+                count: 12,
+                attempt: 0,
+                ..
+            }
         ));
         let relaxed = r#"{"type":"floor_relaxed","round":0,"floor":6.0,"relaxed_to":5.0,
             "reaching":7,"needed":15}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(relaxed).unwrap(),
-            BuildEvent::FloorRelaxed { reaching: 7, needed: 15, .. }
+            BuildEvent::FloorRelaxed {
+                reaching: 7,
+                needed: 15,
+                ..
+            }
         ));
     }
 
@@ -517,7 +719,13 @@ mod tests {
             "first_q":5.5,"first_r":5.5,"q":7.0,"r":8.0,"passed":true,"reversed":true,
             "review_model":"claude-sonnet-5"}"#;
         match serde_json::from_str::<BuildEvent>(raw).unwrap() {
-            BuildEvent::SourceReviewed { first_q, q, reversed, passed, .. } => {
+            BuildEvent::SourceReviewed {
+                first_q,
+                q,
+                reversed,
+                passed,
+                ..
+            } => {
                 assert_eq!(first_q, Some(5.5));
                 assert_eq!(q, 7.0);
                 assert!(reversed && passed);
@@ -535,7 +743,11 @@ mod tests {
             "review_model":"claude-sonnet-5"}"#;
         assert!(matches!(
             serde_json::from_str::<BuildEvent>(raw).unwrap(),
-            BuildEvent::SourceReviewed { first_q: None, first_r: None, .. }
+            BuildEvent::SourceReviewed {
+                first_q: None,
+                first_r: None,
+                ..
+            }
         ));
     }
 
@@ -565,9 +777,15 @@ mod tests {
 
     #[test]
     fn build_request_omits_tier_when_auto() {
-        let auto = BuildRequest { topic: "x".into(), tier: None };
+        let auto = BuildRequest {
+            topic: "x".into(),
+            tier: None,
+        };
         assert_eq!(serde_json::to_string(&auto).unwrap(), r#"{"topic":"x"}"#);
-        let explicit = BuildRequest { topic: "x".into(), tier: Some("lite".into()) };
+        let explicit = BuildRequest {
+            topic: "x".into(),
+            tier: Some("lite".into()),
+        };
         assert!(serde_json::to_string(&explicit).unwrap().contains("lite"));
     }
 }

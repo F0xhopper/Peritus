@@ -1,17 +1,17 @@
+use crate::api::types::{ExpertSummary, SourceOut};
+use crate::events::AppAction;
+use crate::tui::screens::build::BuildCardInfo;
+use crate::tui::theme::Theme;
+use crate::tui::widgets::avatar;
+use crate::tui::widgets::input_box::TextInput;
+use crate::tui::widgets::spinner;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::Modifier,
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    Frame,
 };
-use crate::api::types::{ExpertSummary, SourceOut};
-use crate::events::AppAction;
-use crate::tui::theme::Theme;
-use crate::tui::screens::build::BuildCardInfo;
-use crate::tui::widgets::avatar;
-use crate::tui::widgets::input_box::TextInput;
-use crate::tui::widgets::spinner;
 
 const CARD_WIDTH: u16 = 46;
 
@@ -19,10 +19,10 @@ const CARD_WIDTH: u16 = 46;
 // the account's plan and credit balance afford. It is the default because a
 // topic alone should always be a buildable request.
 const TIERS: &[(&str, &str, &str)] = &[
-    ("auto",     "AUTO",     "best your plan affords"),
-    ("lite",     "LITE",     "~15 sources · fast"),
+    ("auto", "AUTO", "best your plan affords"),
+    ("lite", "LITE", "~15 sources · fast"),
     ("standard", "STANDARD", "~30 sources · balanced"),
-    ("pro",      "PRO",      "~60 sources · deep"),
+    ("pro", "PRO", "~60 sources · deep"),
 ];
 const DEFAULT_TIER_IDX: usize = 0; // AUTO
 
@@ -32,7 +32,7 @@ pub struct HomeScreen {
     pub input_active: bool,
     pub confirm_delete: bool,
     pub tier_select_active: bool,
-    tier_selected: usize,   // index into TIERS
+    tier_selected: usize, // index into TIERS
     pending_topic: Option<String>,
     input: TextInput,
     submitted_build: Option<(String, String)>, // (topic, tier)
@@ -94,20 +94,26 @@ impl HomeScreen {
     /// Late results for an expert the user has since navigated away from are
     /// dropped: the slug they were requested for must still be the open one.
     pub fn set_sources(&mut self, slug: &str, sources: Vec<SourceOut>) {
-        if self.sources_slug.as_deref() != Some(slug) { return; }
+        if self.sources_slug.as_deref() != Some(slug) {
+            return;
+        }
         self.sources = sources;
         self.sources_loading = false;
         self.sources_error = None;
     }
 
     pub fn set_sources_error(&mut self, slug: &str, error: String) {
-        if self.sources_slug.as_deref() != Some(slug) { return; }
+        if self.sources_slug.as_deref() != Some(slug) {
+            return;
+        }
         self.sources_loading = false;
         self.sources_error = Some(error);
     }
 
     pub fn sources_scroll_down(&mut self) {
-        if self.sources_scroll + 1 < self.sources.len() { self.sources_scroll += 1; }
+        if self.sources_scroll + 1 < self.sources.len() {
+            self.sources_scroll += 1;
+        }
     }
 
     pub fn sources_scroll_up(&mut self) {
@@ -126,7 +132,9 @@ impl HomeScreen {
     }
 
     pub fn next(&mut self) {
-        if !self.experts.is_empty() { self.selected = (self.selected + 1) % self.experts.len(); }
+        if !self.experts.is_empty() {
+            self.selected = (self.selected + 1) % self.experts.len();
+        }
         self.confirm_delete = false;
     }
 
@@ -144,23 +152,26 @@ impl HomeScreen {
         self.confirm_delete = false;
     }
 
-    pub fn cancel_input(&mut self) { self.input_active = false; self.input.clear(); }
+    pub fn cancel_input(&mut self) {
+        self.input_active = false;
+        self.input.clear();
+    }
 
     /// Route an editing action to the topic input while it is focused.
     pub fn input_edit(&mut self, action: &AppAction) {
         match action {
-            AppAction::Char(c)     => self.input.insert(*c),
-            AppAction::Backspace   => self.input.backspace(),
-            AppAction::Delete      => self.input.delete(),
-            AppAction::CursorLeft  => self.input.left(),
+            AppAction::Char(c) => self.input.insert(*c),
+            AppAction::Backspace => self.input.backspace(),
+            AppAction::Delete => self.input.delete(),
+            AppAction::CursorLeft => self.input.left(),
             AppAction::CursorRight => self.input.right(),
-            AppAction::WordLeft    => self.input.word_left(),
-            AppAction::WordRight   => self.input.word_right(),
-            AppAction::Home        => self.input.home(),
-            AppAction::End         => self.input.end(),
-            AppAction::CtrlW       => self.input.delete_word_back(),
-            AppAction::CtrlU       => self.input.kill_to_start(),
-            AppAction::KillToEnd   => self.input.kill_to_end(),
+            AppAction::WordLeft => self.input.word_left(),
+            AppAction::WordRight => self.input.word_right(),
+            AppAction::Home => self.input.home(),
+            AppAction::End => self.input.end(),
+            AppAction::CtrlW => self.input.delete_word_back(),
+            AppAction::CtrlU => self.input.kill_to_start(),
+            AppAction::KillToEnd => self.input.kill_to_end(),
             _ => {}
         }
     }
@@ -176,10 +187,14 @@ impl HomeScreen {
     }
 
     pub fn tier_prev(&mut self) {
-        if self.tier_selected > 0 { self.tier_selected -= 1; }
+        if self.tier_selected > 0 {
+            self.tier_selected -= 1;
+        }
     }
     pub fn tier_next(&mut self) {
-        if self.tier_selected < TIERS.len() - 1 { self.tier_selected += 1; }
+        if self.tier_selected < TIERS.len() - 1 {
+            self.tier_selected += 1;
+        }
     }
     pub fn tier_confirm(&mut self) {
         if let Some(topic) = self.pending_topic.take() {
@@ -193,8 +208,14 @@ impl HomeScreen {
         self.tier_select_active = false;
     }
 
-    pub fn take_submitted_build(&mut self) -> Option<(String, String)> { self.submitted_build.take() }
-    pub fn handle_enter(&mut self) { if self.input_active { self.submit_input(); } }
+    pub fn take_submitted_build(&mut self) -> Option<(String, String)> {
+        self.submitted_build.take()
+    }
+    pub fn handle_enter(&mut self) {
+        if self.input_active {
+            self.submit_input();
+        }
+    }
 
     pub fn select_by_topic(&mut self, topic: &str) {
         if let Some(idx) = self.experts.iter().rposition(|e| e.topic == topic) {
@@ -203,8 +224,13 @@ impl HomeScreen {
         }
     }
 
-    pub fn render(&mut self, f: &mut Frame, area: Rect, tick: u64, build_info: Option<&BuildCardInfo>) {
-
+    pub fn render(
+        &mut self,
+        f: &mut Frame,
+        area: Rect,
+        tick: u64,
+        build_info: Option<&BuildCardInfo>,
+    ) {
         let outer = Block::default()
             .title(" ◈ PERITUS  ·  talk with your experts ")
             .title_style(Theme::normal().add_modifier(Modifier::BOLD))
@@ -221,7 +247,7 @@ impl HomeScreen {
             .constraints([Constraint::Min(4), Constraint::Length(2)])
             .split(inner);
 
-        let cards_area  = layout[0];
+        let cards_area = layout[0];
         let footer_area = layout[1];
 
         let visible_count = (cards_area.width / CARD_WIDTH).max(1) as usize;
@@ -245,15 +271,21 @@ impl HomeScreen {
 
         for slot in 0..visible_count {
             let idx = self.scroll_offset + slot;
-            if idx >= self.experts.len() { break; }
+            if idx >= self.experts.len() {
+                break;
+            }
             let expert = &self.experts[idx];
 
             let x = cards_area.x + slot as u16 * CARD_WIDTH;
             // Later cards must fit whole; the first card clamps to whatever
             // width there is, so a narrow terminal still shows *something*.
-            if slot > 0 && x + CARD_WIDTH > cards_area.x + cards_area.width { break; }
+            if slot > 0 && x + CARD_WIDTH > cards_area.x + cards_area.width {
+                break;
+            }
             let w = (CARD_WIDTH - 1).min((cards_area.x + cards_area.width).saturating_sub(x));
-            if w < 10 { break; }
+            if w < 10 {
+                break;
+            }
             let card_area = Rect::new(x, cards_area.y, w, cards_area.height);
 
             let card_build = build_info.filter(|b| b.topic == expert.topic);
@@ -263,9 +295,12 @@ impl HomeScreen {
         // Scroll indicator — dots while they fit, "n/total" once the list grows.
         if self.experts.len() > visible_count {
             let indicator = if self.experts.len() <= 12 {
-                self.experts.iter().enumerate()
+                self.experts
+                    .iter()
+                    .enumerate()
                     .map(|(i, _)| if i == self.selected { "●" } else { "○" })
-                    .collect::<Vec<_>>().join(" ")
+                    .collect::<Vec<_>>()
+                    .join(" ")
             } else {
                 format!("{} / {}", self.selected + 1, self.experts.len())
             };
@@ -278,30 +313,58 @@ impl HomeScreen {
 
         // Footer hints / new-expert input
         let hint_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
-        let selected_status = self.selected_expert().map(|e| e.status.as_str()).unwrap_or("");
-        let selected_chattable = self.selected_expert().map(|e| e.can_chat()).unwrap_or(false);
+        let selected_status = self
+            .selected_expert()
+            .map(|e| e.status.as_str())
+            .unwrap_or("");
+        let selected_chattable = self
+            .selected_expert()
+            .map(|e| e.can_chat())
+            .unwrap_or(false);
 
         let (footer_text, hint_style) = if self.input_active {
             (String::new(), Theme::dim())
         } else if self.confirm_delete {
-            let name = self.selected_expert()
+            let name = self
+                .selected_expert()
                 .and_then(|e| e.persona_name.as_deref().or(Some(e.name.as_str())))
                 .unwrap_or("this expert");
-            (format!("Delete \"{}\"?  [D] Confirm  [Esc] Cancel", name), Theme::error())
-        } else if (selected_status == "building" || selected_status == "queued") && selected_chattable {
-            ("[Enter] Chat now  [b] Build  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(), Theme::accent())
+            (
+                format!("Delete \"{}\"?  [D] Confirm  [Esc] Cancel", name),
+                Theme::error(),
+            )
+        } else if (selected_status == "building" || selected_status == "queued")
+            && selected_chattable
+        {
+            (
+                "[Enter] Chat now  [b] Build  [s] Sources  [n] New  [d] Delete  [q] Quit"
+                    .to_string(),
+                Theme::accent(),
+            )
         } else if selected_status == "building" || selected_status == "queued" {
-            ("[Enter/b] Watch Build  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(), Theme::accent())
+            (
+                "[Enter/b] Watch Build  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(),
+                Theme::accent(),
+            )
         } else if selected_status == "failed" && !selected_chattable {
-            ("[Enter] Rebuild  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(), Theme::dim())
+            (
+                "[Enter] Rebuild  [s] Sources  [n] New  [d] Delete  [q] Quit".to_string(),
+                Theme::dim(),
+            )
         } else {
-            ("[n] New  [Enter] Chat  [s] Sources  [d] Delete  [q] Quit".to_string(), Theme::dim())
+            (
+                "[n] New  [Enter] Chat  [s] Sources  [d] Delete  [q] Quit".to_string(),
+                Theme::dim(),
+            )
         };
         f.render_widget(Paragraph::new(footer_text).style(hint_style), hint_area);
 
         if self.confirm_delete {
             if let Some(expert) = self.selected_expert() {
-                let name = expert.persona_name.as_deref().unwrap_or(expert.name.as_str());
+                let name = expert
+                    .persona_name
+                    .as_deref()
+                    .unwrap_or(expert.name.as_str());
                 render_confirm_popup(f, area, name);
             }
         }
@@ -338,8 +401,10 @@ impl HomeScreen {
             popup,
         );
         let inner = Rect::new(
-            popup.x + 1, popup.y + 1,
-            popup.width.saturating_sub(2), popup.height.saturating_sub(2),
+            popup.x + 1,
+            popup.y + 1,
+            popup.width.saturating_sub(2),
+            popup.height.saturating_sub(2),
         );
         let split = Layout::default()
             .direction(Direction::Vertical)
@@ -350,10 +415,15 @@ impl HomeScreen {
         if let Some(err) = &self.sources_error {
             lines.push(Line::from(Span::styled(err.clone(), Theme::error())));
         } else if self.sources_loading {
-            lines.push(Line::from(Span::styled("Fetching the corpus…", Theme::dim())));
+            lines.push(Line::from(Span::styled(
+                "Fetching the corpus…",
+                Theme::dim(),
+            )));
         } else if self.sources.is_empty() {
             lines.push(Line::from(Span::styled(
-                "No sources yet — this expert has no corpus.", Theme::dim())));
+                "No sources yet — this expert has no corpus.",
+                Theme::dim(),
+            )));
         } else {
             // One row per source, windowed by sources_scroll. The list is the
             // point of the overlay, so it gets every line except the footer.
@@ -365,7 +435,11 @@ impl HomeScreen {
                     // fetcher name, so no source type is ever shown truncated.
                     Span::styled(
                         format!("{:<15} ", truncate(&src.source_type, 15)),
-                        if src.is_user_supplied() { Theme::success() } else { Theme::dim() },
+                        if src.is_user_supplied() {
+                            Theme::success()
+                        } else {
+                            Theme::dim()
+                        },
                     ),
                 ];
                 // Quality is what the validator scored it; absent for uploads,
@@ -374,7 +448,10 @@ impl HomeScreen {
                     Some(q) => spans.push(Span::styled(format!("{:>4.1} ", q), Theme::normal())),
                     None => spans.push(Span::styled("   · ", Theme::dim())),
                 }
-                spans.push(Span::styled(format!("{:>4}c ", src.chunk_count), Theme::dim()));
+                spans.push(Span::styled(
+                    format!("{:>4}c ", src.chunk_count),
+                    Theme::dim(),
+                ));
                 // Tier as a single letter: P/S/T for primary/secondary/tertiary.
                 // This is what corpus_tier_warning fires on — a corpus that is
                 // mostly T is summaries about the field rather than the field.
@@ -395,13 +472,18 @@ impl HomeScreen {
         }
         f.render_widget(Paragraph::new(lines), split[0]);
 
-        let shown = self.sources.len().min(self.sources_scroll + split[0].height as usize);
+        let shown = self
+            .sources
+            .len()
+            .min(self.sources_scroll + split[0].height as usize);
         let footer = if self.sources.is_empty() {
             "[Esc] Close".to_string()
         } else {
             format!(
                 "{}–{} of {}   [↑↓] Scroll  [Esc] Close",
-                self.sources_scroll + 1, shown, self.sources.len(),
+                self.sources_scroll + 1,
+                shown,
+                self.sources.len(),
             )
         };
         f.render_widget(Paragraph::new(Span::styled(footer, Theme::dim())), split[1]);
@@ -411,14 +493,28 @@ impl HomeScreen {
 /// Clip to `max` columns, marking the cut with an ellipsis. Counts chars, not
 /// bytes — source titles routinely carry non-ASCII.
 fn truncate(s: &str, max: usize) -> String {
-    if max == 0 { return String::new(); }
-    if s.chars().count() <= max { return s.to_string(); }
+    if max == 0 {
+        return String::new();
+    }
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
     let keep = max.saturating_sub(1);
     s.chars().take(keep).collect::<String>() + "…"
 }
 
-fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is_selected: bool, build_info: Option<&BuildCardInfo>, tick: u64) {
-    let display_name = expert.persona_name.as_deref().unwrap_or(expert.name.as_str());
+fn render_expert_card(
+    f: &mut Frame,
+    card_area: Rect,
+    expert: &ExpertSummary,
+    is_selected: bool,
+    build_info: Option<&BuildCardInfo>,
+    tick: u64,
+) {
+    let display_name = expert
+        .persona_name
+        .as_deref()
+        .unwrap_or(expert.name.as_str());
 
     let (status_label, status_style) = match expert.status.as_str() {
         "ready" => ("✓ ready", Theme::success()),
@@ -426,15 +522,27 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
         // while the graph/persona stages are still running.
         "building" | "queued" if expert.can_chat() => ("★ chat-ready", Theme::success()),
         "building" => ("● building", Theme::warning()),
-        "queued"   => ("◌ queued",   Theme::warning()),
+        "queued" => ("◌ queued", Theme::warning()),
         // e.g. a build that failed after the corpus was embedded: still usable.
         _ if expert.can_chat() => ("△ usable", Theme::warning()),
         _ => ("✗ failed", Theme::error()),
     };
 
-    let border_style = if is_selected { Theme::selected_border() } else { Theme::normal_border() };
-    let border_type  = if is_selected { BorderType::Double } else { BorderType::Rounded };
-    let block_style  = if is_selected { Theme::selected_bg() } else { Theme::normal() };
+    let border_style = if is_selected {
+        Theme::selected_border()
+    } else {
+        Theme::normal_border()
+    };
+    let border_type = if is_selected {
+        BorderType::Double
+    } else {
+        BorderType::Rounded
+    };
+    let block_style = if is_selected {
+        Theme::selected_bg()
+    } else {
+        Theme::normal()
+    };
 
     let block = Block::default()
         .borders(Borders::ALL)
@@ -459,7 +567,10 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
     const AVATAR_W: u16 = avatar::WIDTH + 1;
     let top_h = 3u16.min(content.height);
 
-    for (i, line) in avatar::lines(display_name, is_selected).into_iter().enumerate() {
+    for (i, line) in avatar::lines(display_name, is_selected)
+        .into_iter()
+        .enumerate()
+    {
         if (i as u16) < top_h {
             f.render_widget(
                 Paragraph::new(line),
@@ -469,15 +580,15 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
     }
 
     let text_x = content.x + AVATAR_W;
-    let text_w  = content.width.saturating_sub(AVATAR_W);
+    let text_w = content.width.saturating_sub(AVATAR_W);
     if text_w > 0 {
-        let name_style  = Theme::normal().add_modifier(Modifier::BOLD);
-        let content_w   = text_w as usize;
-        let tier_label  = expert.tier.to_uppercase();
+        let name_style = Theme::normal().add_modifier(Modifier::BOLD);
+        let content_w = text_w as usize;
+        let tier_label = expert.tier.to_uppercase();
         let right_block = format!("{}  {}", tier_label, status_label);
-        let name_chars   = display_name.chars().count();
-        let right_chars  = right_block.chars().count();
-        let gap          = content_w.saturating_sub(name_chars + right_chars);
+        let name_chars = display_name.chars().count();
+        let right_chars = right_block.chars().count();
+        let gap = content_w.saturating_sub(name_chars + right_chars);
 
         // Row 0: name + tier + status
         f.render_widget(
@@ -503,7 +614,9 @@ fn render_expert_card(f: &mut Frame, card_area: Rect, expert: &ExpertSummary, is
     // ── Rows below avatar ─────────────────────────────────────────────────
     let bottom_y = content.y + top_h;
     let bottom_h = content.height.saturating_sub(top_h);
-    if bottom_h == 0 { return; }
+    if bottom_h == 0 {
+        return;
+    }
 
     let bottom_area = Rect::new(content.x, bottom_y, content.width, bottom_h);
 
@@ -535,7 +648,10 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
     // lists the planned key concepts directly underneath, so it contradicts
     // itself on the same screen.
     let stats_line = match unbuilt_reason(expert) {
-        Some(reason) => Line::from(Span::styled(reason, Theme::dim().add_modifier(Modifier::ITALIC))),
+        Some(reason) => Line::from(Span::styled(
+            reason,
+            Theme::dim().add_modifier(Modifier::ITALIC),
+        )),
         None => {
             let mut stats = vec![
                 Span::styled(fmt_count(expert.node_count), Theme::normal()),
@@ -572,7 +688,11 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
         // Without the label a card can read "0 graph concepts" above a list of
         // seven concepts and look simply wrong.
         body_lines.push(Line::from(Span::styled(
-            if unbuilt_reason(expert).is_some() { "Planned to cover:" } else { "Covers:" },
+            if unbuilt_reason(expert).is_some() {
+                "Planned to cover:"
+            } else {
+                "Covers:"
+            },
             Theme::dim(),
         )));
     }
@@ -582,7 +702,10 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
             Span::styled(concept.clone(), Theme::dim()),
         ]));
     }
-    f.render_widget(Paragraph::new(body_lines).wrap(Wrap { trim: true }), chunks[3]);
+    f.render_widget(
+        Paragraph::new(body_lines).wrap(Wrap { trim: true }),
+        chunks[3],
+    );
 }
 
 /// Why this expert has no corpus to report, or `None` when it has one.
@@ -604,7 +727,13 @@ fn unbuilt_reason(expert: &ExpertSummary) -> Option<&'static str> {
     })
 }
 
-fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, content_w: u16, tick: u64) {
+fn render_building_card_body(
+    f: &mut Frame,
+    area: Rect,
+    info: &BuildCardInfo,
+    content_w: u16,
+    tick: u64,
+) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -618,15 +747,18 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
 
     let sep: String = "─".repeat(content_w as usize);
 
-    f.render_widget(Paragraph::new(Span::styled(sep.as_str(), Theme::dim())), chunks[0]);
+    f.render_widget(
+        Paragraph::new(Span::styled(sep.as_str(), Theme::dim())),
+        chunks[0],
+    );
 
     // Stage name line with [N/6] right-aligned (stage is 0-based, 6 stages total)
     let indicator = format!("[{}/6]", info.stage.min(5) + 1);
     let spin = spinner::braille(tick);
     let label_max = (content_w as usize).saturating_sub(3 + indicator.len() + 1);
     let label_trunc: String = info.stage_label.chars().take(label_max).collect();
-    let pad = (content_w as usize)
-        .saturating_sub(2 + label_trunc.chars().count() + 1 + indicator.len());
+    let pad =
+        (content_w as usize).saturating_sub(2 + label_trunc.chars().count() + 1 + indicator.len());
     f.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(format!("{}  ", spin), Theme::accent()),
@@ -643,7 +775,10 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
         chunks[2],
     );
 
-    f.render_widget(Paragraph::new(Span::styled(sep.as_str(), Theme::dim())), chunks[3]);
+    f.render_widget(
+        Paragraph::new(Span::styled(sep.as_str(), Theme::dim())),
+        chunks[3],
+    );
 
     // Mini pipeline: ✓ Plan  ✓ Find  ● Score  ○ Read  ○ Graph  ○ Voice
     // Indexed by the backend's 0-based stage number (5 = persona/"Voice").
@@ -651,7 +786,9 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
     let mut spans: Vec<Span> = Vec::new();
     for (i, label) in MINI.iter().enumerate() {
         let stage_num = i as u8;
-        if i > 0 { spans.push(Span::styled(" ", Theme::dim())); }
+        if i > 0 {
+            spans.push(Span::styled(" ", Theme::dim()));
+        }
         let (icon, style) = if stage_num < info.stage {
             ("✓", Theme::success())
         } else if stage_num == info.stage {
@@ -666,11 +803,14 @@ fn render_building_card_body(f: &mut Frame, area: Rect, info: &BuildCardInfo, co
 
 /// Format large numbers with K/M suffix so they fit neatly in the card.
 fn fmt_count(n: u64) -> String {
-    if n >= 1_000_000 { format!("{:.1}M", n as f64 / 1_000_000.0) }
-    else if n >= 1_000 { format!("{:.1}K", n as f64 / 1_000.0) }
-    else               { n.to_string() }
+    if n >= 1_000_000 {
+        format!("{:.1}M", n as f64 / 1_000_000.0)
+    } else if n >= 1_000 {
+        format!("{:.1}K", n as f64 / 1_000.0)
+    } else {
+        n.to_string()
+    }
 }
-
 
 fn render_confirm_popup(f: &mut Frame, area: Rect, name: &str) {
     let popup_w = 50u16.min(area.width.saturating_sub(4));
@@ -686,12 +826,20 @@ fn render_confirm_popup(f: &mut Frame, area: Rect, name: &str) {
             .style(Theme::normal()),
         popup,
     );
-    let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+    let inner = Rect::new(
+        popup.x + 1,
+        popup.y + 1,
+        popup.width.saturating_sub(2),
+        popup.height.saturating_sub(2),
+    );
     f.render_widget(
         Paragraph::new(vec![
             Line::from(vec![
                 Span::raw("Delete "),
-                Span::styled(format!("\"{}\"", name), Theme::error().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("\"{}\"", name),
+                    Theme::error().add_modifier(Modifier::BOLD),
+                ),
                 Span::raw("?"),
             ]),
             Line::from(""),
@@ -720,9 +868,18 @@ fn render_input_popup(f: &mut Frame, area: Rect, input: &TextInput) {
             .style(Theme::normal()),
         popup,
     );
-    let inner = Rect::new(popup.x + 1, popup.y + 1, popup.width.saturating_sub(2), popup.height.saturating_sub(2));
+    let inner = Rect::new(
+        popup.x + 1,
+        popup.y + 1,
+        popup.width.saturating_sub(2),
+        popup.height.saturating_sub(2),
+    );
     let mut line = vec![Span::styled("> ", Theme::accent())];
-    line.extend(input.spans(inner.width.saturating_sub(3) as usize, Theme::normal(), true));
+    line.extend(input.spans(
+        inner.width.saturating_sub(3) as usize,
+        Theme::normal(),
+        true,
+    ));
     f.render_widget(
         Paragraph::new(vec![
             Line::from(Span::styled("Topic:", Theme::dim())),
@@ -746,7 +903,12 @@ fn render_tier_popup(f: &mut Frame, area: Rect, topic: &str, selected: usize) {
             .style(Theme::normal()),
         popup,
     );
-    let inner = Rect::new(popup.x + 2, popup.y + 1, popup.width.saturating_sub(4), popup.height.saturating_sub(2));
+    let inner = Rect::new(
+        popup.x + 2,
+        popup.y + 1,
+        popup.width.saturating_sub(4),
+        popup.height.saturating_sub(2),
+    );
 
     // One column per tier
     let col_w = (inner.width / TIERS.len() as u16).max(1);
@@ -756,7 +918,11 @@ fn render_tier_popup(f: &mut Frame, area: Rect, topic: &str, selected: usize) {
         let col = Rect::new(x, inner.y, col_w, inner.height.saturating_sub(1));
 
         let (icon, name_style, desc_style) = if is_sel {
-            ("●", Theme::accent().add_modifier(Modifier::BOLD), Theme::normal())
+            (
+                "●",
+                Theme::accent().add_modifier(Modifier::BOLD),
+                Theme::normal(),
+            )
         } else {
             ("○", Theme::dim(), Theme::dim())
         };
@@ -780,7 +946,12 @@ fn render_tier_popup(f: &mut Frame, area: Rect, topic: &str, selected: usize) {
             Span::styled("[Esc] ", Theme::accent()),
             Span::styled("Cancel", Theme::dim()),
         ])),
-        Rect::new(inner.x, inner.y + inner.height.saturating_sub(1), inner.width, 1),
+        Rect::new(
+            inner.x,
+            inner.y + inner.height.saturating_sub(1),
+            inner.width,
+            1,
+        ),
     );
 }
 
@@ -811,9 +982,18 @@ mod tests {
 
     #[test]
     fn an_expert_that_was_never_built_says_so_instead_of_showing_zeros() {
-        assert_eq!(unbuilt_reason(&expert("queued", "pending", 0)), Some("queued — not built yet"));
-        assert_eq!(unbuilt_reason(&expert("building", "pending", 0)), Some("building — no corpus yet"));
-        assert_eq!(unbuilt_reason(&expert("failed", "pending", 0)), Some("build failed — no corpus"));
+        assert_eq!(
+            unbuilt_reason(&expert("queued", "pending", 0)),
+            Some("queued — not built yet")
+        );
+        assert_eq!(
+            unbuilt_reason(&expert("building", "pending", 0)),
+            Some("building — no corpus yet")
+        );
+        assert_eq!(
+            unbuilt_reason(&expert("failed", "pending", 0)),
+            Some("build failed — no corpus")
+        );
     }
 
     #[test]
