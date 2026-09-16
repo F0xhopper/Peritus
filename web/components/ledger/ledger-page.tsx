@@ -186,11 +186,14 @@ export function LedgerPage({
             </MenuTrigger>
             <MenuContent>
               <MenuLabel label="Download the sources">
-                {/* A full-page navigation, so the browser handles the streamed
-                    response and the API's own `Content-Disposition` names the
-                    file. A fetch would buffer it in memory first. */}
+                {/* Not a navigation at all: the response is a file with its own
+                    `Content-Disposition`, and handing it to the browser is what
+                    downloads it. `router.push` would try to render it as a page,
+                    and a fetch would buffer the whole export in memory first —
+                    which is why the lint rule is disabled rather than obeyed. */}
                 <MenuItem
                   onClick={() => {
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a file download, not a page
                     window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=csv&decision=${decision}`
                   }}
                 >
@@ -198,6 +201,7 @@ export function LedgerPage({
                 </MenuItem>
                 <MenuItem
                   onClick={() => {
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a file download, not a page
                     window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=ris&decision=${decision}`
                   }}
                 >

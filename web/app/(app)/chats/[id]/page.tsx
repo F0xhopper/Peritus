@@ -11,9 +11,15 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function ChatPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const conversation = await getConversation(id)
-  // The conversation carries `expert_slug`, so the expert is one extra fetch
-  // rather than a lookup through the whole list.
-  const expert = await getExpertIfReadable(conversation.expert_slug)
+  // The conversation carries `expert_slug`, so both of these are one extra
+  // fetch rather than a lookup through the whole list — and both depend only on
+  // that slug, so they go together. The siblings are wasted in the unreadable
+  // case below, which is the rare one; awaiting them in sequence cost a round
+  // trip on every chat that opens.
+  const [expert, siblings] = await Promise.all([
+    getExpertIfReadable(conversation.expert_slug),
+    getExpertConversations(conversation.expert_slug),
+  ])
 
   // The chat is the caller's, but the expert is not readable any more: it was
   // shared with them and the link has since been reset or turned off. The
@@ -29,7 +35,6 @@ export default async function ChatPage({ params }: { params: Promise<{ id: strin
     )
   }
 
-  const siblings = await getExpertConversations(conversation.expert_slug)
   return <ChatView conversation={conversation} expert={expert} siblings={siblings} />
 }
 

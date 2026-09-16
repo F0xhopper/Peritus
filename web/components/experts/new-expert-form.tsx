@@ -2,7 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useRef } from 'react'
-import { useForm } from 'react-hook-form'
+import { useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
@@ -81,8 +81,11 @@ export function NewExpertForm({
     mode: 'onSubmit',
   })
 
-  const tier = form.watch('tier')
-  const topic = form.watch('topic')
+  // `useWatch`, not `form.watch()`: the latter returns a fresh function every
+  // render, so React cannot memoize around it and the lint rule is right to say
+  // so. `useWatch` subscribes to the field and re-renders only this component.
+  const tier = useWatch({ control: form.control, name: 'tier' })
+  const topic = useWatch({ control: form.control, name: 'topic' })
 
   // The registration's own ref has to be kept and called alongside ours, or
   // react-hook-form loses the element and the field stops being read.

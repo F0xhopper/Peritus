@@ -53,8 +53,11 @@ export function AccountSettingsPage({
     } catch {
       /* the cookies are cleared on the response either way */
     }
-    // A full navigation so `proxy.ts` sees the cleared cookies and the whole
-    // client cache goes with the page.
+    // A full navigation on purpose, which is why the rule is disabled rather
+    // than obeyed: `router.push` keeps the React tree and its caches alive, so
+    // the previous account's data would still be on screen behind the login
+    // page. A reload is also what makes `proxy.ts` re-read the cleared cookies.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a deliberate full reload
     window.location.assign('/login')
   }
 
