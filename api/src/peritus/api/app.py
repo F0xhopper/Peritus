@@ -10,6 +10,8 @@ from peritus.api.middleware import RequestContextMiddleware, install_error_handl
 from peritus.api.routes import (
     audit,
     auth,
+    billing,
+    catalog,
     chat,
     conversations,
     experts,
@@ -116,6 +118,8 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(catalog.router)
+    app.include_router(billing.router)
     app.include_router(experts.router)
     app.include_router(chat.router)
     app.include_router(conversations.router)

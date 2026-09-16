@@ -5,15 +5,55 @@ DB and queue are mocked so no infrastructure is required.
 
 import contextlib
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
 from peritus.api import deps
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
+from peritus.experts.service import ExpertService
 from peritus.jobs.domain import BuildEventRow, BuildJob, JobStatus
-from tests.conftest import lazy_dep
+from tests.conftest import _LazyDep, lazy_dep, override_dep
+
+
+@contextlib.contextmanager
+def _wired(app):
+    """The expert repository, the job queue and entitlements, as one set.
+
+    `POST /experts/build` is "validate, call, map" now — the slug walk, the
+    entitlement check, the enqueue and the hold all live in
+    `ExpertService.request_build`. These tests still pin that choreography, so
+    the same three mocks go to the service *and* to the dependencies the route
+    keeps using directly (it tails the event log through the job repository).
+
+    Lazily, because the tests set `.return_value` inside the block: everything
+    here reads its collaborators when a request arrives, not when it is built.
+    """
+    repo, jobs, entitlements = _LazyDep(), _LazyDep(), _LazyDep()
+    service = ExpertService(
+        MagicMock(),
+        repo=_Deferred(repo),
+        jobs=_Deferred(jobs),
+        entitlements=_Deferred(entitlements),
+    )
+    with (
+        override_dep(app, deps.expert_service, service),
+        override_dep(app, deps.expert_repo, _Deferred(repo)),
+        override_dep(app, deps.job_repo, _Deferred(jobs)),
+        override_dep(app, deps.entitlements, _Deferred(entitlements)),
+    ):
+        yield repo, jobs, entitlements
+
+
+class _Deferred:
+    """Forwards every attribute to whatever the `_LazyDep` holds at call time."""
+
+    def __init__(self, holder):
+        self._holder = holder
+
+    def __getattr__(self, name):
+        return getattr(self._holder.return_value, name)
 
 
 def _make_expert(tier: ExpertTier = ExpertTier.STANDARD, name: str = "stoicism") -> Expert:
@@ -105,11 +145,7 @@ def test_default_tier_is_unset_so_the_server_resolves_it():
 async def test_build_enqueues_and_streams(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-        lazy_dep(app, deps.entitlements) as MockEntitlements,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, MockEntitlements):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
         mock_repo.create = AsyncMock(return_value=expert)
@@ -141,11 +177,7 @@ async def test_build_denied_without_credits(app, client):
     """A denial is a structured 402 the client can render, not prose."""
     from peritus.billing.domain import FREE, InsufficientCredits
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-        lazy_dep(app, deps.entitlements) as MockEntitlements,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, MockEntitlements):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
         MockRepo.return_value = mock_repo
@@ -178,10 +210,7 @@ async def test_build_denied_without_credits(app, client):
 async def test_build_events_reconnect(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, _):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=expert)
         MockRepo.return_value = mock_repo
@@ -204,10 +233,7 @@ async def test_build_events_reconnect(app, client):
 async def test_delete_cancels_then_deletes(app, client):
     expert = _make_expert(name="stoicism")
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, _):
         mock_repo = AsyncMock()
         # Delete is a mutation, so it resolves the expert via get_owned_for_user
         # (owner-only) rather than the wider read-visibility lookup — a public
@@ -256,11 +282,7 @@ async def test_topic_only_build_resolves_tier_from_plan(app, client):
     this account can actually build, instead of 402ing on a fixed default."""
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-        lazy_dep(app, deps.entitlements) as MockEntitlements,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, MockEntitlements):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
         mock_repo.create = AsyncMock(return_value=expert)
@@ -290,11 +312,7 @@ async def test_topic_only_build_resolves_tier_from_plan(app, client):
 async def test_explicit_tier_skips_resolution(app, client):
     expert = _make_expert(ExpertTier.PRO, name="stoicism")
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-        lazy_dep(app, deps.entitlements) as MockEntitlements,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, MockEntitlements):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
         mock_repo.create = AsyncMock(return_value=expert)
@@ -329,11 +347,7 @@ async def test_slug_collision_autosuffixes(app, client):
     mine = _make_expert(ExpertTier.LITE, name="stoicism-2")
     mine.owner_id = "00000000-0000-0000-0000-000000000000"
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-        lazy_dep(app, deps.entitlements) as MockEntitlements,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, MockEntitlements):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(side_effect=[theirs, None])
         mock_repo.create = AsyncMock(return_value=mine)
@@ -383,11 +397,7 @@ async def test_rebuild_at_new_tier_updates_expert(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
     expert.owner_id = "00000000-0000-0000-0000-000000000000"
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-        lazy_dep(app, deps.entitlements) as MockEntitlements,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, MockEntitlements):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=expert)
         MockRepo.return_value = mock_repo
@@ -413,11 +423,7 @@ async def test_rebuild_at_new_tier_updates_expert(app, client):
 async def test_build_appends_created_event(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
-    with (
-        lazy_dep(app, deps.expert_repo) as MockRepo,
-        lazy_dep(app, deps.job_repo) as MockJobs,
-        lazy_dep(app, deps.entitlements) as MockEntitlements,
-    ):
+    with _wired(app) as (MockRepo, MockJobs, MockEntitlements):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
         mock_repo.create = AsyncMock(return_value=expert)

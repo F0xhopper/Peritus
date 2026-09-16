@@ -32,7 +32,8 @@ Related reading: [audit-api.md](audit-api.md) (reading the record back),
 
 | Component | File | Role |
 |-----------|------|------|
-| Build route | `api/src/peritus/api/routes/experts.py` (`build_expert`) | Validates, resolves slug + tier, charges credits, enqueues, streams |
+| Build route | `api/src/peritus/api/routes/experts.py` (`build_expert`) | Validates, calls the service, maps its errors to status codes, streams |
+| Build orchestration | `api/src/peritus/experts/service.py` (`ExpertService.request_build`) | Resolves slug + tier, charges credits, enqueues, holds |
 | Entitlements | `api/src/peritus/billing/service.py` | Plan/credit checks, tier resolution, holds and refunds |
 | Job queue | `api/src/peritus/jobs/repository.py` | `build_jobs` + `build_events` tables; claim/heartbeat/retry/reap |
 | Worker | `api/src/peritus/jobs/worker.py` | Claims jobs, runs builds with heartbeat + cost meter |
@@ -67,7 +68,7 @@ sequenceDiagram
     Q-->>C: events stream through the tail
 ```
 
-Step by step (`routes/experts.py`, `build_expert`):
+Step by step (`experts/service.py`, `ExpertService.request_build`):
 
 1. **Source filter validation.** `sources`, when present, must be a non-empty
    subset of the builder's fetcher names (`FETCHER_NAMES` in `builder.py`);

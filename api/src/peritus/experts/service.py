@@ -1,17 +1,74 @@
+"""Expert operations that are more than one repository call.
+
+The routes above this layer are meant to read "validate, call, map": parse the
+request, call one method here, turn the result or the error into HTTP. Anything
+that has to touch two repositories and the entitlement service to get one thing
+done belongs on this side of that line — `request_build` below being the case
+that dragged a hundred and thirty lines of choreography into a route handler.
+"""
+
+import re
+from dataclasses import dataclass
+
 import asyncpg
 
-from peritus.core.exceptions import ConflictError, NotFoundError
+from peritus.billing.service import EntitlementService
+from peritus.core.config import settings
+from peritus.core.exceptions import ConflictError, NotFoundError, PeritusError
 from peritus.core.logging import get_logger
-from peritus.experts.domain import Expert, ExpertStatus
+from peritus.experts.domain import Expert, ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
+from peritus.jobs.domain import BuildJob, JobType
+from peritus.jobs.repository import JobRepository
 
 logger = get_logger(__name__)
 
+# A slug is derived from the topic, so two users can legitimately want the same
+# one. `base`, `base-2`, `base-3`… and after this many attempts the topic is
+# genuinely too popular to disambiguate automatically.
+_MAX_SLUG_ATTEMPTS = 50
+
+
+class InvalidBuildRequest(PeritusError):
+    """The request cannot produce a build: a bad topic, or unknown source types."""
+
+
+@dataclass(frozen=True)
+class BuildRequested:
+    """What `request_build` did, in terms the route can map to a response."""
+
+    expert: Expert
+    job: BuildJob
+    #: True when an in-flight build was joined rather than a new one started.
+    #: Nothing was charged and the expert's status was left alone — it may be
+    #: mid-build, and its hold was taken when that job was enqueued.
+    attached: bool
+
+
+def slugify(topic: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")[:80]
+
 
 class ExpertService:
-    def __init__(self, pool: asyncpg.Pool) -> None:
+    def __init__(
+        self,
+        pool: asyncpg.Pool,
+        *,
+        repo: ExpertRepository | None = None,
+        jobs: JobRepository | None = None,
+        entitlements: EntitlementService | None = None,
+    ) -> None:
+        """`ExpertService(pool)` is the ordinary construction.
+
+        The three keyword arguments exist so a test can substitute a
+        collaborator without a database — `request_build` coordinates all three,
+        and mocking them through the module namespace is how that kind of test
+        goes stale.
+        """
         self._pool = pool
-        self._repo = ExpertRepository(pool)
+        self._repo = repo or ExpertRepository(pool)
+        self._jobs = jobs or JobRepository(pool)
+        self._entitlements = entitlements or EntitlementService(pool)
 
     async def create(self, topic: str, owner_id: str | None = None) -> Expert:
         name = topic.lower().strip()
@@ -33,6 +90,133 @@ class ExpertService:
 
     async def list_all(self) -> list[Expert]:
         return await self._repo.list_all()
+
+    async def request_build(
+        self,
+        *,
+        topic: str,
+        owner_id: str,
+        owner_email: str | None,
+        is_admin: bool,
+        tier: ExpertTier | None = None,
+        sources: list[str] | None = None,
+        known_sources: tuple[str, ...] = (),
+    ) -> BuildRequested:
+        """Resolve the expert, charge for the build, and queue it.
+
+        **This is the gate.** Builds are the paid action, so entitlements are
+        checked and held here, at enqueue — never mid-build, when the money is
+        already being spent. Attaching to a build that is already running is
+        free: its hold was taken when it was enqueued.
+
+        Raises :class:`InvalidBuildRequest` for a request that cannot produce a
+        build, :class:`ConflictError` when the topic's slugs are exhausted, and
+        lets ``EntitlementError`` through for the caller to render.
+        """
+        if sources is not None:
+            unknown = [s for s in sources if s not in known_sources]
+            if unknown:
+                raise InvalidBuildRequest(
+                    f"Unknown source type(s): {', '.join(unknown)}. "
+                    f"Valid source types: {', '.join(known_sources)}"
+                )
+            if not sources:
+                raise InvalidBuildRequest(
+                    "sources, when given, must name at least one source type. "
+                    f"Valid source types: {', '.join(known_sources)}"
+                )
+
+        base_slug = slugify(topic)
+        if not base_slug:
+            raise InvalidBuildRequest("Topic must contain at least one letter or number")
+
+        expert, slug = await self._resolve_slug(base_slug, owner_id, is_admin)
+
+        if expert is not None:
+            active = await self._jobs.get_active_job(expert.id, job_type=JobType.BUILD)
+            if active is not None:
+                logger.info("Attaching to in-flight build job %d for %r", active.id, slug)
+                return BuildRequested(expert=expert, job=active, attached=True)
+
+        resolved = (
+            tier
+            if tier is not None
+            else await self._entitlements.resolve_tier(owner_id, None, owner_email)
+        )
+        # Checked before anything is created, so a denial leaves no orphan rows.
+        await self._entitlements.authorize_build(owner_id, resolved, owner_email)
+
+        expert = await self._prepare_for_build(expert, slug, topic, resolved, owner_id)
+        job = await self._jobs.enqueue(
+            expert.id,
+            tier=resolved.value,
+            source_filter=sources or None,
+            max_attempts=settings.WORKER_MAX_ATTEMPTS,
+        )
+        # First event in the durable log, so every client — including one that
+        # reconnects later — learns which expert this stream belongs to without
+        # re-deriving the slug client-side.
+        await self._jobs.append_event(
+            job.id,
+            "created",
+            {
+                "type": "created",
+                "slug": expert.name,
+                "expert_id": expert.id,
+                "job_id": job.id,
+                "tier": resolved.value,
+                "topic": expert.topic,
+            },
+        )
+        # The authoritative charge. Re-checks the balance under a row lock and is
+        # idempotent per job id, so a double-submit landing on the same job never
+        # double-charges. A failure here cancels the job rather than leaving it
+        # to run unpaid.
+        try:
+            await self._entitlements.hold_for_job(owner_id, job.id, resolved)
+        except Exception:
+            await self._jobs.request_cancel(expert.id, job_type=JobType.BUILD)
+            await self._repo.update_status(expert.id, ExpertStatus.FAILED, "Not enough credits")
+            raise
+
+        logger.info("Enqueued build job %d for %r (expert=%d)", job.id, slug, expert.id)
+        return BuildRequested(expert=expert, job=job, attached=False)
+
+    async def _resolve_slug(
+        self, base_slug: str, owner_id: str, is_admin: bool
+    ) -> tuple[Expert | None, str]:
+        """Walk `base`, `base-2`, `base-3`… to the caller's expert or a free slug.
+
+        Another user's expert on the same topic is silently stepped over: its
+        existence is never revealed, and the caller gets the next slug along.
+        """
+        for i in range(1, _MAX_SLUG_ATTEMPTS + 1):
+            slug = base_slug if i == 1 else f"{base_slug}-{i}"
+            candidate = await self._repo.get_by_name(slug)
+            if candidate is None:
+                return None, slug
+            if candidate.is_owned_by(owner_id, include_unowned=is_admin):
+                return candidate, slug
+        raise ConflictError("Too many experts already exist for this topic — rename it slightly")
+
+    async def _prepare_for_build(
+        self,
+        expert: Expert | None,
+        slug: str,
+        topic: str,
+        tier: ExpertTier,
+        owner_id: str,
+    ) -> Expert:
+        """Create the expert, or put an existing one back into the queue."""
+        if expert is None:
+            return await self._repo.create(name=slug, topic=topic, tier=tier, owner_id=owner_id)
+        if expert.tier != tier:
+            # Rebuild at a different depth: the worker builds from the expert
+            # row, so tier and config must move with the request or the new
+            # build silently runs at the old depth.
+            await self._repo.update_tier(expert.id, tier)
+        await self._repo.update_status(expert.id, ExpertStatus.QUEUED)
+        return expert
 
     async def delete(self, name_or_id: str | int) -> None:
         expert = await self.get(name_or_id)

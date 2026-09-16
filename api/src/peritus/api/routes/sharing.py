@@ -32,7 +32,7 @@ from peritus.api.deps import (
     ReadableExpert,
     Shares,
 )
-from peritus.api.routes.experts import _picture_out
+from peritus.api.presenters import picture_out
 from peritus.api.schemas.experts import ExpertAvatar
 from peritus.api.schemas.sharing import ShareAcceptOut, SharedExpertOut, ShareStateOut
 from peritus.core.logging import get_logger
@@ -142,7 +142,7 @@ async def get_shared_expert(token: str, response: Response, repo: ExpertRepo):
         avg_quality=expert.avg_quality,
         source_type_counts=expert.source_type_counts,
         avatar=ExpertAvatar(**expert.avatar) if expert.avatar else None,
-        picture=_picture_out(expert.picture),
+        picture=picture_out(expert.picture),
         created_at=expert.created_at,
     )
 
