@@ -1,0 +1,58 @@
+# `pre-commit install` once per clone; see docs/development.md.
+#
+# These are the same gates CI runs, applied to the staged files only, so a
+# commit cannot introduce the formatting noise Phase 1 of the cleanup plan
+# removed. `just check` remains the full local run.
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        # The 64 MB of Lighthouse reports that were tracked until this plan
+        # would have been refused by this.
+        args: [--maxkb=512]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.20
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+        files: ^api/
+      - id: ruff-format
+        files: ^api/
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  # Local because these come from the pinned toolchains rather than a hook repo:
+  # rustfmt from rust-toolchain.toml, Prettier from web/node_modules — which
+  # also means the hook and CI can never run different versions or configs.
+  - repo: local
+    hooks:
+      - id: prettier
+        name: prettier
+        # Prettier resolves its plugins from the working directory, so it has
+        # to run inside web/ — which means stripping the repo-relative prefix
+        # pre-commit passes.
+        entry: bash -c 'cd web && exec node_modules/.bin/prettier --write "${@#web/}"' --
+        language: system
+        files: ^web/
+        exclude: ^web/package-lock\.json$
+        types_or: [ts, tsx, javascript, jsx, css, json, yaml, markdown]
+
+      - id: cargo-fmt
+        name: cargo fmt
+        entry: bash -c 'cd cli && cargo fmt --check'
+        language: system
+        files: ^cli/.*\.rs$
+        pass_filenames: false

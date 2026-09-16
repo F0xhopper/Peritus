@@ -28,7 +28,7 @@ test-db url="postgresql://postgres:postgres@localhost:5432/peritus_test":
     cd api && PERITUS_TEST_DATABASE_URL={{url}} python -m pytest
 
 lint:
-    cd api && ruff check src tests && mypy src
+    cd api && ruff check src tests && ruff format --check src tests && mypy src
 
 migrate:
     cd api && python migrations/apply.py
@@ -40,7 +40,7 @@ web:
 
 # Exactly what the `web` CI job runs, so a green local run means a green CI run.
 lint-web:
-    cd web && npx eslint . && npx tsc --noEmit && npx vitest run
+    cd web && npx prettier --check . && npx eslint . && npx tsc --noEmit && npx vitest run
 
 build-web:
     cd web && npx next build
@@ -62,10 +62,21 @@ lighthouse-web:
 
 # ── Everything ───────────────────────────────────────────────────────────────
 
-# Every check CI runs, except the DB-backed tests (see `test-db`) and Rust.
-check: lint test lint-web build-web
+# Write every formatter's output. `just lint` and `lint-web` check the same
+# three; CI checks them too, so this is the fix for a red format gate.
+format:
+    cd api && ruff format src tests
+    cd web && npx prettier --write .
+    cd cli && cargo fmt
+
+# Every check CI runs, except the DB-backed tests (see `test-db`).
+check: lint test lint-web build-web lint-cli
 
 # ── CLI ──────────────────────────────────────────────────────────────────────
+
+# Exactly what the `cli` CI job runs.
+lint-cli:
+    cd cli && cargo fmt --check && cargo clippy --locked --all-targets -- -D warnings && cargo test --locked
 
 build-cli:
     cd cli && cargo build --release
