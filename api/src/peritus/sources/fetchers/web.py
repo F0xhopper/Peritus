@@ -4,7 +4,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
-from peritus.infrastructure.http import guarded_client
+from peritus.infrastructure.http import BROWSER_UA, shared_client
 from peritus.sources.domain import Identifiers, RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.base import note_search_failure
 from peritus.sources.fetchers.exa import classify_search_error
@@ -13,7 +13,7 @@ from peritus.sources.identifiers import identifiers_from_url
 logger = get_logger(__name__)
 
 _SEARCH_URL = "https://html.duckduckgo.com/html/"
-_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Peritus/1.0)"}
+_HEADERS = {"User-Agent": BROWSER_UA}
 
 
 class WebFetcher:
@@ -22,12 +22,12 @@ class WebFetcher:
         return [_to_candidate(hit) for hit in hits]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        async with guarded_client(timeout=20, headers=_HEADERS) as client:
-            try:
-                text, title = await _fetch_page(client, candidate.url)
-            except Exception as exc:
-                logger.warning("Web fetch failed for %r: %s", candidate.url, exc)
-                return None
+        client = shared_client(timeout=20, headers=_HEADERS, guarded=True)
+        try:
+            text, title = await _fetch_page(client, candidate.url)
+        except Exception as exc:
+            logger.warning("Web fetch failed for %r: %s", candidate.url, exc)
+            return None
         if len(text) < 500:
             return None
         return RawSource(
@@ -94,10 +94,10 @@ async def _ddg_search(query: str, limit: int) -> list[dict]:
     """DuckDuckGo HTML search. Returns [{url, title, snippet}] — snippets make
     candidates triageable without fetching the page."""
     try:
-        async with httpx.AsyncClient(timeout=15, headers=_HEADERS) as client:
-            resp = await client.post(_SEARCH_URL, data={"q": query})
-            resp.raise_for_status()
-            return await asyncio.to_thread(_parse_ddg, resp.text, limit)
+        client = shared_client(timeout=15, headers=_HEADERS, follow_redirects=False)
+        resp = await client.post(_SEARCH_URL, data={"q": query})
+        resp.raise_for_status()
+        return await asyncio.to_thread(_parse_ddg, resp.text, limit)
     except Exception as exc:
         logger.warning("DuckDuckGo search failed: %s", exc)
         note_search_failure(*classify_search_error(exc, "DuckDuckGo"))
@@ -134,6 +134,6 @@ async def _fetch_page(
 
 async def fetch_page_text(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
     """Page text for a URL, with its own client. Raises on transport failure."""
-    async with guarded_client(timeout=20, headers=_HEADERS) as client:
-        text, _title = await _fetch_page(client, url, max_chars)
+    client = shared_client(timeout=20, headers=_HEADERS, guarded=True)
+    text, _title = await _fetch_page(client, url, max_chars)
     return text

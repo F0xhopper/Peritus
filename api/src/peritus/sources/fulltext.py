@@ -24,12 +24,12 @@ from dataclasses import dataclass
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.http import guarded_client
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.domain import Identifiers, SourceCandidate
 
 logger = get_logger(__name__)
 
-HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+HEADERS = {"User-Agent": RESEARCH_UA}
 
 # Below this, "full text" is a stub, a paywall notice, or a cookie banner — not
 # something worth preferring over the abstract the fetcher already has.
@@ -193,8 +193,8 @@ async def _from_arxiv(arxiv_id: str) -> FullText | None:
     from peritus.sources.fetchers.arxiv import fetch_ar5iv
 
     try:
-        async with guarded_client(timeout=30, headers=HEADERS) as http:
-            text = await fetch_ar5iv(http, arxiv_id)
+        http = shared_client(timeout=30, headers=HEADERS, guarded=True)
+        text = await fetch_ar5iv(http, arxiv_id)
         if _long_enough(text):
             return FullText(text[:MAX_FULL_TEXT], METHOD_AR5IV)
     except Exception as exc:
@@ -233,8 +233,8 @@ async def _from_europe_pmc(ids: Identifiers, hints: FullTextHints | None = None)
     if not pmcid:
         return None
     try:
-        async with guarded_client(timeout=30, headers=HEADERS) as http:
-            text = await fetch_full_text(http, pmcid)
+        http = shared_client(timeout=30, headers=HEADERS, guarded=True)
+        text = await fetch_full_text(http, pmcid)
     except Exception as exc:
         logger.debug("Europe PMC full text failed for %s: %s", pmcid, exc)
         return None

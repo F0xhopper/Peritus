@@ -113,7 +113,8 @@ class _StubClient:
 
 
 def _patch_http(client: _StubClient):
-    return patch.object(openalex.httpx, "AsyncClient", client)
+    # See test_pubmed_fetcher: patch the `shared_client` seam, not httpx.
+    return patch.object(openalex, "shared_client", client)
 
 
 # ── abstract reconstruction ───────────────────────────────────────────────────

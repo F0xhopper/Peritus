@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import shared_client
 from peritus.sources.dedup import SeenSet
 from peritus.sources.domain import Identifiers, SourceCandidate, SourceType, ValidatedSource
 from peritus.sources.fetchers.pdf import identifiers_from_external, semantic_scholar_headers
@@ -221,18 +222,18 @@ async def snowball(
     pool: dict[str, SnowballCandidate] = {}
     semaphore = asyncio.Semaphore(_SEED_CONCURRENCY)
 
-    async with httpx.AsyncClient(
+    http = shared_client(
         timeout=_REQUEST_TIMEOUT, headers=semantic_scholar_headers(), follow_redirects=True
-    ) as http:
+    )
 
-        async def _one(key: str, source: ValidatedSource) -> None:
-            async with semaphore:
-                backward = await _fetch_list(http, key, "references", _REFERENCE_LIMIT)
-                forward = await _fetch_list(http, key, "citations", _CITATION_LIMIT)
-            _absorb(pool, backward, source, DISCOVERED_BACKWARD)
-            _absorb(pool, forward, source, DISCOVERED_FORWARD)
+    async def _one(key: str, source: ValidatedSource) -> None:
+        async with semaphore:
+            backward = await _fetch_list(http, key, "references", _REFERENCE_LIMIT)
+            forward = await _fetch_list(http, key, "citations", _CITATION_LIMIT)
+        _absorb(pool, backward, source, DISCOVERED_BACKWARD)
+        _absorb(pool, forward, source, DISCOVERED_FORWARD)
 
-        await asyncio.gather(*[_one(key, source) for key, source in seeds])
+    await asyncio.gather(*[_one(key, source) for key, source in seeds])
 
     # Never propose what the build has already seen — its own seeds included.
     seed_keys: set[str] = set()

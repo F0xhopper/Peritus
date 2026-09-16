@@ -99,7 +99,8 @@ def _stub_http(by_edge: dict[str, dict[str, list[dict]]]):
             papers = by_edge.get(edge, {}).get(seed_key, [])
             return _Response({"data": [{field: p} for p in papers]})
 
-    return patch.object(snowball_module.httpx, "AsyncClient", lambda **kw: _Client())
+    # See test_pubmed_fetcher: patch the `shared_client` seam, not httpx.
+    return patch.object(snowball_module, "shared_client", lambda **kw: _Client())
 
 
 # ── seeds ────────────────────────────────────────────────────────────────────

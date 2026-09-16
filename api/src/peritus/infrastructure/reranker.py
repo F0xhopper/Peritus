@@ -9,11 +9,10 @@ available, and otherwise scores passages in small windows and merges the results
 import asyncio
 from typing import Any
 
-import httpx
-
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.http import shared_client
 
 logger = get_logger(__name__)
 
@@ -74,20 +73,20 @@ async def _cohere_rerank(
     """Cross-encoder rerank via the Cohere API. Returns None on any failure."""
     docs = [d[:_MAX_DOC_CHARS] for d in documents]
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                "https://api.cohere.com/v2/rerank",
-                headers={
-                    "Authorization": f"Bearer {settings.COHERE_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": settings.COHERE_RERANK_MODEL,
-                    "query": query,
-                    "documents": docs,
-                    "top_n": min(top_n, len(docs)),
-                },
-            )
+        client = shared_client(timeout=30, follow_redirects=False)
+        resp = await client.post(
+            "https://api.cohere.com/v2/rerank",
+            headers={
+                "Authorization": f"Bearer {settings.COHERE_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.COHERE_RERANK_MODEL,
+                "query": query,
+                "documents": docs,
+                "top_n": min(top_n, len(docs)),
+            },
+        )
         if resp.status_code != 200:
             logger.warning("Cohere rerank HTTP %d: %s", resp.status_code, resp.text[:200])
             return None

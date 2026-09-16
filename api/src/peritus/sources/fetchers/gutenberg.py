@@ -23,6 +23,7 @@ from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_client import get_anthropic_client
 from peritus.infrastructure.gutenberg_catalogue import load_catalogue, title_matches
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.base import (
     STATUS_ERROR,
@@ -34,7 +35,7 @@ from peritus.sources.sections import apply_sections
 logger = get_logger(__name__)
 
 _GUTENDEX = "https://gutendex.com/books/"
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 _MAX_CHARS = 200_000
 # Per Gutendex call. Discovery waits on every fetcher, so this bounds how long a
 # fallback lookup may delay the build; a slow call costs that one book.
@@ -133,10 +134,8 @@ class GutenbergFetcher:
         discard every book already resolved alongside it.
         """
         candidates: list[SourceCandidate] = []
-        async with httpx.AsyncClient(
-            timeout=_GUTENDEX_TIMEOUT, headers=_HEADERS, follow_redirects=True
-        ) as client:
-            per_book = await asyncio.gather(*[_lookup_book(client, b) for b in identified])
+        client = shared_client(timeout=_GUTENDEX_TIMEOUT, headers=_HEADERS, follow_redirects=True)
+        per_book = await asyncio.gather(*[_lookup_book(client, b) for b in identified])
 
         timeouts = 0
         for book_info, (results, timed_out) in zip(identified, per_book, strict=True):
@@ -193,14 +192,12 @@ class GutenbergFetcher:
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
         book_id = candidate.metadata.get("gutenberg_id")
-        async with httpx.AsyncClient(timeout=30, headers=_HEADERS, follow_redirects=True) as client:
-            try:
-                text = await _download_book(
-                    client, book_id, candidate.metadata.get("formats") or {}
-                )
-            except Exception as exc:
-                logger.warning("Gutenberg download failed for book %s: %s", book_id, exc)
-                return None
+        client = shared_client(timeout=30, headers=_HEADERS, follow_redirects=True)
+        try:
+            text = await _download_book(client, book_id, candidate.metadata.get("formats") or {})
+        except Exception as exc:
+            logger.warning("Gutenberg download failed for book %s: %s", book_id, exc)
+            return None
         if len(text) < 500:
             return None
         # The plan's sections, when it named some, rather than the book's opening.

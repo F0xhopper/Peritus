@@ -18,6 +18,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.domain import (
     Identifiers,
     RawSource,
@@ -34,7 +35,7 @@ _REST = "https://www.ebi.ac.uk/europepmc/webservices/rest"
 _SEARCH_URL = f"{_REST}/search"
 _ARTICLE_URL = "https://europepmc.org/article/{src}/{ext_id}"
 
-HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+HEADERS = {"User-Agent": RESEARCH_UA}
 MIN_FULL_TEXT = 3_000
 MAX_FULL_TEXT = 120_000
 # Below this an "abstract" is a structured-heading stub or a bare citation line,
@@ -75,10 +76,10 @@ class PubmedFetcher:
             "pageSize": max(1, min(max_results, MAX_PAGE_SIZE)),
         }
         try:
-            async with httpx.AsyncClient(timeout=30, headers=HEADERS) as http:
-                resp = await http.get(_SEARCH_URL, params=params)
-                resp.raise_for_status()
-                payload = resp.json()
+            http = shared_client(timeout=30, headers=HEADERS, follow_redirects=False)
+            resp = await http.get(_SEARCH_URL, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
         except Exception as exc:
             logger.warning("Europe PMC search failed for %r: %s", query, exc)
             note_search_failure(*classify_search_error(exc, "Europe PMC"))
@@ -206,19 +207,19 @@ async def pmcid_for_pmid(pmid: str) -> str | None:
     full text and an abstract.
     """
     try:
-        async with httpx.AsyncClient(timeout=15, headers=HEADERS) as http:
-            resp = await http.get(
-                _SEARCH_URL,
-                params={
-                    "query": f"EXT_ID:{pmid} AND SRC:MED",
-                    "format": "json",
-                    "resultType": "lite",
-                    "pageSize": 1,
-                },
-            )
-            if resp.status_code != 200:
-                return None
-            results = resp.json().get("resultList", {}).get("result", []) or []
+        http = shared_client(timeout=15, headers=HEADERS, follow_redirects=False)
+        resp = await http.get(
+            _SEARCH_URL,
+            params={
+                "query": f"EXT_ID:{pmid} AND SRC:MED",
+                "format": "json",
+                "resultType": "lite",
+                "pageSize": 1,
+            },
+        )
+        if resp.status_code != 200:
+            return None
+        results = resp.json().get("resultList", {}).get("result", []) or []
     except Exception as exc:
         logger.debug("Europe PMC id lookup failed for PMID %s: %s", pmid, exc)
         return None

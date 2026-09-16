@@ -8,6 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA
 from peritus.sources.domain import (
     Identifiers,
     RawSource,
@@ -23,7 +24,7 @@ logger = get_logger(__name__)
 _AR5IV = "https://ar5iv.labs.arxiv.org/html/"
 
 # Shared with the citation-snowballing step in the builder.
-HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+HEADERS = {"User-Agent": RESEARCH_UA}
 MIN_FULL_TEXT = 3_000
 MAX_FULL_TEXT = 120_000
 

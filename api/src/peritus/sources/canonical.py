@@ -48,9 +48,8 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import quote
 
-import httpx
-
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.domain import (
     FIGURE_ABOUT_ONLY,
     FIGURE_OWN_VOICE,
@@ -130,7 +129,7 @@ _EXA_RESULTS = 5
 _ARCHIVE_ROWS = 6
 _ARCHIVE_TIMEOUT = 15.0
 _ARXIV_TIMEOUT = 15.0
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 _MIN_TEXT = 2_000
 # The same ceiling the Gutenberg fetcher applies. Raising it without a way to
 # choose *which* part of a long work to keep would only buy a longer prefix —
@@ -736,10 +735,10 @@ async def _archive_route(work: MustHaveWork, _exa) -> list[SourceCandidate]:
         ("rows", _ARCHIVE_ROWS),
         ("output", "json"),
     ]
-    async with httpx.AsyncClient(timeout=_ARCHIVE_TIMEOUT, headers=_HEADERS) as http:
-        resp = await http.get(_ARCHIVE_SEARCH, params=params)
-        resp.raise_for_status()
-        docs = (resp.json().get("response") or {}).get("docs") or []
+    http = shared_client(timeout=_ARCHIVE_TIMEOUT, headers=_HEADERS, follow_redirects=False)
+    resp = await http.get(_ARCHIVE_SEARCH, params=params)
+    resp.raise_for_status()
+    docs = (resp.json().get("response") or {}).get("docs") or []
 
     candidates = []
     for doc in docs:
@@ -845,31 +844,31 @@ class ArchiveTextFetcher:
         identifier = candidate.metadata.get("archive_id") or archive_identifier(candidate.url)
         if not identifier:
             return None
-        async with httpx.AsyncClient(timeout=60, headers=_HEADERS, follow_redirects=True) as http:
-            meta_resp = await http.get(f"https://archive.org/metadata/{identifier}")
-            meta_resp.raise_for_status()
-            item = meta_resp.json()
-            reusable, why = archive_item_is_reusable(item.get("metadata") or {})
-            if not reusable:
-                logger.warning(
-                    "Internet Archive item %s not used: %s (%r)",
-                    identifier,
-                    why,
-                    candidate.title,
-                )
-                return None
-            names = [
-                str(f.get("name", ""))
-                for f in (item.get("files") or [])
-                if str(f.get("name", "")).endswith("_djvu.txt")
-            ]
-            if not names:
-                return None
-            preferred = f"{identifier}_djvu.txt"
-            name = preferred if preferred in names else names[0]
-            resp = await http.get(f"https://archive.org/download/{identifier}/{quote(name)}")
-            resp.raise_for_status()
-            text = resp.text.strip()
+        http = shared_client(timeout=60, headers=_HEADERS, follow_redirects=True)
+        meta_resp = await http.get(f"https://archive.org/metadata/{identifier}")
+        meta_resp.raise_for_status()
+        item = meta_resp.json()
+        reusable, why = archive_item_is_reusable(item.get("metadata") or {})
+        if not reusable:
+            logger.warning(
+                "Internet Archive item %s not used: %s (%r)",
+                identifier,
+                why,
+                candidate.title,
+            )
+            return None
+        names = [
+            str(f.get("name", ""))
+            for f in (item.get("files") or [])
+            if str(f.get("name", "")).endswith("_djvu.txt")
+        ]
+        if not names:
+            return None
+        preferred = f"{identifier}_djvu.txt"
+        name = preferred if preferred in names else names[0]
+        resp = await http.get(f"https://archive.org/download/{identifier}/{quote(name)}")
+        resp.raise_for_status()
+        text = resp.text.strip()
         if len(text) < _MIN_TEXT:
             return None
         if not looks_like_prose(text):

@@ -19,11 +19,10 @@ for "Jacques Maritain Thomism" ranks the entry about him first
 import asyncio
 from typing import Any
 
-import httpx
-
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.dedup import normalise_url
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.base import note_search_failure
@@ -32,7 +31,7 @@ from peritus.sources.hosts import ABOUT_HOSTS, is_about_page
 
 logger = get_logger(__name__)
 
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 _MAX_CHARS = 50_000
 # Results per person, per search.
 _RESULTS_PER_SEARCH = 3
@@ -119,10 +118,8 @@ class ThoughtLeadersFetcher:
             from peritus.sources.fetchers.web import _fetch_page
 
             try:
-                async with httpx.AsyncClient(
-                    timeout=20, headers=_HEADERS, follow_redirects=True
-                ) as client:
-                    text, title = await _fetch_page(client, candidate.url)
+                client = shared_client(timeout=20, headers=_HEADERS, follow_redirects=True)
+                text, title = await _fetch_page(client, candidate.url)
             except Exception as exc:
                 logger.warning("Web fetch for leader %r at %r failed: %s", name, candidate.url, exc)
                 return None

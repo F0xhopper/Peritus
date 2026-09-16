@@ -6,6 +6,7 @@ from contextlib import suppress
 
 from peritus.core.logging import get_logger, setup_logging
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
+from peritus.infrastructure.http import close_shared
 from peritus.jobs.worker import BuildWorker
 
 logger = get_logger(__name__)
@@ -36,6 +37,10 @@ async def _run() -> None:
     try:
         await worker.run()
     finally:
+        # The fetchers' shared clients hold open connections to a dozen hosts.
+        # Fly sends SIGTERM on every deploy and expects a clean exit inside
+        # kill_timeout, so they are closed rather than left to the interpreter.
+        await close_shared()
         await close_pool()
 
 

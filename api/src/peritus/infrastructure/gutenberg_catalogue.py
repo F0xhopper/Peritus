@@ -34,6 +34,7 @@ import httpx
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA
 
 logger = get_logger(__name__)
 
@@ -44,7 +45,7 @@ _DOWNLOAD_TIMEOUT = 90.0
 # After a failed download, don't try again for this long: a build must not pay
 # a 90-second timeout per fetcher call while gutenberg.org is down.
 _RETRY_AFTER_FAILURE_SECONDS = 600.0
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 
 _TITLE_STOPWORDS = frozenset({"the", "a", "an", "of", "and", "or", "on", "in", "to"})
 _NORM_RE = re.compile(r"[^a-z0-9 ]")

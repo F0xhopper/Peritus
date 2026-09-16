@@ -1,7 +1,16 @@
-"""Outbound HTTP, with the guard that makes a user-supplied URL safe to fetch.
+"""Outbound HTTP: one client per configuration, and the guard on user-supplied URLs.
 
-Every fetch in this codebase that follows a URL the user or a discovery result
-chose runs through :func:`guarded_client`. The guard exists because the worker
+Two jobs, both of which used to be done — differently — at each of twenty-seven
+call sites.
+
+**Connection reuse.** Every fetcher built its own ``httpx.AsyncClient`` per call
+and closed it again. A discovery round hits the same handful of hosts hundreds
+of times, so each of those requests paid for a fresh TCP connection and TLS
+handshake because the thing that would have pooled it had just been thrown away.
+:func:`shared_client` returns one long-lived client per distinct configuration.
+
+**The SSRF guard.** Every fetch that follows a URL the user or a discovery result
+chose passes ``guarded=True``. The guard exists because the worker
 sits inside a private network: on Fly it can reach every other machine in the
 organisation over 6PN, and on any cloud it can reach the instance metadata
 endpoint at ``169.254.169.254``. A scheme check alone — which is all
@@ -25,6 +34,7 @@ literal-address cases this closes are neither.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import ipaddress
 import socket
 from urllib.parse import urlsplit
@@ -36,9 +46,15 @@ from peritus.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-# What a fetcher sends when it has no opinion. Individual fetchers still pass
-# their own timeouts; this is the identity, which every outbound request shares.
-DEFAULT_HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; Peritus/1.0)"}
+# The two identities this process goes out under. RESEARCH is honest about what
+# is calling, which is what the scholarly APIs' etiquette asks for and what gets
+# a polite-pool rate limit. BROWSER exists because a plain web page served by a
+# CDN is frequently refused outright to anything that does not look like a
+# browser — and a page nobody can read is a source nobody can cite.
+RESEARCH_UA = "Peritus/2.0 (research corpus builder)"
+BROWSER_UA = "Mozilla/5.0 (compatible; Peritus/1.0)"
+
+DEFAULT_HEADERS = {"User-Agent": RESEARCH_UA}
 
 
 class BlockedURLError(PeritusError):
@@ -173,6 +189,57 @@ async def _guard_hook(request: httpx.Request) -> None:
     await assert_public_url(str(request.url))
 
 
+# ── shared clients ───────────────────────────────────────────────────────────
+#
+# Every fetcher used to build its own `httpx.AsyncClient` per call — 27 such
+# constructions. A discovery round hits the same handful of hosts (OpenAlex,
+# arXiv, Europe PMC, Semantic Scholar) hundreds of times, and each of those
+# requests was paying for a fresh TCP connection and TLS handshake because the
+# client that would have pooled it had just been closed. The per-site timeout,
+# header and redirect settings had diverged too.
+#
+# One client per distinct configuration, held for the life of the process.
+# `httpx.AsyncClient` is safe to use from many tasks at once and pools
+# connections across them, which is the point.
+
+_clients: dict[tuple[object, ...], httpx.AsyncClient] = {}
+
+
+def shared_client(
+    *,
+    timeout: float = 20.0,
+    headers: dict[str, str] | None = None,
+    follow_redirects: bool = True,
+    guarded: bool = False,
+) -> httpx.AsyncClient:
+    """A process-wide client for this configuration.
+
+    **Do not close it and do not use it as a context manager** — it is shared,
+    and `async with` would close it for every other caller. `close_shared()`
+    releases them all at shutdown.
+
+    Set ``guarded`` for any URL that came from outside the process: an upload, a
+    search result, an open-access location a metadata API handed over. For a
+    call to a known API endpoint (OpenAlex, Mistral, Europe PMC) leave it off —
+    the host is ours to trust and the guard costs a resolution per request.
+    """
+    merged = dict(DEFAULT_HEADERS)
+    if headers:
+        merged.update(headers)
+    key = (timeout, follow_redirects, guarded, tuple(sorted(merged.items())))
+
+    client = _clients.get(key)
+    if client is None or client.is_closed:
+        client = httpx.AsyncClient(
+            timeout=timeout,
+            headers=merged,
+            follow_redirects=follow_redirects,
+            event_hooks={"request": [_guard_hook]} if guarded else {},
+        )
+        _clients[key] = client
+    return client
+
+
 def guarded_client(
     *,
     timeout: float = 20.0,
@@ -180,12 +247,11 @@ def guarded_client(
     follow_redirects: bool = True,
     **kwargs: object,
 ) -> httpx.AsyncClient:
-    """An ``httpx.AsyncClient`` that refuses to reach anything non-public.
+    """A one-off client that refuses to reach anything non-public.
 
-    Use this for any URL that came from outside the process: an upload, a search
-    result, an open-access location a metadata API handed over. For a call to a
-    known API endpoint (OpenAI, Mistral, Europe PMC) a plain client is right —
-    the host is ours to trust and the guard only costs a resolution.
+    Prefer :func:`shared_client` with ``guarded=True``. This exists for the
+    cases that need their own transport — a test's `MockTransport`, above all —
+    and unlike the shared ones it *is* meant to be closed by its caller.
     """
     merged = dict(DEFAULT_HEADERS)
     if headers:
@@ -197,3 +263,14 @@ def guarded_client(
         event_hooks={"request": [_guard_hook]},
         **kwargs,  # type: ignore[arg-type]
     )
+
+
+async def close_shared() -> None:
+    """Release every shared client. Called from the API's lifespan and the
+    worker's shutdown; idempotent, and safe with none open."""
+    clients = list(_clients.values())
+    _clients.clear()
+    for client in clients:
+        if not client.is_closed:
+            with contextlib.suppress(Exception):
+                await client.aclose()

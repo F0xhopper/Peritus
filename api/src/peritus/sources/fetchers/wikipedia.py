@@ -1,8 +1,7 @@
 import re
 
-import httpx
-
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import shared_client
 from peritus.infrastructure.wikimedia import user_agent
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 
@@ -22,20 +21,20 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 class WikipediaFetcher:
     async def search(self, query: str, max_results: int = 4) -> list[SourceCandidate]:
-        async with httpx.AsyncClient(timeout=30, headers=_HEADERS) as client:
-            resp = await client.get(
-                _API_URL,
-                params={
-                    "action": "query",
-                    "list": "search",
-                    "srsearch": query,
-                    "srlimit": max_results,
-                    "srprop": "snippet",
-                    "format": "json",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        client = shared_client(timeout=30, headers=_HEADERS, follow_redirects=False)
+        resp = await client.get(
+            _API_URL,
+            params={
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "srlimit": max_results,
+                "srprop": "snippet",
+                "format": "json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
         candidates = []
         for item in data.get("query", {}).get("search", []):
             title = item["title"]
@@ -53,20 +52,20 @@ class WikipediaFetcher:
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
         title = candidate.metadata["wiki_title"]
-        async with httpx.AsyncClient(timeout=30, headers=_HEADERS) as client:
-            resp = await client.get(
-                _API_URL,
-                params={
-                    "action": "query",
-                    "titles": title,
-                    "prop": "extracts",
-                    "explaintext": True,
-                    "exsectionformat": "plain",
-                    "format": "json",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        client = shared_client(timeout=30, headers=_HEADERS, follow_redirects=False)
+        resp = await client.get(
+            _API_URL,
+            params={
+                "action": "query",
+                "titles": title,
+                "prop": "extracts",
+                "explaintext": True,
+                "exsectionformat": "plain",
+                "format": "json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
         pages = data.get("query", {}).get("pages", {})
         page = next(iter(pages.values()))
         text = page.get("extract", "")

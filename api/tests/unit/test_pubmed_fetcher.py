@@ -99,7 +99,11 @@ class _StubClient:
 
 
 def _patch_http(client: _StubClient):
-    return patch.object(pubmed.httpx, "AsyncClient", client)
+    # The named seam, not `httpx.AsyncClient`: clients are now shared for the
+    # life of the process (infrastructure/http.shared_client), so a test that
+    # replaced the constructor would either miss a cached client or poison one
+    # for every test after it.
+    return patch.object(pubmed, "shared_client", client)
 
 
 # ── search ────────────────────────────────────────────────────────────────────

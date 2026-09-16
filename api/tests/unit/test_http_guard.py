@@ -20,11 +20,15 @@ import pytest
 
 from peritus.api.schemas.sources import AddUrlRequest
 from peritus.infrastructure.http import (
+    BROWSER_UA,
+    RESEARCH_UA,
     BlockedURLError,
     _is_public,
     assert_public_url,
     blocked_url_reason,
+    close_shared,
     guarded_client,
+    shared_client,
 )
 
 # Every shape of "not the public internet" the guard has to recognise, with the
@@ -170,3 +174,88 @@ def test_nat64_wrapped_private_addresses_are_not_public():
     report it global."""
     assert not _is_public(ipaddress.ip_address("64:ff9b::a00:1"))
     assert _is_public(ipaddress.ip_address("64:ff9b::5db8:d822"))
+
+
+# ── the shared client registry ──
+
+
+@pytest.fixture(autouse=True)
+async def _no_leaked_clients():
+    """Every test here starts and ends with an empty registry.
+
+    The clients are process-wide by design, so a test that creates one would
+    otherwise hand it to the next test — and to the rest of the suite.
+    """
+    await close_shared()
+    yield
+    await close_shared()
+
+
+def test_the_same_configuration_returns_the_same_client():
+    """The whole point: a discovery round hits the same host hundreds of times,
+    and a client per call threw away the connection pool that would have made
+    that cheap."""
+    a = shared_client(timeout=30, headers={"User-Agent": RESEARCH_UA})
+    b = shared_client(timeout=30, headers={"User-Agent": RESEARCH_UA})
+    assert a is b
+
+
+def test_different_configurations_get_different_clients():
+    assert shared_client(timeout=30) is not shared_client(timeout=10)
+    assert shared_client(headers={"X": "1"}) is not shared_client(headers={"X": "2"})
+    assert shared_client(follow_redirects=True) is not shared_client(follow_redirects=False)
+    # The guard is part of the identity: a client that checks addresses must
+    # never be handed to a caller that asked for one that does not, or vice versa.
+    assert shared_client(guarded=True) is not shared_client(guarded=False)
+
+
+def test_header_order_does_not_split_the_cache():
+    a = shared_client(headers={"A": "1", "B": "2"})
+    b = shared_client(headers={"B": "2", "A": "1"})
+    assert a is b
+
+
+def test_a_shared_client_carries_the_default_user_agent():
+    client = shared_client()
+    assert client.headers["user-agent"] == RESEARCH_UA
+
+
+def test_an_explicit_header_overrides_the_default():
+    client = shared_client(headers={"User-Agent": BROWSER_UA})
+    assert client.headers["user-agent"] == BROWSER_UA
+
+
+async def test_a_closed_client_is_replaced_rather_than_handed_back():
+    """`close_shared` runs at shutdown, but a client can also be closed by a
+    transport failure. Returning a closed one would fail every later request."""
+    first = shared_client(timeout=5)
+    await first.aclose()
+    second = shared_client(timeout=5)
+    assert second is not first
+    assert not second.is_closed
+
+
+async def test_close_shared_is_idempotent():
+    shared_client(timeout=5)
+    await close_shared()
+    await close_shared()
+
+
+async def test_only_a_guarded_client_checks_addresses(monkeypatch):
+    """Two clients, one guard. An unguarded client talks to known API hosts and
+    must not pay a resolution per request."""
+    seen: list[str] = []
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200)
+
+    unguarded = shared_client(guarded=False)
+    monkeypatch.setattr(unguarded, "_transport", httpx.MockTransport(_handler))
+    await unguarded.get("http://127.0.0.1/would-be-blocked-if-guarded")
+    assert seen == ["http://127.0.0.1/would-be-blocked-if-guarded"]
+
+    async with guarded_client(transport=httpx.MockTransport(_handler)) as guarded:
+        with pytest.raises(BlockedURLError):
+            await guarded.get("http://127.0.0.1/blocked")
+    assert len(seen) == 1
