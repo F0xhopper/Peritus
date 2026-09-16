@@ -304,6 +304,12 @@ class Settings:
     # Supabase enforces its own per-project limits too; this is a first line.
     AUTH_RATE_LIMIT: int = int(os.getenv("AUTH_RATE_LIMIT", "10"))
     AUTH_RATE_WINDOW: float = float(os.getenv("AUTH_RATE_WINDOW", "60"))
+    # Whether to believe Fly-Client-IP / X-Forwarded-For when deciding which
+    # client a request came from. A forwarded header is only as trustworthy as
+    # the proxy that set it: run directly, anyone can write one and rotate it to
+    # get a fresh rate-limit bucket per request. Empty means "when in
+    # production", which is where the Fly proxy is in front.
+    TRUST_PROXY_HEADERS: str = os.getenv("TRUST_PROXY_HEADERS", "")
 
     # Allowed CORS origins for browser clients, comma-separated. The TUI/CLI are
     # not browsers and ignore CORS, so this defaults to local dev origins only —
@@ -342,6 +348,13 @@ class Settings:
     @property
     def IS_PRODUCTION(self) -> bool:
         return self.PERITUS_ENV in ("production", "prod")
+
+    @property
+    def TRUST_PROXY(self) -> bool:
+        """Whether forwarded client-IP headers may be believed."""
+        if self.TRUST_PROXY_HEADERS:
+            return self.TRUST_PROXY_HEADERS.lower() in ("1", "true", "yes")
+        return self.IS_PRODUCTION
 
     @property
     def CORS_ORIGINS(self) -> list[str]:

@@ -5,7 +5,7 @@ monkeypatching ``time.monotonic`` rather than by sleeping.
 """
 
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from peritus.api import ratelimit
 from peritus.api.auth import AuthUser
@@ -118,3 +118,75 @@ async def test_chat_rate_limit_is_keyed_on_the_user_not_the_process(monkeypatch)
         await chat_rate_limit(alice)
 
     assert await chat_rate_limit(bob) is bob
+
+
+# ── which address a request is charged against ──
+
+
+def _request(headers: dict[str, str], peer: str | None = "203.0.113.9") -> Request:
+    """A Starlette Request with the given headers and socket peer."""
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/auth/otp",
+        "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()],
+        "client": (peer, 54321) if peer else None,
+    }
+    return Request(scope)
+
+
+def test_client_ip_prefers_fly_client_ip(monkeypatch):
+    """Fly's proxy sets this itself and overwrites whatever the client sent."""
+    monkeypatch.setattr(ratelimit.settings, "TRUST_PROXY_HEADERS", "true")
+    req = _request({"fly-client-ip": "198.51.100.7", "x-forwarded-for": "1.2.3.4, 198.51.100.7"})
+    assert ratelimit._client_ip(req) == "198.51.100.7"
+
+
+def test_client_ip_takes_the_last_forwarded_hop_not_the_first(monkeypatch):
+    """The bug this replaces: the *first* XFF entry is whatever the client wrote.
+
+    Reading it let an attacker rotate one header and get a fresh bucket for every
+    OTP attempt. The last hop is the entry our own nearest proxy added.
+    """
+    monkeypatch.setattr(ratelimit.settings, "TRUST_PROXY_HEADERS", "true")
+    req = _request({"x-forwarded-for": "10.9.9.9, 198.51.100.7"})
+    assert ratelimit._client_ip(req) == "198.51.100.7"
+
+
+def test_a_spoofed_forwarded_header_cannot_move_the_bucket(monkeypatch):
+    """The property that matters, stated directly: an attacker controlling the
+    left-hand entries always lands in the same bucket."""
+    monkeypatch.setattr(ratelimit.settings, "TRUST_PROXY_HEADERS", "true")
+    buckets = {
+        ratelimit._client_ip(_request({"x-forwarded-for": f"{i}.{i}.{i}.{i}, 198.51.100.7"}))
+        for i in range(1, 20)
+    }
+    assert buckets == {"198.51.100.7"}
+
+
+def test_forwarded_headers_are_ignored_when_no_proxy_is_trusted(monkeypatch):
+    """Run without a proxy in front and anyone can write these headers, so the
+    socket peer is the only honest answer."""
+    monkeypatch.setattr(ratelimit.settings, "TRUST_PROXY_HEADERS", "false")
+    req = _request({"fly-client-ip": "198.51.100.7", "x-forwarded-for": "1.2.3.4"})
+    assert ratelimit._client_ip(req) == "203.0.113.9"
+
+
+def test_client_ip_falls_back_to_the_socket_peer(monkeypatch):
+    monkeypatch.setattr(ratelimit.settings, "TRUST_PROXY_HEADERS", "true")
+    assert ratelimit._client_ip(_request({})) == "203.0.113.9"
+
+
+def test_client_ip_is_unknown_when_there_is_no_peer(monkeypatch):
+    monkeypatch.setattr(ratelimit.settings, "TRUST_PROXY_HEADERS", "true")
+    assert ratelimit._client_ip(_request({}, peer=None)) == "unknown"
+
+
+def test_trust_defaults_to_production(monkeypatch):
+    """Nothing set: believe the headers in production, where Fly's proxy is in
+    front, and not otherwise."""
+    monkeypatch.setattr(ratelimit.settings, "TRUST_PROXY_HEADERS", "")
+    monkeypatch.setattr(ratelimit.settings, "PERITUS_ENV", "production")
+    assert ratelimit.settings.TRUST_PROXY is True
+    monkeypatch.setattr(ratelimit.settings, "PERITUS_ENV", "development")
+    assert ratelimit.settings.TRUST_PROXY is False

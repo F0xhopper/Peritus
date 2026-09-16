@@ -74,11 +74,31 @@ _chat_limiter = SlidingWindowLimiter(settings.CHAT_RATE_LIMIT, settings.CHAT_RAT
 
 
 def _client_ip(request: Request) -> str:
-    # Trust the first hop of X-Forwarded-For when behind a proxy; fall back to the
-    # socket peer. (A hardened deployment should have the proxy set this.)
-    fwd = request.headers.get("x-forwarded-for")
-    if fwd:
-        return fwd.split(",")[0].strip()
+    """The address to throttle this request against.
+
+    The obvious reading — the first `X-Forwarded-For` hop — is the wrong one.
+    That entry is whatever the *client* wrote; every proxy in the chain appends
+    to the right of it. Reading it means an attacker rotates one header and gets
+    a fresh bucket per request, which is exactly the OTP brute-force this limiter
+    exists to stop.
+
+    So: `Fly-Client-IP` first, which Fly's proxy sets itself and overwrites on
+    every request. Failing that the **last** XFF hop, which is the entry our own
+    nearest trusted proxy added. Failing both, the socket peer.
+
+    And none of the headers count unless `settings.TRUST_PROXY` says something
+    trustworthy is in front — run directly, the socket peer is the only honest
+    answer available.
+    """
+    if settings.TRUST_PROXY:
+        fly = request.headers.get("fly-client-ip")
+        if fly:
+            return fly.strip()
+        fwd = request.headers.get("x-forwarded-for")
+        if fwd:
+            hops = [h.strip() for h in fwd.split(",") if h.strip()]
+            if hops:
+                return hops[-1]
     return request.client.host if request.client else "unknown"
 
 
