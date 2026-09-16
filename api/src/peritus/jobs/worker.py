@@ -134,6 +134,105 @@ class _JobCancelled(Exception):
     """Raised internally when a running job is cancelled or reaped mid-build."""
 
 
+class _Supervision:
+    """Heartbeat, cancellation and cleanup for one running job.
+
+    Builds and uploads are different pipelines with the same life support
+    around them, and it used to be written twice: two `heartbeat_loop` closures
+    over two `cancelled` flags, two try/finally blocks cancelling two task
+    handles in the same order. The duplication is the risk — the two copies had
+    already diverged over whether a spend cap was checked, and the next thing to
+    diverge would have been the cleanup.
+
+    The three things worth knowing:
+
+    * **The cap check rides the heartbeat.** It is the one thing already running
+      on a fixed cadence regardless of which stage the pipeline is in, so a
+      runaway is stopped mid-stage rather than at the next stage boundary.
+    * **A cancelled work task means three different things** — over cap,
+      cancelled/reaped, or worker shutdown — and only this class knows which,
+      because only it knows why it pulled the trigger. `run` translates.
+    * **The heartbeat outlives a failure.** `aclose` cancels the work task
+      first, then the heartbeat, so a build that is being torn down cannot be
+      reaped halfway through its own cleanup.
+    """
+
+    def __init__(self, worker: "BuildWorker", job: BuildJob, meter: BuildMeter | None) -> None:
+        self._worker = worker
+        self._job = job
+        self._meter = meter
+        self._task: asyncio.Task[Any] | None = None
+        self._cancelled = False
+        self._over_cap = False
+        self._meter_token = set_meter(meter) if meter is not None else None
+        self._heartbeat = asyncio.create_task(self._beat_loop())
+        self._flush = (
+            asyncio.create_task(flush_periodically(meter, worker._persist_usage(meter)))
+            if meter is not None
+            else None
+        )
+
+    async def _beat_loop(self) -> None:
+        while True:
+            await asyncio.sleep(settings.WORKER_HEARTBEAT_INTERVAL)
+            if self._meter is not None and self._meter.over_cap and not self._over_cap:
+                self._over_cap = True
+                self._stop_work()
+                return
+            if not await self._worker._beat(self._job.id):
+                self._cancelled = True
+                self._stop_work()
+                return
+
+    def _stop_work(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+
+    async def run(self, coro: Any) -> Any:
+        """Await ``coro`` as a cancellable task, translating why it was stopped.
+
+        Raises :class:`SpendCapExceeded` when the meter tripped,
+        :class:`_JobCancelled` when the job was cancelled or reaped, and
+        re-raises ``CancelledError`` untouched when the worker itself is
+        shutting down — which is what makes `_drain` requeue the job instead of
+        failing it.
+        """
+        self._task = asyncio.create_task(coro)
+        try:
+            return await self._task
+        except asyncio.CancelledError:
+            if self._over_cap:
+                raise SpendCapExceeded(
+                    self._meter.spent_usd if self._meter else 0.0,
+                    float(self._meter.cap_usd) if self._meter and self._meter.cap_usd else 0.0,
+                ) from None
+            if self._cancelled:
+                raise _JobCancelled from None
+            raise
+
+    async def aclose(self) -> None:
+        """Stop everything this started, in the order that makes it safe."""
+        # Never leave the pipeline running detached (e.g. on shutdown cancellation).
+        if self._task is not None and not self._task.done():
+            self._task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._task
+        self._heartbeat.cancel()
+        with suppress(asyncio.CancelledError):
+            await self._heartbeat
+        if self._flush is not None:
+            self._flush.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._flush
+        # Final flush: whatever the job spent in its last few seconds must still
+        # be recorded, including on the failure and cancellation paths.
+        if self._meter is not None:
+            with suppress(Exception):
+                await flush_once(self._meter, self._worker._persist_usage(self._meter))
+        if self._meter_token is not None:
+            reset_meter(self._meter_token)
+
+
 class BuildWorker:
     def __init__(
         self,
@@ -343,41 +442,11 @@ class BuildWorker:
             await self._run_ingest_job(job, expert)
             return
 
-        cancelled = False
-        cap_exceeded = False
-        build_task: asyncio.Task[Any] | None = None
-
-        # Metering context for this job. Bound here, before the build task is
-        # created, so every task the pipeline spawns inherits it — and so two
-        # concurrent builds in this worker meter independently.
+        # Metering context for this job. Bound before the build task is created,
+        # so every task the pipeline spawns inherits it — and so two concurrent
+        # builds in this worker meter independently.
         meter = await self._start_meter(job, expert)
-        meter_token = set_meter(meter) if meter is not None else None
-
-        async def heartbeat_loop() -> None:
-            nonlocal cancelled, cap_exceeded
-            while True:
-                await asyncio.sleep(settings.WORKER_HEARTBEAT_INTERVAL)
-                # The cap check rides the heartbeat: it is the one place that
-                # already runs on a fixed cadence regardless of what stage the
-                # build is in, so a runaway is stopped mid-stage rather than at
-                # the next stage boundary.
-                if meter is not None and meter.over_cap and not cap_exceeded:
-                    cap_exceeded = True
-                    if build_task is not None:
-                        build_task.cancel()
-                    return
-                if not await self._beat(job.id):
-                    cancelled = True
-                    if build_task is not None:
-                        build_task.cancel()
-                    return
-
-        hb_task = asyncio.create_task(heartbeat_loop())
-        flush_task = (
-            asyncio.create_task(flush_periodically(meter, self._persist_usage(meter)))
-            if meter is not None
-            else None
-        )
+        supervision = _Supervision(self, job, meter)
         try:
             builder = self._builder_factory(job.source_filter)
             resume_from = _resume_point(job, expert, builder)
@@ -407,22 +476,11 @@ class BuildWorker:
             # (which tests substitute) does not have to know about it.
             if hasattr(builder, "_job_id"):
                 builder._job_id = job.id
-            build_task = asyncio.create_task(
+            result: BuildResult = await supervision.run(
                 builder.resume(expert, resume_from, on_event=on_event)
                 if resume_from is not None
                 else builder.build(expert, on_event=on_event)
             )
-            try:
-                result: BuildResult = await build_task
-            except asyncio.CancelledError:
-                if cap_exceeded:
-                    raise SpendCapExceeded(
-                        meter.spent_usd if meter else 0.0,
-                        float(meter.cap_usd) if meter and meter.cap_usd else 0.0,
-                    ) from None
-                if cancelled:
-                    raise _JobCancelled from None
-                raise  # worker shutdown — propagate so _drain requeues it
 
             await expert_repo.update_status(expert.id, ExpertStatus.READY)
             await self._jobs.append_event(
@@ -465,25 +523,7 @@ class BuildWorker:
         except Exception as exc:
             await self._on_failure(job, expert_repo, exc)
         finally:
-            # Never leave the pipeline running detached (e.g. on shutdown cancellation).
-            if build_task is not None and not build_task.done():
-                build_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await build_task
-            hb_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await hb_task
-            if flush_task is not None:
-                flush_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await flush_task
-            # Final flush: whatever the build spent in its last few seconds must
-            # still be recorded, including on the failure and cancellation paths.
-            if meter is not None:
-                with suppress(Exception):
-                    await flush_once(meter, self._persist_usage(meter))
-            if meter_token is not None:
-                reset_meter(meter_token)
+            await supervision.aclose()
 
     async def _run_ingest_job(self, job: BuildJob, expert) -> None:
         """Ingest one user-supplied document.
@@ -499,20 +539,9 @@ class BuildWorker:
             await self._jobs.mark_failed(job.id, self.worker_id, "Ingest job has no upload_id")
             return
 
-        cancelled = False
-        ingest_task: asyncio.Task[Any] | None = None
-
-        async def heartbeat_loop() -> None:
-            nonlocal cancelled
-            while True:
-                await asyncio.sleep(settings.WORKER_HEARTBEAT_INTERVAL)
-                if not await self._beat(job.id):
-                    cancelled = True
-                    if ingest_task is not None:
-                        ingest_task.cancel()
-                    return
-
-        hb_task = asyncio.create_task(heartbeat_loop())
+        # No meter: an upload is not metered and holds no credits (see the
+        # docstring), so the cap half of the supervision is simply absent.
+        supervision = _Supervision(self, job, meter=None)
         try:
             await self._jobs.append_event(
                 job.id,
@@ -528,15 +557,9 @@ class BuildWorker:
             async def on_event(event: dict[str, Any]) -> None:
                 await self._jobs.append_event(job.id, event["type"], event)
 
-            ingest_task = asyncio.create_task(
+            summary = await supervision.run(
                 ingest_upload(self._pool, expert, upload_id, on_event=on_event)
             )
-            try:
-                summary = await ingest_task
-            except asyncio.CancelledError:
-                if cancelled:
-                    raise _JobCancelled from None
-                raise  # worker shutdown — propagate so _drain requeues it
 
             await self._jobs.append_event(job.id, "done", summary_event(summary))
             await self._jobs.mark_succeeded(job.id, self.worker_id)
@@ -581,13 +604,7 @@ class BuildWorker:
             logger.exception("Ingest job %d failed", job.id)
             await self._fail_or_retry_ingest(job, exc)
         finally:
-            if ingest_task is not None and not ingest_task.done():
-                ingest_task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await ingest_task
-            hb_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await hb_task
+            await supervision.aclose()
 
     async def _fail_or_retry_ingest(self, job: BuildJob, exc: Exception) -> None:
         message = f"{type(exc).__name__}: {exc}"
