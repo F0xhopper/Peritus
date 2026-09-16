@@ -123,7 +123,7 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  */
 const PICTURE_BYTES = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-  'base64',
+  'base64'
 )
 const PICTURE_SHA = 'f1e2d3c4b5a6'
 
@@ -142,8 +142,7 @@ function pictureMeta() {
     license: 'CC BY-SA 2.0',
     license_url: 'https://creativecommons.org/licenses/by-sa/2.0',
     page_url: 'https://en.wikipedia.org/wiki/Varroa_destructor',
-    file_page_url:
-      'https://commons.wikimedia.org/wiki/File:Varroa_destructor_on_honeybee_host.jpg',
+    file_page_url: 'https://commons.wikimedia.org/wiki/File:Varroa_destructor_on_honeybee_host.jpg',
     attribution_required: true,
   }
 }
@@ -274,8 +273,12 @@ async function seed() {
 }
 
 function newToken() {
-  return Array.from({ length: 32 }, () =>
-    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'[Math.floor(Math.random() * 64)],
+  return Array.from(
+    { length: 32 },
+    () =>
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-'[
+        Math.floor(Math.random() * 64)
+      ]
   ).join('')
 }
 
@@ -294,8 +297,16 @@ function shareState(slug) {
 /** The anonymous card: no slug, no id, no owner, no error. */
 function sharedCard(expert) {
   const {
-    id: _id, name: _name, status: _status, error: _error, updated_at: _updated, catalog: _catalog,
-    access: _access, persona_style: _style, edge_count: _edges, ...card
+    id: _id,
+    name: _name,
+    status: _status,
+    error: _error,
+    updated_at: _updated,
+    catalog: _catalog,
+    access: _access,
+    persona_style: _style,
+    edge_count: _edges,
+    ...card
   } = expert
   return card
 }
@@ -506,7 +517,7 @@ async function streamChat(req, res, conversationId, question) {
       has_contradiction: true,
       interrupted: false,
       created_at: new Date().toISOString(),
-    },
+    }
   )
   conversation.message_count = conversation.messages.length
   conversation.last_message_at = new Date().toISOString()
@@ -639,7 +650,7 @@ async function handle(req, res) {
     const token = decodeURIComponent(shareMatch[1])
     const foreignLink = state.links.get('__foreign__')
     const ownSlug = [...state.links.entries()].find(
-      ([slug, link]) => slug !== '__foreign__' && link.token === token,
+      ([slug, link]) => slug !== '__foreign__' && link.token === token
     )?.[0]
     const expert =
       foreignLink?.token === token ? state.foreign : ownSlug ? state.experts.get(ownSlug) : null
@@ -649,7 +660,11 @@ async function handle(req, res) {
     if (!shareMatch[2] && method === 'GET') return json(res, 200, sharedCard(expert), noStore)
     if (shareMatch[2] === '/picture' && method === 'GET') {
       if (!expert.picture) return json(res, 404, { detail: 'This expert has no picture' })
-      res.writeHead(200, { 'Content-Type': 'image/png', 'Content-Length': PICTURE_BYTES.length, ...noStore })
+      res.writeHead(200, {
+        'Content-Type': 'image/png',
+        'Content-Length': PICTURE_BYTES.length,
+        ...noStore,
+      })
       return res.end(PICTURE_BYTES)
     }
     if (shareMatch[2] === '/accept' && method === 'POST') {
@@ -842,7 +857,13 @@ async function handle(req, res) {
             output_tokens: 6_000,
             cost_usd: 0.65,
           },
-          { stage: 'validation', calls: 4, input_tokens: 62_000, output_tokens: 2_400, cost_usd: 0.12 },
+          {
+            stage: 'validation',
+            calls: 4,
+            input_tokens: 62_000,
+            output_tokens: 2_400,
+            cost_usd: 0.12,
+          },
         ],
         by_model: [
           {
@@ -942,7 +963,7 @@ async function handle(req, res) {
         200,
         [...state.conversations.values()]
           .filter((conversation) => conversation.expert_slug === slug)
-          .map(summary),
+          .map(summary)
       )
     }
     if (rest === '/conversations' && method === 'POST') {

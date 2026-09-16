@@ -49,11 +49,10 @@ export function AdminPage({ me }: { me: Me }) {
         }),
       })
       const body = (await res.json().catch(() => null)) as
-        | (GrantCreditsResult & { detail?: unknown })
-        | null
+        (GrantCreditsResult & { detail?: unknown }) | null
       if (!res.ok) {
         setError(
-          typeof body?.detail === 'string' ? body.detail : `The grant failed (${res.status}).`,
+          typeof body?.detail === 'string' ? body.detail : `The grant failed (${res.status}).`
         )
         return
       }
@@ -104,9 +103,7 @@ export function AdminPage({ me }: { me: Me }) {
                 className="mt-1.5"
               />
               <FieldError>
-                {amount.trim() !== '' && !amountValid
-                  ? 'A whole number, and not zero.'
-                  : undefined}
+                {amount.trim() !== '' && !amountValid ? 'A whole number, and not zero.' : undefined}
               </FieldError>
               <p className="text-xs text-fg-3">Negative claws credits back.</p>
             </div>

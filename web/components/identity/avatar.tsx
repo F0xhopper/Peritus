@@ -76,7 +76,7 @@ export function Avatar({
         // The tile under `rings` and `identicon`, which draw on transparency,
         // and the whole of the monogram's surface.
         'bg-expert-soft ring-1 ring-expert/40 ring-inset',
-        className,
+        className
       )}
     >
       {picture ? (

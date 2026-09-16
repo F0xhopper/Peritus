@@ -98,7 +98,7 @@ export function LedgerPage({
   const [visible, setVisible] = useStoredPreference(
     COLUMN_PREFERENCE_KEY,
     DEFAULT_COLUMNS,
-    parseColumns,
+    parseColumns
   )
 
   const toggleColumn = (key: string) => {
@@ -133,7 +133,7 @@ export function LedgerPage({
     if (!conceptFilter) return report.sources
     const needle = conceptFilter.toLowerCase()
     return report.sources.filter((source) =>
-      source.covered_concepts.some((concept) => concept.toLowerCase() === needle),
+      source.covered_concepts.some((concept) => concept.toLowerCase() === needle)
     )
   }, [report.sources, conceptFilter])
 
@@ -221,8 +221,8 @@ export function LedgerPage({
           {/* The provenance banner, when older rows genuinely lack fields. */}
           {!report.provenance.complete && (
             <Notice tone="info" title="Some rows are missing provenance">
-              {report.provenance.note} Nothing is backfilled — a guessed DOI or a guessed
-              full-text method would put a fabrication into the record.
+              {report.provenance.note} Nothing is backfilled — a guessed DOI or a guessed full-text
+              method would put a fabrication into the record.
             </Notice>
           )}
 
@@ -291,7 +291,10 @@ export function LedgerPage({
 
             <MenuRoot>
               <MenuTrigger
-                className={cn(buttonStyles({ variant: 'ghost', size: 'md' }), 'hidden lg:inline-flex')}
+                className={cn(
+                  buttonStyles({ variant: 'ghost', size: 'md' }),
+                  'hidden lg:inline-flex'
+                )}
               >
                 <Columns3 className="size-3.5" />
                 Columns
@@ -299,23 +302,23 @@ export function LedgerPage({
               <MenuContent align="start">
                 <MenuLabel label="Show">
                   {COLUMNS.map((column) => (
-                  <MenuItem
-                    key={column.key}
-                    closeOnClick={false}
-                    disabled={column.key === 'title'}
-                    onClick={() => toggleColumn(column.key)}
-                  >
-                    <span
-                      aria-hidden="true"
-                      className={cn(
-                        'grid size-3.5 place-items-center rounded-[3px] border',
-                        visible.has(column.key)
-                          ? 'border-expert bg-expert text-accent-fg'
-                          : 'border-border',
-                      )}
+                    <MenuItem
+                      key={column.key}
+                      closeOnClick={false}
+                      disabled={column.key === 'title'}
+                      onClick={() => toggleColumn(column.key)}
                     >
-                      {visible.has(column.key) && '✓'}
-                    </span>
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'grid size-3.5 place-items-center rounded-[3px] border',
+                          visible.has(column.key)
+                            ? 'border-expert bg-expert text-accent-fg'
+                            : 'border-border'
+                        )}
+                      >
+                        {visible.has(column.key) && '✓'}
+                      </span>
                       {column.label}
                     </MenuItem>
                   ))}

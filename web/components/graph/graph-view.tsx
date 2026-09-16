@@ -61,7 +61,7 @@ export function GraphView({
       if (!needle) return []
       return graph.nodes.filter((node) => node.label.toLowerCase().includes(needle)).slice(0, 8)
     },
-    [graph.nodes],
+    [graph.nodes]
   )
 
   const matches = useMemo(() => search(query), [search, query])
@@ -151,12 +151,7 @@ export function GraphView({
         />
 
         {/* Floating search, top-left from `lg`; a top-bar icon below. */}
-        <div
-          className={cn(
-            'absolute top-3 left-3 w-56',
-            searchOpen ? 'block' : 'hidden lg:block',
-          )}
-        >
+        <div className={cn('absolute top-3 left-3 w-56', searchOpen ? 'block' : 'hidden lg:block')}>
           <Input
             value={query}
             onChange={(event) => setQuery(event.target.value)}
@@ -211,7 +206,9 @@ export function GraphView({
             onChange={(event) => setLimit(LIMITS[Number(event.target.value)])}
             className="w-24 accent-[var(--expert)]"
           />
-          <span className={cn('w-10 text-right font-mono text-xs', pending ? 'text-fg-3' : 'text-fg-2')}>
+          <span
+            className={cn('w-10 text-right font-mono text-xs', pending ? 'text-fg-3' : 'text-fg-2')}
+          >
             {limit}
           </span>
         </div>
@@ -219,9 +216,7 @@ export function GraphView({
         <div className="pointer-events-none absolute bottom-3 left-3 rounded-row bg-panel/90 px-2 py-1 text-xs text-fg-3">
           {formatNumber(graph.nodes.length)} of {formatNumber(graph.total_nodes)} concepts ·{' '}
           {formatNumber(graph.edges.length)} links
-          {graph.truncated && (
-            <span className="ml-1.5 text-fg-3">busiest first</span>
-          )}
+          {graph.truncated && <span className="ml-1.5 text-fg-3">busiest first</span>}
         </div>
 
         {graph.nodes.length === 0 && (

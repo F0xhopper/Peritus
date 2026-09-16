@@ -105,13 +105,19 @@ self.onmessage = (event: MessageEvent<SimulationRequest>) => {
           // A well-evidenced edge pulls harder, so the graph's spine is the
           // part the corpus actually supports.
           .strength((link) => Math.min(0.9, 0.15 + link.evidence * 0.08))
-          .distance(48),
+          .distance(48)
       )
       // Busy nodes push harder, which is what keeps hubs legible instead of
       // buried under their own neighbours.
-      .force('charge', forceManyBody<WorkerNode>().strength((node) => -60 - node.degree * 12))
+      .force(
+        'charge',
+        forceManyBody<WorkerNode>().strength((node) => -60 - node.degree * 12)
+      )
       .force('center', forceCenter(request.width / 2, request.height / 2).strength(0.06))
-      .force('collide', forceCollide<WorkerNode>().radius((node) => 6 + Math.sqrt(node.degree) * 2))
+      .force(
+        'collide',
+        forceCollide<WorkerNode>().radius((node) => 6 + Math.sqrt(node.degree) * 2)
+      )
       .stop()
 
     if (request.settled) {

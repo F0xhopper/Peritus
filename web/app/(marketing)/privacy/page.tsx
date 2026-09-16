@@ -16,22 +16,22 @@ export default function PrivacyPage() {
       <h2>What this covers</h2>
       <p>
         Peritus builds subject experts from public sources and answers questions from them. This
-        page describes what the service stores while doing that, why each piece exists, and who
-        can see it.
+        page describes what the service stores while doing that, why each piece exists, and who can
+        see it.
       </p>
 
       <h2>Signing in</h2>
       <p>
-        Authentication is handled by Supabase Auth. Signing in with an email code stores your
-        email address and an account identifier; signing in with Google stores the same two
-        things, taken from the Google profile you consent to share. No password is ever stored,
-        because Peritus does not use one.
+        Authentication is handled by Supabase Auth. Signing in with an email code stores your email
+        address and an account identifier; signing in with Google stores the same two things, taken
+        from the Google profile you consent to share. No password is ever stored, because Peritus
+        does not use one.
       </p>
       <p>
         Your session lives in two cookies set by this site, marked
         <code>HttpOnly</code> so no JavaScript on the page can read them, and
-        <code>Secure</code> in production. They are the session and nothing else: no analytics,
-        no advertising, and no third-party cookies are set anywhere on this site.
+        <code>Secure</code> in production. They are the session and nothing else: no analytics, no
+        advertising, and no third-party cookies are set anywhere on this site.
       </p>
 
       <h2>What is stored when you build an expert</h2>
@@ -47,16 +47,16 @@ export default function PrivacyPage() {
           by-product: the record is the thing you are being given.
         </li>
         <li>
-          <strong>The text of accepted sources</strong>, split into passages and stored with
-          vector embeddings so they can be retrieved. Only material the source itself published.
+          <strong>The text of accepted sources</strong>, split into passages and stored with vector
+          embeddings so they can be retrieved. Only material the source itself published.
         </li>
         <li>
           <strong>A durable event log for each build</strong>, so a build survives a closed laptop
           and can be replayed from where you left it.
         </li>
         <li>
-          <strong>Metered provider spend per stage</strong>, so a build’s cost is checkable
-          against what it was quoted.
+          <strong>Metered provider spend per stage</strong>, so a build’s cost is checkable against
+          what it was quoted.
         </li>
       </ul>
 
@@ -67,9 +67,9 @@ export default function PrivacyPage() {
         fact — an answer nobody can re-examine is not an answer with receipts.
       </p>
       <p>
-        Each answer also stores a retrieval trail: which passages were retrieved, which reached
-        the model, and which the answer cited. It records dispositions and counts, never a
-        confidence or a grounding score, because there is no calibration behind such a number.
+        Each answer also stores a retrieval trail: which passages were retrieved, which reached the
+        model, and which the answer cited. It records dispositions and counts, never a confidence or
+        a grounding score, because there is no calibration behind such a number.
       </p>
 
       <h2>Sources you upload</h2>
@@ -84,8 +84,8 @@ export default function PrivacyPage() {
         An expert is private by default: only your account can read it, and only your account can
         ever modify it. Publishing an expert makes its card, its corpus and its evidence trail
         readable by anyone with the link — deliberately, because a public expert whose evidence
-        trail was private would be a claim without a receipt. It never makes the expert writable
-        by anyone else, and it never exposes your email, your credit balance or your spend.
+        trail was private would be a claim without a receipt. It never makes the expert writable by
+        anyone else, and it never exposes your email, your credit balance or your spend.
       </p>
 
       <h2>Processors</h2>
@@ -100,9 +100,9 @@ export default function PrivacyPage() {
       <h2>Retention and deletion</h2>
       <p>
         Deleting an expert deletes its corpus, its passages, its graph and its chats. Account
-        deletion is not offered through the interface yet — ask and it will be done by hand.
-        Server logs record request identifiers, timings and errors; they never record message or
-        answer content.
+        deletion is not offered through the interface yet — ask and it will be done by hand. Server
+        logs record request identifiers, timings and errors; they never record message or answer
+        content.
       </p>
 
       <h2>Getting in touch</h2>

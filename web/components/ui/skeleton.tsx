@@ -7,7 +7,13 @@ import { cn } from '@/lib/cn'
  * widths, which is what keeps CLS under 0.1: the skeleton and the content
  * occupy the same space, so nothing moves when the data lands.
  */
-export function Skeleton({ className, style }: { className?: string; style?: React.CSSProperties }) {
+export function Skeleton({
+  className,
+  style,
+}: {
+  className?: string
+  style?: React.CSSProperties
+}) {
   return (
     <div
       aria-hidden="true"

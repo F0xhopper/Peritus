@@ -27,17 +27,12 @@ export function StatTile({
     <dl className={cn('container-tile rounded-card bg-panel p-3', className)}>
       <dt className="text-label tracking-[0.04em] text-fg-3 uppercase">{label}</dt>
       <dd
-        className={cn(
-          'mt-1.5 text-stat leading-none font-medium',
-          tone ? TONES[tone] : 'text-fg',
-        )}
+        className={cn('mt-1.5 text-stat leading-none font-medium', tone ? TONES[tone] : 'text-fg')}
       >
         {value}
       </dd>
       {/* The hint is the first thing to go when the tile is narrow. */}
-      {hint && (
-        <dd className="mt-1 hidden truncate text-xs text-fg-3 @[9rem]:block">{hint}</dd>
-      )}
+      {hint && <dd className="mt-1 hidden truncate text-xs text-fg-3 @[9rem]:block">{hint}</dd>}
     </dl>
   )
 }

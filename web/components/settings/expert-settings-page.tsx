@@ -86,8 +86,8 @@ export function ExpertSettingsPage({
           <section className="mt-8">
             <h2 className="text-lg font-medium text-fg">Avatar</h2>
             <p className="mt-1 text-sm text-fg-3">
-              A found, licensed picture of the subject, or a drawing generated from a style and
-              a seed. Nothing is ever uploaded.
+              A found, licensed picture of the subject, or a drawing generated from a style and a
+              seed. Nothing is ever uploaded.
             </p>
             <div className="mt-3 flex items-center gap-3">
               <AvatarPicker expert={expert}>
@@ -124,14 +124,12 @@ export function ExpertSettingsPage({
 
           <section className="mt-10">
             <h2 className="text-lg font-medium text-fg">Rebuild</h2>
-            <p className="mt-1 text-sm text-fg-3">
-              Search again from scratch at a chosen depth.
-            </p>
+            <p className="mt-1 text-sm text-fg-3">Search again from scratch at a chosen depth.</p>
 
             <Notice tone="warn" className="mt-3" title="A rebuild starts over from scratch">
               Every discovered source, passage and concept is deleted and rebuilt. Sources you
-              uploaded yourself survive. It costs credits again, and the expert cannot answer
-              until its new passages are indexed.
+              uploaded yourself survive. It costs credits again, and the expert cannot answer until
+              its new passages are indexed.
             </Notice>
 
             <TierPicker

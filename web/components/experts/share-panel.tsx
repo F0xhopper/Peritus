@@ -59,7 +59,7 @@ export function SharePanel({
         })
         .then(setState)
         .catch(() => setLoadFailed(true)),
-    [endpoint],
+    [endpoint]
   )
 
   useEffect(() => {
@@ -77,12 +77,16 @@ export function SharePanel({
       if (!res.ok) throw new Error()
       if (kind === 'disable') {
         setState((current) =>
-          current ? { ...current, enabled: false, token: null, created_at: null, viewer_count: 0 } : current,
+          current
+            ? { ...current, enabled: false, token: null, created_at: null, viewer_count: 0 }
+            : current
         )
         toast.success('Sharing is off. The link no longer works.')
       } else {
         setState((await res.json()) as ShareState)
-        toast.success(kind === 'reset' ? 'New link created. The old one no longer works.' : 'Link created')
+        toast.success(
+          kind === 'reset' ? 'New link created. The old one no longer works.' : 'Link created'
+        )
       }
       setConfirming(null)
     } catch {
@@ -91,7 +95,7 @@ export function SharePanel({
           ? 'Could not create a link.'
           : kind === 'reset'
             ? 'Could not reset the link.'
-            : 'Could not turn sharing off.',
+            : 'Could not turn sharing off.'
       )
     } finally {
       setBusy(null)
@@ -129,18 +133,21 @@ export function SharePanel({
     <div className="space-y-3 text-sm">
       <ul className="space-y-1 text-fg-2">
         <li>
-          Anyone with the link can see what {name} is. Once signed in, they can read its sources
-          and concept map and ask it questions.
+          Anyone with the link can see what {name} is. Once signed in, they can read its sources and
+          concept map and ask it questions.
         </li>
         <li>They cannot rebuild, edit or delete it, or share it on.</li>
         <li>Chats stay private: you never see theirs, and they never see yours.</li>
       </ul>
 
       {state.uploaded_source_count > 0 && (
-        <Notice tone="warn" title={`Includes ${plural(state.uploaded_source_count, 'file')} you uploaded`}>
+        <Notice
+          tone="warn"
+          title={`Includes ${plural(state.uploaded_source_count, 'file')} you uploaded`}
+        >
           Answers quote the passages they cite, so people with the link can read parts of{' '}
-          {state.uploaded_source_count === 1 ? 'it' : 'them'}. Only share what you have the right
-          to share.
+          {state.uploaded_source_count === 1 ? 'it' : 'them'}. Only share what you have the right to
+          share.
         </Notice>
       )}
 
@@ -208,11 +215,15 @@ function LinkRow({ token, name, viewers }: { token: string; name: string; viewer
   // to itself rather than to production. Read through an external store with a
   // server snapshot: the Settings page renders this on the server, where there
   // is no origin, and a value that differed at hydration would be a mismatch.
-  const origin = useSyncExternalStore(noSubscribe, () => window.location.origin, () => '')
+  const origin = useSyncExternalStore(
+    noSubscribe,
+    () => window.location.origin,
+    () => ''
+  )
   const canNativeShare = useSyncExternalStore(
     noSubscribe,
     () => typeof navigator.share === 'function',
-    () => false,
+    () => false
   )
   const url = `${origin}${sharePath(token)}`
 
@@ -243,7 +254,12 @@ function LinkRow({ token, name, viewers }: { token: string; name: string; viewer
           onFocus={(event) => event.currentTarget.select()}
           className="min-w-0 flex-1 font-mono text-xs"
         />
-        <Button variant="secondary" onClick={() => void copy()} minWidth={88} aria-label="Copy link">
+        <Button
+          variant="secondary"
+          onClick={() => void copy()}
+          minWidth={88}
+          aria-label="Copy link"
+        >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? 'Copied' : 'Copy'}
         </Button>

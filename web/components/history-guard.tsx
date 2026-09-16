@@ -42,7 +42,11 @@ function install() {
     Object.defineProperty(history, method, {
       configurable: true,
       writable: true,
-      value: function guardedHistoryMethod(data: unknown, unused: string, url?: string | URL | null) {
+      value: function guardedHistoryMethod(
+        data: unknown,
+        unused: string,
+        url?: string | URL | null
+      ) {
         try {
           original(data, unused, url)
         } catch (error) {

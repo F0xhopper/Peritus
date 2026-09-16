@@ -1,8 +1,4 @@
-import type {
-  CandidateLedgerRow,
-  CorpusComposition,
-  MustHaveStatus,
-} from '@/lib/api/types'
+import type { CandidateLedgerRow, CorpusComposition, MustHaveStatus } from '@/lib/api/types'
 
 /**
  * The source-selection block of the screening-flow report, shaped for the
@@ -33,7 +29,9 @@ const OUTCOME_LABEL: Record<string, string> = {
 
 export function describeFetchOutcome(outcome: string | null): string {
   if (outcome === null) return 'Not recorded'
-  return OUTCOME_LABEL[outcome] ?? outcome.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase())
+  return (
+    OUTCOME_LABEL[outcome] ?? outcome.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase())
+  )
 }
 
 export const MUST_HAVE_LABEL: Record<MustHaveStatus, string> = {
@@ -114,7 +112,7 @@ export function describeMustHaveFor(work: MustHaveEntry): string {
  * Outcomes the ledger does not use are left out rather than listed as zero.
  */
 export function ledgerByOutcome(
-  rows: CandidateLedgerRow[],
+  rows: CandidateLedgerRow[]
 ): { outcome: string | null; label: string; count: number }[] {
   const totals = new Map<string | null, number>()
   for (const row of rows) {

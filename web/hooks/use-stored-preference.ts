@@ -41,7 +41,7 @@ function emit() {
 export function useStoredPreference<T>(
   key: string,
   fallback: T,
-  parse: (raw: string) => T | null,
+  parse: (raw: string) => T | null
 ): [T, (value: T, serialise: (value: T) => string) => void] {
   const getSnapshot = useCallback((): T => {
     let raw: string | null = null
@@ -81,7 +81,7 @@ export function useStoredPreference<T>(
       }
       emit()
     },
-    [key],
+    [key]
   )
 
   return [value, set]

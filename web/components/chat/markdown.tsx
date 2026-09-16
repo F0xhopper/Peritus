@@ -85,12 +85,7 @@ export const COMPONENTS = {
   ),
   hr: () => <hr className="my-5 border-border-soft" />,
   code: ({ className: c, children }: { className?: string; children?: React.ReactNode }) => (
-    <code
-      className={cn(
-        'rounded-[4px] bg-raised px-1 py-0.5 font-mono text-[0.875em] text-fg',
-        c,
-      )}
-    >
+    <code className={cn('rounded-[4px] bg-raised px-1 py-0.5 font-mono text-[0.875em] text-fg', c)}>
       {children}
     </code>
   ),
@@ -203,8 +198,12 @@ export function closeOpenMarkdown(text: string): string {
   const strongs = (prose.match(/\*\*/g) ?? []).length
   // Single `*` emphasis: what is left once `**` pairs and line-start bullets are
   // taken out. Closed inside any open `**`, so `**bold *it` nests correctly.
-  const singles = (prose.replace(/\*\*/g, '').replace(/^\s*[*+-]\s/gm, '').match(/\*/g) ?? [])
-    .length
+  const singles = (
+    prose
+      .replace(/\*\*/g, '')
+      .replace(/^\s*[*+-]\s/gm, '')
+      .match(/\*/g) ?? []
+  ).length
   if (singles % 2 === 1) out += '*'
   if (strongs % 2 === 1) out += '**'
   // A dangling list marker or heading hash with nothing after it yet renders as

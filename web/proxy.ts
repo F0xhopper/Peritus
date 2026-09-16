@@ -1,12 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { callApi } from '@/lib/api/server'
-import {
-  ACCESS_COOKIE,
-  REFRESH_COOKIE,
-  accessCookieMaxAge,
-  isProduction,
-} from '@/lib/auth/cookies'
+import { ACCESS_COOKIE, REFRESH_COOKIE, accessCookieMaxAge, isProduction } from '@/lib/auth/cookies'
 import type { Session } from '@/lib/api/types'
 
 /**
@@ -108,5 +103,7 @@ export const config = {
   // Static assets, the image optimiser and `/api/*` are excluded: the route
   // handlers under `/api/auth/*` must stay reachable without a session, and
   // running an auth gate over CSS would break the login page it redirects to.
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|ico|webp|txt|xml)$).*)'],
+  matcher: [
+    '/((?!api|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|ico|webp|txt|xml)$).*)',
+  ],
 }

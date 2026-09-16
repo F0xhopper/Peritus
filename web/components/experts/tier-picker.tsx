@@ -80,7 +80,7 @@ export function TierPicker({
     const next = choices[(index + step + choices.length) % choices.length]
     onChange(next)
     requestAnimationFrame(() =>
-      group.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus(),
+      group.current?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')?.focus()
     )
   }
 
@@ -169,7 +169,7 @@ function TierCard({
         // finger that just tapped it.
         'transition-colors duration-(--dur-1)',
         selected ? 'border-expert bg-expert-soft' : 'border-border hover:border-fg-4',
-        disabled && 'cursor-not-allowed opacity-50 hover:border-border',
+        disabled && 'cursor-not-allowed opacity-50 hover:border-border'
       )}
     >
       <span className="flex items-baseline justify-between gap-2">
@@ -181,7 +181,7 @@ function TierCard({
           <span
             className={cn(
               'text-xs',
-              !affordable && !disabled ? 'text-bad' : selected ? 'text-fg-2' : 'text-fg-3',
+              !affordable && !disabled ? 'text-bad' : selected ? 'text-fg-2' : 'text-fg-3'
             )}
           >
             {cost} {cost === 1 ? 'credit' : 'credits'}
@@ -241,8 +241,7 @@ export function CostLine({
   return (
     <p className={cn('text-xs', short ? 'text-bad' : 'text-fg-3', className)}>
       Holds {price.credit_cost} {price.credit_cost === 1 ? 'credit' : 'credits'}
-      {balance !== null && `, you have ${balance}`}.
-      {' '}
+      {balance !== null && `, you have ${balance}`}.{' '}
       {/* Credits are *held* while the build runs and refunded if it fails —
           worth saying, because "holds" is not "spends". */}
       <span className="text-fg-3">Refunded in full if the build fails.</span>

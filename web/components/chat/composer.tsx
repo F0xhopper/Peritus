@@ -97,7 +97,7 @@ export function Composer({
 
   if (disabled) {
     return (
-      <div className="shrink-0 bg-bg px-3 pt-3 pb-keyboard md:px-4">
+      <div className="pb-keyboard shrink-0 bg-bg px-3 pt-3 md:px-4">
         <p className="mx-auto max-w-[720px] rounded-card bg-panel px-3 py-2.5 text-sm text-fg-3">
           {disabledReason ?? 'This expert cannot answer yet.'}
         </p>
@@ -115,7 +115,7 @@ export function Composer({
    * type".
    */
   return (
-    <div className="shrink-0 bg-bg px-3 pt-2 pb-keyboard md:px-4">
+    <div className="pb-keyboard shrink-0 bg-bg px-3 pt-2 md:px-4">
       <div className="mx-auto w-full max-w-[720px]">
         {about && (
           <div className="mb-1.5 flex items-center gap-1.5">
@@ -139,7 +139,7 @@ export function Composer({
           className={cn(
             'flex items-end gap-2 rounded-card border border-border bg-panel p-1.5',
             'transition-colors duration-(--dur-1)',
-            'focus-within:border-fg-4',
+            'focus-within:border-fg-4'
           )}
         >
           <textarea
@@ -164,7 +164,7 @@ export function Composer({
             className={cn(
               'min-h-[2rem] w-full min-w-0 flex-1 resize-none bg-transparent px-1.5 py-1',
               'text-base leading-relaxed text-fg placeholder:text-fg-3 focus:outline-none md:text-base',
-              '[field-sizing:content]',
+              '[field-sizing:content]'
             )}
             style={{ maxHeight: `${MAX_LINES * 1.6}em` }}
           />

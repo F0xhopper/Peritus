@@ -41,7 +41,7 @@ export function AccountSettingsPage({
   const hydrated = useSyncExternalStore(
     noopSubscribe,
     () => true,
-    () => false,
+    () => false
   )
   const [signingOut, setSigningOut] = useState(false)
   const showCredits = credits?.credits_enforced === true
@@ -147,11 +147,7 @@ export function AccountSettingsPage({
               <ul className="mt-2 space-y-1 text-sm">
                 {credits.tiers.map((tier) => (
                   <li key={tier.tier} className="flex items-baseline justify-between gap-2">
-                    <span
-                      className={cn(
-                        tier.included_in_plan ? 'text-fg-2' : 'text-fg-3',
-                      )}
-                    >
+                    <span className={cn(tier.included_in_plan ? 'text-fg-2' : 'text-fg-3')}>
                       {humanise(tier.tier)}
                       {!tier.included_in_plan && (
                         <span className="ml-1.5 text-xs text-warn">not on your plan</span>
@@ -177,9 +173,7 @@ export function AccountSettingsPage({
 
               {ledger.length > 0 && (
                 <>
-                  <h3 className="mt-8 text-label tracking-[0.04em] text-fg-3 uppercase">
-                    History
-                  </h3>
+                  <h3 className="mt-8 text-label tracking-[0.04em] text-fg-3 uppercase">History</h3>
                   <CreditLedger entries={ledger} className="mt-2" />
                 </>
               )}
@@ -200,7 +194,9 @@ export function AccountSettingsPage({
             <Link href="/privacy" className="transition-colors hover:text-fg-3">
               Privacy
             </Link>
-            <span aria-hidden="true" className="mx-2">·</span>
+            <span aria-hidden="true" className="mx-2">
+              ·
+            </span>
             <Link href="/terms" className="transition-colors hover:text-fg-3">
               Terms
             </Link>

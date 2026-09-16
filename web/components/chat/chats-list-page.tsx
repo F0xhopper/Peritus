@@ -46,17 +46,14 @@ export function ChatsListPage({
   // Rows hidden pending an undo. Not removed from the server yet.
   const [pendingDelete, setPendingDelete] = useState<Set<string>>(() => new Set())
 
-  const byName = useMemo(
-    () => new Map(experts.map((expert) => [expert.name, expert])),
-    [experts],
-  )
+  const byName = useMemo(() => new Map(experts.map((expert) => [expert.name, expert])), [experts])
 
   const groups = useMemo(() => {
     const needle = filter.trim().toLowerCase()
     const visible = conversations.filter(
       (conversation) =>
         !pendingDelete.has(conversation.id) &&
-        (!needle || (conversation.title ?? '').toLowerCase().includes(needle)),
+        (!needle || (conversation.title ?? '').toLowerCase().includes(needle))
     )
     const map = new Map<string, ConversationSummary[]>()
     for (const conversation of visible) {
@@ -146,7 +143,10 @@ export function ChatsListPage({
                     picture: list[0].expert_picture_version
                       ? { version: list[0].expert_picture_version }
                       : null,
-                  } as Pick<ExpertSummary, 'name' | 'persona_name' | 'topic' | 'avatar' | 'picture'>)
+                  } as Pick<
+                    ExpertSummary,
+                    'name' | 'persona_name' | 'topic' | 'avatar' | 'picture'
+                  >)
 
                 return (
                   <section key={slug}>
@@ -169,7 +169,7 @@ export function ChatsListPage({
                             prefetch
                             className={cn(
                               'flex h-(--row-h) items-center gap-2 rounded-row px-2 pr-10 text-sm',
-                              'transition-colors duration-(--dur-1) hover:bg-raised',
+                              'transition-colors duration-(--dur-1) hover:bg-raised'
                             )}
                           >
                             <span className="min-w-0 flex-1 truncate text-fg-2">
@@ -192,7 +192,7 @@ export function ChatsListPage({
                                 'rounded-chip text-fg-3 transition-[opacity,color] duration-(--dur-1)',
                                 'hover:text-fg',
                                 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-                                '[@media(hover:none)]:opacity-100',
+                                '[@media(hover:none)]:opacity-100'
                               )}
                             >
                               <MoreHorizontal className="size-3.5" />

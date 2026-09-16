@@ -10,11 +10,7 @@ import { Block, COMPONENTS, closeOpenMarkdown, splitBlocks } from '@/components/
 import { Collapse } from '@/components/ui/collapse'
 import { cn } from '@/lib/cn'
 import { displayName } from '@/lib/persona'
-import type {
-  Citation,
-  ChatRetrievalAuditEvent,
-  ExpertSummary,
-} from '@/lib/api/types'
+import type { Citation, ChatRetrievalAuditEvent, ExpertSummary } from '@/lib/api/types'
 
 /**
  * One answer.
@@ -86,8 +82,8 @@ export function AssistantCard({
     <article
       className={cn(
         'cv-auto rounded-card bg-panel p-3 md:p-4',
-        'motion-safe:animate-in motion-safe:fade-in motion-safe:duration-(--dur-2)',
-        className,
+        'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fade-in',
+        className
       )}
       // An intrinsic size so `content-visibility: auto` does not collapse an
       // off-screen card to zero and destroy the scroll position.
@@ -95,9 +91,7 @@ export function AssistantCard({
     >
       <header className="mb-2 flex items-center gap-2">
         <Avatar expert={expert} size={20} />
-        <span className="min-w-0 truncate text-sm font-medium text-fg">
-          {displayName(expert)}
-        </span>
+        <span className="min-w-0 truncate text-sm font-medium text-fg">{displayName(expert)}</span>
         {hasContradiction && (
           <Explained
             label="Disputed"
@@ -301,7 +295,7 @@ function CitedBlock({
         )
       },
     }),
-    [citations, danglingKey, selected],
+    [citations, danglingKey, selected]
   )
 
   return <Block source={source.replace(CITE_MARKER, '[$1](#cite-$1)')} components={components} />
@@ -408,13 +402,16 @@ function Explained({
           // The button is the hit area — 44px tall under a coarse pointer — and
           // the small pill inside it is what shows, so the header keeps its size
           // on a mouse and a thumb still has something to hit.
-          <button type="button" className="group/chip inline-flex shrink-0 items-center pointer-coarse:min-h-11">
+          <button
+            type="button"
+            className="group/chip inline-flex shrink-0 items-center pointer-coarse:min-h-11"
+          >
             <span
               className={cn(
                 'rounded-chip px-1.5 text-xs transition-colors duration-(--dur-1)',
                 tone === 'warn'
                   ? 'bg-warn/12 text-warn group-hover/chip:bg-warn/20'
-                  : 'bg-raised text-fg-2 group-hover/chip:bg-border',
+                  : 'bg-raised text-fg-2 group-hover/chip:bg-border'
               )}
             >
               {label}

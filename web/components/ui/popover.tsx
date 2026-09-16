@@ -29,7 +29,7 @@ export function PopoverContent({
             'transition-[opacity,transform] duration-(--dur-2) ease-(--ease-out)',
             'data-starting-style:scale-[0.98] data-starting-style:opacity-0',
             'data-ending-style:opacity-0 data-ending-style:duration-(--dur-1)',
-            className,
+            className
           )}
         >
           {children}

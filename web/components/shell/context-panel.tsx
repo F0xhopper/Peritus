@@ -62,7 +62,7 @@ export function ContextPanel() {
             aria-label="Close panel"
             className={cn(
               'grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3',
-              'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
+              'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg'
             )}
           >
             <X className="size-3.5" />

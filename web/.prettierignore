@@ -1,0 +1,13 @@
+.next/
+out/
+build/
+.vercel/
+coverage/
+playwright-report/
+test-results/
+.lighthouseci/
+next-env.d.ts
+package-lock.json
+*.report.html
+*.report.json
+manifest.json

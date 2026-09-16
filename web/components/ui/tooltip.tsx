@@ -44,13 +44,13 @@ export function Tooltip({
               'max-w-64 rounded-chip border border-border bg-raised px-2 py-1 text-xs text-fg-2',
               'shadow-md shadow-black/25',
               'transition-[opacity,transform] duration-(--dur-1) ease-(--ease-out)',
-              'data-starting-style:opacity-0 data-ending-style:opacity-0',
+              'data-ending-style:opacity-0 data-starting-style:opacity-0',
               // 2px toward the target, not a slide from far away.
               side === 'right' && 'data-starting-style:-translate-x-0.5',
               side === 'left' && 'data-starting-style:translate-x-0.5',
               side === 'bottom' && 'data-starting-style:-translate-y-0.5',
               side === 'top' && 'data-starting-style:translate-y-0.5',
-              className,
+              className
             )}
           >
             {content}

@@ -32,8 +32,8 @@ const ITEMS: { question: string; answer: React.ReactNode }[] = [
         An answer is composed only from passages that were actually retrieved, and each inline
         <span className="mx-1 font-mono text-xs text-accent">[n]</span> marker points at one of
         them. Opening it shows the passage, the source it came from, its scores, and how much of
-        that source was read. If an answer ever cites a number that resolves to nothing, it is
-        shown as plain text rather than dressed up as a reference.
+        that source was read. If an answer ever cites a number that resolves to nothing, it is shown
+        as plain text rather than dressed up as a reference.
       </>
     ),
   },
@@ -53,9 +53,9 @@ const ITEMS: { question: string; answer: React.ReactNode }[] = [
     answer: (
       <>
         Where <em>sources in that corpus</em> were judged to disagree, yes — resolved down to the
-        passages on each side, with a one-line statement of what is in dispute. Note the
-        wording: a corpus is tens of sources, not the literature, and Peritus does not claim to
-        detect contradictions in a field.
+        passages on each side, with a one-line statement of what is in dispute. Note the wording: a
+        corpus is tens of sources, not the literature, and Peritus does not claim to detect
+        contradictions in a field.
       </>
     ),
   },
@@ -63,11 +63,11 @@ const ITEMS: { question: string; answer: React.ReactNode }[] = [
     question: 'Is this systematic review software?',
     answer: (
       <>
-        No, and it should not be used as if it were. Screening is a single model pass with a
-        second read on borderline cases — there is no dual human review, no conflict resolution,
-        and no calibration set, so Peritus reports no sensitivity, recall or precision figures,
-        because any number there would be invented. What it produces is the data a review asks you
-        to <em>report</em>: what was searched, what was screened, what was excluded and why.
+        No, and it should not be used as if it were. Screening is a single model pass with a second
+        read on borderline cases — there is no dual human review, no conflict resolution, and no
+        calibration set, so Peritus reports no sensitivity, recall or precision figures, because any
+        number there would be invented. What it produces is the data a review asks you to{' '}
+        <em>report</em>: what was searched, what was screened, what was excluded and why.
       </>
     ),
   },
@@ -75,9 +75,9 @@ const ITEMS: { question: string; answer: React.ReactNode }[] = [
     question: 'What does it not do?',
     answer: (
       <>
-        There is no checkout — credits are issued by hand while billing is in private beta. There
-        is no account deletion, no persona regeneration without a rebuild, and no email when a
-        build finishes; builds are durable, so the log is still there when you come back.
+        There is no checkout — credits are issued by hand while billing is in private beta. There is
+        no account deletion, no persona regeneration without a rebuild, and no email when a build
+        finishes; builds are durable, so the log is still there when you come back.
       </>
     ),
   },

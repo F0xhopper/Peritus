@@ -21,7 +21,7 @@ export default function Loading() {
               {['w-full', 'w-full', 'w-11/12', 'w-full', 'w-3/4', 'w-full', 'w-5/6'].map(
                 (width, i) => (
                   <Skeleton key={i} className={`h-3.5 ${width}`} />
-                ),
+                )
               )}
             </div>
             <Skeleton className="mt-4 h-3 w-24" />

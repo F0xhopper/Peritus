@@ -51,7 +51,7 @@ export function Segmented<T extends string>({
               // 44px floor. The wrapper is then 2px taller on each side.
               'inline-flex h-(--row-h) items-center gap-1.5 rounded-[6px] px-2.5 text-sm',
               'transition-colors duration-(--dur-1)',
-              active ? 'bg-raised text-fg' : 'text-fg-3 hover:text-fg-2',
+              active ? 'bg-raised text-fg' : 'text-fg-3 hover:text-fg-2'
             )}
           >
             {option.label}

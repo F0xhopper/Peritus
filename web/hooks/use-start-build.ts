@@ -4,7 +4,12 @@ import { useCallback, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { seqFromId, streamSse } from '@/lib/api/sse'
-import { isEntitlementDenial, type BuildEvent, type EntitlementDenial, type ExpertTier } from '@/lib/api/types'
+import {
+  isEntitlementDenial,
+  type BuildEvent,
+  type EntitlementDenial,
+  type ExpertTier,
+} from '@/lib/api/types'
 
 /**
  * Start a build and navigate to its page.
@@ -73,7 +78,7 @@ export function useStartBuild(): StartBuildResult {
           setError(
             typeof body?.detail === 'string'
               ? body.detail
-              : `Could not start the build (${res.status}).`,
+              : `Could not start the build (${res.status}).`
           )
           return
         }
@@ -101,7 +106,7 @@ export function useStartBuild(): StartBuildResult {
         setSubmitting(false)
       }
     },
-    [router],
+    [router]
   )
 
   return { start, submitting, denial, error, clear }

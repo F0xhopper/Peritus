@@ -28,13 +28,13 @@ export function DenialNotice({
     `I would like more credits.\n\nPlan: ${denial.plan}\nTier I tried to build: ${denial.tier}\n` +
       (denial.required_credits !== undefined
         ? `Needed: ${denial.required_credits}\nAvailable: ${denial.available_credits ?? 0}\n`
-        : ''),
+        : '')
   )
 
   return (
     <Notice
       tone="warn"
-      className={cn('animate-in fade-in slide-in-from-bottom-1 duration-(--dur-2)', className)}
+      className={cn('animate-in duration-(--dur-2) fade-in slide-in-from-bottom-1', className)}
       title={denial.code === 'insufficient_credits' ? 'Not enough credits' : 'Not on your plan'}
       action={
         denial.remedy.kind === 'request_credits' ? (

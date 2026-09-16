@@ -147,7 +147,7 @@ describe('corpus report', () => {
 
   it('marks an abstract-only source, which is what a reviewer asks first', () => {
     const abstractOnly = reportFixture.sources.find(
-      (source) => source.full_text_method === 'abstract',
+      (source) => source.full_text_method === 'abstract'
     )
     expect(abstractOnly).toBeDefined()
   })
@@ -167,7 +167,7 @@ describe('corpus report', () => {
 
   it('records a duplicate as a rejection with a stated reason, scored zero', () => {
     const duplicate = reportFixture.exclusions.by_reason.find((reason) =>
-      reason.reason.startsWith('duplicate of'),
+      reason.reason.startsWith('duplicate of')
     )!
     // Zeros here are not a quality verdict — it was never judged on merit.
     expect(duplicate.mean_quality).toBe(0)
@@ -230,7 +230,7 @@ describe('chat events', () => {
   it('covers every type the stream emits', () => {
     const types = new Set(Object.values(chatFixtures).map((event) => event.type))
     expect(types).toEqual(
-      new Set(['meta', 'status', 'token', 'sources', 'retrieval_audit', 'done', 'error']),
+      new Set(['meta', 'status', 'token', 'sources', 'retrieval_audit', 'done', 'error'])
     )
   })
 

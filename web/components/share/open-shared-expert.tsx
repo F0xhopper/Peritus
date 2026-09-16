@@ -45,7 +45,13 @@ export function OpenSharedExpert({ token }: { token: string }) {
   }
 
   return (
-    <Button variant="primary" size="lg" loading={opening} minWidth={148} onClick={() => void open()}>
+    <Button
+      variant="primary"
+      size="lg"
+      loading={opening}
+      minWidth={148}
+      onClick={() => void open()}
+    >
       Open the expert
       <ArrowRight className="size-3.5" />
     </Button>

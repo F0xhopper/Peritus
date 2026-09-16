@@ -38,8 +38,14 @@ export default defineConfig({
   },
 
   projects: [
-    { name: 'desktop', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
-    { name: 'laptop', use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } } },
+    {
+      name: 'desktop',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: 'laptop',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
+    },
     { name: 'ipad-portrait', use: { ...devices['iPad (gen 7)'] } },
     { name: 'ipad-landscape', use: { ...devices['iPad (gen 7) landscape'] } },
     { name: 'iphone', use: { ...devices['iPhone 15'] } },
@@ -49,7 +55,11 @@ export default defineConfig({
       // two longer duration tokens are zero, sheets do not slide and the
       // pulses are static — none of which may break an interaction.
       name: 'reduced-motion',
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, reducedMotion: 'reduce' },
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 1440, height: 900 },
+        reducedMotion: 'reduce',
+      },
     },
   ],
 

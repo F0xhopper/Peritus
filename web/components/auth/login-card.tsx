@@ -65,7 +65,7 @@ export function LoginCard({
 
       if (res.ok) {
         router.push(
-          `/login/verify?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`,
+          `/login/verify?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`
         )
         return
       }
@@ -85,7 +85,7 @@ export function LoginCard({
         detail ??
           (res.status === 503
             ? 'Sign-in is not configured on this server.'
-            : 'Could not send a code. Try again.'),
+            : 'Could not send a code. Try again.')
       )
     } catch {
       setNotice('Could not reach Peritus. Check your connection.')
@@ -99,11 +99,7 @@ export function LoginCard({
           It is running in development mode, so every request is the bootstrap admin. Open the app
           directly.
         </Notice>
-        <Button
-          variant="primary"
-          className="mt-3 w-full"
-          onClick={() => router.push(next)}
-        >
+        <Button variant="primary" className="mt-3 w-full" onClick={() => router.push(next)}>
           Continue
         </Button>
       </Card>
@@ -113,9 +109,7 @@ export function LoginCard({
   return (
     <Card>
       <h1 className="text-lg font-medium text-fg">Sign in to Peritus</h1>
-      <p className="mt-1 text-sm text-fg-3">
-        We email a six-digit code. No password to remember.
-      </p>
+      <p className="mt-1 text-sm text-fg-3">We email a six-digit code. No password to remember.</p>
 
       <form onSubmit={onSubmit} className="mt-5 space-y-1.5" noValidate>
         <Label htmlFor="email">Email</Label>
@@ -148,7 +142,10 @@ export function LoginCard({
           down after a failed Continue — is not a click anyone is mid-way through. */}
       <div className="min-h-8 pt-3">
         {notice && (
-          <Notice tone="bad" className="animate-in fade-in slide-in-from-bottom-1 duration-(--dur-2)">
+          <Notice
+            tone="bad"
+            className="animate-in duration-(--dur-2) fade-in slide-in-from-bottom-1"
+          >
             {notice}
             {retryAfter !== null && <Countdown seconds={retryAfter} />}
           </Notice>
@@ -168,7 +165,7 @@ export function LoginCard({
           'mt-4 flex h-(--btn-lg) w-full items-center justify-center gap-2.5 rounded-row',
           'border border-border text-sm font-medium text-fg',
           'transition-colors duration-(--dur-1) hover:bg-raised',
-          !loginAvailable && 'pointer-events-none opacity-50',
+          !loginAvailable && 'pointer-events-none opacity-50'
         )}
       >
         <GoogleMark className="size-4" />

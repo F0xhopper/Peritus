@@ -54,7 +54,7 @@ export function CitedText({
           citation={citation}
           onSelect={onSelect}
           selected={selected === n}
-        />,
+        />
       )
     } else {
       // Either not in the list at all, or explicitly flagged as dangling. The
@@ -114,7 +114,10 @@ function CitationChip({
         // disappearing behind it.
         if (window.matchMedia('(max-width: 1023px)').matches) {
           const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-          event.currentTarget.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' })
+          event.currentTarget.scrollIntoView({
+            block: 'start',
+            behavior: still ? 'auto' : 'smooth',
+          })
         }
       }}
       aria-label={`Citation ${shown}: ${citation.label}`}
@@ -129,7 +132,7 @@ function CitationChip({
         'transition-colors duration-(--dur-1)',
         selected
           ? 'bg-fg text-bg'
-          : 'bg-raised text-fg ring-1 ring-border ring-inset hover:bg-border',
+          : 'bg-raised text-fg ring-1 ring-border ring-inset hover:bg-border'
       )}
     >
       {shown}
@@ -199,7 +202,7 @@ export function CitationList({
             onClick={() => onSelect(citation)}
             className={cn(
               'flex min-w-0 flex-1 gap-2 text-left transition-colors duration-(--dur-1)',
-              selected === citation.n ? 'text-fg' : 'text-fg-3 hover:text-fg-2',
+              selected === citation.n ? 'text-fg' : 'text-fg-3 hover:text-fg-2'
             )}
           >
             <span className="shrink-0 font-mono text-fg-2">[{citation.display ?? citation.n}]</span>

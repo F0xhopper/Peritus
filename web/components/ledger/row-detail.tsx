@@ -48,10 +48,9 @@ export function RowDetail({
   const remove = async () => {
     setDeleting(true)
     try {
-      const res = await fetch(
-        `/api/experts/${encodeURIComponent(slug)}/sources/${source.id}`,
-        { method: 'DELETE' },
-      )
+      const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/sources/${source.id}`, {
+        method: 'DELETE',
+      })
       if (!res.ok) throw new Error()
       setConfirming(false)
       onDeleted?.()
@@ -232,7 +231,12 @@ export function RowDetail({
           </Button>
         )}
         {onDeleted && (
-          <Button variant="ghost" size="sm" onClick={() => setConfirming(true)} className="text-bad">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirming(true)}
+            className="text-bad"
+          >
             <Trash2 className="size-3" />
             Remove
           </Button>

@@ -115,7 +115,7 @@ export function AddSourceDialog({
           queued(body.job_id, body.title ?? file.name)
         } else {
           setError(
-            typeof body.detail === 'string' ? body.detail : `Upload failed (${request.status}).`,
+            typeof body.detail === 'string' ? body.detail : `Upload failed (${request.status}).`
           )
         }
       } catch {
@@ -155,7 +155,9 @@ export function AddSourceDialog({
       } | null
       if (!res.ok || typeof payload?.job_id !== 'number') {
         setError(
-          typeof payload?.detail === 'string' ? payload.detail : `Could not save that (${res.status}).`,
+          typeof payload?.detail === 'string'
+            ? payload.detail
+            : `Could not save that (${res.status}).`
         )
         return
       }
@@ -185,7 +187,9 @@ export function AddSourceDialog({
       } | null
       if (!res.ok || typeof payload?.job_id !== 'number') {
         setError(
-          typeof payload?.detail === 'string' ? payload.detail : `Could not add that URL (${res.status}).`,
+          typeof payload?.detail === 'string'
+            ? payload.detail
+            : `Could not add that URL (${res.status}).`
         )
         return
       }
@@ -204,7 +208,8 @@ export function AddSourceDialog({
   }
 
   const canSubmit =
-    !busy && ((tab === 'file' && file) || (tab === 'text' && text.trim()) || (tab === 'url' && url.trim()))
+    !busy &&
+    ((tab === 'file' && file) || (tab === 'text' && text.trim()) || (tab === 'url' && url.trim()))
 
   return (
     <Dialog
@@ -220,7 +225,13 @@ export function AddSourceDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button variant="primary" loading={busy} disabled={!canSubmit} onClick={submit} minWidth={92}>
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={!canSubmit}
+            onClick={submit}
+            minWidth={92}
+          >
             Add
           </Button>
         </>
@@ -246,7 +257,7 @@ export function AddSourceDialog({
             className={cn(
               'inline-flex h-(--icon-btn-sm) flex-1 items-center justify-center gap-1.5 rounded-[6px] text-xs',
               'transition-colors duration-(--dur-1)',
-              tab === option.id ? 'bg-raised text-fg' : 'text-fg-3 hover:text-fg-2',
+              tab === option.id ? 'bg-raised text-fg' : 'text-fg-3 hover:text-fg-2'
             )}
           >
             <option.icon className="size-3.5" />
@@ -272,7 +283,7 @@ export function AddSourceDialog({
               className={cn(
                 'rounded-card border border-dashed p-4 text-center',
                 'transition-colors duration-(--dur-1)',
-                dragging ? 'border-expert bg-expert-soft' : 'border-border',
+                dragging ? 'border-expert bg-expert-soft' : 'border-border'
               )}
             >
               <Upload className="mx-auto size-5 text-fg-4" aria-hidden="true" />

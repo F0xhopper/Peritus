@@ -41,7 +41,7 @@ These come from `web-production.md` and are enforced in code, not in copy.
 - **`lib/api/proxy.ts`** is the only thing that talks to FastAPI. It attaches the
   bearer, refreshes **once** on a 401 and retries, and distinguishes a dead
   refresh token (`NotAuthenticatedError` → sign in) from an unreachable auth
-  server (`ApiError` 503 → do *not* sign the user out).
+  server (`ApiError` 503 → do _not_ sign the user out).
 - **`app/api/*`** is one thin route handler per backend endpoint. Mutating ones
   call `guardOrigin`. Streaming ones use `forwardStream` and set
   `dynamic = 'force-dynamic'`.
@@ -79,7 +79,7 @@ These come from `web-production.md` and are enforced in code, not in copy.
   the deleted thing lingers in the shell.
 - **`useMediaQuery` may not decide what to render at first paint.** Its server
   snapshot is `false`, so both forms of every region are in the HTML and toggled
-  with `hidden md:flex`. It decides *behaviour* only — drawer or inline. The one
+  with `hidden md:flex`. It decides _behaviour_ only — drawer or inline. The one
   exception is `Dialog`, which is closed on first paint and so has nothing to get
   wrong.
 - **Never trust a pending `requestAnimationFrame` id as "a frame is coming".**
@@ -98,7 +98,7 @@ These come from `web-production.md` and are enforced in code, not in copy.
   out; `tests/format.test.ts` asserts the exact strings.
 - **A hydration mismatch is not a warning.** React discards the server HTML for
   that subtree and re-renders it, and on the expert page that was enough to take
-  the page down in Safari. Timestamps that are *meant* to differ (a relative
+  the page down in Safari. Timestamps that are _meant_ to differ (a relative
   time, a local-time date) go through `RelativeTime`/`DateText`, which carry the
   instant in `<time dateTime>` and suppress the check deliberately.
 - **`components/history-guard.tsx` must stay mounted in the root layout.** Next's
@@ -109,7 +109,7 @@ These come from `web-production.md` and are enforced in code, not in copy.
   the document with its built-in "This page couldn't load" screen. The guard
   swallows exactly that error, and is installed at module scope because the
   router captures `replaceState` before any effect of ours could run.
-- **`md:` is not "desktop".** An iPad is wide *and* touch, so a width-only
+- **`md:` is not "desktop".** An iPad is wide _and_ touch, so a width-only
   breakpoint hands a tablet the mouse-sized control. Density overrides that
   exist for a pointer use `pointer-fine:md:`; sizes that must grow for a thumb
   come from the coarse-pointer token block.
@@ -129,7 +129,7 @@ These come from `web-production.md` and are enforced in code, not in copy.
   no shadows except popovers) fight shadcn's defaults more than they share them.
 - **The avatar is a stored recipe, not a client-side derivation.** See below.
 - **There are no per-expert colours.** web-design.md §4's twelve expert hues are
-  not used — neither hashed from a name nor offered in the picker. See *Colour*.
+  not used — neither hashed from a name nor offered in the picker. See _Colour_.
 - **The `StatPill` is gone.** It floated over the Overview's own prose at wide
   widths, and every number on it was already in the properties list two
   paragraphs above.
@@ -149,7 +149,7 @@ sent (the key stays in the stored shape, always null, for older clients), and
 `--accent` (the primary button, the wordmark, the landing page's markers) is ink
 on paper: near-white on the dark theme, near-black on the light one. It used to
 be violet, and the primary button used to read `bg-expert` — which outside an
-expert's own pages resolves to the *root* hue, so every primary button in the
+expert's own pages resolves to the _root_ hue, so every primary button in the
 product was violet. Together with hues hashed from persona names (five experts
 whose names landed in the blues) the whole app read as blue.
 
@@ -227,7 +227,7 @@ server and an origin read during render would be a hydration mismatch.
 The rail **is** the expert list. The second column never repeats it: on an
 expert it shows that expert's pages and chats, and on Home it shows the
 workspace nav and the chats — the one thing the rail cannot reach. Home's page
-body therefore drops its own *Recent chats* section from `lg` up (`lg:hidden`),
+body therefore drops its own _Recent chats_ section from `lg` up (`lg:hidden`),
 because below `lg` there is no sidebar and that section is the only route to a
 chat.
 
@@ -254,7 +254,7 @@ resolves them in this order:
 separate table rather than a seventh avatar style: a style written by the builder would
 be indistinguishable from one a person chose, and the next build would overwrite their
 decision. It is also why `{"avatar": null}` — the picker's Reset — now means "back to
-the picture", and why Remove (`DELETE …/picture`) is a *separate* action from picking
+the picture", and why Remove (`DELETE …/picture`) is a _separate_ action from picking
 the monogram in the style grid.
 
 **Still nothing is uploaded.** A user cannot put an arbitrary image beside answers that
@@ -288,7 +288,7 @@ nowhere a 20px tile is only a navigational mark.
   project: no horizontal overflow, and 44px tap targets on the touch projects.
   `fillField` waits for hydration first: `fill()` a millisecond early and the
   `input` event lands with no listener, React hydrates over a field whose value
-  it does not know about and leaves it there, so the field *looks* filled while
+  it does not know about and leaves it there, so the field _looks_ filled while
   the component's state is empty — and the failure then points at whatever was
   supposed to appear next.
 - **A canvas test must assert that pixels were painted.** `graph-settings.spec`

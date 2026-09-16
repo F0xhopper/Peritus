@@ -97,8 +97,8 @@ export function GraphCanvas({
     const step = 24
     context.fillStyle = border
     context.globalAlpha = 0.5
-    for (let x = (transform.current.x % step + step) % step; x < width; x += step) {
-      for (let y = (transform.current.y % step + step) % step; y < height; y += step) {
+    for (let x = ((transform.current.x % step) + step) % step; x < width; x += step) {
+      for (let y = ((transform.current.y % step) + step) % step; y < height; y += step) {
         context.fillRect(x, y, 1, 1)
       }
     }
@@ -184,7 +184,7 @@ export function GraphCanvas({
       const y = pos[i * 2 + 1] + radius + 3 / k
       const box = { x0: x - width / 2, y0: y, x1: x + width / 2, y1: y + 13 / k }
       const collides = placed.some(
-        (other) => box.x0 < other.x1 && box.x1 > other.x0 && box.y0 < other.y1 && box.y1 > other.y0,
+        (other) => box.x0 < other.x1 && box.x1 > other.x0 && box.y0 < other.y1 && box.y1 > other.y0
       )
       if (collides && !forced) continue
       placed.push(box)
@@ -308,7 +308,11 @@ export function GraphCanvas({
     const padding = 72
     const scale = Math.max(
       0.15,
-      Math.min(2, (width - padding * 2) / Math.max(maxX - minX, 1), (height - padding * 2) / Math.max(maxY - minY, 1)),
+      Math.min(
+        2,
+        (width - padding * 2) / Math.max(maxX - minX, 1),
+        (height - padding * 2) / Math.max(maxY - minY, 1)
+      )
     )
     const target = zoomIdentity
       .translate(width / 2, height / 2)
@@ -442,7 +446,7 @@ export function GraphCanvas({
           .call(behaviour.transform, target)
       },
     }),
-    [reducedMotion],
+    [reducedMotion]
   )
 
   return (

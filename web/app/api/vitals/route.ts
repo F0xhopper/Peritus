@@ -26,7 +26,7 @@ export async function POST(request: Request) {
         metric.name,
         metric.value.toFixed(metric.name === 'CLS' ? 4 : 0),
         metric.rating ?? '-',
-        metric.path ?? '-',
+        metric.path ?? '-'
       )
     }
   } catch {

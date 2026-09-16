@@ -66,14 +66,14 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
         setNotice(
           Number.isFinite(seconds) && seconds > 0
             ? `Too many attempts. Try again in ${seconds}s.`
-            : 'Too many attempts. Wait a moment and try again.',
+            : 'Too many attempts. Wait a moment and try again.'
         )
       } else {
         const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
         setNotice(
           typeof body?.detail === 'string'
             ? body.detail
-            : 'That code is wrong or has expired. Ask for a new one.',
+            : 'That code is wrong or has expired. Ask for a new one.'
         )
       }
       // Clear the cells so the next attempt starts from an empty field rather
@@ -149,13 +149,13 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
               autoFocus={index === 0}
               aria-label={index === 0 ? undefined : `Digit ${index + 1} of ${CODE_LENGTH}`}
               className={cn(
-                'h-12 w-full min-w-0 max-w-12 rounded-row border border-border bg-raised',
+                'h-12 w-full max-w-12 min-w-0 rounded-row border border-border bg-raised',
                 'text-center font-mono text-base text-fg',
                 'transition-colors duration-(--dur-1)',
                 'focus:border-expert focus:outline-none',
                 // A filled cell reads as filled without a border change, so
                 // the focus ring stays the only thing the eye tracks.
-                'data-filled:bg-border',
+                'data-filled:bg-border'
               )}
             />
           ))}
@@ -179,7 +179,7 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
         {notice && (
           <Notice
             tone="bad"
-            className="animate-in fade-in slide-in-from-bottom-1 duration-(--dur-2)"
+            className="animate-in duration-(--dur-2) fade-in slide-in-from-bottom-1"
           >
             {notice}
           </Notice>

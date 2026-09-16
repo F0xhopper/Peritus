@@ -116,7 +116,10 @@ export async function expectTapTargets(page: Page) {
       // 43.99997 there. Rounding noise is not a design failure — anything a
       // full pixel short is.
       if (rect.height < 43.5) {
-        failures.push({ text: (element.textContent ?? '').trim().slice(0, 40), height: rect.height })
+        failures.push({
+          text: (element.textContent ?? '').trim().slice(0, 40),
+          height: rect.height,
+        })
       }
     }
     return failures
@@ -191,10 +194,10 @@ export async function waitForHydration(page: Page) {
     .waitForFunction(
       () =>
         [document, document.documentElement, document.body].some((node) =>
-          Object.keys(node).some((key) => key.startsWith('__react')),
+          Object.keys(node).some((key) => key.startsWith('__react'))
         ),
       undefined,
-      { timeout: 10_000 },
+      { timeout: 10_000 }
     )
     .catch(() => {})
 }

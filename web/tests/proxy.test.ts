@@ -2,7 +2,12 @@ import { http, HttpResponse } from 'msw'
 import { setupServer } from 'msw/node'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { ApiError, NotAuthenticatedError, isNextControlFlow, parseRetryAfter } from '@/lib/api/errors'
+import {
+  ApiError,
+  NotAuthenticatedError,
+  isNextControlFlow,
+  parseRetryAfter,
+} from '@/lib/api/errors'
 
 /**
  * The refresh-once behaviour, against a mocked FastAPI.
@@ -202,7 +207,7 @@ describe('proxyFetch', () => {
       http.get(`${UPSTREAM}/auth/status`, ({ request }) => {
         expect(request.headers.get('authorization')).toBeNull()
         return HttpResponse.json({ auth_enabled: true, login_available: true })
-      }),
+      })
     )
     jar.store.set('peritus_access_token', 'live-access')
     const { proxyJson } = await proxy()
@@ -231,14 +236,14 @@ describe('proxyJson error decoding', () => {
     }
     server.use(
       http.post(`${UPSTREAM}/experts/build`, () =>
-        HttpResponse.json({ detail: denial }, { status: 402 }),
-      ),
+        HttpResponse.json({ detail: denial }, { status: 402 })
+      )
     )
     jar.store.set('peritus_access_token', 'live-access')
 
     const { proxyJson } = await proxy()
     const error = (await proxyJson('/experts/build', { method: 'POST' }).catch(
-      (thrown: unknown) => thrown,
+      (thrown: unknown) => thrown
     )) as ApiError
 
     expect(error).toBeInstanceOf(ApiError)
@@ -251,8 +256,8 @@ describe('proxyJson error decoding', () => {
   it('reads a string detail as the message', async () => {
     server.use(
       http.get(`${UPSTREAM}/experts`, () =>
-        HttpResponse.json({ detail: 'Expert not found' }, { status: 404 }),
-      ),
+        HttpResponse.json({ detail: 'Expert not found' }, { status: 404 })
+      )
     )
     jar.store.set('peritus_access_token', 'live-access')
     const { proxyJson } = await proxy()
@@ -265,8 +270,11 @@ describe('proxyJson error decoding', () => {
   it('carries Retry-After off a 429', async () => {
     server.use(
       http.get(`${UPSTREAM}/experts`, () =>
-        HttpResponse.json({ detail: 'slow down' }, { status: 429, headers: { 'Retry-After': '42' } }),
-      ),
+        HttpResponse.json(
+          { detail: 'slow down' },
+          { status: 429, headers: { 'Retry-After': '42' } }
+        )
+      )
     )
     jar.store.set('peritus_access_token', 'live-access')
     const { proxyJson } = await proxy()
@@ -296,7 +304,7 @@ describe('isNextControlFlow', () => {
     // A wrapper that caught this would turn a deliberate 404 into an error page.
     expect(isNextControlFlow(Object.assign(new Error(), { digest: 'NEXT_NOT_FOUND' }))).toBe(true)
     expect(isNextControlFlow(Object.assign(new Error(), { digest: 'NEXT_REDIRECT;/login' }))).toBe(
-      true,
+      true
     )
   })
 

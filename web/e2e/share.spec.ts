@@ -82,7 +82,7 @@ test('a signed-out visitor sees the card and is asked to sign in', async ({ page
   const signInLink = main.getByRole('link', { name: 'Sign in to open it' })
   await expect(signInLink).toHaveAttribute(
     'href',
-    `/login?next=${encodeURIComponent(`/share/${FOREIGN_TOKEN}`)}`,
+    `/login?next=${encodeURIComponent(`/share/${FOREIGN_TOKEN}`)}`
   )
 
   // Never indexed, and the token never leaves in a Referer.
@@ -96,7 +96,9 @@ test('a signed-out visitor sees the card and is asked to sign in', async ({ page
 
 test('an inactive link says so, and says nothing else', async ({ page }) => {
   await page.goto('/share/thisTokenDoesNotExistAnywhereAtAll00')
-  await expect(content(page).getByRole('heading', { name: 'This link is not active' })).toBeVisible()
+  await expect(
+    content(page).getByRole('heading', { name: 'This link is not active' })
+  ).toBeVisible()
   await expect(page.getByText('Fr. Reginald Hale')).toHaveCount(0)
 })
 

@@ -95,18 +95,13 @@ export function TopicComposer({
             aria-hidden="true"
             className={cn(
               'size-3 transition-transform duration-(--dur-2) ease-(--ease-out)',
-              showOptions && 'rotate-180',
+              showOptions && 'rotate-180'
             )}
           />
           Options
         </button>
         {!showOptions && (
-          <CostLine
-            tier={tier}
-            tiers={tiers}
-            balance={balance}
-            creditsEnforced={creditsEnforced}
-          />
+          <CostLine tier={tier} tiers={tiers} balance={balance} creditsEnforced={creditsEnforced} />
         )}
         {tooLong && (
           <span className="ml-auto text-xs text-bad">
@@ -139,7 +134,10 @@ export function TopicComposer({
           does not move under the pointer that just pressed it. */}
       {denial && <DenialNotice denial={denial} className="mt-3" />}
       {error && (
-        <Notice tone="bad" className="mt-3 animate-in fade-in slide-in-from-bottom-1 duration-(--dur-2)">
+        <Notice
+          tone="bad"
+          className="mt-3 animate-in duration-(--dur-2) fade-in slide-in-from-bottom-1"
+        >
           {error}
         </Notice>
       )}

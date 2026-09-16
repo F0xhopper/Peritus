@@ -24,8 +24,8 @@ export default function TermsPage() {
         <li>
           <strong>It is not systematic review software.</strong> Screening is a single model pass,
           with a second read on borderline cases. There is no dual human review and no conflict
-          resolution. It produces data a review asks you to report; compliance is a property of
-          your review, not of a tool.
+          resolution. It produces data a review asks you to report; compliance is a property of your
+          review, not of a tool.
         </li>
         <li>
           <strong>It does not substitute for professional advice.</strong> Nothing it says is
@@ -51,24 +51,24 @@ export default function TermsPage() {
 
       <h2>Credits</h2>
       <p>
-        Builds consume credits. Credits are held when a build is enqueued and refunded in full if
-        it fails, is cancelled, or stops at its spend ceiling. Chat does not consume credits.
-        There is no checkout: credits are issued by hand during the beta and have no cash value.
+        Builds consume credits. Credits are held when a build is enqueued and refunded in full if it
+        fails, is cancelled, or stops at its spend ceiling. Chat does not consume credits. There is
+        no checkout: credits are issued by hand during the beta and have no cash value.
       </p>
 
       <h2>Acceptable use</h2>
       <p>
-        Do not use Peritus to build a corpus whose purpose is to harass or defame someone, to
-        evade the access controls or terms of the sources it searches, or to launder invented
-        claims through a citation format. Do not upload material you have no right to use.
+        Do not use Peritus to build a corpus whose purpose is to harass or defame someone, to evade
+        the access controls or terms of the sources it searches, or to launder invented claims
+        through a citation format. Do not upload material you have no right to use.
       </p>
 
       <h2>Content and rights</h2>
       <p>
         Sources keep their own copyright; Peritus stores passages of them in order to retrieve and
-        cite them, and points at the original. Your topics, uploads and conversations remain
-        yours. Publishing an expert grants readers the right to read its corpus record and its
-        evidence trail.
+        cite them, and points at the original. Your topics, uploads and conversations remain yours.
+        Publishing an expert grants readers the right to read its corpus record and its evidence
+        trail.
       </p>
 
       <h2>No warranty, and limits</h2>

@@ -64,7 +64,7 @@ export function NodeDetail({
     return [...groups.entries()]
       .map(
         ([type, byNeighbour]) =>
-          [type, [...byNeighbour.values()].sort((a, b) => b.evidence - a.evidence)] as const,
+          [type, [...byNeighbour.values()].sort((a, b) => b.evidence - a.evidence)] as const
       )
       .sort((a, b) => indexOfType(a[0]) - indexOfType(b[0]))
   }, [edges, node.id, byId])
@@ -88,7 +88,7 @@ export function NodeDetail({
             <p
               className={cn(
                 'text-label tracking-[0.04em] uppercase',
-                type === 'contradicts' ? 'text-warn' : 'text-fg-3',
+                type === 'contradicts' ? 'text-warn' : 'text-fg-3'
               )}
             >
               {LABELS[type] ?? humanise(type)}
@@ -112,9 +112,7 @@ export function NodeDetail({
               ))}
             </ul>
             {neighbours.length > 12 && (
-              <p className="mt-0.5 px-1 text-xs text-fg-3">
-                +{neighbours.length - 12} more
-              </p>
+              <p className="mt-0.5 px-1 text-xs text-fg-3">+{neighbours.length - 12} more</p>
             )}
           </div>
         ))

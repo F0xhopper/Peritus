@@ -72,7 +72,7 @@ export function NavDrawer({
             aria-label="Home"
             className={cn(
               'grid size-10 shrink-0 place-items-center rounded-card text-fg-3',
-              pathname === '/experts' ? 'bg-raised text-fg' : 'hover:bg-raised',
+              pathname === '/experts' ? 'bg-raised text-fg' : 'hover:bg-raised'
             )}
           >
             <Home className="size-4" />
@@ -84,7 +84,7 @@ export function NavDrawer({
               aria-label={expert.persona_name ?? expert.topic}
               className={cn(
                 'relative grid size-10 shrink-0 place-items-center rounded-card',
-                expert.name === activeSlug ? 'opacity-100' : 'opacity-70',
+                expert.name === activeSlug ? 'opacity-100' : 'opacity-70'
               )}
             >
               <Avatar expert={expert} size={40} />

@@ -36,9 +36,11 @@ test('an expert is drawn the same way on every surface', async ({ page }) => {
   await expect(page.locator('[data-avatar]').filter({ hasText: 'DR' })).toHaveCount(0)
 
   // And none of them carries a colour of its own: there are no per-expert hues.
-  const hues = await page.locator('[data-avatar]').evaluateAll((nodes) =>
-    nodes.map((node) => (node as HTMLElement).style.getPropertyValue('--expert-h').trim()),
-  )
+  const hues = await page
+    .locator('[data-avatar]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => (node as HTMLElement).style.getPropertyValue('--expert-h').trim())
+    )
   expect(hues.length).toBeGreaterThan(1)
   expect(new Set(hues)).toEqual(new Set(['']))
 })
@@ -149,7 +151,6 @@ test('the avatar can also be changed from expert settings', async ({ page }) => 
   await expect(content(page).getByText(/Pinned — style "glass"/)).toBeVisible({ timeout: 15_000 })
 })
 
-
 /**
  * The found picture.
  *
@@ -168,9 +169,9 @@ test('an expert with a found picture shows it, everywhere, from our own origin',
   // width, all of them in the HTML.
   expect(await tiles.count()).toBeGreaterThan(1)
 
-  for (const src of await tiles.locator('img').evaluateAll((nodes) =>
-    nodes.map((node) => node.getAttribute('src')),
-  )) {
+  for (const src of await tiles
+    .locator('img')
+    .evaluateAll((nodes) => nodes.map((node) => node.getAttribute('src')))) {
     // Same-origin, and carrying the version that makes the immutable cache safe.
     expect(src).toMatch(/^\/api\/experts\/[^/]+\/picture\?v=[0-9a-f]+$/)
   }
@@ -183,9 +184,9 @@ test('an expert with a found picture shows it, everywhere, from our own origin',
       () =>
         onScreen.evaluate(
           (node) =>
-            (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0,
+            (node as HTMLImageElement).complete && (node as HTMLImageElement).naturalWidth > 0
         ),
-      { timeout: 10_000 },
+      { timeout: 10_000 }
     )
     .toBe(true)
 })
@@ -195,11 +196,13 @@ test('the picture is credited where it is the identity of the page', async ({ pa
 
   // CC BY-SA obliges attribution, so the credit names the work, the artist and
   // the licence, and links out to where the licence is actually stated.
-  const credit = content(page).getByText(/^Picture:/).first()
+  const credit = content(page)
+    .getByText(/^Picture:/)
+    .first()
   await expect(credit).toBeVisible()
   await expect(credit.getByRole('link', { name: 'Varroa destructor' })).toHaveAttribute(
     'href',
-    /commons\.wikimedia\.org/,
+    /commons\.wikimedia\.org/
   )
   await expect(credit).toContainText('Gilles San Martin')
   await expect(credit.getByRole('link', { name: 'CC BY-SA 2.0' })).toBeVisible()
@@ -234,7 +237,7 @@ test('find another replaces the picture without touching the recipe', async ({ p
   // Still a picture, and still derived — finding one is not a choice the owner
   // made, so Reset stays disabled.
   await expect(
-    page.getByRole('button', { name: 'Change avatar' }).locator('[data-avatar="picture"]'),
+    page.getByRole('button', { name: 'Change avatar' }).locator('[data-avatar="picture"]')
   ).toBeVisible({ timeout: 15_000 })
   await page.getByRole('button', { name: 'Change avatar' }).click()
   await expect(page.getByRole('button', { name: 'Reset' })).toBeDisabled()
@@ -261,6 +264,6 @@ test('a pinned drawing overrides the picture, and Reset brings it back', async (
 
   await page.reload()
   await expect(
-    page.getByRole('button', { name: 'Change avatar' }).locator('[data-avatar="picture"]'),
+    page.getByRole('button', { name: 'Change avatar' }).locator('[data-avatar="picture"]')
   ).toBeVisible({ timeout: 15_000 })
 })

@@ -4,10 +4,7 @@
       "startServerCommand": "npx next start --port 3200",
       "startServerReadyPattern": "Ready in",
       "startServerReadyTimeout": 120000,
-      "url": [
-        "http://127.0.0.1:3200/",
-        "http://127.0.0.1:3200/login"
-      ],
+      "url": ["http://127.0.0.1:3200/", "http://127.0.0.1:3200/login"],
       "numberOfRuns": 3,
       "settings": {
         "throttlingMethod": "devtools"

@@ -1,6 +1,15 @@
 'use client'
 
-import { LogOut, MessageSquare, MoreHorizontal, Network, Settings, Table, Trash2, Users } from 'lucide-react'
+import {
+  LogOut,
+  MessageSquare,
+  MoreHorizontal,
+  Network,
+  Settings,
+  Table,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
@@ -90,7 +99,7 @@ export function ExpertCard({
           'group relative flex flex-col rounded-card bg-panel p-3',
           'transition-colors duration-(--dur-1) hover:bg-raised',
           stagger !== null &&
-            'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-(--dur-2) motion-safe:fill-mode-backwards',
+            'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fill-mode-backwards motion-safe:fade-in motion-safe:slide-in-from-bottom-1'
         )}
       >
         {/* Right padding keeps a long name clear of the absolutely placed ⋯ menu. */}
@@ -172,7 +181,7 @@ export function ExpertCard({
               'hover:bg-raised hover:text-fg',
               // Hidden until hover on a mouse, always present on touch.
               'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-              '[@media(hover:none)]:opacity-100',
+              '[@media(hover:none)]:opacity-100'
             )}
           >
             <MoreHorizontal className="size-3.5" />

@@ -47,9 +47,15 @@ export function Dialog({
 
   if (!isTabletUp) {
     return (
-      <Sheet open={open} onOpenChange={onOpenChange} side="bottom" title={title} description={description}>
+      <Sheet
+        open={open}
+        onOpenChange={onOpenChange}
+        side="bottom"
+        title={title}
+        description={description}
+      >
         <div className="pt-1">{children}</div>
-        {footer && <div className="sticky bottom-0 mt-4 bg-panel pt-3 pb-safe">{footer}</div>}
+        {footer && <div className="pb-safe sticky bottom-0 mt-4 bg-panel pt-3">{footer}</div>}
       </Sheet>
     )
   }
@@ -66,8 +72,8 @@ export function Dialog({
           className={cn(
             'fixed inset-0 z-40 bg-black/50',
             'transition-opacity duration-(--dur-2) ease-(--ease-out)',
-            'data-starting-style:opacity-0 data-ending-style:opacity-0',
-            'data-ending-style:duration-(--dur-1)',
+            'data-ending-style:opacity-0 data-starting-style:opacity-0',
+            'data-ending-style:duration-(--dur-1)'
           )}
         />
         <BaseDialog.Popup
@@ -85,7 +91,7 @@ export function Dialog({
             'transition-[opacity,transform] duration-(--dur-2) ease-(--ease-out)',
             'data-starting-style:scale-[0.98] data-starting-style:opacity-0',
             'data-ending-style:opacity-0 data-ending-style:duration-(--dur-1)',
-            className,
+            className
           )}
         >
           <div className="mb-3 flex items-start justify-between gap-3">

@@ -43,7 +43,7 @@ import type {
  */
 async function safely<T>(
   fetcher: () => Promise<T>,
-  opts: { next?: string; notFoundOn404?: boolean } = {},
+  opts: { next?: string; notFoundOn404?: boolean } = {}
 ): Promise<T> {
   try {
     return await fetcher()
@@ -107,7 +107,7 @@ export function getExperts(next?: string) {
 export const getExpert = cache((slug: string) =>
   safely(() => proxyJson<ExpertWithCatalog>(`/experts/${encodeURIComponent(slug)}`), {
     next: `/experts/${slug}`,
-  }),
+  })
 )
 
 /**
@@ -121,9 +121,7 @@ export function getExpertIfReadable(slug: string) {
 
 /** Null until the expert has ever had a build job. */
 export function getBuildStatus(slug: string) {
-  return optional(() =>
-    proxyJson<BuildStatus>(`/experts/${encodeURIComponent(slug)}/build/status`),
-  )
+  return optional(() => proxyJson<BuildStatus>(`/experts/${encodeURIComponent(slug)}/build/status`))
 }
 
 /** Null until the latest job has metered some spend. */
@@ -185,7 +183,7 @@ export function getCorpusReport(slug: string, query: CorpusQuery = {}) {
   })
   return safely(
     () => proxyJson<CorpusReport>(`/experts/${encodeURIComponent(slug)}/corpus-report?${params}`),
-    { next: `/experts/${slug}/sources` },
+    { next: `/experts/${slug}/sources` }
   )
 }
 
@@ -199,7 +197,7 @@ export function getCorpusReport(slug: string, query: CorpusQuery = {}) {
 export async function getScreeningFlow(slug: string): Promise<ScreeningFlow | null> {
   try {
     return await optional(() =>
-      proxyJson<ScreeningFlow>(`/experts/${encodeURIComponent(slug)}/screening-flow`),
+      proxyJson<ScreeningFlow>(`/experts/${encodeURIComponent(slug)}/screening-flow`)
     )
   } catch (error) {
     if (isNextControlFlow(error)) throw error
@@ -213,7 +211,7 @@ export async function getScreeningFlow(slug: string): Promise<ScreeningFlow | nu
 export function getGraph(slug: string, limit = 400) {
   return safely(
     () => proxyJson<GraphResponse>(`/experts/${encodeURIComponent(slug)}/graph?limit=${limit}`),
-    { next: `/experts/${slug}/graph` },
+    { next: `/experts/${slug}/graph` }
   )
 }
 
@@ -225,9 +223,8 @@ export function getConversations(limit = 20, next?: string) {
 
 export function getExpertConversations(slug: string) {
   return safely(
-    () =>
-      proxyJson<ConversationSummary[]>(`/experts/${encodeURIComponent(slug)}/conversations`),
-    { next: `/experts/${slug}` },
+    () => proxyJson<ConversationSummary[]>(`/experts/${encodeURIComponent(slug)}/conversations`),
+    { next: `/experts/${slug}` }
   )
 }
 
@@ -241,8 +238,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  */
 export const getConversation = cache((id: string) => {
   if (!UUID.test(id)) notFound()
-  return safely(
-    () => proxyJson<ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
-    { next: `/chats/${id}` },
-  )
+  return safely(() => proxyJson<ConversationDetail>(`/conversations/${encodeURIComponent(id)}`), {
+    next: `/chats/${id}`,
+  })
 })

@@ -59,7 +59,7 @@ export function Disclosure({
           aria-hidden="true"
           className={cn(
             'size-3.5 shrink-0 text-fg-3 transition-transform duration-(--dur-2) ease-(--ease-out)',
-            open && 'rotate-90',
+            open && 'rotate-90'
           )}
         />
         <span className="min-w-0 flex-1 truncate">{summary}</span>

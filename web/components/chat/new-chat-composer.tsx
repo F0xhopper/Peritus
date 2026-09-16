@@ -57,7 +57,9 @@ export function focusAskField(href: string): boolean {
   const field = document.getElementById(ASK_FIELD_ID)
   if (!field) return false
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  document.getElementById('ask')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' })
+  document
+    .getElementById('ask')
+    ?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' })
   field.focus({ preventScroll: true })
   return true
 }
@@ -102,10 +104,9 @@ export function NewChatComposer({
     if (!trimmed || starting) return
     setStarting(true)
     try {
-      const res = await fetch(
-        `/api/experts/${encodeURIComponent(expert.name)}/conversations`,
-        { method: 'POST' },
-      )
+      const res = await fetch(`/api/experts/${encodeURIComponent(expert.name)}/conversations`, {
+        method: 'POST',
+      })
       if (res.status === 409) {
         toast.error('This expert cannot answer yet.')
         return
@@ -132,7 +133,11 @@ export function NewChatComposer({
           // Enter sends, Shift+Enter breaks — but only with a fine pointer. On
           // a phone Enter is the keyboard's newline and the button is the only
           // way to send.
-          if (event.key === 'Enter' && !event.shiftKey && window.matchMedia('(hover: hover)').matches) {
+          if (
+            event.key === 'Enter' &&
+            !event.shiftKey &&
+            window.matchMedia('(hover: hover)').matches
+          ) {
             event.preventDefault()
             void send()
           }

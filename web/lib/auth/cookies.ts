@@ -91,10 +91,7 @@ export function clearedSessionCookies(): CookieSpec[] {
 
 /** The PKCE verifier and the post-login destination, both short-lived. */
 export function pkceCookies(verifier: string, next: string): CookieSpec[] {
-  return [
-    base(PKCE_COOKIE, verifier, 600),
-    base(LOGIN_NEXT_COOKIE, next, 600),
-  ]
+  return [base(PKCE_COOKIE, verifier, 600), base(LOGIN_NEXT_COOKIE, next, 600)]
 }
 
 export function clearedPkceCookies(): CookieSpec[] {

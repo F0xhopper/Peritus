@@ -81,8 +81,7 @@ export function ChatView({
   // expert even when the chat is not in the layout's recents.
   useEffect(() => {
     setChatExpert({ chatId: conversation.id, slug: expert.name })
-    return () =>
-      setChatExpert((current) => (current?.chatId === conversation.id ? null : current))
+    return () => setChatExpert((current) => (current?.chatId === conversation.id ? null : current))
   }, [conversation.id, expert.name, setChatExpert])
 
   /**
@@ -137,7 +136,7 @@ export function ChatView({
     if (citation.source_id !== null && !ledgerRequested.current) {
       ledgerRequested.current = true
       void fetch(
-        `/api/experts/${encodeURIComponent(expert.name)}/sources?decision=accepted&limit=500`,
+        `/api/experts/${encodeURIComponent(expert.name)}/sources?decision=accepted&limit=500`
       )
         .then((res) => (res.ok ? (res.json() as Promise<CorpusReport>) : null))
         .then((report) => {
@@ -286,8 +285,8 @@ export function ChatView({
 
       {chattable && expert.readiness === 'chat_ready' && (
         <p className="shrink-0 px-3 pb-1 text-xs text-fg-3 md:px-4">
-          The concept graph is still building, so answers are not yet expanded with related
-          concepts or flagged where sources disagree.
+          The concept graph is still building, so answers are not yet expanded with related concepts
+          or flagged where sources disagree.
         </p>
       )}
 
@@ -327,9 +326,7 @@ export function ChatView({
         <ContextSlot title="Cited passage" open onClose={() => setSelected(null)}>
           <PassagePanel
             citation={selected}
-            source={
-              selected.source_id !== null ? (ledger?.get(selected.source_id) ?? null) : null
-            }
+            source={selected.source_id !== null ? (ledger?.get(selected.source_id) ?? null) : null}
             slug={expert.name}
             onAsk={(title) => {
               setDraft({ text: `What else does “${title}” say about this?`, id: Date.now() })

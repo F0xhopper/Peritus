@@ -42,9 +42,7 @@ export function Notice({
         <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           {title && <p className="text-sm font-medium">{title}</p>}
-          {children && (
-            <div className={cn('text-sm text-fg-2', title && 'mt-1')}>{children}</div>
-          )}
+          {children && <div className={cn('text-sm text-fg-2', title && 'mt-1')}>{children}</div>}
           {action && <div className="mt-2.5 flex flex-wrap gap-2">{action}</div>}
         </div>
       </div>

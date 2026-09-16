@@ -41,9 +41,9 @@ describe('canonical works', () => {
   })
 
   it('colours found green, parts amber and missing red', () => {
-    expect(['found_whole', 'found_sections', 'found_partial', 'not_found'].map(mustHaveTone)).toEqual(
-      ['ok', 'ok', 'warn', 'bad'],
-    )
+    expect(
+      ['found_whole', 'found_sections', 'found_partial', 'not_found'].map(mustHaveTone)
+    ).toEqual(['ok', 'ok', 'warn', 'bad'])
     expect(isMustHaveFound('found_partial')).toBe(false)
   })
 
@@ -56,7 +56,7 @@ describe('canonical works', () => {
         found: group.found,
         total: group.total,
         works: group.works.map((work) => work.title),
-      })),
+      }))
     ).toEqual([
       {
         scope: 'overall',
@@ -89,9 +89,9 @@ describe('canonical works', () => {
 
   it('leaves out a group with no works', () => {
     const overallOnly = corpus.must_have.filter((work) => work.scope !== 'concept')
-    expect(mustHaveGroups({ ...corpus, must_have: overallOnly }).map((group) => group.scope)).toEqual([
-      'overall',
-    ])
+    expect(
+      mustHaveGroups({ ...corpus, must_have: overallOnly }).map((group) => group.scope)
+    ).toEqual(['overall'])
   })
 
   it('reports none of none for a plan with no must-have works', () => {
@@ -114,8 +114,20 @@ describe('the candidate ledger', () => {
   it('keeps an unrecorded outcome as its own row, last, never folded into another', () => {
     const rows = ledgerByOutcome([
       { round: 0, fetch_outcome: null, triage_status: 'scored', count: 2, mean_triage_score: null },
-      { round: 0, fetch_outcome: 'fetched', triage_status: 'scored', count: 1, mean_triage_score: 7 },
-      { round: 0, fetch_outcome: 'mystery', triage_status: 'scored', count: 1, mean_triage_score: 7 },
+      {
+        round: 0,
+        fetch_outcome: 'fetched',
+        triage_status: 'scored',
+        count: 1,
+        mean_triage_score: 7,
+      },
+      {
+        round: 0,
+        fetch_outcome: 'mystery',
+        triage_status: 'scored',
+        count: 1,
+        mean_triage_score: 7,
+      },
     ])
     expect(rows.map((row) => row.label)).toEqual(['Fetched', 'Mystery', 'Not recorded'])
   })

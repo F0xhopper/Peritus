@@ -41,9 +41,15 @@ test('walking the expert’s pages raises nothing and reloads nothing', async ({
   // Three laps, because a transition that is interrupted by the *next*
   // navigation is the case that rejects.
   for (let lap = 0; lap < 3; lap += 1) {
-    await page.getByRole('link', { name: /^Sources/ }).first().click()
+    await page
+      .getByRole('link', { name: /^Sources/ })
+      .first()
+      .click()
     await page.waitForURL(`**/${SLUG}/sources`)
-    await page.getByRole('link', { name: /^Graph/ }).first().click()
+    await page
+      .getByRole('link', { name: /^Graph/ })
+      .first()
+      .click()
     await page.waitForURL(`**/${SLUG}/graph`)
     await page.getByRole('link', { name: 'Overview' }).first().click()
     await page.waitForURL(`**/${SLUG}`)
@@ -65,7 +71,10 @@ test('the shell keeps the expert while reading one of its chats', async ({ page 
   test.skip(isTouchProject(testInfo.project.name), 'the rail and sidebar are hidden below md')
 
   await page.goto(`/experts/${SLUG}`)
-  await page.getByRole('link', { name: /How effective is drone brood removal/ }).first().click()
+  await page
+    .getByRole('link', { name: /How effective is drone brood removal/ })
+    .first()
+    .click()
   await page.waitForURL('**/chats/**')
 
   // A conversation's URL does not name an expert, so both navigation columns
@@ -74,9 +83,7 @@ test('the shell keeps the expert while reading one of its chats', async ({ page 
   const rail = page.getByRole('navigation', { name: 'Experts' })
   await expect(rail.getByRole('link', { name: /Dr\. Marta Belen/ }).first()).toHaveAttribute(
     'aria-current',
-    'page',
+    'page'
   )
-  await expect(
-    page.getByRole('navigation', { name: /Dr\. Marta Belen pages/ }),
-  ).toBeVisible()
+  await expect(page.getByRole('navigation', { name: /Dr\. Marta Belen pages/ })).toBeVisible()
 })

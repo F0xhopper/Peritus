@@ -60,7 +60,9 @@ export function SharedExpertCard({
 
       <dl className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 text-sm min-[480px]:grid-cols-[auto_1fr]">
         <Property label="Depth">{humanise(expert.tier)}</Property>
-        <Property label="Sources">{plural(expert.source_count, 'source')} kept after screening</Property>
+        <Property label="Sources">
+          {plural(expert.source_count, 'source')} kept after screening
+        </Property>
         <Property label="Quality">{formatScore(expert.avg_quality)} average, out of 10</Property>
         <Property label="Passages">{expert.chunk_count}</Property>
         {expert.node_count > 0 && <Property label="Concepts">{expert.node_count}</Property>}

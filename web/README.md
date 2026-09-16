@@ -26,16 +26,16 @@ npm run mock-api               # :8787 — point PERITUS_API_URL at it
 
 ## Scripts
 
-| Command | What it does |
-|---|---|
-| `npm run dev` | Development server |
-| `npm run build` | Production build |
-| `npm run lint` | ESLint |
-| `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Vitest unit suite |
-| `npm run e2e` | Playwright, all seven device projects (needs a build) |
+| Command              | What it does                                                    |
+| -------------------- | --------------------------------------------------------------- |
+| `npm run dev`        | Development server                                              |
+| `npm run build`      | Production build                                                |
+| `npm run lint`       | ESLint                                                          |
+| `npm run typecheck`  | `tsc --noEmit`                                                  |
+| `npm test`           | Vitest unit suite                                               |
+| `npm run e2e`        | Playwright, all seven device projects (needs a build)           |
 | `npm run lighthouse` | Performance budgets on the public and app pages (needs a build) |
-| `npm run mock-api` | The fixture server the e2e suite runs against |
+| `npm run mock-api`   | The fixture server the e2e suite runs against                   |
 
 From the repository root, `just lint-web` runs exactly what the web CI job runs, so a green local
 run means a green CI run.
@@ -81,7 +81,7 @@ in code, not in copy.
 - **`proxy.ts`** (not `middleware.ts` — renamed in Next 16) gates the `(app)` routes and refreshes
   the session at the edge, because a server component cannot write cookies.
 - **`lib/api/proxy.ts`** attaches the bearer, refreshes once on a 401 and retries, and
-  distinguishes a dead refresh token (sign in again) from an unreachable auth server (do *not*
+  distinguishes a dead refresh token (sign in again) from an unreachable auth server (do _not_
   sign the user out).
 - **The browser holds no token in JavaScript.** Two httpOnly cookies carry the session, and only
   the server reads them.

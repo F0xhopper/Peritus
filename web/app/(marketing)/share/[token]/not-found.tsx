@@ -11,8 +11,8 @@ export default function ShareNotFound() {
       <Link2Off className="size-7 text-fg-4" aria-hidden="true" />
       <h1 className="mt-3 text-lg font-medium text-fg">This link is not active</h1>
       <p className="mt-1.5 text-sm text-fg-3">
-        Its owner may have reset it or stopped sharing, or the link may be incomplete. Ask them
-        for a new one.
+        Its owner may have reset it or stopped sharing, or the link may be incomplete. Ask them for
+        a new one.
       </p>
       <Link
         href="/"

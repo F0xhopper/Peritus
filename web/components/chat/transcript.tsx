@@ -98,7 +98,7 @@ export function Transcript({
       <div
         ref={scroller}
         onScroll={checkAtBottom}
-        className="anchor-none h-full overflow-y-auto overscroll-contain pan-y"
+        className="anchor-none pan-y h-full overflow-y-auto overscroll-contain"
       >
         {/* Top-anchored, like a page. Anchoring to the bottom (messaging-app
             style) left a one-turn conversation in the lower third under an
@@ -127,7 +127,7 @@ export function Transcript({
                     : undefined
                 }
               />
-            ),
+            )
           )}
 
           {/**
@@ -141,15 +141,15 @@ export function Transcript({
           {unanswered && (
             <div className="rounded-card bg-panel p-3 md:p-4">
               <p className="text-sm text-fg-2">
-                No answer was recorded for this question. The answer was interrupted, or the
-                server could not finish it.
+                No answer was recorded for this question. The answer was interrupted, or the server
+                could not finish it.
               </p>
               <button
                 type="button"
                 onClick={() => onRegenerate(lastQuestion)}
                 className={cn(
                   'mt-2 inline-flex h-(--row-h) items-center gap-1.5 rounded-row bg-raised px-2.5',
-                  'text-xs text-fg-2 transition-colors duration-(--dur-1) hover:text-fg',
+                  'text-xs text-fg-2 transition-colors duration-(--dur-1) hover:text-fg'
                 )}
               >
                 <RotateCcw className="size-3" />
@@ -175,9 +175,7 @@ export function Transcript({
                   onSelectCitation={onSelectCitation}
                   selectedCitation={selectedCitation}
                   onRegenerate={
-                    !streaming && lastQuestion
-                      ? () => onRegenerate(lastQuestion)
-                      : undefined
+                    !streaming && lastQuestion ? () => onRegenerate(lastQuestion) : undefined
                   }
                 />
               )}
@@ -201,7 +199,7 @@ export function Transcript({
             'inline-flex h-(--icon-btn-sm) items-center gap-1.5 rounded-full border border-border bg-raised px-3',
             'text-xs text-fg-2 shadow-lg shadow-black/25',
             'transition-colors duration-(--dur-1) hover:text-fg',
-            'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-(--dur-2)',
+            'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fade-in motion-safe:slide-in-from-bottom-1'
           )}
         >
           <ArrowDown className="size-3" />

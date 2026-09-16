@@ -4,12 +4,7 @@ import { cookies } from 'next/headers'
 
 import { ApiError, NotAuthenticatedError } from '@/lib/api/errors'
 import { callApi, throwForStatus, type CallInit } from '@/lib/api/server'
-import {
-  ACCESS_COOKIE,
-  REFRESH_COOKIE,
-  accessCookieMaxAge,
-  isProduction,
-} from '@/lib/auth/cookies'
+import { ACCESS_COOKIE, REFRESH_COOKIE, accessCookieMaxAge, isProduction } from '@/lib/auth/cookies'
 import type { Session } from '@/lib/api/types'
 
 /**

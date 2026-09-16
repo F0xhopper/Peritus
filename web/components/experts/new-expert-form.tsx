@@ -153,18 +153,13 @@ export function NewExpertForm({
 
       {/* Inline at `md` and up; a sticky footer below, above the safe area. */}
       <div className="mt-6 hidden items-center justify-between gap-4 md:flex">
-        <CostLine
-          tier={tier}
-          tiers={tiers}
-          balance={balance}
-          creditsEnforced={creditsEnforced}
-        />
+        <CostLine tier={tier} tiers={tiers} balance={balance} creditsEnforced={creditsEnforced} />
         <Button type="submit" variant="primary" size="lg" loading={submitting} minWidth={120}>
           Build
         </Button>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg px-4 pt-3 pb-safe-4 md:hidden">
+      <div className="pb-safe-4 fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg px-4 pt-3 md:hidden">
         <CostLine
           tier={tier}
           tiers={tiers}
@@ -172,13 +167,7 @@ export function NewExpertForm({
           creditsEnforced={creditsEnforced}
           className="mb-2"
         />
-        <Button
-          type="submit"
-          variant="primary"
-          size="lg"
-          loading={submitting}
-          className="w-full"
-        >
+        <Button type="submit" variant="primary" size="lg" loading={submitting} className="w-full">
           Build
         </Button>
       </div>

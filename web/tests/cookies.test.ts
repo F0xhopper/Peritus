@@ -88,7 +88,7 @@ describe('clearedSessionCookies', () => {
     // refresh a token that is already gone on every navigation.
     const cookies = clearedSessionCookies()
     expect(cookies.map((cookie) => cookie.name).sort()).toEqual(
-      [ACCESS_COOKIE, REFRESH_COOKIE].sort(),
+      [ACCESS_COOKIE, REFRESH_COOKIE].sort()
     )
     for (const cookie of cookies) {
       expect(cookie.maxAge).toBe(0)
@@ -145,7 +145,7 @@ describe('challengeFor', () => {
 describe('safeNext', () => {
   it('keeps an in-app path', () => {
     expect(safeNext('/experts/abc/sources?decision=rejected')).toBe(
-      '/experts/abc/sources?decision=rejected',
+      '/experts/abc/sources?decision=rejected'
     )
   })
 

@@ -88,14 +88,62 @@
     "candidate_ledger": {
       "job_id": 118,
       "rows": [
-        { "round": 0, "fetch_outcome": "fetched", "triage_status": "scored", "count": 26, "mean_triage_score": 7.4 },
-        { "round": 0, "fetch_outcome": "fetched", "triage_status": "must_have", "count": 2, "mean_triage_score": 9.0 },
-        { "round": 0, "fetch_outcome": "failed", "triage_status": "scored", "count": 3, "mean_triage_score": 6.8 },
-        { "round": 0, "fetch_outcome": "below_floor", "triage_status": "scored", "count": 58, "mean_triage_score": 3.1 },
-        { "round": 0, "fetch_outcome": "below_floor", "triage_status": "unscored", "count": 4, "mean_triage_score": 0.0 },
-        { "round": 1, "fetch_outcome": "fetched", "triage_status": "scored", "count": 6, "mean_triage_score": 7.1 },
-        { "round": 1, "fetch_outcome": "budget", "triage_status": "scored", "count": 5, "mean_triage_score": 6.2 },
-        { "round": 1, "fetch_outcome": "content_duplicate", "triage_status": "scored", "count": 1, "mean_triage_score": 6.9 }
+        {
+          "round": 0,
+          "fetch_outcome": "fetched",
+          "triage_status": "scored",
+          "count": 26,
+          "mean_triage_score": 7.4
+        },
+        {
+          "round": 0,
+          "fetch_outcome": "fetched",
+          "triage_status": "must_have",
+          "count": 2,
+          "mean_triage_score": 9.0
+        },
+        {
+          "round": 0,
+          "fetch_outcome": "failed",
+          "triage_status": "scored",
+          "count": 3,
+          "mean_triage_score": 6.8
+        },
+        {
+          "round": 0,
+          "fetch_outcome": "below_floor",
+          "triage_status": "scored",
+          "count": 58,
+          "mean_triage_score": 3.1
+        },
+        {
+          "round": 0,
+          "fetch_outcome": "below_floor",
+          "triage_status": "unscored",
+          "count": 4,
+          "mean_triage_score": 0.0
+        },
+        {
+          "round": 1,
+          "fetch_outcome": "fetched",
+          "triage_status": "scored",
+          "count": 6,
+          "mean_triage_score": 7.1
+        },
+        {
+          "round": 1,
+          "fetch_outcome": "budget",
+          "triage_status": "scored",
+          "count": 5,
+          "mean_triage_score": 6.2
+        },
+        {
+          "round": 1,
+          "fetch_outcome": "content_duplicate",
+          "triage_status": "scored",
+          "count": 1,
+          "mean_triage_score": 6.9
+        }
       ]
     },
     "note": "junk_fetched counts fetched sources the validator scored 3 or less for relevance — candidates triage should not have sent to fetch. An abstract-only source ships to the corpus but never counts toward coverage. Must-have works are judged on the accepted corpus: found_partial means only a section or volume of the work passed; found_sections means the sections the plan named were found and kept."

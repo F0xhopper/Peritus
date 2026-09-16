@@ -24,13 +24,7 @@ export type ExpertTier = 'lite' | 'standard' | 'pro'
 export type SourceDecision = 'all' | 'accepted' | 'rejected'
 
 export type SourceSort =
-  | 'decision'
-  | 'quality'
-  | 'relevance'
-  | 'title'
-  | 'type'
-  | 'discovered_via'
-  | 'added'
+  'decision' | 'quality' | 'relevance' | 'title' | 'type' | 'discovered_via' | 'added'
 
 export type ExportFormat = 'csv' | 'ris'
 
@@ -380,14 +374,7 @@ export const TERMINAL_BUILD_EVENTS = new Set<string>(['done', 'error', 'cancelle
 
 /** Pipeline stage names, in order, as the `stage` event reports them. */
 export type StageName =
-  | 'plan'
-  | 'discover'
-  | 'validate'
-  | 'chunk'
-  | 'graph'
-  | 'resolve'
-  | 'reconcile'
-  | 'persona'
+  'plan' | 'discover' | 'validate' | 'chunk' | 'graph' | 'resolve' | 'reconcile' | 'persona'
 
 interface BuildEventBase {
   type: string
@@ -488,13 +475,7 @@ export interface TriageDoneEvent extends BuildEventBase {
 
 /** What happened to each ranked candidate at fetch time. */
 export type FetchOutcome =
-  | 'fetched'
-  | 'failed'
-  | 'capped'
-  | 'below_floor'
-  | 'budget'
-  | 'not_reached'
-  | 'content_duplicate'
+  'fetched' | 'failed' | 'capped' | 'below_floor' | 'budget' | 'not_reached' | 'content_duplicate'
 
 export interface FetchDoneEvent extends BuildEventBase {
   type: 'fetch_done'

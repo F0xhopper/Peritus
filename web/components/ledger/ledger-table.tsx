@@ -70,7 +70,7 @@ export function LedgerTable({
       className={cn(
         'overflow-x-auto rounded-card bg-panel',
         'transition-opacity duration-(--dur-1)',
-        pending && 'opacity-60',
+        pending && 'opacity-60'
       )}
     >
       <table className="w-full min-w-[720px] border-collapse text-sm">
@@ -83,10 +83,10 @@ export function LedgerTable({
                 className={cn(
                   // `font-normal`: a `<th>` is bold by default, and bold 11px
                   // capitals read as shouting next to the rows beneath.
-                  'border-b border-border px-2 py-1.5 text-label font-normal tracking-[0.04em] text-fg-3 uppercase whitespace-nowrap',
+                  'border-b border-border px-2 py-1.5 text-label font-normal tracking-[0.04em] whitespace-nowrap text-fg-3 uppercase',
                   column.align === 'right' ? 'text-right' : 'text-left',
                   // The title column stays put while the rest scrolls.
-                  column.key === 'title' && 'sticky left-0 z-20 bg-panel',
+                  column.key === 'title' && 'sticky left-0 z-20 bg-panel'
                 )}
               >
                 {column.sort ? (
@@ -103,7 +103,7 @@ export function LedgerTable({
                       // the sortable headers read "Decision" beside "SOURCE".
                       'inline-flex h-(--icon-btn) items-center gap-1 uppercase',
                       'transition-colors duration-(--dur-1) hover:text-fg-2',
-                      sort === column.sort && 'text-fg-2',
+                      sort === column.sort && 'text-fg-2'
                     )}
                   >
                     {column.label}
@@ -135,7 +135,7 @@ export function LedgerTable({
               className={cn(
                 'h-(--table-row-h) cursor-default transition-colors duration-(--dur-1)',
                 'focus-visible:bg-raised focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-fg',
-                selectedId === source.id ? 'bg-raised' : 'hover:bg-raised',
+                selectedId === source.id ? 'bg-raised' : 'hover:bg-raised'
               )}
             >
               {columns.map((column) => (
@@ -145,7 +145,7 @@ export function LedgerTable({
                     'border-b border-border-soft px-2',
                     column.align === 'right' ? 'text-right' : 'text-left',
                     column.key === 'title' &&
-                      cn('sticky left-0 z-10', selectedId === source.id ? 'bg-raised' : 'bg-panel'),
+                      cn('sticky left-0 z-10', selectedId === source.id ? 'bg-raised' : 'bg-panel')
                   )}
                 >
                   <Cell column={column.key} source={source} />
@@ -165,16 +165,17 @@ function Cell({ column, source }: { column: string; source: LedgerSource }) {
       return (
         <span className="block max-w-[22rem] truncate text-fg-2" title={source.title}>
           {source.title}
-          {source.url && (
-            <span className="ml-1.5 text-xs text-fg-3">{hostOf(source.url)}</span>
-          )}
+          {source.url && <span className="ml-1.5 text-xs text-fg-3">{hostOf(source.url)}</span>}
         </span>
       )
 
     case 'type':
       // No wrap: "Thought leader" broke onto two lines and doubled its row.
       return (
-        <span className="whitespace-nowrap text-fg-3" title={`Found via ${sourceProvider(source.source_type)}`}>
+        <span
+          className="whitespace-nowrap text-fg-3"
+          title={`Found via ${sourceProvider(source.source_type)}`}
+        >
           {sourceKind(source.source_type)}
         </span>
       )
