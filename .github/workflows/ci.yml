@@ -124,6 +124,14 @@ jobs:
       - name: Smoke-check the installed CLI
         run: uv run --frozen peritus --help
 
+      # `openapi.json` is committed and the web job generates its TypeScript
+      # from it, so a stale one would silently break that link. Built from the
+      # app object, not a running server.
+      - name: The committed OpenAPI schema is current
+        run: |
+          uv run --frozen python scripts/openapi.py > openapi.json
+          git diff --exit-code openapi.json
+
   # The unit suite runs against a virtualenv; production runs a container. This
   # builds that exact image and runs it the way Fly does — release_command
   # migrations, then the API and the worker — so a broken Dockerfile, a missing
@@ -236,6 +244,16 @@ jobs:
 
       - name: Build
         run: npx next build
+
+      # The other half of the schema link: regenerate from the committed
+      # `api/openapi.json` and fail if the checked-in TypeScript differs.
+      # Fetched rather than installed — it peers on TypeScript 5 and this
+      # project is on 6.
+      - name: The generated types are current
+        run: |
+          npx --yes openapi-typescript@7.13.0 ../api/openapi.json -o lib/api/types.generated.ts
+          npx prettier --write lib/api/types.generated.ts
+          git diff --exit-code lib/api/types.generated.ts
 
   web-e2e:
     name: Web end to end

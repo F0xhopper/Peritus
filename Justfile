@@ -43,6 +43,20 @@ migrate:
 migrate-status:
     cd api && uv run --frozen python migrations/apply.py --status
 
+# Regenerate the API schema and the TypeScript it produces.
+#
+# `api/openapi.json` comes from the FastAPI app (no server, no database) and
+# `web/lib/api/types.generated.ts` from that. Both are committed, and CI
+# regenerates them and fails on a diff — which is the only automatic link
+# between a renamed Python field and the TypeScript that reads it.
+#
+# openapi-typescript is fetched rather than installed: it peers on TypeScript 5
+# and this project is on 6. Same reasoning as `@lhci/cli`.
+types:
+    cd api && uv run --frozen python scripts/openapi.py > openapi.json
+    cd web && npx --yes openapi-typescript@7.13.0 ../api/openapi.json -o lib/api/types.generated.ts
+    cd web && npx prettier --write lib/api/types.generated.ts
+
 # Every setting, its type and its default, as a Markdown table.
 settings:
     cd api && uv run --frozen python scripts/settings_reference.py
