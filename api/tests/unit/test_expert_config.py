@@ -116,5 +116,5 @@ def test_empty_config_fallback():
 
 
 def test_unknown_tier_rejected():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="not a valid ExpertTier"):
         ExpertTier("ultra")

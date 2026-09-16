@@ -463,7 +463,7 @@ def _plan_tool(max_concepts: int) -> dict[str, Any]:
                         "type does best and a weight steering how much of the source budget "
                         "it deserves for this topic."
                     ),
-                    "properties": {name: _FETCHER_PLAN_SCHEMA for name in _FETCHER_NAMES},
+                    "properties": dict.fromkeys(_FETCHER_NAMES, _FETCHER_PLAN_SCHEMA),
                 },
                 "facets": {
                     "type": "array",
@@ -3779,7 +3779,7 @@ def corpus_tier_warning(passed: list[ValidatedSource]) -> dict | None:
     could not classify are counted separately and never held against the corpus:
     an unclassified source is unknown, not tertiary.
     """
-    counts = {tier: 0 for tier in ("primary", "secondary", "tertiary")}
+    counts = dict.fromkeys(("primary", "secondary", "tertiary"), 0)
     unclassified = 0
     for vs in passed:
         if vs.source_tier in counts:

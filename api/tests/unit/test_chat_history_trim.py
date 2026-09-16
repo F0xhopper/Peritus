@@ -6,6 +6,8 @@ the trimming is block-quantised rather than a plain slice. A sliding window
 passes every cap assertion you can write and still never hits the cache.
 """
 
+import itertools
+
 from peritus.chat.agent import _trim_start, build_composition_messages
 from peritus.core.config import settings
 
@@ -48,7 +50,7 @@ def test_retained_prefix_is_stable_across_consecutive_turns():
     cap = settings.CHAT_HISTORY_MAX_MESSAGES
     # Two messages per turn, well past the cap.
     starts = [_trim_start(n) for n in range(cap + 2, cap + 40, 2)]
-    changes = sum(1 for a, b in zip(starts, starts[1:], strict=False) if a != b)
+    changes = sum(1 for a, b in itertools.pairwise(starts) if a != b)
     turns = len(starts) - 1
     assert changes < turns, (
         f"window start moved on {changes}/{turns} turns — a sliding window never "

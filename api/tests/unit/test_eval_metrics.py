@@ -226,7 +226,7 @@ def test_precision_and_recall_are_zero_rather_than_undefined_on_empty_classes():
 
 
 def test_precision_and_recall_reject_mismatched_lengths():
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="same length"):
         screening_precision_recall([True], [True, False])
 
 

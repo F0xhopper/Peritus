@@ -82,8 +82,7 @@ def _extract_video_id(url: str) -> str | None:
     try:
         parsed = urlparse(url)
         if parsed.hostname in ("www.youtube.com", "youtube.com", "m.youtube.com"):
-            vid_id = parse_qs(parsed.query).get("v", [None])[0]
-            return vid_id
+            return parse_qs(parsed.query).get("v", [None])[0]
         if parsed.hostname in ("youtu.be",):
             return parsed.path.lstrip("/") or None
     except Exception:

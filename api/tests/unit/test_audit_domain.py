@@ -19,7 +19,7 @@ from peritus.audit.domain import (
 
 
 @pytest.mark.parametrize(
-    "value,expected",
+    ("value", "expected"),
     [
         ("plan", ("plan", None)),
         ("snowball", ("snowball", None)),

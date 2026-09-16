@@ -31,16 +31,16 @@ def _passage(index: int, source_id: int) -> Passage:
 
 
 def _trail(steps: list[RetrievalStep], **overrides) -> RetrievalTrail:
-    fields = dict(
-        subqueries=["stoic view of death", "memento mori"],
-        followup_queries=[],
-        coverage_satisfied=True,
-        second_pass=False,
-        context_cap=3,
-        duplicate_hits=0,
-        graph_expanded=True,
-        steps=steps,
-    )
+    fields = {
+        "subqueries": ["stoic view of death", "memento mori"],
+        "followup_queries": [],
+        "coverage_satisfied": True,
+        "second_pass": False,
+        "context_cap": 3,
+        "duplicate_hits": 0,
+        "graph_expanded": True,
+        "steps": steps,
+    }
     fields.update(overrides)
     return RetrievalTrail(**fields)
 

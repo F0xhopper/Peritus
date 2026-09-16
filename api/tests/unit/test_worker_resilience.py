@@ -42,7 +42,7 @@ class _FlakyJobs:
             self._worker.request_stop()
         if self.calls <= self._fail_times:
             raise ConnectionDoesNotExistError("connection was closed in the middle of operation")
-        return None
+        return
 
     async def reap_stale(self, timeout, *, protect_job_ids=None):
         return 0

@@ -150,7 +150,7 @@ def corpus_composition(
     def share(count: int) -> float:
         return round(count / total, 3) if total else 0.0
 
-    tiers = {tier: 0 for tier in ("primary", "secondary", "tertiary")}
+    tiers = dict.fromkeys(("primary", "secondary", "tertiary"), 0)
     unclassified = 0
     for vs in passed:
         if vs.source_tier in tiers:

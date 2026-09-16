@@ -5,7 +5,7 @@ No network: ``gather_claude_calls`` is stubbed, so what is under test is the
 decision logic rather than the model.
 """
 
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 import pytest
@@ -103,7 +103,7 @@ def test_a_source_that_was_never_judged_always_gets_a_second_look():
 async def test_second_opinion_is_off_by_default(monkeypatch):
     monkeypatch.setattr(settings, "VALIDATE_SECOND_OPINION", False)
     with _stub_calls([[_verdict(5.5, 6.5)]], review=[]):
-        passed, dropped = await validate_sources("t", [_source()], ["analogy"])
+        passed, _dropped = await validate_sources("t", [_source()], ["analogy"])
     assert len(passed) == 1
     assert passed[0].review_model is None
     assert passed[0].validator_model == settings.FAST_MODEL
@@ -221,10 +221,10 @@ async def test_a_string_where_a_verdict_was_expected_does_not_take_the_batch(mon
     # Batch returns one good verdict and one bare string.
     class _MixedBlock:
         type = "tool_use"
-        input = {"validations": [_verdict(9.0, 9.0), "looks fine to me"]}
+        input: ClassVar[dict[str, Any]] = {"validations": [_verdict(9.0, 9.0), "looks fine to me"]}
 
     class _MixedResponse:
-        content = [_MixedBlock()]
+        content: ClassVar[list[Any]] = [_MixedBlock()]
 
     queues = {"validate": [_MixedResponse()], "validate-review": [_Response([_verdict(8.0, 8.0)])]}
 

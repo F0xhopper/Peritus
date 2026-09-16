@@ -229,7 +229,8 @@ class FakeRepo:
             {"id": 1, "label": "A", "node_type": "claim", "description": "a", "chunk_ids": [100]},
             {"id": 2, "label": "B", "node_type": "claim", "description": "b", "chunk_ids": [200]},
         ]
-        self.all_nodes = self.nodes + [
+        self.all_nodes = [
+            *self.nodes,
             {"id": 3, "label": "C", "node_type": "claim", "description": "c"},
             {"id": 4, "label": "D", "node_type": "concept", "description": "d"},
         ]

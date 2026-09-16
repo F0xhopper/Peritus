@@ -565,7 +565,7 @@ async def _second_opinion(
     results: dict[int, dict] = {}
 
     async def _on_review(n: int, resp: Any) -> None:
-        index, source, first = candidates[n]
+        index, source, _first = candidates[n]
         if resp is None:
             return
         try:

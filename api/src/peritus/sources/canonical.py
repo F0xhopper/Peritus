@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import itertools
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -669,11 +670,11 @@ def order_by_sections(candidates: list[SourceCandidate], sections: str) -> list[
 
     stop = {"and", "qq", "q", "the", "of", "on", "in", "part", "vol", "volume", "book"}
     hint_tokens = [t for t in tokens(sections) if t not in stop and not t.isdigit()]
-    hint_pairs = set(zip(hint_tokens, hint_tokens[1:], strict=False))
+    hint_pairs = set(itertools.pairwise(hint_tokens))
 
     def affinity(title: str) -> int:
         words = [t for t in tokens(title) if t not in stop]
-        pairs = set(zip(words, words[1:], strict=False))
+        pairs = set(itertools.pairwise(words))
         return 2 * len(hint_pairs & pairs) + len(set(hint_tokens) & set(words))
 
     for c in candidates:

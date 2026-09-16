@@ -131,7 +131,7 @@ def test_no_match_falls_back_to_a_prefix_and_says_why():
 
 
 def test_apply_sections_records_what_happened():
-    text, recorded = apply_sections(
+    _text, recorded = apply_sections(
         _treatise(range(1, 6), toc=False),
         {"must_have_sections": "q. 3", "text_max_chars": 50_000},
         200_000,
@@ -479,7 +479,7 @@ async def test_priority_stops_jumping_the_queue_past_its_share_of_the_money():
     ]
     texts = {f"p{i}": long_text for i in range(6)}
     outcomes: dict = {}
-    results, committed = await _builder(texts)._fetch_with_refill(
+    results, _committed = await _builder(texts)._fetch_with_refill(
         ranked, budget=10, caps={}, budget_usd=Decimal("0.5"), floor=6.0, outcomes=outcomes
     )
     assert 0 < len(results) < 6, (
@@ -614,7 +614,7 @@ async def test_suggestions_are_held_to_the_concepts_asked_about_and_not_repeated
     from peritus.experts import feedback
 
     class _Client:
-        class messages:  # noqa: N801 — mirrors the SDK's attribute
+        class messages:
             @staticmethod
             async def create(**_kwargs):
                 block = MagicMock(type="tool_use")
@@ -649,7 +649,7 @@ async def test_suggestions_are_held_to_the_concepts_asked_about_and_not_repeated
                 }
                 return MagicMock(content=[block])
 
-    with patch.object(feedback, "get_anthropic_client", lambda: _Client()):
+    with patch.object(feedback, "get_anthropic_client", _Client):
         out = await feedback.suggest_primary_texts("t", "def", ["orbits"], ["already tried"])
     assert [(t["concept"], t["title"], t["kind"], t["public_domain"]) for t in out] == [
         ("orbits", "Principia", "text", True),

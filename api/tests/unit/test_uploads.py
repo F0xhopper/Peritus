@@ -171,21 +171,21 @@ def _job(**kw) -> BuildJob:
     from datetime import UTC, datetime
 
     now = datetime.now(UTC)
-    base = dict(
-        id=1,
-        expert_id=7,
-        status=JobStatus.QUEUED,
-        tier="standard",
-        source_filter=None,
-        attempts=0,
-        max_attempts=3,
-        available_at=now,
-        locked_by=None,
-        heartbeat_at=None,
-        last_error=None,
-        created_at=now,
-        updated_at=now,
-    )
+    base = {
+        "id": 1,
+        "expert_id": 7,
+        "status": JobStatus.QUEUED,
+        "tier": "standard",
+        "source_filter": None,
+        "attempts": 0,
+        "max_attempts": 3,
+        "available_at": now,
+        "locked_by": None,
+        "heartbeat_at": None,
+        "last_error": None,
+        "created_at": now,
+        "updated_at": now,
+    }
     base.update(kw)
     return BuildJob(**base)
 

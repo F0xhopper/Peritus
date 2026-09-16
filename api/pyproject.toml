@@ -75,8 +75,63 @@ target-version = "py312"
 src = ["src"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "SIM"]
-ignore = ["B008"]
+select = [
+    "E",         # pycodestyle
+    "F",         # pyflakes
+    "I",         # import sorting
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "SIM",       # simplify
+    "C4",        # comprehensions
+    "RET",       # returns
+    "PT",        # pytest style
+    "RUF",       # ruff's own
+    "ASYNC",     # blocking calls in async functions
+    "PLW",       # pylint warnings
+    "PLR0402",   # `import x.y as y` → `from x import y`
+    "PLR1714",   # `a == b or a == c` → `a in (b, c)`
+    # Complexity, as a ratchet rather than a standard: the thresholds below are
+    # set one notch above today's worst offender so nothing can get *worse*, and
+    # they come down as the builder split (cleanup plan, Phase 5) lands.
+    "C901",      # cyclomatic complexity
+    "PLR0911",   # too many returns
+    "PLR0912",   # too many branches
+    "PLR0913",   # too many arguments
+    "PLR0915",   # too many statements
+]
+ignore = [
+    "B008",      # FastAPI's Depends() in a default is the framework's own idiom.
+    # The prose in this codebase uses real typography — en dashes, curly
+    # quotes, × — in docstrings, comments and user-facing strings. That is
+    # deliberate, and these three rules flag every instance of it.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+    # `assert a and b` reads better than two asserts in most of these tests,
+    # and pytest's failure output is adequate either way.
+    "PT018",
+    # Module-level singletons (the pool, the settings, the HTTP client) are
+    # initialised through `global` by design; see infrastructure/database.py.
+    "PLW0603",
+    # A `timeout` parameter on an async function is how the fetchers expose
+    # per-source budgets; the rule wants a cancel scope instead.
+    "ASYNC109",
+    # `for x in xs: x = x.strip()` — normalising the loop variable in place is
+    # the idiom this codebase uses, and renaming six of them reads worse.
+    "PLW2901",
+]
+
+[tool.ruff.lint.mccabe]
+# Worst in src today: 25. Lower this as Phase 5 splits the builder.
+max-complexity = 25
+
+[tool.ruff.lint.pylint]
+# Same ratchet. Worst today: 7 returns, 21 branches, 13 arguments,
+# 102 statements (`ExpertBuilder._run_discovery`).
+max-returns = 7
+max-branches = 21
+max-args = 13
+max-statements = 102
 
 [tool.ruff.lint.pycodestyle]
 # The formatter targets line-length (100); E501 only fires on egregious lines.

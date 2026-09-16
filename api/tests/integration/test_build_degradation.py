@@ -15,6 +15,7 @@ returns a `BuildResult`.
 
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any, ClassVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -348,7 +349,7 @@ async def test_persona_refused_by_the_provider_is_not_retried():
 
     class _Refused(Exception):
         status_code = 400
-        body = {
+        body: ClassVar[dict[str, Any]] = {
             "error": {
                 "type": "invalid_request_error",
                 "message": "Your credit balance is too low to access the Anthropic API.",

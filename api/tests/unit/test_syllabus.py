@@ -172,7 +172,7 @@ def test_a_resolver_candidate_never_dedups_against_a_search_hit():
 
 
 @pytest.mark.parametrize(
-    "title, url",
+    ("title", "url"),
     [
         (
             "The Aristotelian context of the existence-essence distinction in De Ente et Essentia",
@@ -586,7 +586,7 @@ def test_the_channel_excludes_about_hosts_and_asks_for_personal_sites():
 
 
 @pytest.mark.parametrize(
-    "title, url, about",
+    ("title", "url", "about"),
     [
         (
             "Jacques Maritain (Stanford Encyclopedia of Philosophy)",
@@ -838,7 +838,7 @@ def test_a_section_cut_work_counts_only_for_the_concepts_it_was_cut_for():
 
 
 @pytest.mark.parametrize(
-    "named, depth, has_primary",
+    ("named", "depth", "has_primary"),
     [
         (NAMED_FOUND, DEPTH_TREATS, True),
         (NAMED_PARTIAL, DEPTH_TREATS, True),

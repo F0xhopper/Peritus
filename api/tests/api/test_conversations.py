@@ -38,20 +38,20 @@ def _make_expert(status: ExpertStatus = ExpertStatus.READY) -> Expert:
 
 def _make_conversation(**overrides) -> Conversation:
     now = datetime.now(UTC)
-    fields = dict(
-        id=CONV_ID,
-        expert_id=1,
-        owner_id=ADMIN_ID,
-        title=None,
-        message_count=0,
-        streaming_started_at=None,
-        created_at=now,
-        last_message_at=now,
-        expert_slug="stoicism",
-        expert_topic="stoicism",
-        expert_persona_name="Marcus",
-        expert_status="ready",
-    )
+    fields = {
+        "id": CONV_ID,
+        "expert_id": 1,
+        "owner_id": ADMIN_ID,
+        "title": None,
+        "message_count": 0,
+        "streaming_started_at": None,
+        "created_at": now,
+        "last_message_at": now,
+        "expert_slug": "stoicism",
+        "expert_topic": "stoicism",
+        "expert_persona_name": "Marcus",
+        "expert_status": "ready",
+    }
     fields.update(overrides)
     return Conversation(**fields)
 

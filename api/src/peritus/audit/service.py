@@ -36,7 +36,7 @@ from peritus.search.readiness import Readiness
 # applies them rather than restated here: a copy would silently drift the day
 # someone retunes the rubric, and this API's whole value is that its numbers
 # match the ones the pipeline actually used.
-from peritus.sources.validator import (  # noqa: PLC2701
+from peritus.sources.validator import (
     _PASS_THRESHOLD_Q,
     _PASS_THRESHOLD_R,
     RUBRIC_VERSION,

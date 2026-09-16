@@ -114,7 +114,8 @@ def test_funnel_counts_match_the_log():
 
 
 def test_fetchers_are_reported_with_their_query_counts_and_skips():
-    events = _full_build() + [
+    events = [
+        *_full_build(),
         _ev(
             12,
             "fetcher_done",
@@ -148,14 +149,15 @@ def test_absent_snowball_event_after_a_completed_fetch_is_zero():
 
 
 def test_snowball_count_is_read_when_present():
-    events = _full_build() + [_ev(12, "snowball_done", {"added": 3}, 55)]
+    events = [*_full_build(), _ev(12, "snowball_done", {"added": 3}, 55)]
     funnel = derive_discovery_funnel(events)
     assert funnel is not None
     assert funnel.snowballed_added == 3
 
 
 def test_gapfill_round_is_reported_with_its_concepts():
-    events = _full_build() + [
+    events = [
+        *_full_build(),
         _ev(12, "coverage_gaps", {"gaps": ["Stoic physics", "oikeiosis"]}, 95),
         _ev(13, "gapfill_done", {"added": 1, "still_uncovered": ["oikeiosis"]}, 110),
     ]

@@ -66,7 +66,7 @@ def counting_tags(source: ValidatedSource) -> list[tuple[str, str]]:
     cut_for = meta.get("must_have_concepts") if meta.get("sections_matched") else None
     if cut_for:
         return [(str(c), DEPTH_SETS_OUT) for c in dict.fromkeys(cut_for)]
-    depths = source.concept_depths or {c: DEPTH_TREATS for c in source.covered_concepts}
+    depths = source.concept_depths or dict.fromkeys(source.covered_concepts, DEPTH_TREATS)
     tags = [(c, d) for c, d in depths.items() if d in COUNTING_DEPTHS]
     tags.sort(key=lambda tag: DEPTHS.index(tag[1]))
     return tags[:MAX_COUNTING_TAGS]

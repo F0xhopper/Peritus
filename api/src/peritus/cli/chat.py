@@ -68,7 +68,9 @@ async def _chat_async(name: str) -> None:
 
     while True:
         try:
-            question = input("You: ").strip()
+            # `input()` blocks the event loop, which stalls the streaming
+            # response the agent is about to produce on the next turn.
+            question = (await asyncio.to_thread(input, "You: ")).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Session ended.[/dim]")
             break

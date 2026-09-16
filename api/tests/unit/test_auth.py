@@ -38,7 +38,7 @@ def hs256_env(monkeypatch):
     monkeypatch.setattr(settings, "SUPABASE_JWT_SECRET", SECRET, raising=False)
     monkeypatch.setattr(settings, "SUPABASE_JWT_AUD", "authenticated", raising=False)
     monkeypatch.setattr(settings, "BOOTSTRAP_ADMIN_EMAIL", "admin@example.com", raising=False)
-    yield
+    return
 
 
 async def test_valid_token_resolves_user(hs256_env):

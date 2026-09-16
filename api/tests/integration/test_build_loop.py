@@ -566,7 +566,7 @@ async def test_a_round_retries_a_timed_out_channel_relaxes_a_thin_floor_and_writ
     assert relaxed and relaxed[0]["relaxed_to"] == 5.0, "three candidates cannot fill round 0"
     assert {s.title for s in sources} == {"Summa", "strong", "middling"}
 
-    [(expert_id, job_id, rows)] = [
+    [(_expert_id, _job_id, rows)] = [
         c.args for c in builder._repo.insert_candidate_screenings.call_args_list
     ]
     by_title = {r["title"]: r for r in rows}
