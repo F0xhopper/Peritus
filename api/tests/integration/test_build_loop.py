@@ -597,8 +597,9 @@ async def test_refused_validation_stops_the_build_instead_of_reporting_a_collaps
             "terminal_provider_error",
             lambda: RuntimeError("Your credit balance is too low"),
         ),
+        # `_raise_if_provider_down` reads it from its own module.
         patch(
-            "peritus.experts.builder.terminal_provider_error",
+            "peritus.experts.build.selection.terminal_provider_error",
             lambda: RuntimeError("Your credit balance is too low"),
         ),
         pytest.raises(BuildError, match="credit balance"),

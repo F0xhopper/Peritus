@@ -14,13 +14,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from peritus.core.config import settings
+from peritus.experts.build.planning import (
+    _normalise_plan,
+)
 from peritus.experts.builder import (
     OUTCOME_FETCHED,
     OUTCOME_NOT_ENGLISH,
     ExpertBuilder,
     _fetcher_for,
     _graph_chunk_limit,
-    _normalise_plan,
 )
 from peritus.experts.coverage import ConceptCoverage
 from peritus.experts.domain import ExpertConfig, ExpertTier

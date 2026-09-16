@@ -242,7 +242,7 @@ class ExpertService:
         """
         # Imported lazily: the builder drags in every fetcher (and their optional
         # third-party dependencies), which no other caller of this service needs.
-        from peritus.experts.builder import generate_persona
+        from peritus.experts.build.persona import generate_persona
         from peritus.graph.repository import GraphRepository
 
         expert = await self.get(name_or_id)

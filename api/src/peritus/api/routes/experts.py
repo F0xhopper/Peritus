@@ -55,7 +55,7 @@ from peritus.core.exceptions import ConflictError
 from peritus.core.logging import get_logger
 from peritus.experts.avatar import InvalidAvatar
 from peritus.experts.avatar import normalise as normalise_avatar
-from peritus.experts.builder import FETCHER_NAMES
+from peritus.experts.build.constants import FETCHER_NAMES
 from peritus.experts.domain import (
     ExpertStatus,
     ExpertVisibility,

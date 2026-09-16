@@ -2,12 +2,16 @@
 
 from unittest.mock import patch
 
-from peritus.experts.builder import (
+from peritus.experts.build.constants import (
     _MAX_QUERIES_PER_FETCHER,
     _MIN_RESULTS_PER_QUERY,
-    ExpertBuilder,
+)
+from peritus.experts.build.planning import (
     _normalise_plan,
     _route_must_have_works,
+)
+from peritus.experts.builder import (
+    ExpertBuilder,
     _search_breadth,
     _type_caps,
 )
@@ -112,7 +116,9 @@ def test_route_must_have_works_appends_quoted_queries():
         "stoicism",
     )
 
-    with patch("peritus.experts.builder.settings") as mock_settings:
+    # `_route_must_have_works` reads `settings` from its own module, so that is
+    # where the substitution has to happen.
+    with patch("peritus.experts.build.planning.settings") as mock_settings:
         mock_settings.EXA_API_KEY = ""
         _route_must_have_works(plan)
 

@@ -12,11 +12,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from peritus.experts.build.planning import (
+    _normalise_plan,
+)
 from peritus.experts.builder import (
     ExpertBuilder,
     _boosted_must_have_titles,
     _enforce_ceiling,
-    _normalise_plan,
 )
 from peritus.experts.composition import corpus_composition
 from peritus.experts.coverage import CoverageTarget, compute_coverage
@@ -378,12 +380,14 @@ class _PlanClient:
 async def _plan_with(pack: OrientationPack, plan: dict, max_concepts: int = 10):
     from unittest.mock import AsyncMock, patch
 
-    from peritus.experts.builder import _plan_research
+    from peritus.experts.build.planning import _plan_research
 
     client = _PlanClient(plan)
     with (
-        patch("peritus.experts.builder.build_orientation_pack", AsyncMock(return_value=pack)),
-        patch("peritus.experts.builder.get_anthropic_client", lambda: client),
+        patch(
+            "peritus.experts.build.planning.build_orientation_pack", AsyncMock(return_value=pack)
+        ),
+        patch("peritus.experts.build.planning.get_anthropic_client", lambda: client),
     ):
         return await _plan_research("Thomism", max_concepts), client.calls[0]
 
