@@ -1,0 +1,43 @@
+# Weekly, grouped so that a routine week is one PR per ecosystem rather than
+# fifteen. Majors are deliberately left ungrouped: `anthropic` and `openai` in
+# particular need the batch and streaming paths exercised against a real key
+# before they merge (docs/plans/codebase-cleanup.md, 2.9).
+version: 2
+
+updates:
+  - package-ecosystem: uv
+    directory: /api
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: cargo
+    directory: /cli
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Keeps the `@v7`-style major tags moving, and is the mechanism by which the
+  # actions can later be pinned to SHAs without going stale.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
