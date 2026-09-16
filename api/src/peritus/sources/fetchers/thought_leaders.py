@@ -17,13 +17,13 @@ for "Jacques Maritain Thomism" ranks the entry about him first
 """
 
 import asyncio
-from typing import Any
 
-import httpx
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.dedup import normalise_url
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.base import note_search_failure
@@ -32,13 +32,13 @@ from peritus.sources.hosts import ABOUT_HOSTS, is_about_page
 
 logger = get_logger(__name__)
 
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 _MAX_CHARS = 50_000
 # Results per person, per search.
 _RESULTS_PER_SEARCH = 3
 _MAX_PEOPLE = 6
 
-_IDENTIFY_TOOL: dict[str, Any] = {
+_IDENTIFY_TOOL: ToolParam = {
     "name": "identify_thought_leaders",
     "description": "Identify the top thought leaders, authors, and practitioners for a topic.",
     "input_schema": {
@@ -50,8 +50,14 @@ _IDENTIFY_TOOL: dict[str, Any] = {
                     "type": "object",
                     "properties": {
                         "name": {"type": "string"},
-                        "role": {"type": "string", "description": "e.g. pioneer, author, researcher"},
-                        "known_for": {"type": "string", "description": "Their most notable work or contribution"},
+                        "role": {
+                            "type": "string",
+                            "description": "e.g. pioneer, author, researcher",
+                        },
+                        "known_for": {
+                            "type": "string",
+                            "description": "Their most notable work or contribution",
+                        },
                     },
                     "required": ["name", "role", "known_for"],
                 },
@@ -106,15 +112,15 @@ class ThoughtLeadersFetcher:
         name = candidate.metadata["leader"]
         if candidate.metadata.get("exa_id"):
             from peritus.sources.fetchers.exa import fetch_exa_contents
+
             text = await fetch_exa_contents(candidate.url)
             title = candidate.title
         else:
             from peritus.sources.fetchers.web import _fetch_page
+
             try:
-                async with httpx.AsyncClient(
-                    timeout=20, headers=_HEADERS, follow_redirects=True
-                ) as client:
-                    text, title = await _fetch_page(client, candidate.url)
+                client = shared_client(timeout=20, headers=_HEADERS, follow_redirects=True)
+                text, title = await _fetch_page(client, candidate.url)
             except Exception as exc:
                 logger.warning("Web fetch for leader %r at %r failed: %s", name, candidate.url, exc)
                 return None
@@ -150,7 +156,7 @@ def _mentions_leader(name: str, title: str, text: str) -> bool:
 async def _identify_leaders(topic: str) -> list[dict]:
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=512,
             system=(
@@ -158,16 +164,25 @@ async def _identify_leaders(topic: str) -> list[dict]:
                 "for educational topics. Return real people with verifiable published work."
             ),
             tools=[_IDENTIFY_TOOL],
-            tool_choice={"type": "tool", "name": "identify_thought_leaders"},
-            messages=[{
-                "role": "user",
-                "content": f"Who are the 4–6 most important thought leaders, authors, or practitioners for: {topic}?",
-            }],
+            tool_choice=ToolChoiceToolParam(type="tool", name="identify_thought_leaders"),
+            messages=[
+                MessageParam(
+                    role="user",
+                    content=(
+                        "Who are the 4–6 most important thought leaders, authors, "
+                        f"or practitioners for: {topic}?"
+                    ),
+                )
+            ],
         )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        leaders = block.input.get("leaders", [])
-        logger.info("Identified %d thought leaders for %r: %s", len(leaders), topic,
-                    ", ".join(ldr["name"] for ldr in leaders))
+        block = tool_input(resp) or {}
+        leaders = block.get("leaders", [])
+        logger.info(
+            "Identified %d thought leaders for %r: %s",
+            len(leaders),
+            topic,
+            ", ".join(ldr["name"] for ldr in leaders),
+        )
         return leaders
     except Exception as exc:
         logger.warning("Thought leader identification failed: %s", exc)
@@ -213,7 +228,10 @@ async def exa_people_searches(name: str, topic: str, base_metadata: dict) -> lis
     client = Exa(api_key=settings.EXA_API_KEY)
     calls = people_search_calls(name, topic)
     responses = await asyncio.gather(
-        *[asyncio.to_thread(client.search_and_contents, query, **kwargs) for query, kwargs in calls],
+        *[
+            asyncio.to_thread(client.search_and_contents, query, **kwargs)
+            for query, kwargs in calls
+        ],
         return_exceptions=True,
     )
     per_search: list[list[SourceCandidate]] = []
@@ -223,18 +241,20 @@ async def exa_people_searches(name: str, topic: str, base_metadata: dict) -> lis
             # failing costs its results, never the other search's.
             logger.warning("Exa search for leader %r (%s) failed: %s", name, query, response)
             continue
-        per_search.append([
-            SourceCandidate(
-                source_type=SourceType.THOUGHT_LEADER,
-                url=r.url,
-                title=r.title or name,
-                author=name,
-                snippet=getattr(r, "text", None) or "",
-                metadata={**base_metadata, "exa_id": r.id},
-            )
-            for r in response.results
-            if r.url
-        ])
+        per_search.append(
+            [
+                SourceCandidate(
+                    source_type=SourceType.THOUGHT_LEADER,
+                    url=r.url,
+                    title=r.title or name,
+                    author=name,
+                    snippet=getattr(r, "text", None) or "",
+                    metadata={**base_metadata, "exa_id": r.id},
+                )
+                for r in response.results
+                if r.url
+            ]
+        )
     return _interleave(per_search)
 
 

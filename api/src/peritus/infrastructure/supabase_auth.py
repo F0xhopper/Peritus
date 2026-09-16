@@ -32,6 +32,29 @@ def _base_headers(access_token: str | None = None) -> dict[str, str]:
     return headers
 
 
+# One client for the process, not one per call. Every login, refresh and logout
+# went through its own `AsyncClient`, which meant a fresh TCP and TLS handshake
+# to GoTrue on each — and a token refresh sits on the critical path of ordinary
+# page loads. Created lazily so importing this module needs no running loop, and
+# closed by the API's lifespan.
+_client: httpx.AsyncClient | None = None
+
+
+def _get_client() -> httpx.AsyncClient:
+    global _client
+    if _client is None or _client.is_closed:
+        _client = httpx.AsyncClient(base_url=settings.SUPABASE_AUTH_URL, timeout=15.0)
+    return _client
+
+
+async def close_client() -> None:
+    """Release the shared client. Idempotent; safe to call without one."""
+    global _client
+    if _client is not None and not _client.is_closed:
+        await _client.aclose()
+    _client = None
+
+
 async def _post(
     path: str,
     json: dict,
@@ -39,10 +62,9 @@ async def _post(
     params: dict | None = None,
     access_token: str | None = None,
 ) -> dict:
-    async with httpx.AsyncClient(base_url=settings.SUPABASE_AUTH_URL, timeout=15.0) as client:
-        resp = await client.post(
-            path, json=json, params=params, headers=_base_headers(access_token)
-        )
+    resp = await _get_client().post(
+        path, json=json, params=params, headers=_base_headers(access_token)
+    )
     if resp.status_code >= 400:
         detail = _extract_error(resp)
         raise SupabaseAuthError(detail, status=resp.status_code)

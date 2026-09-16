@@ -155,14 +155,17 @@ class WikimediaClient:
 
     async def search_with_snippets(self, query: str, limit: int = 3) -> list[dict[str, str]]:
         """``{title, snippet}`` for articles matching ``query``, best first, snippet as plain text."""
-        data = await self._get(API_URL, {
-            "action": "query",
-            "list": "search",
-            "srsearch": query,
-            "srlimit": limit,
-            "srnamespace": 0,
-            "srprop": "snippet",
-        })
+        data = await self._get(
+            API_URL,
+            {
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "srlimit": limit,
+                "srnamespace": 0,
+                "srprop": "snippet",
+            },
+        )
         return [
             {"title": hit["title"], "snippet": re.sub(r"<[^>]+>", "", hit.get("snippet") or "")}
             for hit in data.get("query", {}).get("search", [])
@@ -170,27 +173,33 @@ class WikimediaClient:
 
     async def extract(self, title: str, section_format: str = "plain") -> str:
         """An article's plain-text extract; ``section_format="wiki"`` keeps ``== Heading ==`` markers."""
-        data = await self._get(API_URL, {
-            "action": "query",
-            "titles": title,
-            "prop": "extracts",
-            "explaintext": True,
-            "exsectionformat": section_format,
-        })
+        data = await self._get(
+            API_URL,
+            {
+                "action": "query",
+                "titles": title,
+                "prop": "extracts",
+                "explaintext": True,
+                "exsectionformat": section_format,
+            },
+        )
         pages = (data.get("query") or {}).get("pages") or {}
         page: dict[str, Any] = next(iter(pages.values()), {}) if pages else {}
         return str(page.get("extract") or "")
 
     async def search_articles(self, query: str, limit: int = 3) -> list[str]:
         """Article titles matching ``query``, best first."""
-        data = await self._get(API_URL, {
-            "action": "query",
-            "list": "search",
-            "srsearch": query,
-            "srlimit": limit,
-            "srnamespace": 0,
-            "srprop": "",
-        })
+        data = await self._get(
+            API_URL,
+            {
+                "action": "query",
+                "list": "search",
+                "srsearch": query,
+                "srlimit": limit,
+                "srnamespace": 0,
+                "srprop": "",
+            },
+        )
         return [hit["title"] for hit in data.get("query", {}).get("search", [])]
 
     async def page_images(self, titles: list[str], thumb_size: int = 512) -> list[dict]:
@@ -202,17 +211,20 @@ class WikimediaClient:
         """
         if not titles:
             return []
-        data = await self._get(API_URL, {
-            "action": "query",
-            "titles": "|".join(titles[:50]),
-            "prop": "pageimages|pageprops",
-            "piprop": "thumbnail|name|original",
-            "pithumbsize": thumb_size,
-            "pilimit": 50,
-            "pilicense": "free",
-            "ppprop": "wikibase_item|disambiguation",
-            "redirects": 1,
-        })
+        data = await self._get(
+            API_URL,
+            {
+                "action": "query",
+                "titles": "|".join(titles[:50]),
+                "prop": "pageimages|pageprops",
+                "piprop": "thumbnail|name|original",
+                "pithumbsize": thumb_size,
+                "pilimit": 50,
+                "pilicense": "free",
+                "ppprop": "wikibase_item|disambiguation",
+                "redirects": 1,
+            },
+        )
         pages = data.get("query", {}).get("pages", {})
         # Negative page ids are "no such page"; they carry nothing useful.
         return [p for p in pages.values() if isinstance(p, dict) and p.get("pageid")]
@@ -222,11 +234,14 @@ class WikimediaClient:
         ids = [e for e in entity_ids if e][:50]
         if not ids:
             return {}
-        data = await self._get(WIKIDATA_API_URL, {
-            "action": "wbgetentities",
-            "ids": "|".join(ids),
-            "props": "claims",
-        })
+        data = await self._get(
+            WIKIDATA_API_URL,
+            {
+                "action": "wbgetentities",
+                "ids": "|".join(ids),
+                "props": "claims",
+            },
+        )
         entities = data.get("entities", {})
         return {
             qid: entity.get("claims", {})
@@ -247,13 +262,16 @@ class WikimediaClient:
         titles = [t for t in file_titles if t][:50]
         if not titles:
             return {}
-        data = await self._get(API_URL, {
-            "action": "query",
-            "titles": "|".join(titles),
-            "prop": "imageinfo",
-            "iiprop": "extmetadata|mime|size|url",
-            "iiurlwidth": thumb_width,
-        })
+        data = await self._get(
+            API_URL,
+            {
+                "action": "query",
+                "titles": "|".join(titles),
+                "prop": "imageinfo",
+                "iiprop": "extmetadata|mime|size|url",
+                "iiurlwidth": thumb_width,
+            },
+        )
         out: dict[str, dict] = {}
         for page in data.get("query", {}).get("pages", {}).values():
             if not isinstance(page, dict):

@@ -4,7 +4,15 @@ name: CI
 # so that nothing reaches production without passing it. There is deliberately
 # no `push: main` trigger here: it would run the same suite twice per merge.
 on:
+  # Docs-only changes are filtered on `pull_request` and nowhere else: a push to
+  # main still runs the full suite through workflow_call, because that is the
+  # gate production depends on and a README edit riding a code commit must not
+  # be able to skip it.
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'LICENSE'
   workflow_call:
   workflow_dispatch:
 
@@ -21,12 +29,13 @@ jobs:
   api:
     name: API (Python)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     # The DB-backed tests (job queue claim/heartbeat/reap, conversation
     # persistence, credit arithmetic, expert visibility, source uploads) skip
     # themselves when PERITUS_TEST_DATABASE_URL is unset. Without this service
-    # they skipped in CI too — 54 written tests, including every billing test,
-    # reporting green while never having run. pgvector's image is required, not
+    # they skipped in CI too — dozens of written tests, including every billing
+    # test, reporting green while never having run. pgvector's image is required, not
     # plain postgres: the schema declares vector columns.
     services:
       postgres:
@@ -70,21 +79,58 @@ jobs:
       - name: Lint
         run: uv run --frozen ruff check src tests
 
+      # The formatting was applied once in a single commit; this is what stops
+      # the next PR carrying reformatting noise again.
+      - name: Format
+        run: uv run --frozen ruff format --check src tests
+
       # `just lint` runs ruff *and* mypy; CI ran only ruff, and the type errors
       # that accumulated behind that gap included two real bugs.
       - name: Typecheck
         run: uv run --frozen mypy src
+
+      # The production dependency set, not the dev one: this is what the Docker
+      # image ships. `cryptography` sat on a known advisory for weeks because
+      # nothing looked.
+      - name: Audit dependencies
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements-audit.txt
+          uvx pip-audit -r requirements-audit.txt
 
       # Also exercises the migration runner itself on every push, which is the
       # thing the deploy release_command depends on.
       - name: Apply migrations
         run: uv run --frozen python migrations/apply.py
 
+      # --cov-fail-under is a ratchet, one point under the 68% this
+      # configuration measures today with the DB service up. Raise it when
+      # coverage rises; never lower it to make a red run green. (Without the
+      # service the same suite reaches 63%, which is why the number was
+      # invisible before: nobody was running the configuration it describes.)
       - name: Test
-        run: uv run --frozen python -m pytest
+        run: >-
+          uv run --frozen python -m pytest
+          --cov=src/peritus --cov-report=xml --cov-report=term
+          --cov-fail-under=67
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml
+          path: api/coverage.xml
+          retention-days: 7
 
       - name: Smoke-check the installed CLI
         run: uv run --frozen peritus --help
+
+      # `openapi.json` is committed and the web job generates its TypeScript
+      # from it, so a stale one would silently break that link. Built from the
+      # app object, not a running server.
+      - name: The committed OpenAPI schema is current
+        run: |
+          uv run --frozen python scripts/openapi.py > openapi.json
+          git diff --exit-code openapi.json
 
   # The unit suite runs against a virtualenv; production runs a container. This
   # builds that exact image and runs it the way Fly does — release_command
@@ -94,6 +140,7 @@ jobs:
   api-image:
     name: API image
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     services:
       postgres:
@@ -155,6 +202,7 @@ jobs:
   web:
     name: Web (Next.js)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: web
@@ -173,23 +221,46 @@ jobs:
       - name: Lint
         run: npx eslint .
 
+      - name: Format
+        run: npx prettier --check .
+
       - name: Typecheck
         run: npx tsc --noEmit
+
+      # `npm ci` installs devDependencies, so this covers the whole tree. It is
+      # only meaningful because `@lhci/cli` — which accounted for every advisory
+      # this project had — is fetched by `scripts/lighthouse.mjs` via npx
+      # instead of being installed.
+      - name: Audit dependencies
+        run: npm audit --audit-level=high
 
       # The unit suite covers the SSE frame parser, the build-event reducer, the
       # proxy's refresh-once and dead-refresh paths, cookie shaping, and the
       # avatar resolver. The fixture tests are the schema check: there is no
       # codegen between the Python schemas and `lib/api/types.ts`, so a payload
       # that drifts fails here rather than in a user's browser.
+      # `--coverage` over `lib/**` only: components are Playwright's job, and a
+      # number that counted them would be measuring the wrong suite.
       - name: Unit tests
-        run: npx vitest run
+        run: npx vitest run --coverage
 
       - name: Build
         run: npx next build
 
+      # The other half of the schema link: regenerate from the committed
+      # `api/openapi.json` and fail if the checked-in TypeScript differs.
+      # Fetched rather than installed — it peers on TypeScript 5 and this
+      # project is on 6.
+      - name: The generated types are current
+        run: |
+          npx --yes openapi-typescript@7.13.0 ../api/openapi.json -o lib/api/types.generated.ts
+          npx prettier --write lib/api/types.generated.ts
+          git diff --exit-code lib/api/types.generated.ts
+
   web-e2e:
     name: Web end to end
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # The build is the artefact under test, so this waits for the job that
     # proves it compiles rather than racing it.
     needs: web
@@ -218,8 +289,28 @@ jobs:
           restore-keys: |
             next-${{ runner.os }}-${{ hashFiles('web/package-lock.json') }}-
 
+      # Keyed on the resolved Playwright version: a browser build belongs to a
+      # Playwright release, so the key has to move when that does.
+      - name: Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Restore the browsers
+        id: pw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
       - name: Install browsers
+        if: steps.pw-cache.outputs.cache-hit != 'true'
         run: npx playwright install --with-deps chromium webkit
+
+      # The cached browsers carry no system libraries, so those are installed
+      # even on a hit — it is the ~150 MB download the cache saves.
+      - name: Install browser system dependencies
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium webkit
 
       - name: Build
         run: npx next build
@@ -243,6 +334,7 @@ jobs:
   web-lighthouse:
     name: Web performance budgets
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     needs: web
     defaults:
       run:
@@ -291,6 +383,7 @@ jobs:
   cli:
     name: CLI (Rust)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -302,6 +395,23 @@ jobs:
         with:
           workspaces: cli
 
-      - name: Check
+      - name: Format
         working-directory: cli
-        run: cargo check --locked
+        run: cargo fmt --check
+
+      # `cargo check` alone was the whole job: clippy never ran, and neither did
+      # the 29 unit tests in types.rs, home.rs, chat.rs and avatar.rs.
+      - name: Lint
+        working-directory: cli
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        working-directory: cli
+        run: cargo test --locked
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Audit dependencies
+        working-directory: cli
+        run: cargo audit

@@ -42,14 +42,14 @@ from __future__ import annotations
 
 import asyncio
 import difflib
+import itertools
 import re
 from dataclasses import dataclass, field, replace
 from typing import Any
 from urllib.parse import quote
 
-import httpx
-
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.domain import (
     FIGURE_ABOUT_ONLY,
     FIGURE_OWN_VOICE,
@@ -129,7 +129,7 @@ _EXA_RESULTS = 5
 _ARCHIVE_ROWS = 6
 _ARCHIVE_TIMEOUT = 15.0
 _ARXIV_TIMEOUT = 15.0
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 _MIN_TEXT = 2_000
 # The same ceiling the Gutenberg fetcher applies. Raising it without a way to
 # choose *which* part of a long work to keep would only buy a longer prefix —
@@ -243,7 +243,7 @@ _PREPOSITION_BEFORE = re.compile(r"\b(?:in|of|on|about)\s+$")
 
 
 def _work_is_object_of_preposition(title: str, wanted: str) -> bool:
-    """"… in De Ente et Essentia", "… of the Summa": a title about the work.
+    """ "… in De Ente et Essentia", "… of the Summa": a title about the work.
 
     Only when the work's title is not where the title starts: "The Summa
     Theologica of St. Thomas" is the work, and "Thomas Aquinas: De ente et
@@ -255,7 +255,7 @@ def _work_is_object_of_preposition(title: str, wanted: str) -> bool:
     index = f" {t} ".find(f" {w} ")
     if index <= 0:
         return False
-    before = f" {t} "[:index + 1]
+    before = f" {t} "[: index + 1]
     before = re.sub(r"\b(?:the|a|an)\s+$", "", before)
     return bool(_PREPOSITION_BEFORE.search(before))
 
@@ -542,8 +542,7 @@ async def _resolve_one(
             logger.warning("Canonical %r via %s failed: %s", work.title, name, exc)
             continue
         partial_count = sum(
-            1 for c in resolution.candidates
-            if c.metadata.get("must_have_extent") == EXTENT_PARTIAL
+            1 for c in resolution.candidates if c.metadata.get("must_have_extent") == EXTENT_PARTIAL
         )
         for candidate in found:
             candidate = as_archive_candidate(candidate) or candidate
@@ -609,7 +608,9 @@ def _mark_priority(resolution: WorkResolution) -> None:
     best = ordered[0]
     best.metadata["fetch_priority"] = True
     # The topic's canonical works, then concept texts, then figures' works.
-    best.metadata["priority_rank"] = {SCOPE_OVERALL: 0, SCOPE_CONCEPT: 1}.get(resolution.work.scope, 2)
+    best.metadata["priority_rank"] = {SCOPE_OVERALL: 0, SCOPE_CONCEPT: 1}.get(
+        resolution.work.scope, 2
+    )
 
 
 # ── route: the Gutenberg catalogue ───────────────────────────────────────────
@@ -662,16 +663,17 @@ def order_by_sections(candidates: list[SourceCandidate], sections: str) -> list[
     (Prima Pars)" over "Pars Prima Secundae", and "I-II" is one token rather than
     two roman numerals that every volume title contains.
     """
+
     def tokens(text: str) -> list[str]:
         return _DESIGNATOR.findall(text.casefold())
 
     stop = {"and", "qq", "q", "the", "of", "on", "in", "part", "vol", "volume", "book"}
     hint_tokens = [t for t in tokens(sections) if t not in stop and not t.isdigit()]
-    hint_pairs = set(zip(hint_tokens, hint_tokens[1:], strict=False))
+    hint_pairs = set(itertools.pairwise(hint_tokens))
 
     def affinity(title: str) -> int:
         words = [t for t in tokens(title) if t not in stop]
-        pairs = set(zip(words, words[1:], strict=False))
+        pairs = set(itertools.pairwise(words))
         return 2 * len(hint_pairs & pairs) + len(set(hint_tokens) & set(words))
 
     for c in candidates:
@@ -733,10 +735,10 @@ async def _archive_route(work: MustHaveWork, _exa) -> list[SourceCandidate]:
         ("rows", _ARCHIVE_ROWS),
         ("output", "json"),
     ]
-    async with httpx.AsyncClient(timeout=_ARCHIVE_TIMEOUT, headers=_HEADERS) as http:
-        resp = await http.get(_ARCHIVE_SEARCH, params=params)
-        resp.raise_for_status()
-        docs = (resp.json().get("response") or {}).get("docs") or []
+    http = shared_client(timeout=_ARCHIVE_TIMEOUT, headers=_HEADERS, follow_redirects=False)
+    resp = await http.get(_ARCHIVE_SEARCH, params=params)
+    resp.raise_for_status()
+    docs = (resp.json().get("response") or {}).get("docs") or []
 
     candidates = []
     for doc in docs:
@@ -797,7 +799,9 @@ def public_domain_cutoff_year(today: int | None = None) -> int:
 _YEAR_RE = re.compile(r"\b(1[4-9]\d\d|20\d\d)\b")
 
 
-def archive_item_is_reusable(metadata: dict[str, Any], today: int | None = None) -> tuple[bool, str]:
+def archive_item_is_reusable(
+    metadata: dict[str, Any], today: int | None = None
+) -> tuple[bool, str]:
     """Whether an archive.org item's text may go into a corpus, and why.
 
     The Internet Archive holds scans of in-copyright books uploaded by users and
@@ -840,32 +844,31 @@ class ArchiveTextFetcher:
         identifier = candidate.metadata.get("archive_id") or archive_identifier(candidate.url)
         if not identifier:
             return None
-        async with httpx.AsyncClient(
-            timeout=60, headers=_HEADERS, follow_redirects=True
-        ) as http:
-            meta_resp = await http.get(f"https://archive.org/metadata/{identifier}")
-            meta_resp.raise_for_status()
-            item = meta_resp.json()
-            reusable, why = archive_item_is_reusable(item.get("metadata") or {})
-            if not reusable:
-                logger.warning(
-                    "Internet Archive item %s not used: %s (%r)", identifier, why, candidate.title,
-                )
-                return None
-            names = [
-                str(f.get("name", ""))
-                for f in (item.get("files") or [])
-                if str(f.get("name", "")).endswith("_djvu.txt")
-            ]
-            if not names:
-                return None
-            preferred = f"{identifier}_djvu.txt"
-            name = preferred if preferred in names else names[0]
-            resp = await http.get(
-                f"https://archive.org/download/{identifier}/{quote(name)}"
+        http = shared_client(timeout=60, headers=_HEADERS, follow_redirects=True)
+        meta_resp = await http.get(f"https://archive.org/metadata/{identifier}")
+        meta_resp.raise_for_status()
+        item = meta_resp.json()
+        reusable, why = archive_item_is_reusable(item.get("metadata") or {})
+        if not reusable:
+            logger.warning(
+                "Internet Archive item %s not used: %s (%r)",
+                identifier,
+                why,
+                candidate.title,
             )
-            resp.raise_for_status()
-            text = resp.text.strip()
+            return None
+        names = [
+            str(f.get("name", ""))
+            for f in (item.get("files") or [])
+            if str(f.get("name", "")).endswith("_djvu.txt")
+        ]
+        if not names:
+            return None
+        preferred = f"{identifier}_djvu.txt"
+        name = preferred if preferred in names else names[0]
+        resp = await http.get(f"https://archive.org/download/{identifier}/{quote(name)}")
+        resp.raise_for_status()
+        text = resp.text.strip()
         if len(text) < _MIN_TEXT:
             return None
         if not looks_like_prose(text):
@@ -894,7 +897,7 @@ class ArchiveTextFetcher:
 def looks_like_prose(text: str) -> bool:
     """Whether OCR text reads as words, judged on a sample from its middle."""
     middle = len(text) // 2
-    tokens = text[max(0, middle - 10_000): middle + 10_000].split()
+    tokens = text[max(0, middle - 10_000) : middle + 10_000].split()
     if len(tokens) < 50:
         tokens = text.split()
     if not tokens:
@@ -993,10 +996,13 @@ async def _exa_route(
 # ── outcome, once the corpus exists ─────────────────────────────────────────
 
 
-def _primary_hits(passed_metadata: list[tuple[str, dict]], wanted_key: str) -> list[tuple[str, dict]]:
+def _primary_hits(
+    passed_metadata: list[tuple[str, dict]], wanted_key: str
+) -> list[tuple[str, dict]]:
     """Accepted sources carrying the work's title that the validator classified primary."""
     return [
-        (url, meta) for url, meta in passed_metadata
+        (url, meta)
+        for url, meta in passed_metadata
         if title_key(str(meta.get("must_have_title") or "")) == wanted_key
         and meta.get("source_tier", "primary") == "primary"
     ]
@@ -1042,7 +1048,8 @@ def must_have_outcomes(
         # reported as the Summa found whole.
         hits = _primary_hits(passed_metadata, wanted)
         whole = [
-            url for url, meta in hits
+            url
+            for url, meta in hits
             if meta.get("must_have_extent") == EXTENT_WHOLE and not meta.get("sections_matched")
         ]
         sections = [url for url, meta in hits if meta.get("sections_matched")]
@@ -1102,7 +1109,8 @@ def concept_named_texts(
     for lookup in merge_works([w for w in works if w.concepts]):
         wanted = title_key(lookup.title)
         hits = [
-            meta for _url, meta in _primary_hits(passed_metadata, wanted)
+            meta
+            for _url, meta in _primary_hits(passed_metadata, wanted)
             if not lookup.sections
             or set(meta.get("must_have_concepts") or []) & set(lookup.concepts)
         ]
@@ -1151,7 +1159,8 @@ def figure_outcomes(
         work = by_figure.get(key)
         work_key = title_key(work.title) if work else None
         mine = [
-            (url, meta) for url, meta in passed
+            (url, meta)
+            for url, meta in passed
             if str(meta.get("leader") or meta.get("must_have_figure") or "").casefold() == key
             or (work_key and title_key(str(meta.get("must_have_title") or "")) == work_key)
         ]

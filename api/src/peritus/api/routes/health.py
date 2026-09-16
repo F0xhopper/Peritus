@@ -25,13 +25,13 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/health")
-async def health():
+async def health() -> dict[str, str]:
     """Liveness: the process is up. Deliberately touches nothing external."""
     return {"status": "ok"}
 
 
 @router.get("/ready")
-async def ready():
+async def ready() -> dict[str, str | bool]:
     """Readiness: a database connection is obtainable within the acquire deadline."""
     try:
         pool = get_pool()
@@ -40,9 +40,7 @@ async def ready():
                 await conn.fetchval("SELECT 1")
     except TimeoutError as exc:
         logger.warning("Readiness probe timed out acquiring a database connection")
-        raise HTTPException(
-            status_code=503, detail="Database connection pool exhausted"
-        ) from exc
+        raise HTTPException(status_code=503, detail="Database connection pool exhausted") from exc
     except Exception as exc:
         logger.warning("Readiness probe failed: %s", exc)
         raise HTTPException(status_code=503, detail="Database not ready") from exc

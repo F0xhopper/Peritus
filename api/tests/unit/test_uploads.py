@@ -23,17 +23,20 @@ from peritus.uploads.extract import decode_text_upload, extract
 
 def _upload(kind: UploadKind, **kw) -> PendingUpload:
     return PendingUpload(
-        id=1, expert_id=7, owner_id="user-1", kind=kind,
-        title=kw.pop("title", "A Document"), **kw,
+        id=1,
+        expert_id=7,
+        owner_id="user-1",
+        kind=kind,
+        title=kw.pop("title", "A Document"),
+        **kw,
     )
 
 
 # ── text decoding ───────────────────────────────────────────────────────────
 
+
 def test_decode_prefers_utf8():
-    assert decode_text_upload("margin of safety — Graham".encode()) == (
-        "margin of safety — Graham"
-    )
+    assert decode_text_upload("margin of safety — Graham".encode()) == ("margin of safety — Graham")
 
 
 def test_decode_strips_utf8_bom():
@@ -56,6 +59,7 @@ def test_decode_never_raises_on_binary():
 
 
 # ── extraction dispatch ─────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_extract_text_returns_raw_source():
@@ -97,6 +101,7 @@ async def test_extract_pdf_uses_the_ocr_parser(monkeypatch):
 @pytest.mark.asyncio
 async def test_extract_pdf_failure_is_user_facing(monkeypatch):
     """The raised message reaches the UI, so it must mean something to a person."""
+
     async def boom(data: bytes) -> str:
         raise RuntimeError("HTTP 502 from ocr backend")
 
@@ -107,8 +112,23 @@ async def test_extract_pdf_failure_is_user_facing(monkeypatch):
     assert "502" not in str(exc.value)
 
 
+@pytest.fixture
+def allow_any_url(monkeypatch):
+    """Skip the SSRF guard's DNS lookup.
+
+    `example.test` is reserved and resolves nowhere, which the guard is right to
+    refuse — but these tests are about extraction dispatch, not about the guard.
+    `test_http_guard.py` covers the guard itself.
+    """
+
+    async def _allow(url: str) -> None:
+        return None
+
+    monkeypatch.setattr(extract_mod, "assert_public_url", _allow)
+
+
 @pytest.mark.asyncio
-async def test_extract_url_reports_an_unfetchable_page(monkeypatch):
+async def test_extract_url_reports_an_unfetchable_page(monkeypatch, allow_any_url):
     class _Fetcher:
         async def fetch(self, candidate):
             return None
@@ -119,7 +139,7 @@ async def test_extract_url_reports_an_unfetchable_page(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_extract_url_uses_the_fetched_text(monkeypatch):
+async def test_extract_url_uses_the_fetched_text(monkeypatch, allow_any_url):
     class _Raw:
         text = "A long article about value investing. " * 20
 
@@ -135,19 +155,44 @@ async def test_extract_url_uses_the_fetched_text(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_extract_url_refuses_a_private_address(monkeypatch):
+    """The worker-side half of the SSRF guard, and the message it produces.
+
+    The request handler already refuses this shape with a 422, so reaching here
+    means the URL was stored before the guard existed, or the host resolved
+    privately only at fetch time. Either way the fetcher is never called.
+    """
+    called = False
+
+    class _Fetcher:
+        async def fetch(self, candidate):
+            nonlocal called
+            called = True
+            return
+
+    monkeypatch.setattr(extract_mod, "WebFetcher", _Fetcher)
+    with pytest.raises(IngestionError, match="not reachable from the public internet"):
+        await extract(_upload(UploadKind.URL, url="http://169.254.169.254/latest/meta-data/"))
+    assert not called
+
+
+@pytest.mark.asyncio
 async def test_extract_pdf_has_no_url():
     """A file has no address. Empty, not a broken link, so citation rendering
     does not produce one."""
+
     async def fake_parse(data: bytes) -> str:
         return "Book text. " * 40
 
     import peritus.uploads.extract as m
+
     m.parse_pdf_bytes = fake_parse
     raw = await extract(_upload(UploadKind.PDF, content=b"%PDF"))
     assert raw.url == ""
 
 
 # ── provenance constants ────────────────────────────────────────────────────
+
 
 def test_upload_provenance_is_primary_and_marked():
     """Uploaded material is the work itself, and the tertiary-corpus warning
@@ -158,15 +203,26 @@ def test_upload_provenance_is_primary_and_marked():
 
 # ── job typing ──────────────────────────────────────────────────────────────
 
+
 def _job(**kw) -> BuildJob:
     from datetime import UTC, datetime
+
     now = datetime.now(UTC)
-    base = dict(
-        id=1, expert_id=7, status=JobStatus.QUEUED, tier="standard",
-        source_filter=None, attempts=0, max_attempts=3, available_at=now,
-        locked_by=None, heartbeat_at=None, last_error=None,
-        created_at=now, updated_at=now,
-    )
+    base = {
+        "id": 1,
+        "expert_id": 7,
+        "status": JobStatus.QUEUED,
+        "tier": "standard",
+        "source_filter": None,
+        "attempts": 0,
+        "max_attempts": 3,
+        "available_at": now,
+        "locked_by": None,
+        "heartbeat_at": None,
+        "last_error": None,
+        "created_at": now,
+        "updated_at": now,
+    }
     base.update(kw)
     return BuildJob(**base)
 

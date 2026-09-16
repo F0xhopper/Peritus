@@ -1,7 +1,7 @@
-use std::sync::Arc;
 use anyhow::Result;
 use crossterm::event::{self, Event, KeyEventKind};
 use ratatui::DefaultTerminal;
+use std::sync::Arc;
 use tokio::sync::oneshot;
 
 use crate::api::client::{is_unauthorized, ApiClient};
@@ -9,7 +9,10 @@ use crate::api::types::{ExpertSummary, Session, SourceOut};
 use crate::config::store::{now_unix, Config};
 use crate::events::{key_to_action, AppAction};
 use crate::tui::screens::{
-    build::BuildScreen, chat::ChatScreen, config::ConfigScreen, home::HomeScreen,
+    build::BuildScreen,
+    chat::ChatScreen,
+    config::ConfigScreen,
+    home::HomeScreen,
     login::{LoginPhase, LoginScreen},
 };
 
@@ -61,7 +64,11 @@ impl App {
     pub fn new(config: Config) -> Self {
         let api = Arc::new(ApiClient::new(config.server_url.clone(), config.bearer()));
         Self {
-            screen: if config.is_configured() { Screen::Home } else { Screen::Config },
+            screen: if config.is_configured() {
+                Screen::Home
+            } else {
+                Screen::Config
+            },
             api: api.clone(),
             config: config.clone(),
             experts: vec![],
@@ -94,7 +101,9 @@ impl App {
         self.refresh_rx = Some(rx);
         tokio::spawn(async move {
             let _ = tx.send(
-                api.list_experts().await.map_err(|e| (is_unauthorized(&e), e.to_string())),
+                api.list_experts()
+                    .await
+                    .map_err(|e| (is_unauthorized(&e), e.to_string())),
             );
         });
     }
@@ -123,7 +132,7 @@ impl App {
                     .list_experts()
                     .await
                     .map_err(|e| (is_unauthorized(&e), e.to_string())),
-                Err(e) => Err((is_unauthorized(&e), format!("Delete failed: {}", e))),
+                Err(e) => Err((is_unauthorized(&e), format!("Delete failed: {e}"))),
             };
             let _ = tx.send(result);
         });
@@ -132,7 +141,7 @@ impl App {
     /// Open the build screen for `expert`: reuse the live screen if it's the same
     /// build, otherwise attach to the server-side build (survives TUI restarts).
     fn open_build_for(&mut self, topic: String, tier: String) {
-        let same = self.build.as_ref().map(|b| b.topic() == topic).unwrap_or(false);
+        let same = self.build.as_ref().is_some_and(|b| b.topic() == topic);
         if !same {
             if self.build.is_some() {
                 self.set_status("Another build is on screen — it keeps running server-side");
@@ -156,8 +165,8 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
     // Paint a frame before the first (blocking) request so an unreachable backend
     // shows "connecting", not an indefinite blank screen.
     terminal.draw(|f| {
-        use ratatui::widgets::Paragraph;
         use crate::tui::theme::Theme;
+        use ratatui::widgets::Paragraph;
         f.render_widget(
             Paragraph::new("  Connecting to Peritus server…").style(Theme::dim()),
             f.area(),
@@ -175,34 +184,42 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
         let tick = app.tick;
         terminal.draw(|f| {
             match app.screen {
-                Screen::Home   => {
-                    let build_info = app.build.as_ref().map(|b| b.card_info());
+                Screen::Home => {
+                    let build_info = app
+                        .build
+                        .as_ref()
+                        .map(super::screens::build::BuildScreen::card_info);
                     app.home.render(f, f.area(), tick, build_info.as_ref());
                 }
-                Screen::Build  => {
-                    if let Some(build) = &mut app.build { build.render(f, f.area(), tick); }
+                Screen::Build => {
+                    if let Some(build) = &mut app.build {
+                        build.render(f, f.area(), tick);
+                    }
                 }
-                Screen::Chat   => {
-                    if let Some(chat) = &mut app.chat { chat.render(f, f.area(), tick); }
+                Screen::Chat => {
+                    if let Some(chat) = &mut app.chat {
+                        chat.render(f, f.area(), tick);
+                    }
                 }
                 Screen::Config => app.config_screen.render(f, f.area()),
-                Screen::Login  => app.login.render(f, f.area()),
+                Screen::Login => app.login.render(f, f.area()),
             }
 
             // Status toast
             if let Some((msg, when)) = &app.status_msg {
                 if when.elapsed().as_secs() < 3 {
-                    use ratatui::{layout::Rect, widgets::Paragraph};
                     use crate::tui::theme::Theme;
+                    use ratatui::{layout::Rect, widgets::Paragraph};
                     let area = f.area();
                     let w = (msg.len() as u16 + 4).min(area.width);
                     let toast = Rect::new(
                         area.width.saturating_sub(w),
                         area.height.saturating_sub(2),
-                        w, 1,
+                        w,
+                        1,
                     );
                     f.render_widget(
-                        Paragraph::new(format!(" {} ", msg)).style(Theme::warning()),
+                        Paragraph::new(format!(" {msg} ")).style(Theme::warning()),
                         toast,
                     );
                 }
@@ -216,15 +233,21 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
         app.tick = app.tick.wrapping_add(1);
 
         if let Some((_, when)) = &app.status_msg {
-            if when.elapsed().as_secs() >= 3 { app.status_msg = None; }
+            if when.elapsed().as_secs() >= 3 {
+                app.status_msg = None;
+            }
         }
 
-        if app.should_quit { break; }
+        if app.should_quit {
+            break;
+        }
 
         // Poll at 16ms (~60fps) — gives the spinner animation a smooth cadence.
         if event::poll(std::time::Duration::from_millis(16))? {
             if let Event::Key(key) = event::read()? {
-                if key.kind != KeyEventKind::Press { continue; }
+                if key.kind != KeyEventKind::Press {
+                    continue;
+                }
 
                 // Chat owns its own key mapping so that j/k/q/n/d reach the input buffer.
                 if app.screen == Screen::Chat {
@@ -239,10 +262,10 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                     }
                 } else {
                     let in_text_input = match app.screen {
-                        Screen::Home   => app.home.input_active && !app.home.tier_select_active,
+                        Screen::Home => app.home.input_active && !app.home.tier_select_active,
                         Screen::Config => app.config_screen.editing,
-                        Screen::Login  => true, // both login fields are always text entry
-                        _              => false,
+                        Screen::Login => true, // both login fields are always text entry
+                        _ => false,
                     };
                     if let Some(action) = key_to_action(key, in_text_input) {
                         handle_action(app, action).await;
@@ -303,23 +326,21 @@ async fn handle_action(app: &mut App, action: AppAction) {
             }
         }
 
-        Screen::Login => {
-            match action {
-                AppAction::Back => {
-                    if app.login.phase == LoginPhase::Code {
-                        app.login.back_to_email();
-                    } else {
-                        app.should_quit = true;
-                    }
+        Screen::Login => match action {
+            AppAction::Back => {
+                if app.login.phase == LoginPhase::Code {
+                    app.login.back_to_email();
+                } else {
+                    app.should_quit = true;
                 }
-                AppAction::Submit if !app.login.busy => {
-                    handle_login_submit(app).await;
-                }
-                AppAction::Char(c) => app.login.input_push(c),
-                AppAction::Backspace => app.login.input_pop(),
-                _ => {}
             }
-        }
+            AppAction::Submit if !app.login.busy => {
+                handle_login_submit(app).await;
+            }
+            AppAction::Char(c) => app.login.input_push(c),
+            AppAction::Backspace => app.login.input_pop(),
+            _ => {}
+        },
 
         Screen::Home => {
             // The sources overlay owns navigation while it is open, so ↑↓ scroll
@@ -328,7 +349,7 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 match action {
                     AppAction::Down => app.home.sources_scroll_down(),
                     AppAction::Up => app.home.sources_scroll_up(),
-                    AppAction::Back | AppAction::Char('s') | AppAction::Char('q') => {
+                    AppAction::Back | AppAction::Char('s' | 'q') => {
                         app.home.close_sources();
                     }
                     AppAction::Quit => app.should_quit = true,
@@ -341,19 +362,27 @@ async fn handle_action(app: &mut App, action: AppAction) {
             if app.home.confirm_delete {
                 match action {
                     // Capital D (Shift+d) confirms; lowercase d also works for ergonomics.
-                    AppAction::DeleteExpert | AppAction::Char('D') | AppAction::Char('d') => {
+                    AppAction::DeleteExpert | AppAction::Char('D' | 'd') => {
                         app.home.confirm_delete = false;
                         if let Some(expert) = app.home.selected_expert() {
                             let slug = expert.name.clone();
                             // Deleting the expert whose build is on screen? Drop the screen.
-                            if app.build.as_ref().map(|b| b.topic() == expert.topic).unwrap_or(false) {
-                                if let Some(b) = &app.build { b.cancel(); }
+                            if app
+                                .build
+                                .as_ref()
+                                .is_some_and(|b| b.topic() == expert.topic)
+                            {
+                                if let Some(b) = &app.build {
+                                    b.cancel();
+                                }
                                 app.build = None;
                             }
                             app.request_delete(slug);
                         }
                     }
-                    AppAction::Back | AppAction::Quit => { app.home.confirm_delete = false; }
+                    AppAction::Back | AppAction::Quit => {
+                        app.home.confirm_delete = false;
+                    }
                     _ => {}
                 }
                 return;
@@ -362,10 +391,18 @@ async fn handle_action(app: &mut App, action: AppAction) {
             // Tier picker intercepts navigation before normal home handling.
             if app.home.tier_select_active {
                 match action {
-                    AppAction::Left  => { app.home.tier_prev(); }
-                    AppAction::Right => { app.home.tier_next(); }
-                    AppAction::Submit => { app.home.tier_confirm(); }
-                    AppAction::Back  => { app.home.tier_cancel(); }
+                    AppAction::Left => {
+                        app.home.tier_prev();
+                    }
+                    AppAction::Right => {
+                        app.home.tier_next();
+                    }
+                    AppAction::Submit => {
+                        app.home.tier_confirm();
+                    }
+                    AppAction::Back => {
+                        app.home.tier_cancel();
+                    }
                     _ => {}
                 }
                 if let Some((topic, tier)) = app.home.take_submitted_build() {
@@ -391,7 +428,7 @@ async fn handle_action(app: &mut App, action: AppAction) {
 
             match action {
                 AppAction::Quit => app.should_quit = true,
-                AppAction::Up | AppAction::Left  => app.home.prev(),
+                AppAction::Up | AppAction::Left => app.home.prev(),
                 AppAction::Down | AppAction::Right => app.home.next(),
                 AppAction::Submit => {
                     if let Some(expert) = app.home.selected_expert().cloned() {
@@ -399,9 +436,10 @@ async fn handle_action(app: &mut App, action: AppAction) {
                         // from chat_ready onward — a full stage before the build
                         // job finishes. ([b] still watches an in-flight build.)
                         if expert.can_chat() {
-                            let resume = app.chat.as_ref()
-                                .map(|c| c.expert_slug() == expert.name)
-                                .unwrap_or(false);
+                            let resume = app
+                                .chat
+                                .as_ref()
+                                .is_some_and(|c| c.expert_slug() == expert.name);
                             if !resume {
                                 app.chat = Some(ChatScreen::new(expert.clone(), app.api.clone()));
                             }
@@ -494,9 +532,11 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     // A finished (failed/cancelled) build is cleared on the way out so
                     // Home doesn't keep a dead card; a running build is left alone and
                     // keeps streaming in the background (re-enter with [b]).
-                    let errored = app.build.as_ref().map(|b| b.error.is_some()).unwrap_or(false);
+                    let errored = app.build.as_ref().is_some_and(|b| b.error.is_some());
                     if errored {
-                        if let Some(b) = &app.build { b.cancel(); }
+                        if let Some(b) = &app.build {
+                            b.cancel();
+                        }
                         app.build = None;
                     }
                     app.screen = Screen::Home;
@@ -545,8 +585,12 @@ fn apply_session(app: &mut App, session: Session) {
         .expires_at
         .unwrap_or_else(|| now_unix() + session.expires_in);
     let email = session.user.email.clone().unwrap_or_default();
-    app.config
-        .set_session(session.access_token, session.refresh_token, expires_at, email);
+    app.config.set_session(
+        session.access_token,
+        session.refresh_token,
+        expires_at,
+        email,
+    );
     let _ = app.config.save();
     // Update the token through the existing client rather than building a new
     // one. Tasks spawned earlier (build/chat streams) hold their own Arc to this
@@ -610,7 +654,11 @@ async fn handle_login_submit(app: &mut App) {
                 Ok(session) => {
                     apply_session(app, session);
                     app.screen = Screen::Home;
-                    let who = if app.config.email.is_empty() { email } else { app.config.email.clone() };
+                    let who = if app.config.email.is_empty() {
+                        email
+                    } else {
+                        app.config.email.clone()
+                    };
                     app.set_status(format!("Signed in as {who}"));
                     startup_load(app).await;
                 }
@@ -653,7 +701,9 @@ async fn tick_screens(app: &mut App) {
                 }
             }
             Err(oneshot::error::TryRecvError::Empty) => {}
-            Err(oneshot::error::TryRecvError::Closed) => { app.refresh_rx = None; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                app.refresh_rx = None;
+            }
         }
     }
 
@@ -668,10 +718,13 @@ async fn tick_screens(app: &mut App) {
             }
             Ok((slug, Err(e))) => {
                 app.sources_rx = None;
-                app.home.set_sources_error(&slug, format!("Could not load sources: {e}"));
+                app.home
+                    .set_sources_error(&slug, format!("Could not load sources: {e}"));
             }
             Err(oneshot::error::TryRecvError::Empty) => {}
-            Err(oneshot::error::TryRecvError::Closed) => { app.sources_rx = None; }
+            Err(oneshot::error::TryRecvError::Closed) => {
+                app.sources_rx = None;
+            }
         }
     }
 
@@ -705,7 +758,10 @@ async fn tick_screens(app: &mut App) {
     // Auto-refresh the expert list while any expert is still queued or building.
     if app.screen == Screen::Home
         && app.refresh_rx.is_none()
-        && app.experts.iter().any(|e| e.status == "building" || e.status == "queued")
+        && app
+            .experts
+            .iter()
+            .any(|e| e.status == "building" || e.status == "queued")
         && app.last_expert_poll.elapsed().as_secs() >= 5
     {
         app.last_expert_poll = std::time::Instant::now();
@@ -718,12 +774,12 @@ async fn tick_screens(app: &mut App) {
 }
 
 fn render_help_overlay(f: &mut ratatui::Frame) {
+    use crate::tui::theme::Theme;
     use ratatui::{
         layout::Rect,
         text::{Line, Span},
         widgets::{Block, BorderType, Borders, Clear, Paragraph},
     };
-    use crate::tui::theme::Theme;
 
     let area = f.area();
     let w = 62u16.min(area.width.saturating_sub(4));
@@ -734,7 +790,7 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
 
     let key = |k: &'static str, d: &'static str| {
         Line::from(vec![
-            Span::styled(format!("  {:<13}", k), Theme::accent()),
+            Span::styled(format!("  {k:<13}"), Theme::accent()),
             Span::styled(d, Theme::normal()),
         ])
     };

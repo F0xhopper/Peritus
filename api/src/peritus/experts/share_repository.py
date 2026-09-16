@@ -54,7 +54,9 @@ class ShareRepository:
                 ON CONFLICT (expert_id) WHERE revoked_at IS NULL DO NOTHING
                 RETURNING *
                 """,
-                expert_id, new_share_token(), created_by,
+                expert_id,
+                new_share_token(),
+                created_by,
             )
         if row:
             return _row_to_link(row)
@@ -78,7 +80,9 @@ class ShareRepository:
                 VALUES ($1, $2, $3::uuid)
                 RETURNING *
                 """,
-                expert_id, new_share_token(), created_by,
+                expert_id,
+                new_share_token(),
+                created_by,
             )
         return _row_to_link(row)
 
@@ -111,7 +115,8 @@ class ShareRepository:
                 VALUES ($1::uuid, $2::uuid)
                 ON CONFLICT DO NOTHING
                 """,
-                link_id, user_id,
+                link_id,
+                user_id,
             )
 
     async def viewer_count(self, link_id: str) -> int:
@@ -134,7 +139,8 @@ class ShareRepository:
                 USING expert_share_links l
                 WHERE l.id = g.link_id AND l.expert_id = $1 AND g.user_id = $2::uuid
                 """,
-                expert_id, user_id,
+                expert_id,
+                user_id,
             )
         return result.rsplit(" ", 1)[-1] != "0"
 

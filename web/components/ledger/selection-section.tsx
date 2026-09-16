@@ -35,7 +35,9 @@ export function SelectionSection({ selection }: { selection: SelectionBlock | nu
   const corpus = selection.corpus
   const groups = corpus ? mustHaveGroups(corpus) : []
   const failed = Object.entries(selection.failed_channels ?? {})
-  const outcomes = selection.candidate_ledger ? ledgerByOutcome(selection.candidate_ledger.rows) : []
+  const outcomes = selection.candidate_ledger
+    ? ledgerByOutcome(selection.candidate_ledger.rows)
+    : []
 
   return (
     <section
@@ -67,7 +69,7 @@ export function SelectionSection({ selection }: { selection: SelectionBlock | nu
         <div key={group.scope}>
           <h3 className="flex flex-wrap items-baseline gap-x-2 text-label tracking-[0.04em] text-fg-3 uppercase">
             {group.title}
-            <span className="normal-case tracking-normal">
+            <span className="tracking-normal normal-case">
               {group.found} of {group.total} found
             </span>
           </h3>

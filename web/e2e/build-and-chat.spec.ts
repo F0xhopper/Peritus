@@ -184,7 +184,7 @@ test('the overview reads correctly and gates chat on readiness', async ({ page }
 
   await expect(page.getByRole('heading', { name: 'Dr. Marta Belen', level: 1 })).toBeVisible()
   await expect(
-    content(page).getByText('Varroa mite control in temperate beekeeping').first(),
+    content(page).getByText('Varroa mite control in temperate beekeeping').first()
   ).toBeVisible()
 
   // Properties, read off the real payload.
@@ -216,7 +216,7 @@ test('an answer streams, cites its sources, and flags an invented marker', async
   await expect(
     content(page)
       .getByText(/Drone brood removal reduces mite load/)
-      .first(),
+      .first()
   ).toBeVisible()
 
   const composer = page.getByLabel('Your question')
@@ -230,7 +230,7 @@ test('an answer streams, cites its sources, and flags an invented marker', async
   await expect(
     content(page)
       .getByText(/43% reduction relative to untreated/)
-      .first(),
+      .first()
   ).toBeVisible({ timeout: 30_000 })
 
   // Citations resolve to chips; the marker the answer invented does not.
@@ -327,7 +327,7 @@ test('Escape closes the drawer and returns focus to the menu button', async ({
 test('the command palette finds an expert and jumps to it', async ({ page }, testInfo) => {
   test.skip(
     isPhoneProject(testInfo.project.name),
-    'a phone uses the search icon, tested separately',
+    'a phone uses the search icon, tested separately'
   )
 
   await page.goto('/experts')
@@ -348,7 +348,7 @@ test('the sidebar search opens the palette where the top bar has no search butto
 }, testInfo) => {
   test.skip(
     isPhoneProject(testInfo.project.name) || testInfo.project.name === 'ipad-portrait',
-    'below lg there is no sidebar; the top bar search icon is the trigger',
+    'below lg there is no sidebar; the top bar search icon is the trigger'
   )
 
   await page.goto('/experts')

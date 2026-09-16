@@ -6,16 +6,16 @@ Haiku call — and fails open (returns ``None``) so a checker error never blocks
 answer that has already been streamed to the user.
 """
 
-from typing import Any
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.chat.grounding import Passage
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 
 logger = get_logger(__name__)
 
-_TOOL: dict[str, Any] = {
+_TOOL: ToolParam = {
     "name": "report_faithfulness",
     "description": "Report how well the answer is supported by the passages.",
     "input_schema": {
@@ -59,33 +59,29 @@ async def assess_faithfulness(
     if not answer_text.strip() or not passages or not settings.ANTHROPIC_API_KEY:
         return None
     try:
-        passage_block = "\n\n".join(
-            f"[{p.index}] {p.citation}\n{p.text}"
-            for p in passages
-        )
+        passage_block = "\n\n".join(f"[{p.index}] {p.citation}\n{p.text}" for p in passages)
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=512,
             system=_SYSTEM,
             tools=[_TOOL],
-            tool_choice={"type": "tool", "name": "report_faithfulness"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Question: {question}\n\n"
-                    f"Answer to audit:\n{answer_text}\n\n"
-                    f"Passages:\n\n{passage_block}"
-                ),
-            }],
+            tool_choice=ToolChoiceToolParam(type="tool", name="report_faithfulness"),
+            messages=[
+                MessageParam(
+                    role="user",
+                    content=(
+                        f"Question: {question}\n\n"
+                        f"Answer to audit:\n{answer_text}\n\n"
+                        f"Passages:\n\n{passage_block}"
+                    ),
+                )
+            ],
         )
-        block = next(
-            (b for b in resp.content if getattr(b, "type", None) == "tool_use"),
-            None,
-        )
+        block = tool_input(resp)
         if block is None:
             return None
-        data = dict(block.input)
+        data = dict(block)
         score = data.get("groundedness")
         if not isinstance(score, (int, float)):
             return None

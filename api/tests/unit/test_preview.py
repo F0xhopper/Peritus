@@ -73,7 +73,11 @@ def test_section_headings_show_the_shape_of_the_document():
     strongest cheap signals of what a document is."""
     structured = "\n\n".join(
         f"{heading}\n\n{_BODY_PARAGRAPH * 12}"
-        for heading in ("1. Introduction", "2. The Analogy of Proper Proportionality", "3. Conclusion")
+        for heading in (
+            "1. Introduction",
+            "2. The Analogy of Proper Proportionality",
+            "3. Conclusion",
+        )
     )
     preview = build_preview(_source(structured))
     assert "Section headings:" in preview

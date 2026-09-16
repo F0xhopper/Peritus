@@ -47,7 +47,7 @@ export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch 
   return (
     <header
       className={cn(
-        'flex h-topbar-touch shrink-0 items-center gap-2 border-b border-border-soft bg-bg px-2 md:h-topbar md:px-3',
+        'flex h-topbar-touch shrink-0 items-center gap-2 border-b border-border-soft bg-bg px-2 md:h-topbar md:px-3'
       )}
     >
       <button
@@ -92,14 +92,14 @@ export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch 
           there is taken from the title. */}
       <div className="flex shrink-0 items-center gap-2 md:gap-3">
         {!hideSearch && (
-        <button
-          type="button"
-          onClick={openPalette}
-          aria-label="Search"
-          className="grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg lg:hidden"
-        >
-          <Search className="size-4" />
-        </button>
+          <button
+            type="button"
+            onClick={openPalette}
+            aria-label="Search"
+            className="grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg lg:hidden"
+          >
+            <Search className="size-4" />
+          </button>
         )}
 
         {action}

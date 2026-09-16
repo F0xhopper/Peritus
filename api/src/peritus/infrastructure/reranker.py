@@ -7,19 +7,19 @@ available, and otherwise scores passages in small windows and merges the results
 """
 
 import asyncio
-from typing import Any
 
-import httpx
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
+from peritus.infrastructure.http import shared_client
 
 logger = get_logger(__name__)
 
 _MAX_DOC_CHARS = 1500
 
-_TOOL: dict[str, Any] = {
+_TOOL: ToolParam = {
     "name": "rank_passages",
     "description": "Score how well each passage answers the query.",
     "input_schema": {
@@ -74,20 +74,20 @@ async def _cohere_rerank(
     """Cross-encoder rerank via the Cohere API. Returns None on any failure."""
     docs = [d[:_MAX_DOC_CHARS] for d in documents]
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                "https://api.cohere.com/v2/rerank",
-                headers={
-                    "Authorization": f"Bearer {settings.COHERE_API_KEY}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": settings.COHERE_RERANK_MODEL,
-                    "query": query,
-                    "documents": docs,
-                    "top_n": min(top_n, len(docs)),
-                },
-            )
+        client = shared_client(timeout=30, follow_redirects=False)
+        resp = await client.post(
+            "https://api.cohere.com/v2/rerank",
+            headers={
+                "Authorization": f"Bearer {settings.COHERE_API_KEY}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": settings.COHERE_RERANK_MODEL,
+                "query": query,
+                "documents": docs,
+                "top_n": min(top_n, len(docs)),
+            },
+        )
         if resp.status_code != 200:
             logger.warning("Cohere rerank HTTP %d: %s", resp.status_code, resp.text[:200])
             return None
@@ -152,7 +152,7 @@ async def _score_one_window(
         passages = "\n\n".join(
             f"[{local}]\n{documents[g][:_MAX_DOC_CHARS]}" for local, g in enumerate(indices)
         )
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=512,
             system=(
@@ -160,20 +160,17 @@ async def _score_one_window(
                 "the query. Score every passage exactly once, by its index."
             ),
             tools=[_TOOL],
-            tool_choice={"type": "tool", "name": "rank_passages"},
-            messages=[{
-                "role": "user",
-                "content": f"Query: {query}\n\nPassages:\n\n{passages}",
-            }],
+            tool_choice=ToolChoiceToolParam(type="tool", name="rank_passages"),
+            messages=[
+                MessageParam(role="user", content=f"Query: {query}\n\nPassages:\n\n{passages}")
+            ],
         )
-        block = next(
-            (b for b in resp.content if getattr(b, "type", None) == "tool_use"), None
-        )
+        block = tool_input(resp)
         if block is None:
             return []
         out: list[tuple[int, float]] = []
         seen_local: set[int] = set()
-        for r in block.input.get("rankings", []):
+        for r in block.get("rankings", []):
             local, score = r.get("index"), r.get("relevance")
             if (
                 isinstance(local, int)

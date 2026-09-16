@@ -32,9 +32,15 @@ async def test_the_report_compares_the_current_code_with_what_the_build_fetched(
         must_have_titles=[],
         job_id=53,
         candidates=[
-            harness.LabelledCandidate("https://a", "Summa", "web", ledger_outcome="fetched", keep=True),
-            harness.LabelledCandidate("https://b", "Tracie Thoms", "wikipedia", ledger_outcome="fetched", keep=False),
-            harness.LabelledCandidate("https://c", "Aeterni Patris", "web", ledger_outcome="below_floor", keep=True),
+            harness.LabelledCandidate(
+                "https://a", "Summa", "web", ledger_outcome="fetched", keep=True
+            ),
+            harness.LabelledCandidate(
+                "https://b", "Tracie Thoms", "wikipedia", ledger_outcome="fetched", keep=False
+            ),
+            harness.LabelledCandidate(
+                "https://c", "Aeterni Patris", "web", ledger_outcome="below_floor", keep=True
+            ),
             harness.LabelledCandidate("https://d", "Unlabelled", "web"),
         ],
     )
@@ -44,7 +50,9 @@ async def test_the_report_compares_the_current_code_with_what_the_build_fetched(
     scores = {"Summa": 9.0, "Tracie Thoms": 0.0, "Aeterni Patris": 7.0}
 
     async def _triage(topic, concepts, must, candidates):
-        return [TriagedCandidate(c, scores[c.title], model_score=scores[c.title]) for c in candidates]
+        return [
+            TriagedCandidate(c, scores[c.title], model_score=scores[c.title]) for c in candidates
+        ]
 
     with patch.object(harness, "triage_candidates", _triage):
         report = await harness.run(path, floor=6.0)

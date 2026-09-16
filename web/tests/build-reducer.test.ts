@@ -33,7 +33,7 @@ function play(...names: string[]) {
       const event = events[name]
       if (!event) throw new Error(`No fixture named ${name}`)
       return { seq: index + 1, event }
-    }),
+    })
   )
 }
 
@@ -168,7 +168,7 @@ describe('the stage timeline', () => {
     const graph = state.stages.find((stage) => stage.key === 'graph')!
     expect(graph.status).toBe('degraded')
     expect(state.stages.filter((stage) => stage.status === 'done')).toHaveLength(
-      TIMELINE.length - 1,
+      TIMELINE.length - 1
     )
   })
 
@@ -183,9 +183,7 @@ describe('the stage timeline', () => {
     const before = play('created', 'stage_validate')
     const after = reduceBuildEvent(before, 9, events.fetch_progress)
     expect(after.rows).toHaveLength(before.rows.length)
-    expect(after.stages.find((stage) => stage.key === 'discover')!.detail).toBe(
-      'fetched 18 of 30',
-    )
+    expect(after.stages.find((stage) => stage.key === 'discover')!.detail).toBe('fetched 18 of 30')
   })
 })
 
@@ -295,7 +293,9 @@ describe('source selection', () => {
       ['info', 'Retrying gutenberg after a timeout'],
       ['info', 'gutenberg (retry): 3 candidates from 1 query'],
     ])
-    expect(groupRows(state.rows).find((group) => group.group === 'fetchers:0')?.rows).toHaveLength(3)
+    expect(groupRows(state.rows).find((group) => group.group === 'fetchers:0')?.rows).toHaveLength(
+      3
+    )
   })
 
   it('keeps an empty fetcher an info line', () => {
@@ -315,17 +315,17 @@ describe('source selection', () => {
 
   it('reports the fetch floor and the unscored candidates at triage', () => {
     expect(play('created', 'triage_done_selection').rows.at(-1)!.message).toBe(
-      'Triaged 104 candidates, ranked 41 for a budget of 30, 26 above the fetch floor; 4 could not be scored and were not fetched',
+      'Triaged 104 candidates, ranked 41 for a budget of 30, 26 above the fetch floor; 4 could not be scored and were not fetched'
     )
     // An older build's triage line is unchanged.
     expect(play('created', 'triage_done').rows.at(-1)!.message).toBe(
-      'Triaged 104 candidates, ranked 41 for a budget of 30',
+      'Triaged 104 candidates, ranked 41 for a budget of 30'
     )
   })
 
   it('counts failed downloads from the fetch outcomes', () => {
     expect(play('created', 'fetch_done_outcomes').rows.at(-1)!.message).toBe(
-      'Retrieved full text for 24 sources, 1 dropped as duplicates, 3 could not be downloaded',
+      'Retrieved full text for 24 sources, 1 dropped as duplicates, 3 could not be downloaded'
     )
   })
 
@@ -349,7 +349,7 @@ describe('source selection', () => {
     ])
   })
 
-  it('names the primary text per concept, and the plan\'s definition, after the must-have line', () => {
+  it("names the primary text per concept, and the plan's definition, after the must-have line", () => {
     const state = play('created', 'plan_ready_primary_texts')
     expect(state.rows.slice(-3).map((row) => [row.kind, row.stage, row.message])).toEqual([
       ['info', 'plan', 'Must-have works: Summa Theologiae (Thomas Aquinas)'],
@@ -367,7 +367,9 @@ describe('source selection', () => {
     expect(new Set(state.rows.map(rowKey)).size).toBe(state.rows.length)
     // An older plan has neither line.
     expect(
-      play('created', 'plan_ready_selection').rows.filter((row) => row.message.startsWith('Primary')),
+      play('created', 'plan_ready_selection').rows.filter((row) =>
+        row.message.startsWith('Primary')
+      )
     ).toEqual([])
   })
 
@@ -393,13 +395,13 @@ describe('source selection', () => {
       texts: [],
     })
     expect(conceptsOnly.rows.at(-1)!.message).toBe(
-      'Looking up primary texts for concepts without one: viral co-infection',
+      'Looking up primary texts for concepts without one: viral co-infection'
     )
   })
 
   it('mentions fetched sources dropped as not in English', () => {
     expect(play('created', 'fetch_done_not_english').rows.at(-1)!.message).toBe(
-      'Retrieved full text for 22 sources, 1 could not be downloaded, 2 not in English',
+      'Retrieved full text for 22 sources, 1 could not be downloaded, 2 not in English'
     )
     // No mention when none were dropped.
     expect(play('created', 'fetch_done_outcomes').rows.at(-1)!.message).not.toContain('English')
@@ -407,7 +409,7 @@ describe('source selection', () => {
 
   it('names the concepts that still lack a primary source', () => {
     expect(play('created', 'feedback_queries_selection').rows.at(-1)!.message).toBe(
-      'New queries from the corpus: amitraz tolerance monitoring assay — no primary source yet for acaricide resistance',
+      'New queries from the corpus: amitraz tolerance monitoring assay — no primary source yet for acaricide resistance'
     )
   })
 
@@ -436,7 +438,14 @@ describe('retries', () => {
   })
 
   it('starts a later attempt from nothing, because the worker wiped the last one', () => {
-    const first = play('created', 'build_started', 'stage_chunk', 'source_ingested', 'chat_ready', 'retry')
+    const first = play(
+      'created',
+      'build_started',
+      'stage_chunk',
+      'source_ingested',
+      'chat_ready',
+      'retry'
+    )
     expect(first.chatReady).toBe(true)
 
     const second = reduceBuildEvent(first, first.lastSeq + 1, {
@@ -453,7 +462,14 @@ describe('retries', () => {
   })
 
   it('keeps what the last attempt built when the retry resumes from it', () => {
-    const first = play('created', 'build_started', 'stage_chunk', 'source_ingested', 'chat_ready', 'retry')
+    const first = play(
+      'created',
+      'build_started',
+      'stage_chunk',
+      'source_ingested',
+      'chat_ready',
+      'retry'
+    )
 
     const second = reduceBuildEvent(first, first.lastSeq + 1, {
       type: 'build_started',
@@ -465,7 +481,7 @@ describe('retries', () => {
     expect(second.readiness).toBe(first.readiness)
     expect(second.counts.chunks).toBe(first.counts.chunks)
     expect(second.rows.at(-1)?.message).toBe(
-      'Build started (attempt 2 of 3, resuming from chat ready)',
+      'Build started (attempt 2 of 3, resuming from chat ready)'
     )
   })
 })
@@ -578,7 +594,7 @@ describe('a whole build', () => {
       'graph_ready',
       'stage_persona',
       'persona_ready',
-      'done',
+      'done'
     )
 
     expect(state.terminal?.kind).toBe('done')

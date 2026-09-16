@@ -88,9 +88,7 @@ def _readiness_note(e: Expert) -> str:
 
 @app.command("list")
 def list_catalog(
-    all_experts: Annotated[
-        bool, typer.Option("--all", help="Include private experts too")
-    ] = False,
+    all_experts: Annotated[bool, typer.Option("--all", help="Include private experts too")] = False,
 ) -> None:
     """Show the catalog in shelf order (featured, then rank, then newest)."""
 
@@ -164,9 +162,7 @@ def publish(
                 "will stay out of the catalog until its build reaches chat-ready."
             )
         if not updated.catalog.blurb:
-            console.print(
-                "[dim]Tip: add a blurb — it is the line that sells the card.[/dim]"
-            )
+            console.print("[dim]Tip: add a blurb — it is the line that sells the card.[/dim]")
 
     _run(_inner())
 
@@ -261,9 +257,7 @@ def reorder(
 
 @app.command("export")
 def export(
-    path: Annotated[
-        Path | None, typer.Argument(help="File to write; omit for stdout")
-    ] = None,
+    path: Annotated[Path | None, typer.Argument(help="File to write; omit for stdout")] = None,
     all_experts: Annotated[
         bool, typer.Option("--all", help="Include private experts (default: only shared)")
     ] = False,
@@ -348,9 +342,7 @@ def apply(
             raise typer.Abort()
 
         for expert, entry, _ in planned:
-            visibility = (
-                ExpertVisibility(entry["visibility"]) if entry.get("visibility") else None
-            )
+            visibility = ExpertVisibility(entry["visibility"]) if entry.get("visibility") else None
             # An explicit null in the file means "clear this field"; an absent
             # key means "leave it alone". update_catalog needs that distinction
             # spelled out, since None is its own "leave alone" signal.

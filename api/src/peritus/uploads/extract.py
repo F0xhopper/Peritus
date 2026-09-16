@@ -12,6 +12,7 @@ deciding whether to re-export their PDF.
 
 from peritus.core.exceptions import IngestionError
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import BlockedURLError, assert_public_url
 from peritus.infrastructure.pdf_parser import parse_pdf_bytes
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.web import WebFetcher
@@ -55,9 +56,7 @@ async def extract(upload: PendingUpload) -> RawSource:
             "web page, the site may require sign-in."
         )
     if len(text) > _MAX_CHARS:
-        logger.info(
-            "Upload %d truncated from %d to %d chars", upload.id, len(text), _MAX_CHARS
-        )
+        logger.info("Upload %d truncated from %d to %d chars", upload.id, len(text), _MAX_CHARS)
         text = text[:_MAX_CHARS]
 
     return RawSource(
@@ -84,8 +83,7 @@ async def _extract_pdf(upload: PendingUpload) -> str:
     except Exception as exc:
         logger.warning("PDF extraction failed for upload %d: %s", upload.id, exc)
         raise IngestionError(
-            "Could not read this PDF. It may be encrypted, corrupt, or larger "
-            "than the 20 MB limit."
+            "Could not read this PDF. It may be encrypted, corrupt, or larger than the 20 MB limit."
         ) from exc
 
 
@@ -98,6 +96,17 @@ def _extract_text(upload: PendingUpload) -> str:
 async def _extract_url(upload: PendingUpload) -> str:
     if not upload.url:
         raise IngestionError("No URL was provided.")
+    # The request handler already refused the obvious cases. This is the
+    # resolving check, here rather than only inside the fetcher so that a
+    # blocked address produces its own message instead of the generic
+    # "could not fetch that page" that a swallowed transport error gives.
+    try:
+        await assert_public_url(upload.url)
+    except BlockedURLError as exc:
+        logger.warning("Refused URL upload %r: %s", upload.url, exc.reason)
+        raise IngestionError(
+            "That address is not reachable from the public internet, so it cannot be fetched."
+        ) from exc
     candidate = SourceCandidate(
         source_type=SourceType.WEB,
         url=upload.url,
@@ -108,8 +117,7 @@ async def _extract_url(upload: PendingUpload) -> str:
     raw = await WebFetcher().fetch(candidate)
     if raw is None:
         raise IngestionError(
-            "Could not fetch that page. It may be unreachable, or it may block "
-            "automated readers."
+            "Could not fetch that page. It may be unreachable, or it may block automated readers."
         )
     return raw.text
 

@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { sharePath } from '@/lib/access'
 import { plural } from '@/lib/format'
 import type { ShareState } from '@/lib/api/types'
+import { apiJson, apiVoid, messageFor } from '@/lib/api/client'
 
 /**
  * An expert's share link: "anyone with the link can read and ask".
@@ -52,14 +53,10 @@ export function SharePanel({
   // effect that starts it.
   const load = useCallback(
     () =>
-      fetch(endpoint)
-        .then((res) => {
-          if (!res.ok) throw new Error()
-          return res.json() as Promise<ShareState>
-        })
+      apiJson<ShareState>(endpoint)
         .then(setState)
         .catch(() => setLoadFailed(true)),
-    [endpoint],
+    [endpoint]
   )
 
   useEffect(() => {
@@ -69,30 +66,34 @@ export function SharePanel({
   }, [initial, load])
 
   const act = async (kind: 'enable' | 'reset' | 'disable') => {
+    const fallback =
+      kind === 'enable'
+        ? 'Could not create a link.'
+        : kind === 'reset'
+          ? 'Could not reset the link.'
+          : 'Could not turn sharing off.'
     setBusy(kind)
     try {
-      const res = await fetch(kind === 'reset' ? `${endpoint}/reset` : endpoint, {
-        method: kind === 'enable' ? 'PUT' : kind === 'reset' ? 'POST' : 'DELETE',
-      })
-      if (!res.ok) throw new Error()
+      const path = kind === 'reset' ? `${endpoint}/reset` : endpoint
+      const method = kind === 'enable' ? 'PUT' : kind === 'reset' ? 'POST' : 'DELETE'
       if (kind === 'disable') {
+        // 204: there is no state to read back, so it is applied locally.
+        await apiVoid(path, { method }, fallback)
         setState((current) =>
-          current ? { ...current, enabled: false, token: null, created_at: null, viewer_count: 0 } : current,
+          current
+            ? { ...current, enabled: false, token: null, created_at: null, viewer_count: 0 }
+            : current
         )
         toast.success('Sharing is off. The link no longer works.')
       } else {
-        setState((await res.json()) as ShareState)
-        toast.success(kind === 'reset' ? 'New link created. The old one no longer works.' : 'Link created')
+        setState(await apiJson<ShareState>(path, { method }, fallback))
+        toast.success(
+          kind === 'reset' ? 'New link created. The old one no longer works.' : 'Link created'
+        )
       }
       setConfirming(null)
-    } catch {
-      toast.error(
-        kind === 'enable'
-          ? 'Could not create a link.'
-          : kind === 'reset'
-            ? 'Could not reset the link.'
-            : 'Could not turn sharing off.',
-      )
+    } catch (error) {
+      toast.error(messageFor(error, fallback))
     } finally {
       setBusy(null)
     }
@@ -129,18 +130,21 @@ export function SharePanel({
     <div className="space-y-3 text-sm">
       <ul className="space-y-1 text-fg-2">
         <li>
-          Anyone with the link can see what {name} is. Once signed in, they can read its sources
-          and concept map and ask it questions.
+          Anyone with the link can see what {name} is. Once signed in, they can read its sources and
+          concept map and ask it questions.
         </li>
         <li>They cannot rebuild, edit or delete it, or share it on.</li>
         <li>Chats stay private: you never see theirs, and they never see yours.</li>
       </ul>
 
       {state.uploaded_source_count > 0 && (
-        <Notice tone="warn" title={`Includes ${plural(state.uploaded_source_count, 'file')} you uploaded`}>
+        <Notice
+          tone="warn"
+          title={`Includes ${plural(state.uploaded_source_count, 'file')} you uploaded`}
+        >
           Answers quote the passages they cite, so people with the link can read parts of{' '}
-          {state.uploaded_source_count === 1 ? 'it' : 'them'}. Only share what you have the right
-          to share.
+          {state.uploaded_source_count === 1 ? 'it' : 'them'}. Only share what you have the right to
+          share.
         </Notice>
       )}
 
@@ -208,11 +212,15 @@ function LinkRow({ token, name, viewers }: { token: string; name: string; viewer
   // to itself rather than to production. Read through an external store with a
   // server snapshot: the Settings page renders this on the server, where there
   // is no origin, and a value that differed at hydration would be a mismatch.
-  const origin = useSyncExternalStore(noSubscribe, () => window.location.origin, () => '')
+  const origin = useSyncExternalStore(
+    noSubscribe,
+    () => window.location.origin,
+    () => ''
+  )
   const canNativeShare = useSyncExternalStore(
     noSubscribe,
     () => typeof navigator.share === 'function',
-    () => false,
+    () => false
   )
   const url = `${origin}${sharePath(token)}`
 
@@ -243,7 +251,12 @@ function LinkRow({ token, name, viewers }: { token: string; name: string; viewer
           onFocus={(event) => event.currentTarget.select()}
           className="min-w-0 flex-1 font-mono text-xs"
         />
-        <Button variant="secondary" onClick={() => void copy()} minWidth={88} aria-label="Copy link">
+        <Button
+          variant="secondary"
+          onClick={() => void copy()}
+          minWidth={88}
+          aria-label="Copy link"
+        >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
           {copied ? 'Copied' : 'Copy'}
         </Button>

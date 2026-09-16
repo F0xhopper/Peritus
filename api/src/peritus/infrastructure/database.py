@@ -53,8 +53,12 @@ async def init_pool() -> None:
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
-    await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    # No CREATE EXTENSION here. This callback runs for *every* connection the
+    # pool opens, so it put two privileged DDL statements on a runtime path that
+    # only ever needs to read. The migrations create both extensions, and
+    # `migrations/apply.py` is the release command, so they are present before
+    # the first connection is made.
+    #
     # Install the vector/halfvec/sparsevec codecs for the lifetime of this
     # connection. Every query that passes or reads an embedding depends on it.
     from pgvector.asyncpg import register_vector  # type: ignore
@@ -97,7 +101,8 @@ def iterative_scan_sql(*, local: bool) -> str:
         # validate against the allowlist rather than trusting the environment.
         logger.warning(
             "HNSW_ITERATIVE_SCAN=%r is not one of %s — using relaxed_order",
-            settings.HNSW_ITERATIVE_SCAN, ", ".join(sorted(_ITERATIVE_SCAN_MODES)),
+            settings.HNSW_ITERATIVE_SCAN,
+            ", ".join(sorted(_ITERATIVE_SCAN_MODES)),
         )
         mode = "relaxed_order"
     return f"SET {'LOCAL ' if local else ''}hnsw.iterative_scan = {mode}"
@@ -118,7 +123,9 @@ async def _probe_vector_capabilities(pool: asyncpg.Pool) -> None:
     try:
         async with pool.acquire() as conn:
             _halfvec_supported = bool(
-                await conn.fetchval("SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'halfvec')")
+                await conn.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'halfvec')"
+                )
             )
     except Exception as exc:
         _halfvec_supported = False

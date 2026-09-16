@@ -38,10 +38,13 @@ def list_experts(
     table: bool = typer.Option(False, "--table", help="Show compact table instead of suite view"),
 ) -> None:
     """List all experts as a suite of cards."""
+
     async def _inner():
         pairs = await _experts_with_concepts()
         if not pairs:
-            console.print("[dim]No experts found. Run [bold]peritus build <topic>[/bold] to create one.[/dim]")
+            console.print(
+                "[dim]No experts found. Run [bold]peritus build <topic>[/bold] to create one.[/dim]"
+            )
             return
         if table:
             console.print(experts_table([e for e, _ in pairs]))
@@ -54,6 +57,7 @@ def list_experts(
 @app.command("show")
 def show_expert(name: str = typer.Argument(..., help="Expert name or fuzzy match")) -> None:
     """Show details of a specific expert."""
+
     async def _inner():
         svc = await _service()
         try:
@@ -83,6 +87,7 @@ def refresh_persona(name: str = typer.Argument(..., help="Expert name or fuzzy m
     For experts built before a change to the persona prompt: the corpus is
     already right, only the voice is stale. One model call, no rebuild.
     """
+
     async def _inner():
         svc = await _service()
         try:
@@ -124,6 +129,7 @@ def refresh_picture(name: str = typer.Argument(..., help="Expert name or fuzzy m
     get one for an expert built before pictures existed, or a different one when
     the first pick was wrong. No model tokens — five or six HTTP requests.
     """
+
     async def _inner():
         from peritus.experts.picture import PictureSkipped
 
@@ -164,6 +170,7 @@ def backfill_pictures(
     their API policy asks tools not to have. The pause between experts is the
     whole point of the command — raise ``--sleep`` rather than lowering it.
     """
+
     async def _inner():
         from peritus.experts.picture import PictureSkipped
         from peritus.experts.picture_repository import ExpertPictureRepository
@@ -181,9 +188,7 @@ def backfill_pictures(
             if i:
                 await asyncio.sleep(sleep)
             try:
-                updated = await svc.refresh_picture(
-                    expert_id, deadline=_CLI_PICTURE_DEADLINE
-                )
+                updated = await svc.refresh_picture(expert_id, deadline=_CLI_PICTURE_DEADLINE)
             except PictureSkipped as skip:
                 skipped += 1
                 console.print(f"  [yellow]—[/yellow] {slug} [dim]({skip.reason})[/dim]")
@@ -209,6 +214,7 @@ def delete_expert(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation"),
 ) -> None:
     """Delete an expert and all its data."""
+
     async def _inner():
         svc = await _service()
         try:

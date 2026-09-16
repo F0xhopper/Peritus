@@ -10,10 +10,7 @@ import {
   renderAvatarSvg,
   resolveRecipe,
 } from '@/lib/avatar'
-import {
-  nameHash,
-  personaInitials,
-} from '@/lib/persona'
+import { nameHash, personaInitials } from '@/lib/persona'
 
 /**
  * Avatar identity.
@@ -108,7 +105,10 @@ describe('resolveRecipe', () => {
 
   it('ignores a hue an older row still carries — there are no per-expert colours', () => {
     const stored = { style: 'shapes', seed: 'pinned', hue: 145 } as { style: string; seed: string }
-    expect(resolveRecipe({ ...derived, avatar: stored })).toEqual({ style: 'shapes', seed: 'pinned' })
+    expect(resolveRecipe({ ...derived, avatar: stored })).toEqual({
+      style: 'shapes',
+      seed: 'pinned',
+    })
   })
 
   it('fills in the derived seed when only a style is pinned', () => {
@@ -124,7 +124,6 @@ describe('resolveRecipe', () => {
     })
     expect(recipe.style).toBe('sigil')
   })
-
 })
 
 describe('resolveRecipe with a found picture', () => {
@@ -166,7 +165,7 @@ describe('resolveRecipe with a found picture', () => {
 describe('pictureUrl', () => {
   it('always carries the version, because the cache is immutable', () => {
     expect(pictureUrl('varroa-mite-control', '9f3a1c2b7d4e')).toBe(
-      '/api/experts/varroa-mite-control/picture?v=9f3a1c2b7d4e',
+      '/api/experts/varroa-mite-control/picture?v=9f3a1c2b7d4e'
     )
   })
 
@@ -218,7 +217,8 @@ describe('AVATAR_PALETTE', () => {
     // Very slightly cool, like `--fg-3` (#6b6b73): red and green equal, blue a
     // shade higher, so an avatar matches the neutral text beside it.
     const { strong, mid, soft } = AVATAR_PALETTE
-    const channels = (hex: string) => [0, 2, 4].map((at) => Number.parseInt(hex.slice(at, at + 2), 16))
+    const channels = (hex: string) =>
+      [0, 2, 4].map((at) => Number.parseInt(hex.slice(at, at + 2), 16))
     for (const value of [strong, mid, soft]) {
       expect(value).toMatch(/^[0-9a-f]{6}$/)
       const [r, g, b] = channels(value)

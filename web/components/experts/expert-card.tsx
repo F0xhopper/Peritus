@@ -1,10 +1,17 @@
 'use client'
 
-import { LogOut, MessageSquare, MoreHorizontal, Network, Settings, Table, Trash2, Users } from 'lucide-react'
+import {
+  LogOut,
+  MessageSquare,
+  MoreHorizontal,
+  Network,
+  Settings,
+  Table,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { toast } from 'sonner'
 import { ViewTransition } from 'react'
 
 import { Avatar } from '@/components/identity/avatar'
@@ -26,6 +33,8 @@ import { cn } from '@/lib/cn'
 import { firstSentence, formatScore } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
 import type { ExpertSummary } from '@/lib/api/types'
+import { useApiAction } from '@/hooks/use-api-action'
+import { apiVoid } from '@/lib/api/client'
 
 /**
  * One expert on Home.
@@ -48,9 +57,7 @@ export function ExpertCard({
   /** Index for the first-paint stagger, or null for no animation. */
   stagger: number | null
 }) {
-  const router = useRouter()
   const [confirming, setConfirming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const base = `/experts/${expert.name}`
   const chattable = expert.readiness !== 'pending'
   // The About text's first sentence — who this expert is, in a line or two.
@@ -60,22 +67,19 @@ export function ExpertCard({
   const owner = canManage(expert)
   const { leave } = useLeaveExpert(expert.name, displayName(expert))
 
-  const remove = async () => {
-    setDeleting(true)
-    try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(expert.name)}`, {
-        method: 'DELETE',
-      })
-      if (!res.ok) throw new Error()
-      toast.success(`Deleted ${displayName(expert)}`)
-      setConfirming(false)
-      router.refresh()
-    } catch {
-      toast.error('Could not delete that expert.')
-    } finally {
-      setDeleting(false)
+  const { run: remove, pending: deleting } = useApiAction(
+    () =>
+      apiVoid(
+        `/api/experts/${encodeURIComponent(expert.name)}`,
+        { method: 'DELETE' },
+        'Could not delete that expert.'
+      ),
+    {
+      success: `Deleted ${displayName(expert)}`,
+      error: 'Could not delete that expert.',
+      onSuccess: () => setConfirming(false),
     }
-  }
+  )
 
   return (
     <>
@@ -90,7 +94,7 @@ export function ExpertCard({
           'group relative flex flex-col rounded-card bg-panel p-3',
           'transition-colors duration-(--dur-1) hover:bg-raised',
           stagger !== null &&
-            'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-(--dur-2) motion-safe:fill-mode-backwards',
+            'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fill-mode-backwards motion-safe:fade-in motion-safe:slide-in-from-bottom-1'
         )}
       >
         {/* Right padding keeps a long name clear of the absolutely placed ⋯ menu. */}
@@ -172,7 +176,7 @@ export function ExpertCard({
               'hover:bg-raised hover:text-fg',
               // Hidden until hover on a mouse, always present on touch.
               'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-              '[@media(hover:none)]:opacity-100',
+              '[@media(hover:none)]:opacity-100'
             )}
           >
             <MoreHorizontal className="size-3.5" />

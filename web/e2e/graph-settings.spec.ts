@@ -66,7 +66,7 @@ test('the graph draws its concepts on a canvas', async ({ page }, testInfo) => {
           for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) painted++
           return painted
         }),
-      { message: 'the canvas never painted a pixel', timeout: 20_000 },
+      { message: 'the canvas never painted a pixel', timeout: 20_000 }
     )
     .toBeGreaterThan(500)
 
@@ -97,7 +97,7 @@ test('a graph the size of a real corpus still draws', async ({ page }) => {
           for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) painted++
           return painted
         }),
-      { message: 'a 400-node graph painted nothing', timeout: 30_000 },
+      { message: 'a 400-node graph painted nothing', timeout: 30_000 }
     )
     .toBeGreaterThan(5_000)
 })

@@ -52,7 +52,8 @@ def merge_node_extractions(extractions: list[dict]) -> dict[str, dict]:
             if node_type is None:
                 logger.debug(
                     "Rejecting node %r: node_type %r is not in the schema",
-                    node.get("label"), node.get("node_type"),
+                    node.get("label"),
+                    node.get("node_type"),
                 )
                 continue
             key = node["label"].lower().strip()
@@ -110,8 +111,7 @@ class GraphRepository:
         embeddings: list[list[float]] | None = None
         if embedder is not None and merged_nodes:
             texts = [
-                node_embedding_text(n["label"], n["description"])
-                for n in merged_nodes.values()
+                node_embedding_text(n["label"], n["description"]) for n in merged_nodes.values()
             ]
             try:
                 embeddings = await embedder(texts)
@@ -139,8 +139,7 @@ class GraphRepository:
             # the type of every node an edge could name — including the ones
             # already in the graph, which this batch may only be deepening.
             node_types: dict[str, NodeType] = {
-                r["key"]: coerce_node_type(r["node_type"]) or NodeType.CONCEPT
-                for r in existing
+                r["key"]: coerce_node_type(r["node_type"]) or NodeType.CONCEPT for r in existing
             }
 
             label_to_id: dict[str, int] = {}
@@ -188,9 +187,7 @@ class GraphRepository:
                         node_id,
                         chunk_ids,
                         node["description"],
-                        json.dumps({
-                            k: v for k, v in node["properties"].items() if v is not None
-                        }),
+                        json.dumps({k: v for k, v in node["properties"].items() if v is not None}),
                         embedding,
                     )
                 label_to_id[key] = node_id
@@ -231,7 +228,8 @@ class GraphRepository:
                         continue
 
                     properties = {
-                        k: v for k, v in (edge.get("properties") or {}).items()
+                        k: v
+                        for k, v in (edge.get("properties") or {}).items()
                         if isinstance(v, (str, int, float, bool))
                     }
                     required = EDGE_REQUIRED_PROPERTY.get(edge_type)
@@ -243,7 +241,9 @@ class GraphRepository:
             if rejected:
                 logger.info(
                     "Graph ingest for expert %d rejected %d edge(s): %s",
-                    expert_id, sum(rejected.values()), dict(rejected),
+                    expert_id,
+                    sum(rejected.values()),
+                    dict(rejected),
                 )
 
             if relations:
@@ -284,7 +284,8 @@ class GraphRepository:
                 ORDER BY degree DESC
                 LIMIT $2
                 """,
-                expert_id, limit,
+                expert_id,
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -312,7 +313,8 @@ class GraphRepository:
                 )
                 WHERE id = $1
                 """,
-                keep_id, drop_id,
+                keep_id,
+                drop_id,
             )
             # Redirecting can collide with an existing (from, to, type) relation,
             # so drop the redundant rows first, then redirect the rest.
@@ -325,7 +327,9 @@ class GraphRepository:
                   AND e1.to_node_id = e2.to_node_id
                   AND e1.edge_type = e2.edge_type
                 """,
-                keep_id, drop_id, expert_id,
+                keep_id,
+                drop_id,
+                expert_id,
             )
             await conn.execute(
                 """
@@ -336,15 +340,21 @@ class GraphRepository:
                   AND e1.from_node_id = e2.from_node_id
                   AND e1.edge_type = e2.edge_type
                 """,
-                keep_id, drop_id, expert_id,
+                keep_id,
+                drop_id,
+                expert_id,
             )
             await conn.execute(
                 "UPDATE expert_edges SET from_node_id = $1 WHERE from_node_id = $2 AND expert_id = $3",
-                keep_id, drop_id, expert_id,
+                keep_id,
+                drop_id,
+                expert_id,
             )
             await conn.execute(
                 "UPDATE expert_edges SET to_node_id = $1 WHERE to_node_id = $2 AND expert_id = $3",
-                keep_id, drop_id, expert_id,
+                keep_id,
+                drop_id,
+                expert_id,
             )
             await conn.execute(
                 "DELETE FROM expert_edges WHERE from_node_id = to_node_id AND expert_id = $1",
@@ -352,9 +362,7 @@ class GraphRepository:
             )
             await conn.execute("DELETE FROM expert_nodes WHERE id = $1", drop_id)
 
-    async def get_nodes_for_chunks(
-        self, expert_id: int, chunk_ids: list[int]
-    ) -> list[dict]:
+    async def get_nodes_for_chunks(self, expert_id: int, chunk_ids: list[int]) -> list[dict]:
         if not chunk_ids:
             return []
         async with self._pool.acquire() as conn:
@@ -365,7 +373,8 @@ class GraphRepository:
                 WHERE expert_id = $1
                   AND chunk_ids && $2::integer[]
                 """,
-                expert_id, chunk_ids,
+                expert_id,
+                chunk_ids,
             )
         return [dict(r) for r in rows]
 
@@ -397,7 +406,8 @@ class GraphRepository:
                       AND (from_node_id = ANY($2) OR to_node_id = ANY($2))
                     ORDER BY evidence DESC
                     """,
-                    expert_id, frontier,
+                    expert_id,
+                    frontier,
                 )
                 new_ids: list[int] = []
                 for r in edge_rows:
@@ -417,7 +427,8 @@ class GraphRepository:
                 SELECT id, label, node_type, description
                 FROM expert_nodes WHERE expert_id = $1 AND id = ANY($2)
                 """,
-                expert_id, all_node_ids,
+                expert_id,
+                all_node_ids,
             )
             edge_rows = await conn.fetch(
                 """
@@ -427,7 +438,8 @@ class GraphRepository:
                   AND from_node_id = ANY($2)
                   AND to_node_id = ANY($2)
                 """,
-                expert_id, all_node_ids,
+                expert_id,
+                all_node_ids,
             )
 
         return [dict(r) for r in node_rows], [_edge_dict(r) for r in edge_rows]
@@ -487,25 +499,26 @@ class GraphRepository:
                   ))
                 ORDER BY c.id, n.id
                 """,
-                expert_id, touching_chunk_ids,
+                expert_id,
+                touching_chunk_ids,
             )
 
         groups: dict[int, ConceptClaims] = {}
         for r in rows:
             group = groups.get(r["concept_id"])
             if group is None:
-                group = ConceptClaims(
-                    concept_id=r["concept_id"], concept_label=r["concept_label"]
-                )
+                group = ConceptClaims(concept_id=r["concept_id"], concept_label=r["concept_label"])
                 groups[r["concept_id"]] = group
-            group.claims.append(ClaimRow(
-                node_id=r["claim_id"],
-                label=r["claim_label"],
-                description=r["claim_description"],
-                source_id=r["source_id"],
-                source_title=r["source_title"],
-                source_type=r["source_type"],
-            ))
+            group.claims.append(
+                ClaimRow(
+                    node_id=r["claim_id"],
+                    label=r["claim_label"],
+                    description=r["claim_description"],
+                    source_id=r["source_id"],
+                    source_title=r["source_title"],
+                    source_type=r["source_type"],
+                )
+            )
         return [g for g in groups.values() if g.source_count >= min_sources]
 
     async def insert_relations(self, expert_id: int, relations: list[dict]) -> int:
@@ -522,11 +535,10 @@ class GraphRepository:
         async with self._pool.acquire() as conn, conn.transaction():
             rows = await conn.fetch(
                 "SELECT id, node_type FROM expert_nodes WHERE expert_id = $1 AND id = ANY($2)",
-                expert_id, list(wanted),
+                expert_id,
+                list(wanted),
             )
-            types = {
-                r["id"]: coerce_node_type(r["node_type"]) or NodeType.CONCEPT for r in rows
-            }
+            types = {r["id"]: coerce_node_type(r["node_type"]) or NodeType.CONCEPT for r in rows}
 
             payload: dict[tuple[int, int, str], dict] = {}
             rejected: Counter[str] = Counter()
@@ -552,7 +564,9 @@ class GraphRepository:
             if rejected:
                 logger.info(
                     "Reconciliation for expert %d rejected %d relation(s): %s",
-                    expert_id, sum(rejected.values()), dict(rejected),
+                    expert_id,
+                    sum(rejected.values()),
+                    dict(rejected),
                 )
             if not payload:
                 return 0

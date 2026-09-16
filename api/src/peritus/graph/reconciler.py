@@ -19,6 +19,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.graph.domain import (
@@ -27,6 +29,7 @@ from peritus.graph.domain import (
     coerce_edge_type,
 )
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 
 logger = get_logger(__name__)
 
@@ -56,6 +59,7 @@ class ReconcileStats:
     both looked exactly like success. Production had zero reconciled edges and
     no way to say which of those it was.
     """
+
     concepts_eligible: int = 0
     concepts_examined: int = 0
     calls_failed: int = 0
@@ -78,6 +82,7 @@ class ReconcileStats:
 @dataclass
 class ClaimRow:
     """One claim, with the source that made it."""
+
     node_id: int
     label: str
     description: str | None = None
@@ -98,6 +103,7 @@ class ClaimRow:
 @dataclass
 class ConceptClaims:
     """Every claim the corpus makes about one concept."""
+
     concept_id: int
     concept_label: str
     claims: list[ClaimRow] = field(default_factory=list)
@@ -211,19 +217,21 @@ def _params(topic: str, group: ConceptClaims, claims: list[ClaimRow]) -> dict[st
         "system": _SYSTEM,
         "tools": [_TOOL],
         "tool_choice": {"type": "tool", "name": "relate_claims"},
-        "messages": [{
-            "role": "user",
-            "content": (
-                f"Topic: {topic}\n"
-                f"Concept: {group.concept_label}\n\n"
-                f"Claims the corpus makes about it, one per line:\n\n{listing}"
-            ),
-        }],
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    f"Topic: {topic}\n"
+                    f"Concept: {group.concept_label}\n\n"
+                    f"Claims the corpus makes about it, one per line:\n\n{listing}"
+                ),
+            }
+        ],
     }
 
 
 def parse_relations(
-    resp: Any, claims: list[ClaimRow], rejected: Counter | None = None
+    resp: Message | None, claims: list[ClaimRow], rejected: Counter | None = None
 ) -> list[dict]:
     """Turn one model response into relation dicts, dropping what cannot stand.
 
@@ -238,13 +246,13 @@ def parse_relations(
     rejected = rejected if rejected is not None else Counter()
     if resp is None:
         return []
-    block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
+    block = tool_input(resp)
     if block is None:
         rejected["no_tool_use"] += 1
         return []
 
     relations: list[dict] = []
-    raw_relations = dict(block.input).get("relations", [])
+    raw_relations = dict(block).get("relations", [])
     if not isinstance(raw_relations, list):
         rejected["relations_not_a_list"] += 1
         return []
@@ -280,12 +288,14 @@ def parse_relations(
             and to_claim.source_id is not None
             and from_claim.source_id != to_claim.source_id
         )
-        relations.append({
-            "from_node_id": from_claim.node_id,
-            "to_node_id": to_claim.node_id,
-            "edge_type": str(edge_type),
-            "properties": properties,
-        })
+        relations.append(
+            {
+                "from_node_id": from_claim.node_id,
+                "to_node_id": to_claim.node_id,
+                "edge_type": str(edge_type),
+                "properties": properties,
+            }
+        )
     return relations
 
 
@@ -310,11 +320,11 @@ async def reconcile_claims(
     if len(eligible) > max_concepts:
         logger.info(
             "Reconciling the %d concepts spanning the most sources, of %d eligible",
-            max_concepts, len(eligible),
+            max_concepts,
+            len(eligible),
         )
     planned = [
-        (group, _select_claims(group.claims, max_claims))
-        for group in eligible[:max_concepts]
+        (group, _select_claims(group.claims, max_claims)) for group in eligible[:max_concepts]
     ]
     stats.concepts_examined = len(planned)
     if not planned:
@@ -335,10 +345,8 @@ async def reconcile_claims(
         try:
             before = sum(stats.rejected.values())
             parsed = parse_relations(resp, claims, stats.rejected)
-            block = next(
-                (b for b in resp.content if getattr(b, "type", None) == "tool_use"), None
-            )
-            raw = dict(block.input).get("relations") if block is not None else None
+            block = tool_input(resp)
+            raw = dict(block).get("relations") if block is not None else None
             stats.relations_returned += len(raw) if isinstance(raw, list) else 0
             relations.extend(parsed)
             if sum(stats.rejected.values()) > before and not parsed:

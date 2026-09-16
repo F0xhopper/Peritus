@@ -5,11 +5,7 @@ import { useRouter } from 'next/navigation'
 
 import { ApiError } from '@/lib/api/errors'
 import { streamSse } from '@/lib/api/sse'
-import type {
-  ChatEvent,
-  ChatRetrievalAuditEvent,
-  Citation,
-} from '@/lib/api/types'
+import type { ChatEvent, ChatRetrievalAuditEvent, Citation } from '@/lib/api/types'
 
 /**
  * Ask a question and stream the answer.
@@ -134,13 +130,16 @@ export function useChatStream(conversationId: string): UseChatStreamResult {
       controller.current = ac
 
       try {
-        const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-          body: JSON.stringify({ question: question.trim() }),
-          signal: ac.signal,
-          cache: 'no-store',
-        })
+        const res = await fetch(
+          `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+            body: JSON.stringify({ question: question.trim() }),
+            signal: ac.signal,
+            cache: 'no-store',
+          }
+        )
 
         if (res.status === 409) {
           // Another tab (or this one before a refresh) is mid-answer. The claim
@@ -173,16 +172,19 @@ export function useChatStream(conversationId: string): UseChatStreamResult {
               break
             case 'sources': {
               const citations = Array.isArray((event as { citations?: unknown }).citations)
-                ? ((event as { citations: Citation[] }).citations)
+                ? (event as { citations: Citation[] }).citations
                 : []
-              const dangling = Array.isArray((event as { dangling_citations?: unknown }).dangling_citations)
-                ? ((event as { dangling_citations: number[] }).dangling_citations)
+              const dangling = Array.isArray(
+                (event as { dangling_citations?: unknown }).dangling_citations
+              )
+                ? (event as { dangling_citations: number[] }).dangling_citations
                 : []
               setState((prev) => ({
                 ...prev,
                 citations,
                 dangling,
-                hasContradiction: (event as { has_contradiction?: boolean }).has_contradiction === true,
+                hasContradiction:
+                  (event as { has_contradiction?: boolean }).has_contradiction === true,
               }))
               break
             }
@@ -195,7 +197,9 @@ export function useChatStream(conversationId: string): UseChatStreamResult {
                 ...prev,
                 phase: 'error',
                 status: null,
-                error: String((event as { message?: unknown }).message ?? 'The expert hit an error.'),
+                error: String(
+                  (event as { message?: unknown }).message ?? 'The expert hit an error.'
+                ),
               }))
               // The question (and any partial, marked interrupted) is stored
               // and the conversation has its title now, so refetch them — the
@@ -220,7 +224,7 @@ export function useChatStream(conversationId: string): UseChatStreamResult {
         // interrupted and the card offers Retry.
         flush()
         setState((prev) =>
-          prev.phase === 'streaming' ? { ...prev, phase: 'done', status: null } : prev,
+          prev.phase === 'streaming' ? { ...prev, phase: 'done', status: null } : prev
         )
         router.refresh()
       } catch (error) {
@@ -239,7 +243,7 @@ export function useChatStream(conversationId: string): UseChatStreamResult {
         controller.current = null
       }
     },
-    [conversationId, flush, router, scheduleFlush],
+    [conversationId, flush, router, scheduleFlush]
   )
 
   // The 409 countdown. One interval, only while busy.

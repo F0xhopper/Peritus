@@ -14,7 +14,9 @@ pub struct TextInput {
 }
 
 impl TextInput {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn from(s: &str) -> Self {
         let chars: Vec<char> = s.chars().collect();
@@ -22,8 +24,12 @@ impl TextInput {
         Self { chars, cursor }
     }
 
-    pub fn text(&self) -> String { self.chars.iter().collect() }
-    pub fn is_empty(&self) -> bool { self.chars.is_empty() }
+    pub fn text(&self) -> String {
+        self.chars.iter().collect()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.chars.is_empty()
+    }
 
     pub fn clear(&mut self) {
         self.chars.clear();
@@ -77,26 +83,46 @@ impl TextInput {
 
     // ── movement ────────────────────────────────────────────────────────────
 
-    pub fn left(&mut self)  { self.cursor = self.cursor.saturating_sub(1); }
-    pub fn right(&mut self) { self.cursor = (self.cursor + 1).min(self.chars.len()); }
-    pub fn home(&mut self)  { self.cursor = 0; }
-    pub fn end(&mut self)   { self.cursor = self.chars.len(); }
+    pub fn left(&mut self) {
+        self.cursor = self.cursor.saturating_sub(1);
+    }
+    pub fn right(&mut self) {
+        self.cursor = (self.cursor + 1).min(self.chars.len());
+    }
+    pub fn home(&mut self) {
+        self.cursor = 0;
+    }
+    pub fn end(&mut self) {
+        self.cursor = self.chars.len();
+    }
 
-    pub fn word_left(&mut self)  { self.cursor = self.prev_word_boundary(); }
-    pub fn word_right(&mut self) { self.cursor = self.next_word_boundary(); }
+    pub fn word_left(&mut self) {
+        self.cursor = self.prev_word_boundary();
+    }
+    pub fn word_right(&mut self) {
+        self.cursor = self.next_word_boundary();
+    }
 
     fn prev_word_boundary(&self) -> usize {
         let mut i = self.cursor;
-        while i > 0 && self.chars[i - 1].is_whitespace() { i -= 1; }
-        while i > 0 && !self.chars[i - 1].is_whitespace() { i -= 1; }
+        while i > 0 && self.chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
+        while i > 0 && !self.chars[i - 1].is_whitespace() {
+            i -= 1;
+        }
         i
     }
 
     fn next_word_boundary(&self) -> usize {
         let n = self.chars.len();
         let mut i = self.cursor;
-        while i < n && self.chars[i].is_whitespace() { i += 1; }
-        while i < n && !self.chars[i].is_whitespace() { i += 1; }
+        while i < n && self.chars[i].is_whitespace() {
+            i += 1;
+        }
+        while i < n && !self.chars[i].is_whitespace() {
+            i += 1;
+        }
         i
     }
 
@@ -123,7 +149,10 @@ impl TextInput {
         spans.push(Span::styled(before, base));
         if show_cursor {
             if self.cursor < n {
-                spans.push(Span::styled(self.chars[self.cursor].to_string(), cursor_style));
+                spans.push(Span::styled(
+                    self.chars[self.cursor].to_string(),
+                    cursor_style,
+                ));
                 let after: String = self.chars[self.cursor + 1..end].iter().collect();
                 spans.push(Span::styled(after, base));
             } else {

@@ -3,6 +3,7 @@
 import httpx
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import shared_client
 from peritus.sources.domain import RawSource, SourceCandidate, SourceType
 from peritus.sources.fetchers.base import note_search_failure
 from peritus.sources.fetchers.exa import classify_search_error
@@ -40,10 +41,8 @@ class RedditFetcher:
         ]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        async with httpx.AsyncClient(
-            timeout=20, headers=_HEADERS, follow_redirects=True
-        ) as client:
-            return await _fetch_post(client, candidate.url)
+        client = shared_client(timeout=20, headers=_HEADERS, follow_redirects=True)
+        return await _fetch_post(client, candidate.url)
 
 
 async def _fetch_post(client: httpx.AsyncClient, url: str) -> RawSource | None:

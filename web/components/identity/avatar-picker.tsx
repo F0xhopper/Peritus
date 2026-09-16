@@ -10,13 +10,9 @@ import { PictureCredit } from '@/components/identity/picture-credit'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/cn'
-import {
-  AVATAR_STYLES,
-  randomSeed,
-  resolveRecipe,
-  type AvatarRecipe,
-} from '@/lib/avatar'
+import { AVATAR_STYLES, randomSeed, resolveRecipe, type AvatarRecipe } from '@/lib/avatar'
 import type { ExpertSummary } from '@/lib/api/types'
+import { apiSend, apiVoid, messageFor } from '@/lib/api/client'
 
 /**
  * Change an expert's avatar.
@@ -73,26 +69,18 @@ export function AvatarPicker({
   const save = async (next: AvatarRecipe | null) => {
     setSaving(true)
     try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(expert.name)}/avatar`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          avatar: next
-            ? // The monogram needs no seed of its own — it reads the initials
-              // from the persona name.
-              { style: next.style, seed: next.seed, hue: null }
-            : null,
-        }),
+      await apiSend(`/api/experts/${encodeURIComponent(expert.name)}/avatar`, 'PUT', {
+        avatar: next
+          ? // The monogram needs no seed of its own — it reads the initials
+            // from the persona name.
+            { style: next.style, seed: next.seed, hue: null }
+          : null,
       })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-        throw new Error(typeof body?.detail === 'string' ? body.detail : 'Save failed')
-      }
       toast.success(next ? 'Avatar updated' : 'Avatar reset to the generated default')
       setOpen(false)
       router.refresh()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not save that avatar.')
+      toast.error(messageFor(error, 'Could not save that avatar.'))
     } finally {
       setSaving(false)
     }
@@ -103,22 +91,19 @@ export function AvatarPicker({
     kind: 'refresh' | 'remove',
     path: string,
     method: string,
-    success: string,
+    success: string
   ) => {
     setPictureBusy(kind)
     try {
-      const res = await fetch(path, { method })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-        throw new Error(
-          typeof body?.detail === 'string' ? body.detail : 'That did not work.',
-        )
-      }
+      // The API answers 422 with a real sentence when no free, non-mark,
+      // non-living-person image exists for this subject, and that sentence is
+      // the answer — so `messageFor` shows it rather than "that did not work".
+      await apiVoid(path, { method }, 'That did not work.')
       toast.success(success)
       setOpen(false)
       router.refresh()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'That did not work.')
+      toast.error(messageFor(error, 'That did not work.'))
     } finally {
       setPictureBusy(null)
     }
@@ -134,7 +119,7 @@ export function AvatarPicker({
         aria-label="Change avatar"
         className={cn(
           'group relative rounded-card',
-          'transition-opacity duration-(--dur-1) hover:opacity-80',
+          'transition-opacity duration-(--dur-1) hover:opacity-80'
         )}
       >
         {children}
@@ -144,7 +129,7 @@ export function AvatarPicker({
             'pointer-events-none absolute -right-1 -bottom-1 grid size-4 place-items-center',
             'rounded-full bg-raised text-fg-3 ring-1 ring-border',
             'opacity-0 transition-opacity duration-(--dur-1) group-hover:opacity-100',
-            '[@media(hover:none)]:opacity-100',
+            '[@media(hover:none)]:opacity-100'
           )}
         >
           <Pencil className="size-2.5" />
@@ -195,7 +180,7 @@ export function AvatarPicker({
                   aria-pressed={recipe.style === 'picture'}
                   className={cn(
                     'text-sm transition-colors duration-(--dur-1)',
-                    recipe.style === 'picture' ? 'text-fg' : 'text-fg-2 hover:text-fg',
+                    recipe.style === 'picture' ? 'text-fg' : 'text-fg-2 hover:text-fg'
                   )}
                 >
                   Picture{picture.title ? ` — ${picture.title}` : ''}
@@ -212,7 +197,7 @@ export function AvatarPicker({
                         'refresh',
                         `${base}/refresh`,
                         'POST',
-                        'Found another picture',
+                        'Found another picture'
                       )
                     }
                   >
@@ -224,9 +209,7 @@ export function AvatarPicker({
                     size="sm"
                     loading={pictureBusy === 'remove'}
                     disabled={pictureBusy !== null || saving}
-                    onClick={() =>
-                      void pictureAction('remove', base, 'DELETE', 'Picture removed')
-                    }
+                    onClick={() => void pictureAction('remove', base, 'DELETE', 'Picture removed')}
                   >
                     <Trash2 className="size-3.5" />
                     Remove
@@ -266,14 +249,14 @@ export function AvatarPicker({
                 className={cn(
                   'flex flex-col items-center gap-1 rounded-card border p-1.5',
                   'transition-colors duration-(--dur-1)',
-                  selected ? 'border-expert bg-expert-soft' : 'border-border hover:border-fg-4',
+                  selected ? 'border-expert bg-expert-soft' : 'border-border hover:border-fg-4'
                 )}
               >
                 <Avatar expert={expert} recipe={preview} size={36} />
                 <span
                   className={cn(
                     'w-full truncate text-center text-xs',
-                    selected ? 'text-fg' : 'text-fg-3',
+                    selected ? 'text-fg' : 'text-fg-3'
                   )}
                 >
                   {option.label}

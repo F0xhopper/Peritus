@@ -13,13 +13,22 @@ import asyncio
 import contextlib
 import json
 import uuid
+from collections.abc import AsyncIterator
+from typing import Annotated, Any
 
 import anthropic
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sse_starlette.sse import EventSourceResponse
 
-from peritus.api.auth import AuthUser, require_user
+from peritus.api.auth import AuthUser
+from peritus.api.deps import (
+    Conversations,
+    CurrentUser,
+    ExpertRepo,
+    Pool,
+    ReadableExpert,
+)
 from peritus.api.ratelimit import chat_rate_limit
 from peritus.api.schemas.conversations import (
     ConversationDetail,
@@ -32,9 +41,7 @@ from peritus.chat.conversation_repository import Conversation, ConversationRepos
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
-from peritus.experts.repository import ExpertRepository
 from peritus.infrastructure.anthropic_batch import provider_error_message
-from peritus.infrastructure.database import get_pool
 from peritus.search.readiness import get_readiness
 
 logger = get_logger(__name__)
@@ -85,62 +92,57 @@ def _summary_from_expert(c: Conversation, expert: Expert) -> ConversationSummary
     return _to_summary(c)
 
 
-async def _get_readable_expert(slug: str, user: AuthUser) -> Expert:
-    repo = ExpertRepository(get_pool())
-    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    return expert
-
-
-async def _get_owned_conversation(conversation_id: uuid.UUID, user: AuthUser) -> Conversation:
-    convs = ConversationRepository(get_pool())
+async def _owned_conversation(
+    conversation_id: uuid.UUID, user: CurrentUser, convs: Conversations
+) -> Conversation:
+    """A conversation the caller had, or 404. Ownership, never readability: a
+    conversation belongs to the person who had it, not to everyone who can read
+    the expert."""
     conv = await convs.get_for_user(str(conversation_id), user.id, include_unowned=user.is_admin)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return conv
 
 
+OwnedConversation = Annotated[Conversation, Depends(_owned_conversation)]
+
+
 @router.post("/experts/{slug}/conversations", response_model=ConversationSummary)
-async def create_conversation(slug: str, user: AuthUser = Depends(require_user)):
+async def create_conversation(
+    expert: ReadableExpert, user: CurrentUser, convs: Conversations, pool: Pool
+) -> ConversationSummary:
     """Create an empty conversation. The web client calls this on the first
     send, so empties are transient; recents filter them out regardless."""
-    expert = await _get_readable_expert(slug, user)
     # Retrieval readiness, not job status — see routes/chat.py.
-    readiness = await get_readiness(get_pool(), expert.id)
+    readiness = await get_readiness(pool, expert.id)
     if not readiness.can_chat:
         raise HTTPException(status_code=409, detail=f"Expert is {readiness.label}")
-    conv = await ConversationRepository(get_pool()).create(expert.id, user.id)
+    conv = await convs.create(expert.id, user.id)
     logger.info("Created conversation %s for expert %d", conv.id, expert.id)
     return _summary_from_expert(conv, expert)
 
 
 @router.get("/experts/{slug}/conversations", response_model=list[ConversationSummary])
-async def list_expert_conversations(slug: str, user: AuthUser = Depends(require_user)):
-    expert = await _get_readable_expert(slug, user)
-    convs = await ConversationRepository(get_pool()).list_for_expert(
-        expert.id, user.id, include_unowned=user.is_admin
-    )
-    return [_to_summary(c) for c in convs]
+async def list_expert_conversations(
+    expert: ReadableExpert, user: CurrentUser, convs: Conversations
+) -> list[ConversationSummary]:
+    rows = await convs.list_for_expert(expert.id, user.id, include_unowned=user.is_admin)
+    return [_to_summary(c) for c in rows]
 
 
 @router.get("/conversations", response_model=list[ConversationSummary])
 async def list_recent_conversations(
+    user: CurrentUser,
+    convs: Conversations,
     limit: int = Query(20, ge=1, le=50),
-    user: AuthUser = Depends(require_user),
-):
-    convs = await ConversationRepository(get_pool()).list_recent_for_user(
-        user.id, include_unowned=user.is_admin, limit=limit
-    )
-    return [_to_summary(c) for c in convs]
+) -> list[ConversationSummary]:
+    rows = await convs.list_recent_for_user(user.id, include_unowned=user.is_admin, limit=limit)
+    return [_to_summary(c) for c in rows]
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
-async def get_conversation(
-    conversation_id: uuid.UUID, user: AuthUser = Depends(require_user)
-):
-    conv = await _get_owned_conversation(conversation_id, user)
-    messages = await ConversationRepository(get_pool()).get_messages(conv.id)
+async def get_conversation(conv: OwnedConversation, convs: Conversations) -> ConversationDetail:
+    messages = await convs.get_messages(conv.id)
     summary = _to_summary(conv)
     return ConversationDetail(
         **summary.model_dump(),
@@ -163,28 +165,24 @@ async def get_conversation(
 async def rename_conversation(
     conversation_id: uuid.UUID,
     req: RenameConversationRequest,
-    user: AuthUser = Depends(require_user),
-):
-    convs = ConversationRepository(get_pool())
+    user: CurrentUser,
+    convs: Conversations,
+) -> ConversationSummary:
     renamed = await convs.rename(
         str(conversation_id), user.id, include_unowned=user.is_admin, title=req.title
     )
     if not renamed:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv = await convs.get_for_user(
-        str(conversation_id), user.id, include_unowned=user.is_admin
-    )
+    conv = await convs.get_for_user(str(conversation_id), user.id, include_unowned=user.is_admin)
     assert conv is not None
     return _to_summary(conv)
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
 async def delete_conversation(
-    conversation_id: uuid.UUID, user: AuthUser = Depends(require_user)
-):
-    deleted = await ConversationRepository(get_pool()).delete(
-        str(conversation_id), user.id, include_unowned=user.is_admin
-    )
+    conversation_id: uuid.UUID, user: CurrentUser, convs: Conversations
+) -> None:
+    deleted = await convs.delete(str(conversation_id), user.id, include_unowned=user.is_admin)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
     logger.info("Deleted conversation %s", conversation_id)
@@ -194,8 +192,11 @@ async def delete_conversation(
 async def send_message(
     conversation_id: uuid.UUID,
     req: SendMessageRequest,
+    convs: Conversations,
+    experts: ExpertRepo,
+    pool: Pool,
     user: AuthUser = Depends(chat_rate_limit),
-):
+) -> EventSourceResponse:
     """Send a question and stream the answer (SSE), persisting both turns.
 
     Event protocol is the stateless endpoint's plus a leading ``meta`` event
@@ -205,11 +206,11 @@ async def send_message(
     Throttled per user on the same budget as the stateless endpoint: the two
     surfaces cost the same to serve, so one must not be a way around the other.
     """
-    pool = get_pool()
-    convs = ConversationRepository(pool)
-    conv = await _get_owned_conversation(conversation_id, user)
-
-    experts = ExpertRepository(pool)
+    # Resolved here rather than through the `OwnedConversation` dependency the
+    # other conversation routes use: FastAPI does not order sibling dependencies,
+    # so a throttled request would still have queried before `chat_rate_limit`
+    # rejected it. See the same note in routes/chat.py.
+    conv = await _owned_conversation(conversation_id, user, convs)
     expert = await experts.get_by_id(conv.expert_id)
     if not expert:
         # Deletion cascades the conversation away, so a missing expert here can
@@ -219,9 +220,7 @@ async def send_message(
     # viewer's chat outlives the share link it was started through. The history
     # stays readable; asking anything new needs the link to still be live.
     if not await experts.is_readable_by(expert.id, user.id, include_unowned=user.is_admin):
-        raise HTTPException(
-            status_code=403, detail="This expert is no longer shared with you"
-        )
+        raise HTTPException(status_code=403, detail="This expert is no longer shared with you")
     # A rebuild resets readiness to pending before it wipes the corpus, so this
     # also catches an expert whose sources are being replaced underneath us.
     readiness = await get_readiness(pool, expert.id)
@@ -235,9 +234,7 @@ async def send_message(
         # History for the model: everything before this question, in the exact
         # {role, content} shape stateless clients send. +1 covers the reused-
         # question case below; build_composition_messages caps at the max.
-        history = await convs.recent_history(
-            conv.id, settings.CHAT_HISTORY_MAX_MESSAGES + 1
-        )
+        history = await convs.recent_history(conv.id, settings.CHAT_HISTORY_MAX_MESSAGES + 1)
         if history and history[-1]["role"] == "user" and history[-1]["content"] == req.question:
             # Retry of an orphaned question (its stream died before any tokens):
             # reuse the stored user message instead of inserting a duplicate.
@@ -252,7 +249,9 @@ async def send_message(
 
     logger.info(
         "Streaming answer for conversation %s (expert=%d, history=%d)",
-        conv.id, expert.id, len(history),
+        conv.id,
+        expert.id,
+        len(history),
     )
     return EventSourceResponse(
         _stream_and_persist(pool, convs, conv, expert, req.question, history)
@@ -281,8 +280,7 @@ def answer_error_message(error: BaseException) -> str:
     if isinstance(error, anthropic.APIStatusError):
         detail = provider_error_message(error)[:300].strip()
         return (
-            "The answer could not be composed — the Anthropic API rejected the "
-            f"request: {detail}"
+            f"The answer could not be composed — the Anthropic API rejected the request: {detail}"
         )
     return "The expert hit an internal error while answering."
 
@@ -294,7 +292,7 @@ async def _stream_and_persist(
     expert: Expert,
     question: str,
     history: list[dict],
-):
+) -> AsyncIterator[dict[str, Any]]:
     """Wrap the shared stream body with persistence for every exit path.
 
     - ``done``: assistant message persisted (citations + contradiction flag),
@@ -325,9 +323,15 @@ async def _stream_and_persist(
         )
 
     try:
-        yield {"data": json.dumps({
-            "type": "meta", "conversation_id": conv.id, "title": conv.title,
-        })}
+        yield {
+            "data": json.dumps(
+                {
+                    "type": "meta",
+                    "conversation_id": conv.id,
+                    "title": conv.title,
+                }
+            )
+        }
 
         from peritus.chat.streaming import stream_expert_answer
 
@@ -352,10 +356,14 @@ async def _stream_and_persist(
         logger.exception("Conversation stream failed for %s", conv.id)
         with contextlib.suppress(Exception):
             await _finalize(interrupted=True)
-        yield {"data": json.dumps({
-            "type": "error",
-            "message": answer_error_message(error),
-        })}
+        yield {
+            "data": json.dumps(
+                {
+                    "type": "error",
+                    "message": answer_error_message(error),
+                }
+            )
+        }
 
     finally:
         if not finalized:

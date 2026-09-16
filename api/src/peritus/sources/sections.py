@@ -27,9 +27,24 @@ from dataclasses import dataclass
 # Heading kinds, singular. A heading is a line that starts with one of these
 # followed by a number (arabic or roman), optionally followed by a title.
 _HEADING_WORDS = (
-    "question", "chapter", "book", "part", "section", "lecture", "article",
-    "letter", "epistle", "canto", "act", "discourse", "sermon", "meditation",
-    "treatise", "essay", "lesson", "paragraph",
+    "question",
+    "chapter",
+    "book",
+    "part",
+    "section",
+    "lecture",
+    "article",
+    "letter",
+    "epistle",
+    "canto",
+    "act",
+    "discourse",
+    "sermon",
+    "meditation",
+    "treatise",
+    "essay",
+    "lesson",
+    "paragraph",
 )
 _ROMAN = r"[ivxlcdm]+"
 _HEADING_RE = re.compile(
@@ -56,25 +71,54 @@ _HINT_KIND = re.compile(
     re.IGNORECASE,
 )
 _NUMBER = rf"(?:\d{{1,4}}|\b{_ROMAN}\b)"
-_RANGE = re.compile(
-    rf"(?P<a>{_NUMBER})(?:\s*(?:-|–|—|to)\s*(?P<b>{_NUMBER}))?", re.IGNORECASE
-)
+_RANGE = re.compile(rf"(?P<a>{_NUMBER})(?:\s*(?:-|–|—|to)\s*(?P<b>{_NUMBER}))?", re.IGNORECASE)
 
 _KIND_ALIASES = {
-    "q": "question", "qq": "question", "question": "question", "questions": "question",
-    "ch": "chapter", "chs": "chapter", "chap": "chapter", "chaps": "chapter",
-    "chapter": "chapter", "chapters": "chapter",
-    "bk": "book", "book": "book", "books": "book",
-    "part": "part", "parts": "part",
-    "sect": "section", "sects": "section", "section": "section", "sections": "section",
-    "§": "section", "§§": "section",
-    "lect": "lecture", "lects": "lecture", "lecture": "lecture", "lectures": "lecture",
-    "art": "article", "arts": "article", "article": "article", "articles": "article",
-    "letter": "letter", "letters": "letter", "epistle": "epistle", "epistles": "epistle",
-    "canto": "canto", "cantos": "canto", "sermon": "sermon", "sermons": "sermon",
-    "meditation": "meditation", "meditations": "meditation",
-    "lesson": "lesson", "lessons": "lesson",
-    "para": "paragraph", "paras": "paragraph", "paragraph": "paragraph", "paragraphs": "paragraph",
+    "q": "question",
+    "qq": "question",
+    "question": "question",
+    "questions": "question",
+    "ch": "chapter",
+    "chs": "chapter",
+    "chap": "chapter",
+    "chaps": "chapter",
+    "chapter": "chapter",
+    "chapters": "chapter",
+    "bk": "book",
+    "book": "book",
+    "books": "book",
+    "part": "part",
+    "parts": "part",
+    "sect": "section",
+    "sects": "section",
+    "section": "section",
+    "sections": "section",
+    "§": "section",
+    "§§": "section",
+    "lect": "lecture",
+    "lects": "lecture",
+    "lecture": "lecture",
+    "lectures": "lecture",
+    "art": "article",
+    "arts": "article",
+    "article": "article",
+    "articles": "article",
+    "letter": "letter",
+    "letters": "letter",
+    "epistle": "epistle",
+    "epistles": "epistle",
+    "canto": "canto",
+    "cantos": "canto",
+    "sermon": "sermon",
+    "sermons": "sermon",
+    "meditation": "meditation",
+    "meditations": "meditation",
+    "lesson": "lesson",
+    "lessons": "lesson",
+    "para": "paragraph",
+    "paras": "paragraph",
+    "paragraph": "paragraph",
+    "paragraphs": "paragraph",
 }
 
 # Heading kinds that contain other kinds.
@@ -132,7 +176,7 @@ def parse_hint(hint: str) -> dict[str, list[tuple[int, int]]]:
         if kind is None:
             continue
         end = matches[index + 1].start() if index + 1 < len(matches) else len(hint)
-        span = hint[match.end():end]
+        span = hint[match.end() : end]
         # Numbers belong to this kind word until something that is not a number,
         # a range or a list separator appears.
         span = re.split(r"[^\divxlcdmIVXLCDM\s,;–—\-and to]", span, maxsplit=1)[0]
@@ -211,7 +255,8 @@ def select_sections(text: str, hint: str, max_chars: int) -> Selection:
     def _matching(kind: str, within: list[_Section] | None = None) -> list[_Section]:
         wanted = ranges.get(kind, [])
         return [
-            section for section in found.get(kind, [])
+            section
+            for section in found.get(kind, [])
             if section.length >= _MIN_SECTION_CHARS
             and any(low <= section.number <= high for low, high in wanted)
             and (within is None or any(c.start <= section.start < c.end for c in within))
@@ -235,7 +280,8 @@ def select_sections(text: str, hint: str, max_chars: int) -> Selection:
     if not chosen:
         kinds = ", ".join(sorted(found)) or "none"
         return Selection(
-            text[:max_chars], False,
+            text[:max_chars],
+            False,
             reason=f"no heading matched {sorted(ranges)} (headings found: {kinds})",
         )
 
@@ -256,7 +302,7 @@ def select_sections(text: str, hint: str, max_chars: int) -> Selection:
     used = len(front)
     kept = 0
     for section in ordered:
-        body = text[section.start: section.end].strip()
+        body = text[section.start : section.end].strip()
         room = max_chars - used
         if room <= _MIN_SECTION_CHARS:
             break

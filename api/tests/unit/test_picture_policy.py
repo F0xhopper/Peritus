@@ -53,7 +53,7 @@ def test_accepts_every_free_licence(short_name):
         "CC BY-ND 4.0",
         "Fair use",
         "Non-free logo",
-        "GFDL",              # copyleft, but not one we have cleared
+        "GFDL",  # copyleft, but not one we have cleared
         "",
     ],
 )
@@ -99,7 +99,7 @@ def test_a_restriction_refuses_an_otherwise_free_file():
         "Signature_of_Einstein.png",
         "Belgium_locator_map.png",
         "Stoicism_banner.jpg",
-        "Feynman_diagram.svg",   # every SVG, whatever it depicts
+        "Feynman_diagram.svg",  # every SVG, whatever it depicts
     ],
 )
 def test_marks_are_not_pictures(file_name):
@@ -149,9 +149,7 @@ def test_a_dead_person_is_fine():
 
 def test_a_non_human_subject_is_fine():
     """A species, a concept or a building is never a publicity-rights problem."""
-    honeybee = {
-        "P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q16521"}}}}]
-    }
+    honeybee = {"P31": [{"mainsnak": {"datavalue": {"value": {"id": "Q16521"}}}}]}
     assert is_living_human(honeybee) is False
 
 
@@ -188,16 +186,12 @@ def _candidate(title: str, rank_: int, mime: str = "image/jpeg", w: int = 800) -
 
 
 def test_the_topics_own_article_outranks_everything():
-    ordered = rank(
-        [_candidate("Stoic physics", 0), _candidate("Stoicism", 5)], topic="Stoicism"
-    )
+    ordered = rank([_candidate("Stoic physics", 0), _candidate("Stoicism", 5)], topic="Stoicism")
     assert ordered[0].page_title == "Stoicism"
 
 
 def test_the_exact_title_match_ignores_case_and_punctuation():
-    ordered = rank(
-        [_candidate("Other", 0), _candidate("Stoicism!", 3)], topic="  stoicism "
-    )
+    ordered = rank([_candidate("Other", 0), _candidate("Stoicism!", 3)], topic="  stoicism ")
     assert ordered[0].page_title == "Stoicism!"
 
 
@@ -273,7 +267,9 @@ class TestIsOnTopic:
     def test_common_words_do_not_connect_two_unrelated_subjects(self):
         # Without a stoplist, "systems" alone would make NoSQL an illustration
         # of machine learning.
-        assert is_on_topic("NoSQL database systems", "ML system design", "Machine learning") is False
+        assert (
+            is_on_topic("NoSQL database systems", "ML system design", "Machine learning") is False
+        )
 
     def test_short_words_do_not_connect_either(self):
         assert is_on_topic("The Old Man and the Sea", "ion channel", "Ion channels") is False
@@ -295,7 +291,12 @@ class TestDimensions:
 
     def test_reads_a_png(self):
         # 8-byte signature, then IHDR: length, type, width, height.
-        png = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + (634).to_bytes(4, "big") + (291).to_bytes(4, "big")
+        png = (
+            b"\x89PNG\r\n\x1a\n"
+            + b"\x00\x00\x00\rIHDR"
+            + (634).to_bytes(4, "big")
+            + (291).to_bytes(4, "big")
+        )
         assert dimensions(png) == (634, 291)
 
     def test_reads_a_gif(self):
@@ -306,9 +307,15 @@ class TestDimensions:
         # A JFIF APP0 segment the walk must step over, then SOF0.
         jpeg = (
             b"\xff\xd8"
-            + b"\xff\xe0" + (16).to_bytes(2, "big") + b"JFIF\x00" + b"\x00" * 9
-            + b"\xff\xc0" + (17).to_bytes(2, "big") + b"\x08"
-            + (640).to_bytes(2, "big") + (960).to_bytes(2, "big")
+            + b"\xff\xe0"
+            + (16).to_bytes(2, "big")
+            + b"JFIF\x00"
+            + b"\x00" * 9
+            + b"\xff\xc0"
+            + (17).to_bytes(2, "big")
+            + b"\x08"
+            + (640).to_bytes(2, "big")
+            + (960).to_bytes(2, "big")
             + b"\x00" * 6
         )
         # JPEG stores height before width; the helper returns (width, height).
@@ -316,8 +323,13 @@ class TestDimensions:
 
     def test_reads_a_lossy_webp(self):
         webp = (
-            b"RIFF" + b"\x00" * 4 + b"WEBP" + b"VP8 " + b"\x00" * 10
-            + (300).to_bytes(2, "little") + (150).to_bytes(2, "little")
+            b"RIFF"
+            + b"\x00" * 4
+            + b"WEBP"
+            + b"VP8 "
+            + b"\x00" * 10
+            + (300).to_bytes(2, "little")
+            + (150).to_bytes(2, "little")
         )
         assert dimensions(webp) == (300, 150)
 

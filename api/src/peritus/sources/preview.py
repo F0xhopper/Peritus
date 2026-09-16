@@ -22,9 +22,12 @@ from __future__ import annotations
 
 import re
 
+from peritus.core.logging import get_logger
 from peritus.ingestion.chunker import _detect_sections
 from peritus.sources.domain import RawSource
 from peritus.sources.fulltext import default_method_for
+
+logger = get_logger(__name__)
 
 # First pass, one call per batch of five on the fast model. The old budget was
 # ~2,400 characters of body; this is the same order of magnitude with the facts
@@ -83,13 +86,13 @@ def _headings(text: str, limit: int = MAX_HEADINGS) -> list[str]:
     """
     try:
         sections = _detect_sections(text)
-    except Exception:
+    except Exception as exc:
+        # Broad on purpose — this is a preview heuristic and must never be the
+        # reason a source fails — but silent it meant a chunker regression could
+        # disable section hints for every document with nothing to show for it.
+        logger.debug("Section detection failed on a %d-char document: %s", len(text), exc)
         return []
-    headings = [
-        _clip(title, 80)
-        for title, _body in sections
-        if title and title != "Full Text"
-    ]
+    headings = [_clip(title, 80) for title, _body in sections if title and title != "Full Text"]
     # De-duplicated preserving order: numbered subsections repeat their parent's
     # words often enough that a raw list is mostly noise.
     seen: set[str] = set()
@@ -119,12 +122,12 @@ def _samples(text: str, count: int, width: int) -> list[str]:
     out: list[str] = []
     for i in range(count):
         at = usable_start + step * i
-        window = text[at: at + width]
+        window = text[at : at + width]
         # Start at a sentence boundary where one is close, so the sample does not
         # open mid-word.
         break_at = window.find(". ")
         if 0 <= break_at < width // 5:
-            window = window[break_at + 2:]
+            window = window[break_at + 2 :]
         out.append(_WS_RE.sub("\n\n", window).strip())
     return [w for w in out if w]
 

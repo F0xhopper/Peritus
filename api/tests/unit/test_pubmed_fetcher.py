@@ -55,6 +55,7 @@ def _result(**overrides) -> dict:
 
 # ── stub transport ────────────────────────────────────────────────────────────
 
+
 class _StubResponse:
     def __init__(self, *, json_data=None, text="", status_code=200):
         self._json = json_data
@@ -64,7 +65,9 @@ class _StubResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise httpx.HTTPStatusError(
-                "error", request=httpx.Request("GET", "https://x.test"), response=None  # type: ignore[arg-type]
+                "error",
+                request=httpx.Request("GET", "https://x.test"),
+                response=None,  # type: ignore[arg-type]
             )
 
     def json(self):
@@ -96,10 +99,15 @@ class _StubClient:
 
 
 def _patch_http(client: _StubClient):
-    return patch.object(pubmed.httpx, "AsyncClient", client)
+    # The named seam, not `httpx.AsyncClient`: clients are now shared for the
+    # life of the process (infrastructure/http.shared_client), so a test that
+    # replaced the constructor would either miss a cached client or poison one
+    # for every test after it.
+    return patch.object(pubmed, "shared_client", client)
 
 
 # ── search ────────────────────────────────────────────────────────────────────
+
 
 async def test_search_maps_a_core_result_onto_a_candidate():
     client = _StubClient(_StubResponse(json_data={"resultList": {"result": [_result()]}}))
@@ -176,6 +184,7 @@ async def test_search_returns_empty_on_http_error_status():
 
 # ── result mapping helpers ────────────────────────────────────────────────────
 
+
 def test_open_access_requires_deposit_in_europe_pmc():
     """Licensed-as-OA is not the same as retrievable: full text needs inEPMC."""
     licensed_only = _to_candidate(_result(isOpenAccess="Y", inEPMC="N"))
@@ -245,6 +254,7 @@ async def test_fetch_full_text_returns_empty_when_body_missing():
 
 # ── fetch ─────────────────────────────────────────────────────────────────────
 
+
 def _candidate(**metadata_overrides) -> SourceCandidate:
     metadata = {
         "pmcid": "PMC13294356",
@@ -303,7 +313,9 @@ async def test_fetch_falls_back_to_the_abstract_when_full_text_is_short():
 
     assert source is not None
     assert source.metadata["full_text"] is False
-    assert source.text == f"Programmable enhancement of endogenous mRNA translation\n\n{LONG_ABSTRACT}"
+    assert (
+        source.text == f"Programmable enhancement of endogenous mRNA translation\n\n{LONG_ABSTRACT}"
+    )
 
 
 async def test_fetch_skips_the_full_text_request_for_closed_access():
@@ -318,9 +330,7 @@ async def test_fetch_skips_the_full_text_request_for_closed_access():
 
 async def test_fetch_returns_none_when_there_is_nothing_but_a_citation_stub():
     with _patch_http(_StubClient(_StubResponse(status_code=404))):
-        source = await PubmedFetcher().fetch(
-            _candidate(open_access=False, abstract="Too thin.")
-        )
+        source = await PubmedFetcher().fetch(_candidate(open_access=False, abstract="Too thin."))
 
     assert source is None
 

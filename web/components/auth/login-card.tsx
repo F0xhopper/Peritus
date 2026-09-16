@@ -4,13 +4,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { FieldError, Input, Label } from '@/components/ui/input'
 import { Notice } from '@/components/ui/notice'
 import { GoogleMark } from '@/components/auth/google-mark'
 import { cn } from '@/lib/cn'
+import { z } from '@/lib/validation'
+import { ClientApiError, apiVoid, messageFor } from '@/lib/api/client'
 
 /**
  * The sign-in card.
@@ -57,38 +58,31 @@ export function LoginCard({
     setNotice(null)
     setRetryAfter(null)
     try {
-      const res = await fetch('/api/auth/otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-
-      if (res.ok) {
-        router.push(
-          `/login/verify?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`,
-        )
-        return
-      }
-
-      if (res.status === 429) {
-        const seconds = Number(res.headers.get('retry-after'))
-        setRetryAfter(Number.isFinite(seconds) && seconds > 0 ? seconds : null)
+      // `apiVoid`: the API answers 204, so there is no body to decode.
+      await apiVoid(
+        '/api/auth/otp',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        },
+        'Could not send a code. Try again.'
+      )
+      router.push(
+        `/login/verify?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`
+      )
+    } catch (error) {
+      if (error instanceof ClientApiError && error.status === 429) {
+        // The API's own Retry-After, so the countdown matches the limiter
+        // rather than guessing at it.
+        setRetryAfter(error.retryAfter)
         setNotice('Too many attempts. Wait a moment and try again.')
         return
       }
-
-      const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-      const detail = typeof body?.detail === 'string' ? body.detail : null
-      // The API returns this when signups are disabled, which is the
-      // invite-only case and not the user's mistake.
-      setNotice(
-        detail ??
-          (res.status === 503
-            ? 'Sign-in is not configured on this server.'
-            : 'Could not send a code. Try again.'),
-      )
-    } catch {
-      setNotice('Could not reach Peritus. Check your connection.')
+      // A 503 here is "sign-in is not configured on this server", and the
+      // invite-only refusal is a sentence the API writes — both arrive as the
+      // error's message, which is why this does not second-guess it.
+      setNotice(messageFor(error, 'Could not send a code. Try again.'))
     }
   })
 
@@ -99,11 +93,7 @@ export function LoginCard({
           It is running in development mode, so every request is the bootstrap admin. Open the app
           directly.
         </Notice>
-        <Button
-          variant="primary"
-          className="mt-3 w-full"
-          onClick={() => router.push(next)}
-        >
+        <Button variant="primary" className="mt-3 w-full" onClick={() => router.push(next)}>
           Continue
         </Button>
       </Card>
@@ -113,9 +103,7 @@ export function LoginCard({
   return (
     <Card>
       <h1 className="text-lg font-medium text-fg">Sign in to Peritus</h1>
-      <p className="mt-1 text-sm text-fg-3">
-        We email a six-digit code. No password to remember.
-      </p>
+      <p className="mt-1 text-sm text-fg-3">We email a six-digit code. No password to remember.</p>
 
       <form onSubmit={onSubmit} className="mt-5 space-y-1.5" noValidate>
         <Label htmlFor="email">Email</Label>
@@ -148,7 +136,10 @@ export function LoginCard({
           down after a failed Continue — is not a click anyone is mid-way through. */}
       <div className="min-h-8 pt-3">
         {notice && (
-          <Notice tone="bad" className="animate-in fade-in slide-in-from-bottom-1 duration-(--dur-2)">
+          <Notice
+            tone="bad"
+            className="animate-in duration-(--dur-2) fade-in slide-in-from-bottom-1"
+          >
             {notice}
             {retryAfter !== null && <Countdown seconds={retryAfter} />}
           </Notice>
@@ -168,7 +159,7 @@ export function LoginCard({
           'mt-4 flex h-(--btn-lg) w-full items-center justify-center gap-2.5 rounded-row',
           'border border-border text-sm font-medium text-fg',
           'transition-colors duration-(--dur-1) hover:bg-raised',
-          !loginAvailable && 'pointer-events-none opacity-50',
+          !loginAvailable && 'pointer-events-none opacity-50'
         )}
       >
         <GoogleMark className="size-4" />

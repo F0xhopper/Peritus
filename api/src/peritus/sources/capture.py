@@ -98,7 +98,9 @@ def capture_for_screening(
                 handle.write(json.dumps(source_to_record(source, round_n)) + "\n")
         _write_manifest(target, expert, topic, key_concepts)
     except Exception as exc:
-        logger.warning("Screening capture failed (%s: %s) — build continues", type(exc).__name__, exc)
+        logger.warning(
+            "Screening capture failed (%s: %s) — build continues", type(exc).__name__, exc
+        )
         return None
     logger.info("Captured %d source(s) for screening evaluation → %s", len(sources), path)
     return path

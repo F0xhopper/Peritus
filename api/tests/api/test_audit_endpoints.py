@@ -7,12 +7,14 @@ that are allowed to reach SQL, and the two states the contradictions endpoint
 must never conflate.
 """
 
+import contextlib
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from peritus.api import deps
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
 from peritus.search.readiness import Readiness
 
@@ -35,15 +37,8 @@ def _make_expert() -> Expert:
 
 
 @pytest.fixture
-def app():
-    from peritus.api.app import create_app
-    from peritus.api.auth import AuthUser, require_user
-
-    app = create_app()
-    app.dependency_overrides[require_user] = lambda: AuthUser(
-        id=ADMIN_ID, email="admin@test", is_admin=True
-    )
-    return app
+def app(api_app):
+    return api_app(user=ADMIN_ID, is_admin=True, email="admin@test")
 
 
 @pytest.fixture
@@ -57,22 +52,25 @@ async def client(app):
 _UNSET = object()
 
 
-def _patched(service=None, expert=_UNSET, readiness=Readiness.GRAPH_READY):
-    """Patch the route module's pool, expert lookup, service and readiness."""
-    mock_experts = AsyncMock()
-    mock_experts.get_for_user = AsyncMock(
-        return_value=_make_expert() if expert is _UNSET else expert
-    )
+@contextlib.contextmanager
+def _wired(app, service=None, expert=_UNSET, readiness=Readiness.GRAPH_READY):
+    """Substitute the expert lookup and the audit service for this app.
+
+    `dependency_overrides` rather than patching the route module: the routes
+    take both as dependencies, so the test names what it is replacing.
+    `get_readiness` is a plain function the handler calls, so it is still
+    patched.
+    """
+    experts = AsyncMock()
+    experts.get_for_user = AsyncMock(return_value=_make_expert() if expert is _UNSET else expert)
 
     async def _get_readiness(_pool, _expert_id):
         return readiness
 
-    return (
-        patch("peritus.api.routes.audit.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.audit.ExpertRepository", return_value=mock_experts),
-        patch("peritus.api.routes.audit.AuditService", return_value=service or AsyncMock()),
-        patch("peritus.api.routes.audit.get_readiness", new=_get_readiness),
-    )
+    app.dependency_overrides[deps.expert_repo] = lambda: experts
+    app.dependency_overrides[deps.audit_service] = lambda: service or AsyncMock()
+    with patch("peritus.api.routes.audit.get_readiness", new=_get_readiness):
+        yield
 
 
 ENDPOINTS = [
@@ -86,41 +84,40 @@ ENDPOINTS = [
 
 # ── owner scoping ──
 
+
 @pytest.mark.parametrize("path", [*ENDPOINTS, "/experts/stoicism/corpus-report/export"])
 @pytest.mark.asyncio
-async def test_unreadable_expert_404s_everywhere(client, path):
+async def test_unreadable_expert_404s_everywhere(client, path, app):
     """Out-of-scope rows 404 rather than 403, matching the experts routes: an
     expert's existence is not disclosed to someone who cannot read it."""
-    p1, p2, p3, p4 = _patched(expert=None)
-    with p1, p2, p3, p4:
+    with _wired(app, expert=None):
         resp = await client.get(path)
     assert resp.status_code == 404
 
 
 # ── corpus report ──
 
+
 @pytest.mark.asyncio
-async def test_corpus_report_defaults_to_the_whole_ledger(client):
+async def test_corpus_report_defaults_to_the_whole_ledger(client, app):
     service = AsyncMock()
     service.corpus_report = AsyncMock(return_value={"sources": []})
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/corpus-report")
 
     assert resp.status_code == 200
     kwargs = service.corpus_report.await_args.kwargs
-    assert kwargs["decision"] == "all"       # rejected sources included by default
+    assert kwargs["decision"] == "all"  # rejected sources included by default
     assert kwargs["sort"] == "decision"
     assert kwargs["limit"] == 100
     assert kwargs["offset"] == 0
 
 
 @pytest.mark.asyncio
-async def test_corpus_report_can_be_filtered_to_rejected_sources(client):
+async def test_corpus_report_can_be_filtered_to_rejected_sources(client, app):
     service = AsyncMock()
     service.corpus_report = AsyncMock(return_value={"sources": []})
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get(
             "/experts/stoicism/corpus-report?decision=rejected&sort=quality&limit=5&offset=10"
         )
@@ -145,10 +142,9 @@ async def test_corpus_report_can_be_filtered_to_rejected_sources(client):
     ],
 )
 @pytest.mark.asyncio
-async def test_corpus_report_rejects_out_of_contract_parameters(client, query):
+async def test_corpus_report_rejects_out_of_contract_parameters(client, query, app):
     """Sort keys reach an ORDER BY fragment, so only the declared enum may pass."""
-    p1, p2, p3, p4 = _patched()
-    with p1, p2, p3, p4:
+    with _wired(app):
         resp = await client.get(f"/experts/stoicism/corpus-report?{query}")
     assert resp.status_code == 422
 
@@ -161,6 +157,7 @@ def test_declared_sorts_match_the_implemented_sql():
 
 
 # ── export ──
+
 
 def _export_row(passed: bool) -> dict:
     return {
@@ -186,13 +183,10 @@ def _export_row(passed: bool) -> dict:
 
 
 @pytest.mark.asyncio
-async def test_csv_export_includes_rejected_rows_and_downloads(client):
+async def test_csv_export_includes_rejected_rows_and_downloads(client, app):
     service = AsyncMock()
-    service.export_rows = AsyncMock(
-        return_value=([_export_row(True), _export_row(False)], False)
-    )
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    service.export_rows = AsyncMock(return_value=([_export_row(True), _export_row(False)], False))
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/corpus-report/export?format=csv")
 
     assert resp.status_code == 200
@@ -207,11 +201,10 @@ async def test_csv_export_includes_rejected_rows_and_downloads(client):
 
 
 @pytest.mark.asyncio
-async def test_ris_export_is_importable_shaped(client):
+async def test_ris_export_is_importable_shaped(client, app):
     service = AsyncMock()
     service.export_rows = AsyncMock(return_value=([_export_row(True)], False))
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/corpus-report/export?format=ris")
 
     assert resp.status_code == 200
@@ -222,27 +215,26 @@ async def test_ris_export_is_importable_shaped(client):
 
 
 @pytest.mark.asyncio
-async def test_truncated_export_fails_rather_than_returning_a_partial_ledger(client):
+async def test_truncated_export_fails_rather_than_returning_a_partial_ledger(client, app):
     """A ledger that silently stopped short would be cited as complete."""
     service = AsyncMock()
     service.export_rows = AsyncMock(return_value=([_export_row(True)], True))
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/corpus-report/export")
     assert resp.status_code == 507
 
 
 # ── contradictions: "not computed" is not "none found" ──
 
+
 @pytest.mark.asyncio
-async def test_contradictions_are_not_computed_before_the_graph_exists(client):
+async def test_contradictions_are_not_computed_before_the_graph_exists(client, app):
     """The service must be told the readiness, and the real service returns a
     `computed: false` envelope rather than an empty list of findings."""
     from peritus.audit.service import AuditService
 
     real = AuditService(MagicMock())
-    p1, p2, p3, p4 = _patched(real, readiness=Readiness.CHAT_READY)
-    with p1, p2, p3, p4:
+    with _wired(app, real, readiness=Readiness.CHAT_READY):
         resp = await client.get("/experts/stoicism/contradictions")
 
     assert resp.status_code == 200
@@ -250,16 +242,15 @@ async def test_contradictions_are_not_computed_before_the_graph_exists(client):
     assert body["computed"] is False
     assert body["readiness"] == "chat_ready"
     assert body["contradictions"] == []
-    assert body["summary"]["contradictions"] is None      # not 0
+    assert body["summary"]["contradictions"] is None  # not 0
     assert "not looked for" in body["unavailable_reason"]
 
 
 @pytest.mark.asyncio
-async def test_contradictions_pass_readiness_and_paging_to_the_service(client):
+async def test_contradictions_pass_readiness_and_paging_to_the_service(client, app):
     service = AsyncMock()
     service.contradictions = AsyncMock(return_value={"contradictions": []})
-    p1, p2, p3, p4 = _patched(service, readiness=Readiness.GRAPH_READY)
-    with p1, p2, p3, p4:
+    with _wired(app, service, readiness=Readiness.GRAPH_READY):
         resp = await client.get(
             "/experts/stoicism/contradictions?limit=5&offset=2&passages_per_side=4"
         )
@@ -273,36 +264,41 @@ async def test_contradictions_pass_readiness_and_paging_to_the_service(client):
 
 
 @pytest.mark.parametrize(
-    "query", ["limit=0", "limit=1000", "passages_per_side=0", "passages_per_side=50",
-              "excerpt_chars=1", "excerpt_chars=100000"]
+    "query",
+    [
+        "limit=0",
+        "limit=1000",
+        "passages_per_side=0",
+        "passages_per_side=50",
+        "excerpt_chars=1",
+        "excerpt_chars=100000",
+    ],
 )
 @pytest.mark.asyncio
-async def test_contradictions_bound_their_payload_parameters(client, query):
-    p1, p2, p3, p4 = _patched()
-    with p1, p2, p3, p4:
+async def test_contradictions_bound_their_payload_parameters(client, query, app):
+    with _wired(app):
         resp = await client.get(f"/experts/stoicism/contradictions?{query}")
     assert resp.status_code == 422
 
 
 # ── screening flow and coverage ──
 
+
 @pytest.mark.asyncio
-async def test_screening_flow_is_served(client):
+async def test_screening_flow_is_served(client, app):
     service = AsyncMock()
     service.screening_flow = AsyncMock(return_value={"stages": {}})
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/screening-flow")
     assert resp.status_code == 200
     service.screening_flow.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_coverage_is_served(client):
+async def test_coverage_is_served(client, app):
     service = AsyncMock()
     service.coverage = AsyncMock(return_value={"concepts": []})
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/coverage")
     assert resp.status_code == 200
     service.coverage.assert_awaited_once()
@@ -310,12 +306,12 @@ async def test_coverage_is_served(client):
 
 # ── answer audits ──
 
+
 @pytest.mark.asyncio
-async def test_answer_audits_list_accepts_a_conversation_filter(client):
+async def test_answer_audits_list_accepts_a_conversation_filter(client, app):
     service = AsyncMock()
     service.list_answer_audits = AsyncMock(return_value={"audits": []})
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/answer-audits?conversation_id=abc&limit=3")
 
     assert resp.status_code == 200
@@ -325,21 +321,19 @@ async def test_answer_audits_list_accepts_a_conversation_filter(client):
 
 
 @pytest.mark.asyncio
-async def test_unknown_answer_audit_404s(client):
+async def test_unknown_answer_audit_404s(client, app):
     service = AsyncMock()
     service.get_answer_audit = AsyncMock(return_value=None)
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/answer-audits/does-not-exist")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_malformed_audit_id_404s_rather_than_500s(client):
+async def test_malformed_audit_id_404s_rather_than_500s(client, app):
     """A non-uuid reaches Postgres as a cast error; it is a bad id, not a fault."""
     service = AsyncMock()
     service.get_answer_audit = AsyncMock(side_effect=ValueError("invalid input for uuid"))
-    p1, p2, p3, p4 = _patched(service)
-    with p1, p2, p3, p4:
+    with _wired(app, service):
         resp = await client.get("/experts/stoicism/answer-audits/not-a-uuid")
     assert resp.status_code == 404

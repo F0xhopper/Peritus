@@ -1,8 +1,8 @@
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, Paragraph},
+    Frame,
 };
 
 use crate::tui::theme::Theme;
@@ -14,7 +14,7 @@ pub enum LoginPhase {
 }
 
 /// Email-OTP login: enter email, receive a one-time code by email, enter the code.
-/// The async request/verify calls are driven from `app.rs` (it owns the ApiClient).
+/// The async request/verify calls are driven from `app.rs` (it owns the `ApiClient`).
 pub struct LoginScreen {
     pub phase: LoginPhase,
     pub email: String,
@@ -104,9 +104,17 @@ impl LoginScreen {
             self.email.clone()
         };
         f.render_widget(
-            Paragraph::new(format!("Email:  {}", email_val))
-                .style(if email_active { Theme::accent() } else { Theme::dim() })
-                .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::dim())),
+            Paragraph::new(format!("Email:  {email_val}"))
+                .style(if email_active {
+                    Theme::accent()
+                } else {
+                    Theme::dim()
+                })
+                .block(
+                    Block::default()
+                        .borders(Borders::BOTTOM)
+                        .border_style(Theme::dim()),
+                ),
             chunks[1],
         );
 
@@ -117,9 +125,17 @@ impl LoginScreen {
             self.code.clone()
         };
         f.render_widget(
-            Paragraph::new(format!("Code:   {}", code_val))
-                .style(if code_active { Theme::accent() } else { Theme::dim() })
-                .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::dim())),
+            Paragraph::new(format!("Code:   {code_val}"))
+                .style(if code_active {
+                    Theme::accent()
+                } else {
+                    Theme::dim()
+                })
+                .block(
+                    Block::default()
+                        .borders(Borders::BOTTOM)
+                        .border_style(Theme::dim()),
+                ),
             chunks[2],
         );
 
@@ -128,10 +144,16 @@ impl LoginScreen {
             msg_lines.push(Line::from(Span::styled("  Working…", Theme::dim())));
         }
         if let Some(status) = &self.status {
-            msg_lines.push(Line::from(Span::styled(format!("  {}", status), Theme::success())));
+            msg_lines.push(Line::from(Span::styled(
+                format!("  {status}"),
+                Theme::success(),
+            )));
         }
         if let Some(err) = &self.error {
-            msg_lines.push(Line::from(Span::styled(format!("  {}", err), Theme::warning())));
+            msg_lines.push(Line::from(Span::styled(
+                format!("  {err}"),
+                Theme::warning(),
+            )));
         }
         f.render_widget(Paragraph::new(msg_lines), chunks[3]);
 

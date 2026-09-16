@@ -95,13 +95,44 @@ _MIN_ORIGINAL_SIDE = 240
 # Words too common to establish that an article is about a subject. Not a real
 # stopword list — just the ones that would otherwise connect any two English
 # phrases through the `is_on_topic` rule below.
-_STOPWORDS: frozenset[str] = frozenset({
-    "the", "and", "for", "with", "from", "into", "that", "this", "there",
-    "their", "about", "over", "under", "between", "through", "during",
-    "history", "list", "introduction", "overview", "modern", "general",
-    "theory", "theories", "study", "studies", "science", "sciences",
-    "system", "systems", "method", "methods", "analysis", "research",
-})
+_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "into",
+        "that",
+        "this",
+        "there",
+        "their",
+        "about",
+        "over",
+        "under",
+        "between",
+        "through",
+        "during",
+        "history",
+        "list",
+        "introduction",
+        "overview",
+        "modern",
+        "general",
+        "theory",
+        "theories",
+        "study",
+        "studies",
+        "science",
+        "sciences",
+        "system",
+        "systems",
+        "method",
+        "methods",
+        "analysis",
+        "research",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -110,15 +141,15 @@ class Candidate:
 
     page_title: str
     page_url: str
-    file_name: str            # 'File:Zeno_of_Citium.jpg'
+    file_name: str  # 'File:Zeno_of_Citium.jpg'
     thumb_url: str
     thumb_width: int
     thumb_height: int
     original_width: int
     original_height: int
     wikibase_item: str | None
-    query: str                # the search that surfaced the article
-    rank: int                 # position in the deduplicated article order
+    query: str  # the search that surfaced the article
+    rank: int  # position in the deduplicated article order
     # Filled in by the imageinfo pass.
     mime: str = ""
     license: str = ""
@@ -252,7 +283,8 @@ def is_living_human(claims: dict) -> bool:
 def _content_words(text: str) -> set[str]:
     """Words in ``text`` substantial enough to mean something on their own."""
     return {
-        w for w in re.split(r"[^a-z0-9]+", (text or "").casefold())
+        w
+        for w in re.split(r"[^a-z0-9]+", (text or "").casefold())
         if len(w) > 3 and w not in _STOPWORDS
     }
 
@@ -463,8 +495,11 @@ def build_queries(topic: str, key_concepts: list[str], hints: tuple[str, ...] = 
     """
     seen: set[str] = set()
     out: list[str] = []
-    for raw, shape in [(topic, False), *[(h, False) for h in hints],
-                       *[(c, True) for c in key_concepts[:4]]]:
+    for raw, shape in [
+        (topic, False),
+        *[(h, False) for h in hints],
+        *[(c, True) for c in key_concepts[:4]],
+    ]:
         text = _as_query(raw) if shape else (raw or "").strip()
         if not text or text.casefold() in seen:
             continue
@@ -565,32 +600,33 @@ async def _find(
         if not is_on_topic(title, title_query.get(title, topic), topic):
             continue
 
-        candidates.append(Candidate(
-            page_title=title,
-            page_url=f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}",
-            file_name=f"File:{file_name}" if not file_name.startswith("File:") else file_name,
-            thumb_url=thumb["source"],
-            thumb_width=int(thumb.get("width") or 0),
-            thumb_height=int(thumb.get("height") or 0),
-            original_width=ow,
-            original_height=oh,
-            wikibase_item=props.get("wikibase_item"),
-            query=title_query.get(title, topic),
-            # Position within the query that found it, so a query's best hit
-            # competes with every other query's best hit rather than with the
-            # interleaving order.
-            rank=order.get(title, 99),
-        ))
+        candidates.append(
+            Candidate(
+                page_title=title,
+                page_url=f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}",
+                file_name=f"File:{file_name}" if not file_name.startswith("File:") else file_name,
+                thumb_url=thumb["source"],
+                thumb_width=int(thumb.get("width") or 0),
+                thumb_height=int(thumb.get("height") or 0),
+                original_width=ow,
+                original_height=oh,
+                wikibase_item=props.get("wikibase_item"),
+                query=title_query.get(title, topic),
+                # Position within the query that found it, so a query's best hit
+                # competes with every other query's best hit rather than with the
+                # interleaving order.
+                rank=order.get(title, 99),
+            )
+        )
 
     if not candidates:
         raise PictureSkipped("no_candidate")
 
     # 5. Living people.
-    claims = await client.wikidata_claims(
-        [c.wikibase_item for c in candidates if c.wikibase_item]
-    )
+    claims = await client.wikidata_claims([c.wikibase_item for c in candidates if c.wikibase_item])
     candidates = [
-        c for c in candidates
+        c
+        for c in candidates
         if not (c.wikibase_item and is_living_human(claims.get(c.wikibase_item, {})))
     ]
     if not candidates:
@@ -617,20 +653,26 @@ async def _find(
         # thumbnail is how an expert loses its picture to the size cap.
         thumb_url = c.thumb_url or info.get("thumburl") or ""
         from_pageimages = bool(c.thumb_url)
-        licensed.append(Candidate(
-            **{
-                **c.__dict__,
-                "thumb_url": thumb_url,
-                "thumb_width": c.thumb_width if from_pageimages else int(info.get("thumbwidth") or 0),
-                "thumb_height": c.thumb_height if from_pageimages else int(info.get("thumbheight") or 0),
-                "mime": info.get("mime") or "",
-                "license": _extmeta(extmeta, "LicenseShortName"),
-                "license_url": _extmeta(extmeta, "LicenseUrl") or None,
-                "artist": strip_html(_extmeta(extmeta, "Artist")) or None,
-                "credit": strip_html(_extmeta(extmeta, "Credit")) or None,
-                "file_page_url": info.get("descriptionurl") or "",
-            }
-        ))
+        licensed.append(
+            Candidate(
+                **{
+                    **c.__dict__,
+                    "thumb_url": thumb_url,
+                    "thumb_width": c.thumb_width
+                    if from_pageimages
+                    else int(info.get("thumbwidth") or 0),
+                    "thumb_height": c.thumb_height
+                    if from_pageimages
+                    else int(info.get("thumbheight") or 0),
+                    "mime": info.get("mime") or "",
+                    "license": _extmeta(extmeta, "LicenseShortName"),
+                    "license_url": _extmeta(extmeta, "LicenseUrl") or None,
+                    "artist": strip_html(_extmeta(extmeta, "Artist")) or None,
+                    "credit": strip_html(_extmeta(extmeta, "Credit")) or None,
+                    "file_page_url": info.get("descriptionurl") or "",
+                }
+            )
+        )
 
     if not licensed:
         raise PictureSkipped("no_candidate")

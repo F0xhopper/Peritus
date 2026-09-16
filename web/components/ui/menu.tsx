@@ -36,7 +36,7 @@ export function MenuContent({
             'transition-[opacity,transform] duration-(--dur-2) ease-(--ease-out)',
             'data-starting-style:scale-[0.98] data-starting-style:opacity-0',
             'data-ending-style:opacity-0 data-ending-style:duration-(--dur-1)',
-            className,
+            className
           )}
         >
           {children}
@@ -73,7 +73,7 @@ export function MenuItem({
           ? 'text-bad data-highlighted:bg-bad/12'
           : 'text-fg-2 data-highlighted:bg-border data-highlighted:text-fg',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
-        className,
+        className
       )}
     >
       {children}
@@ -98,7 +98,7 @@ export function MenuLinkItem({
       className={cn(
         'flex h-(--row-h) items-center gap-2 rounded-row px-2 text-sm text-fg-2 outline-none',
         'transition-colors duration-(--dur-1) data-highlighted:bg-border data-highlighted:text-fg',
-        className,
+        className
       )}
     >
       {children}

@@ -114,5 +114,5 @@ async def embed_in_batches(
     """
     all_embeddings: list[list[float]] = []
     for i in range(0, len(texts), batch_size):
-        all_embeddings.extend(await embed_batch(texts[i: i + batch_size]))
+        all_embeddings.extend(await embed_batch(texts[i : i + batch_size]))
     return all_embeddings

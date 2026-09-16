@@ -8,6 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA
 from peritus.sources.domain import (
     Identifiers,
     RawSource,
@@ -23,7 +24,7 @@ logger = get_logger(__name__)
 _AR5IV = "https://ar5iv.labs.arxiv.org/html/"
 
 # Shared with the citation-snowballing step in the builder.
-HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+HEADERS = {"User-Agent": RESEARCH_UA}
 MIN_FULL_TEXT = 3_000
 MAX_FULL_TEXT = 120_000
 
@@ -32,9 +33,15 @@ class ArxivFetcher:
     async def search(self, query: str, max_results: int = 3) -> list[SourceCandidate]:
         try:
             papers = await asyncio.to_thread(
-                lambda: list(arxiv.Client().results(
-                    arxiv.Search(query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
-                ))
+                lambda: list(
+                    arxiv.Client().results(
+                        arxiv.Search(
+                            query=query,
+                            max_results=max_results,
+                            sort_by=arxiv.SortCriterion.Relevance,
+                        )
+                    )
+                )
             )
         except Exception as exc:
             logger.warning("ArXiv search failed for %r: %s", query, exc)

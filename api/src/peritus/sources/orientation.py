@@ -45,18 +45,34 @@ _REFERENCE_DOMAINS: tuple[str, ...] = ("plato.stanford.edu", "iep.utm.edu", "bri
 _EXA_TEXT_CHARS = 4_000
 
 # Sections that are apparatus, not the topic.
-_BOILERPLATE_SECTIONS = frozenset({
-    "see also", "references", "notes", "external links", "further reading",
-    "bibliography", "sources", "citations", "footnotes", "works cited",
-    "notes and references", "primary sources", "secondary sources",
-    "academic tools", "other internet resources", "related entries",
-})
+_BOILERPLATE_SECTIONS = frozenset(
+    {
+        "see also",
+        "references",
+        "notes",
+        "external links",
+        "further reading",
+        "bibliography",
+        "sources",
+        "citations",
+        "footnotes",
+        "works cited",
+        "notes and references",
+        "primary sources",
+        "secondary sources",
+        "academic tools",
+        "other internet resources",
+        "related entries",
+    }
+)
 
 # "== Heading ==" at depth 1, "=== Sub ===" at depth 2, from the extract API's
 # `exsectionformat=wiki`.
 _WIKI_HEADING = re.compile(r"^(={2,6})\s*(.+?)\s*\1\s*$", re.MULTILINE)
 # "1. Life", "2.3 The Five Ways": the table of contents SEP and IEP entries open with.
-_NUMBERED_HEADING = re.compile(r"^\s*(\d{1,2}(?:\.\d{1,2})*)\.?\s+([A-Z][^\n]{2,90})$", re.MULTILINE)
+_NUMBERED_HEADING = re.compile(
+    r"^\s*(\d{1,2}(?:\.\d{1,2})*)\.?\s+([A-Z][^\n]{2,90})$", re.MULTILINE
+)
 
 
 @dataclass
@@ -255,10 +271,12 @@ async def build_orientation_pack(
     if pending:
         logger.warning(
             "Orientation: %d lookup(s) still running after %.0fs — planning without them",
-            len(pending), timeout,
+            len(pending),
+            timeout,
         )
     overviews = [
-        overview for task in tasks
+        overview
+        for task in tasks
         if task in done and not task.cancelled() and (overview := task.result()) is not None
     ]
     return OrientationPack(overviews)

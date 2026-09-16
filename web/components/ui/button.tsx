@@ -57,20 +57,18 @@ const button = cva(
          * the height come from the same token pair, so it is square under both
          * pointers.
          */
-        action:
-          'h-(--row-h) w-(--icon-btn) rounded-row px-0 sm:w-auto sm:pl-2.5 sm:pr-3',
+        action: 'h-(--row-h) w-(--icon-btn) rounded-row px-0 sm:w-auto sm:pl-2.5 sm:pr-3',
         lg: 'h-(--btn-lg) rounded-row px-4',
         icon: 'size-(--icon-btn) rounded-row',
         'icon-sm': 'size-(--icon-btn-sm) rounded-chip',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },
-  },
+  }
 )
 
 export interface ButtonProps
-  extends Omit<React.ComponentProps<typeof BaseButton>, 'className'>,
-    VariantProps<typeof button> {
+  extends Omit<React.ComponentProps<typeof BaseButton>, 'className'>, VariantProps<typeof button> {
   className?: string
   loading?: boolean
   /** Minimum width, so a label→spinner swap cannot change the layout. */
@@ -101,7 +99,7 @@ export function Button({
       <span
         className={cn(
           'inline-flex items-center gap-1.5 transition-opacity duration-(--dur-1)',
-          loading && 'opacity-0',
+          loading && 'opacity-0'
         )}
       >
         {children}
@@ -136,7 +134,10 @@ export function ButtonLink({
   href,
   ...props
 }: Omit<React.ComponentProps<typeof Link>, 'className'> &
-  VariantProps<typeof button> & { className?: string; href: React.ComponentProps<typeof Link>['href'] }) {
+  VariantProps<typeof button> & {
+    className?: string
+    href: React.ComponentProps<typeof Link>['href']
+  }) {
   return (
     <Link {...props} href={href} className={cn(button({ variant, size }), className)}>
       {children}

@@ -10,6 +10,7 @@ import { Input, Label, Textarea } from '@/components/ui/input'
 import { Notice } from '@/components/ui/notice'
 import { cn } from '@/lib/cn'
 import { formatBytes } from '@/lib/format'
+import { apiJson, messageFor } from '@/lib/api/client'
 
 /**
  * Add a source the search could not find: a book in copyright, private notes,
@@ -29,6 +30,12 @@ const MAX_BYTES = 20 * 1024 * 1024
 const ACCEPT = 'application/pdf,.pdf,.txt,.md,.markdown,text/plain,text/markdown'
 
 type Tab = 'file' | 'text' | 'url'
+
+/** What `POST …/sources/{upload,url}` answers with: the queued ingest job. */
+interface UploadAccepted {
+  job_id: number
+  title?: string
+}
 
 export function AddSourceDialog({
   slug,
@@ -115,7 +122,7 @@ export function AddSourceDialog({
           queued(body.job_id, body.title ?? file.name)
         } else {
           setError(
-            typeof body.detail === 'string' ? body.detail : `Upload failed (${request.status}).`,
+            typeof body.detail === 'string' ? body.detail : `Upload failed (${request.status}).`
           )
         }
       } catch {
@@ -144,24 +151,14 @@ export function AddSourceDialog({
       const form = new FormData()
       form.set('file', blob)
       if (title.trim()) form.set('title', title.trim())
-      const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/sources/upload`, {
-        method: 'POST',
-        body: form,
-      })
-      const payload = (await res.json().catch(() => null)) as {
-        job_id?: number
-        title?: string
-        detail?: unknown
-      } | null
-      if (!res.ok || typeof payload?.job_id !== 'number') {
-        setError(
-          typeof payload?.detail === 'string' ? payload.detail : `Could not save that (${res.status}).`,
-        )
-        return
-      }
+      const payload = await apiJson<UploadAccepted>(
+        `/api/experts/${encodeURIComponent(slug)}/sources/upload`,
+        { method: 'POST', body: form },
+        'Could not save that.'
+      )
       queued(payload.job_id, payload.title ?? 'Pasted note')
-    } catch {
-      setError('Could not reach Peritus.')
+    } catch (err) {
+      setError(messageFor(err, 'Could not save that.'))
     } finally {
       setBusy(false)
     }
@@ -173,25 +170,20 @@ export function AddSourceDialog({
     setBusy(true)
     setError(null)
     try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/sources/url`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: trimmed, title: title.trim() || undefined }),
-      })
-      const payload = (await res.json().catch(() => null)) as {
-        job_id?: number
-        title?: string
-        detail?: unknown
-      } | null
-      if (!res.ok || typeof payload?.job_id !== 'number') {
-        setError(
-          typeof payload?.detail === 'string' ? payload.detail : `Could not add that URL (${res.status}).`,
-        )
-        return
-      }
+      // A 422 here is the SSRF guard refusing a private or non-public address,
+      // and its message says which — worth showing verbatim.
+      const payload = await apiJson<UploadAccepted>(
+        `/api/experts/${encodeURIComponent(slug)}/sources/url`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: trimmed, title: title.trim() || undefined }),
+        },
+        'Could not add that URL.'
+      )
       queued(payload.job_id, payload.title ?? trimmed)
-    } catch {
-      setError('Could not reach Peritus.')
+    } catch (err) {
+      setError(messageFor(err, 'Could not add that URL.'))
     } finally {
       setBusy(false)
     }
@@ -204,7 +196,8 @@ export function AddSourceDialog({
   }
 
   const canSubmit =
-    !busy && ((tab === 'file' && file) || (tab === 'text' && text.trim()) || (tab === 'url' && url.trim()))
+    !busy &&
+    ((tab === 'file' && file) || (tab === 'text' && text.trim()) || (tab === 'url' && url.trim()))
 
   return (
     <Dialog
@@ -220,7 +213,13 @@ export function AddSourceDialog({
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button variant="primary" loading={busy} disabled={!canSubmit} onClick={submit} minWidth={92}>
+          <Button
+            variant="primary"
+            loading={busy}
+            disabled={!canSubmit}
+            onClick={submit}
+            minWidth={92}
+          >
             Add
           </Button>
         </>
@@ -246,7 +245,7 @@ export function AddSourceDialog({
             className={cn(
               'inline-flex h-(--icon-btn-sm) flex-1 items-center justify-center gap-1.5 rounded-[6px] text-xs',
               'transition-colors duration-(--dur-1)',
-              tab === option.id ? 'bg-raised text-fg' : 'text-fg-3 hover:text-fg-2',
+              tab === option.id ? 'bg-raised text-fg' : 'text-fg-3 hover:text-fg-2'
             )}
           >
             <option.icon className="size-3.5" />
@@ -272,7 +271,7 @@ export function AddSourceDialog({
               className={cn(
                 'rounded-card border border-dashed p-4 text-center',
                 'transition-colors duration-(--dur-1)',
-                dragging ? 'border-expert bg-expert-soft' : 'border-border',
+                dragging ? 'border-expert bg-expert-soft' : 'border-border'
               )}
             >
               <Upload className="mx-auto size-5 text-fg-4" aria-hidden="true" />

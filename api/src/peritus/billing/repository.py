@@ -43,7 +43,9 @@ class BillingRepository:
                 ON CONFLICT (owner_id) DO NOTHING
                 RETURNING *
                 """,
-                owner_id, plan, email,
+                owner_id,
+                plan,
+                email,
             )
             created = row is not None
             if created and signup_credits > 0:
@@ -70,15 +72,14 @@ class BillingRepository:
                         UPDATE accounts SET email = $2, updated_at = NOW()
                         WHERE owner_id = $1::uuid RETURNING *
                         """,
-                        owner_id, email,
+                        owner_id,
+                        email,
                     )
         return dict(row)
 
     async def get_account(self, owner_id: str) -> dict | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM accounts WHERE owner_id = $1::uuid", owner_id
-            )
+            row = await conn.fetchrow("SELECT * FROM accounts WHERE owner_id = $1::uuid", owner_id)
         return dict(row) if row else None
 
     async def find_account_by_email(self, email: str) -> dict | None:
@@ -92,17 +93,8 @@ class BillingRepository:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE accounts SET plan = $2, updated_at = NOW() WHERE owner_id = $1::uuid",
-                owner_id, plan,
-            )
-
-    async def set_spend_cap_override(self, owner_id: str, cap_usd: float | None) -> None:
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE accounts SET spend_cap_override_usd = $2, updated_at = NOW()
-                WHERE owner_id = $1::uuid
-                """,
-                owner_id, Decimal(str(cap_usd)) if cap_usd is not None else None,
+                owner_id,
+                plan,
             )
 
     async def list_accounts(self, limit: int = 100) -> list[dict]:
@@ -174,7 +166,13 @@ class BillingRepository:
                     (owner_id, entry_type, delta, reason, source, actor, external_ref)
                 VALUES ($1::uuid, $2, $3, $4, $5, $6, $7)
                 """,
-                owner_id, entry_type, amount, reason, source, actor, external_ref,
+                owner_id,
+                entry_type,
+                amount,
+                reason,
+                source,
+                actor,
+                external_ref,
             )
             value = await conn.fetchval(
                 "SELECT COALESCE(SUM(delta), 0)::int FROM credit_ledger WHERE owner_id = $1::uuid",
@@ -231,7 +229,11 @@ class BillingRepository:
                 VALUES ($1::uuid, 'hold', $2, $3, $4, $5, 'system', 'system')
                 ON CONFLICT DO NOTHING
                 """,
-                owner_id, -credits, job_id, tier, f"Build ({tier})",
+                owner_id,
+                -credits,
+                job_id,
+                tier,
+                f"Build ({tier})",
             )
         return True, balance
 
@@ -267,7 +269,11 @@ class BillingRepository:
                 VALUES ($1::uuid, 'refund', $2, $3, $4, $5, 'system', 'system')
                 ON CONFLICT DO NOTHING
                 """,
-                hold["owner_id"], amount, job_id, hold["tier"], reason,
+                hold["owner_id"],
+                amount,
+                job_id,
+                hold["tier"],
+                reason,
             )
         return amount
 
@@ -279,7 +285,8 @@ class BillingRepository:
                 UPDATE credit_ledger SET cost_usd = $2
                 WHERE job_id = $1 AND entry_type = 'hold'
                 """,
-                job_id, Decimal(str(round(cost_usd, 6))),
+                job_id,
+                Decimal(str(round(cost_usd, 6))),
             )
 
     async def list_ledger(self, owner_id: str, limit: int = 50) -> list[LedgerEntry]:
@@ -291,7 +298,8 @@ class BillingRepository:
                 ORDER BY id DESC
                 LIMIT $2
                 """,
-                owner_id, limit,
+                owner_id,
+                limit,
             )
         return [_row_to_entry(r) for r in rows]
 
@@ -309,8 +317,13 @@ class BillingRepository:
             return
         records = [
             (
-                job_id, expert_id, owner_id,
-                key[0], key[1], key[2], key[3],
+                job_id,
+                expert_id,
+                owner_id,
+                key[0],
+                key[1],
+                key[2],
+                key[3],
                 bucket.calls,
                 bucket.input_tokens,
                 bucket.output_tokens,
@@ -348,14 +361,19 @@ class BillingRepository:
                     updated_at = NOW()
                 WHERE id = $1
                 """,
-                job_id, delta_cost, delta_input, delta_output, delta_embed,
+                job_id,
+                delta_cost,
+                delta_input,
+                delta_output,
+                delta_embed,
             )
 
     async def set_job_cap(self, job_id: int, cap_usd: float | None) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE build_jobs SET spend_cap_usd = $2 WHERE id = $1",
-                job_id, Decimal(str(cap_usd)) if cap_usd else None,
+                job_id,
+                Decimal(str(cap_usd)) if cap_usd else None,
             )
 
     async def mark_cap_exceeded(self, job_id: int) -> None:

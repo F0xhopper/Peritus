@@ -59,8 +59,11 @@ def build_audit_payload(
     positional = [p.index for p in passages]
     for i, step in enumerate(steps):
         n = (
-            by_chunk.get(step.chunk_id) if by_chunk
-            else positional[i] if i < len(positional) else None
+            by_chunk.get(step.chunk_id)
+            if by_chunk
+            else positional[i]
+            if i < len(positional)
+            else None
         )
         if n is None:
             disposition = DISPOSITION_NOT_IN_CONTEXT

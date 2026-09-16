@@ -13,16 +13,16 @@ result, and fails open (returns ``None``) so a judge outage degrades a report
 rather than breaking a run.
 """
 
-from typing import Any
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.chat.grounding import Passage
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 
 logger = get_logger(__name__)
 
-_TOOL: dict[str, Any] = {
+_TOOL: ToolParam = {
     "name": "report_helpfulness",
     "description": "Score how useful this answer is to the person who asked.",
     "input_schema": {
@@ -102,8 +102,13 @@ _TOOL: dict[str, Any] = {
             },
         },
         "required": [
-            "direct_answer", "subject_organised", "terms_defined",
-            "actionable", "no_corpus_meta", "contradicts_passages", "notes",
+            "direct_answer",
+            "subject_organised",
+            "terms_defined",
+            "actionable",
+            "no_corpus_meta",
+            "contradicts_passages",
+            "notes",
         ],
     },
 }
@@ -147,35 +152,35 @@ async def assess_helpfulness(
     if not answer_text.strip() or not settings.ANTHROPIC_API_KEY:
         return None
     try:
-        passage_block = "\n\n".join(
-            f"[{p.index}] {p.citation}\n{p.text[:800]}" for p in passages
-        ) or "(no passages were retrieved)"
+        passage_block = (
+            "\n\n".join(f"[{p.index}] {p.citation}\n{p.text[:800]}" for p in passages)
+            or "(no passages were retrieved)"
+        )
 
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=768,
             system=_SYSTEM,
             tools=[_TOOL],
-            tool_choice={"type": "tool", "name": "report_helpfulness"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Question asked: {question}\n"
-                    f"Who asked: a {asker_level} asker\n"
-                    f"What kind of answer would satisfy them: {question_type}\n\n"
-                    f"Answer to judge:\n{answer_text}\n\n"
-                    f"Passages the answer had available:\n\n{passage_block}"
-                ),
-            }],
+            tool_choice=ToolChoiceToolParam(type="tool", name="report_helpfulness"),
+            messages=[
+                MessageParam(
+                    role="user",
+                    content=(
+                        f"Question asked: {question}\n"
+                        f"Who asked: a {asker_level} asker\n"
+                        f"What kind of answer would satisfy them: {question_type}\n\n"
+                        f"Answer to judge:\n{answer_text}\n\n"
+                        f"Passages the answer had available:\n\n{passage_block}"
+                    ),
+                )
+            ],
         )
-        block = next(
-            (b for b in resp.content if getattr(b, "type", None) == "tool_use"),
-            None,
-        )
+        block = tool_input(resp)
         if block is None:
             return None
-        return dict(block.input)
+        return dict(block)
     except Exception as exc:
         logger.warning("Helpfulness assessment failed: %s", exc)
         return None

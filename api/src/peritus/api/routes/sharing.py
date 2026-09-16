@@ -22,18 +22,22 @@ server — a per-IP limit here would throttle every visitor behind one address.
 
 import re
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 
-from peritus.api.auth import AuthUser, require_user
-from peritus.api.routes.experts import _picture_out
+from peritus.api.deps import (
+    CurrentUser,
+    ExpertRepo,
+    OwnedExpert,
+    Pictures,
+    ReadableExpert,
+    Shares,
+)
+from peritus.api.presenters import picture_out
 from peritus.api.schemas.experts import ExpertAvatar
 from peritus.api.schemas.sharing import ShareAcceptOut, SharedExpertOut, ShareStateOut
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert, ExpertAccess, ShareLink
-from peritus.experts.picture_repository import ExpertPictureRepository
-from peritus.experts.repository import ExpertRepository
 from peritus.experts.share_repository import ShareRepository
-from peritus.infrastructure.database import get_pool
 
 logger = get_logger(__name__)
 
@@ -49,17 +53,7 @@ _TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
 _ANONYMOUS_HEADERS = {"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"}
 
 
-async def _owned_expert(slug: str, user: AuthUser) -> Expert:
-    expert = await ExpertRepository(get_pool()).get_owned_for_user(
-        slug, user.id, include_unowned=user.is_admin
-    )
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    return expert
-
-
-async def _state(expert: Expert, link: ShareLink | None) -> ShareStateOut:
-    shares = ShareRepository(get_pool())
+async def _state(shares: ShareRepository, expert: Expert, link: ShareLink | None) -> ShareStateOut:
     return ShareStateOut(
         enabled=link is not None,
         token=link.token if link else None,
@@ -69,10 +63,10 @@ async def _state(expert: Expert, link: ShareLink | None) -> ShareStateOut:
     )
 
 
-async def _shared_expert(token: str) -> Expert:
+async def _shared_expert(token: str, repo: ExpertRepo) -> Expert:
     if not _TOKEN_RE.match(token):
         raise HTTPException(status_code=404, detail="This link is not active")
-    expert = await ExpertRepository(get_pool()).get_by_share_token(token)
+    expert = await repo.get_by_share_token(token)
     if not expert:
         raise HTTPException(status_code=404, detail="This link is not active")
     return expert
@@ -82,35 +76,31 @@ async def _shared_expert(token: str) -> Expert:
 
 
 @router.get("/experts/{slug}/share", response_model=ShareStateOut)
-async def get_share(slug: str, user: AuthUser = Depends(require_user)):
-    expert = await _owned_expert(slug, user)
-    return await _state(expert, await ShareRepository(get_pool()).get_active(expert.id))
+async def get_share(expert: OwnedExpert, shares: Shares) -> ShareStateOut:
+    return await _state(shares, expert, await shares.get_active(expert.id))
 
 
 @router.put("/experts/{slug}/share", response_model=ShareStateOut)
-async def enable_share(slug: str, user: AuthUser = Depends(require_user)):
+async def enable_share(expert: OwnedExpert, user: CurrentUser, shares: Shares) -> ShareStateOut:
     """Turn the link on. Idempotent: a live link is returned, never replaced."""
-    expert = await _owned_expert(slug, user)
-    link = await ShareRepository(get_pool()).enable(expert.id, user.id)
+    link = await shares.enable(expert.id, user.id)
     logger.info("Share link on for expert %d", expert.id)
-    return await _state(expert, link)
+    return await _state(shares, expert, link)
 
 
 @router.post("/experts/{slug}/share/reset", response_model=ShareStateOut)
-async def reset_share(slug: str, user: AuthUser = Depends(require_user)):
+async def reset_share(expert: OwnedExpert, user: CurrentUser, shares: Shares) -> ShareStateOut:
     """Replace the link. Everyone who opened the old one loses access."""
-    expert = await _owned_expert(slug, user)
-    link = await ShareRepository(get_pool()).reset(expert.id, user.id)
+    link = await shares.reset(expert.id, user.id)
     logger.info("Share link reset for expert %d", expert.id)
-    return await _state(expert, link)
+    return await _state(shares, expert, link)
 
 
 @router.delete("/experts/{slug}/share", status_code=204)
-async def disable_share(slug: str, user: AuthUser = Depends(require_user)):
+async def disable_share(expert: OwnedExpert, shares: Shares) -> None:
     """Turn the link off. Everyone who opened it loses access; their own chats
     are kept but can no longer be continued."""
-    expert = await _owned_expert(slug, user)
-    await ShareRepository(get_pool()).disable(expert.id)
+    await shares.disable(expert.id)
     logger.info("Share link off for expert %d", expert.id)
 
 
@@ -118,30 +108,24 @@ async def disable_share(slug: str, user: AuthUser = Depends(require_user)):
 
 
 @router.delete("/experts/{slug}/access", status_code=204)
-async def leave_shared_expert(slug: str, user: AuthUser = Depends(require_user)):
+async def leave_shared_expert(expert: ReadableExpert, user: CurrentUser, shares: Shares) -> None:
     """Remove a shared expert from the caller's workspace.
 
     The owner cannot "leave" their own expert — that would be a delete, which
     is a different, destructive action with its own route.
     """
-    pool = get_pool()
-    expert = await ExpertRepository(pool).get_for_user(
-        slug, user.id, include_unowned=user.is_admin
-    )
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
     if expert.is_owned_by(user.id, include_unowned=user.is_admin):
         raise HTTPException(status_code=409, detail="You own this expert")
-    await ShareRepository(pool).remove_access(expert.id, user.id)
+    await shares.remove_access(expert.id, user.id)
 
 
 # ── anyone holding the link ─────────────────────────────────────────────────
 
 
 @router.get("/share/{token}", response_model=SharedExpertOut)
-async def get_shared_expert(token: str, response: Response):
+async def get_shared_expert(token: str, response: Response, repo: ExpertRepo) -> SharedExpertOut:
     """The share card. Readable without a session, so a link can unfurl."""
-    expert = await _shared_expert(token)
+    expert = await _shared_expert(token, repo)
     response.headers.update(_ANONYMOUS_HEADERS)
     return SharedExpertOut(
         topic=expert.topic,
@@ -158,21 +142,23 @@ async def get_shared_expert(token: str, response: Response):
         avg_quality=expert.avg_quality,
         source_type_counts=expert.source_type_counts,
         avatar=ExpertAvatar(**expert.avatar) if expert.avatar else None,
-        picture=_picture_out(expert.picture),
+        picture=picture_out(expert.picture),
         created_at=expert.created_at,
     )
 
 
 @router.get("/share/{token}/picture")
-async def get_shared_picture(token: str, request: Request):
+async def get_shared_picture(
+    token: str, request: Request, repo: ExpertRepo, pictures: Pictures
+) -> Response:
     """The picture's bytes for the share page and its link preview.
 
     Revalidated on every use (``no-cache`` with an ETag) rather than cached
     immutably like the signed-in picture: a 304 costs nothing, and a link that
     has been turned off must stop serving its image too.
     """
-    expert = await _shared_expert(token)
-    blob = await ExpertPictureRepository(get_pool()).get_blob(expert.id)
+    expert = await _shared_expert(token, repo)
+    blob = await pictures.get_blob(expert.id)
     if blob is None:
         raise HTTPException(status_code=404, detail="This expert has no picture")
     image, content_type, sha256 = blob
@@ -188,16 +174,17 @@ async def get_shared_picture(token: str, request: Request):
 
 
 @router.post("/share/{token}/accept", response_model=ShareAcceptOut)
-async def accept_share(token: str, user: AuthUser = Depends(require_user)):
+async def accept_share(
+    token: str, user: CurrentUser, repo: ExpertRepo, shares: Shares
+) -> ShareAcceptOut:
     """Open the link as a signed-in user: record a grant, return the slug.
 
     Idempotent. The owner opening their own link gets no grant — they already
     have more than one would give them.
     """
-    expert = await _shared_expert(token)
+    expert = await _shared_expert(token, repo)
     if expert.is_owned_by(user.id, include_unowned=user.is_admin):
         return ShareAcceptOut(slug=expert.name, access=ExpertAccess.OWNER)
-    shares = ShareRepository(get_pool())
     link = await shares.resolve(token)
     if link is None:  # revoked between the two reads
         raise HTTPException(status_code=404, detail="This link is not active")

@@ -88,12 +88,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <ContextPanel />
           </div>
 
-          <NavDrawer
-            experts={experts}
-            conversations={conversations}
-            credits={credits}
-            me={me}
-          />
+          <NavDrawer experts={experts} conversations={conversations} credits={credits} me={me} />
           <CommandPalette experts={experts} conversations={conversations} />
         </TooltipProvider>
       </ContextSlotProvider>

@@ -1,0 +1,5 @@
+# CI uses dtolnay/rust-toolchain@stable; pin the same here so a local build,
+# `cargo fmt` and clippy all agree with the gate.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]

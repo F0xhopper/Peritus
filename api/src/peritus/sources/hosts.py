@@ -106,7 +106,9 @@ def split_site_suffix(title: str) -> tuple[str, str]:
     match = _SUFFIX.search(title)
     if match is None:
         return title, ""
-    return title[: match.start()].strip(), (match.group("tail") or match.group("paren") or "").strip()
+    return title[: match.start()].strip(), (
+        match.group("tail") or match.group("paren") or ""
+    ).strip()
 
 
 def title_names_about_site(title: str) -> bool:

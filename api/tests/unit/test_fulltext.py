@@ -102,9 +102,7 @@ async def test_a_failed_ar5iv_render_falls_back_to_the_pdf(monkeypatch):
     whole body when the PDF was one request away."""
     monkeypatch.setattr(settings, "MISTRAL_API_KEY", "set")
     rec = _Recorder()
-    result = await _resolve(
-        rec, Identifiers.build(arxiv_id="2001.01234"), ar5iv="", ocr=_LONG
-    )
+    result = await _resolve(rec, Identifiers.build(arxiv_id="2001.01234"), ar5iv="", ocr=_LONG)
     assert result.method == METHOD_ARXIV_PDF
     assert rec.calls == ["ar5iv", "ocr:https://arxiv.org/pdf/2001.01234"]
 
@@ -212,9 +210,7 @@ async def test_a_bare_doi_is_enriched_before_giving_up():
         metadata={"oa_landing_url": "https://journal.test/paper"},
         identifiers=Identifiers.build(doi="10.1234/x", openalex_id="W1"),
     )
-    result = await _resolve(
-        rec, Identifiers.build(doi="10.1234/x"), by_doi=enriched, landing=_LONG
-    )
+    result = await _resolve(rec, Identifiers.build(doi="10.1234/x"), by_doi=enriched, landing=_LONG)
     assert result.method == METHOD_LANDING
     assert "openalex_by_doi" in rec.calls
 
@@ -237,9 +233,12 @@ def test_expected_method_predicts_the_step_without_taking_it(monkeypatch):
     monkeypatch.setattr(settings, "MISTRAL_API_KEY", "set")
     assert expected_method(Identifiers.build(arxiv_id="2001.01234")) == METHOD_AR5IV
     assert expected_method(Identifiers.build(pmcid="PMC1")) == METHOD_EUROPE_PMC
-    assert expected_method(
-        Identifiers.build(doi="10.1234/x"), FullTextHints(oa_pdf_url="https://x.test/p.pdf")
-    ) == METHOD_OA_PDF
+    assert (
+        expected_method(
+            Identifiers.build(doi="10.1234/x"), FullTextHints(oa_pdf_url="https://x.test/p.pdf")
+        )
+        == METHOD_OA_PDF
+    )
     assert expected_method(Identifiers()) == "abstract"
 
 

@@ -7,10 +7,9 @@ it must never leak.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 
 from peritus.experts.domain import (
     CatalogMeta,
@@ -20,6 +19,7 @@ from peritus.experts.domain import (
     ExpertVisibility,
     ShareLink,
 )
+from tests.conftest import call_api as _call
 
 OWNER = "11111111-1111-1111-1111-111111111111"
 VIEWER = "22222222-2222-2222-2222-222222222222"
@@ -50,47 +50,20 @@ def _link() -> ShareLink:
     return ShareLink(id="link-1", expert_id=7, token=TOKEN, created_at=datetime.now(UTC))
 
 
-def _app(user_id: str | None, is_admin: bool = False):
-    from peritus.api.app import create_app
-    from peritus.api.auth import AuthUser, require_user
-
-    app = create_app()
-    if user_id:
-        app.dependency_overrides[require_user] = lambda: AuthUser(
-            id=user_id, email="u@test", is_admin=is_admin
-        )
-    return app
-
-
-async def _call(app, method: str, path: str, **kwargs):
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-        return await c.request(method, path, **kwargs)
-
-
-def _patched(experts: AsyncMock, shares: AsyncMock | None = None):
-    return (
-        patch("peritus.api.routes.sharing.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.sharing.ExpertRepository", return_value=experts),
-        patch(
-            "peritus.api.routes.sharing.ShareRepository", return_value=shares or AsyncMock()
-        ),
-    )
-
-
 # ── the owner ───────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_enable_returns_the_token_and_the_uploads_warning_count():
+async def test_enable_returns_the_token_and_the_uploads_warning_count(api_app):
     experts = AsyncMock()
     experts.get_owned_for_user = AsyncMock(return_value=_expert())
     shares = AsyncMock()
     shares.enable = AsyncMock(return_value=_link())
     shares.viewer_count = AsyncMock(return_value=3)
     shares.uploaded_source_count = AsyncMock(return_value=2)
-    p1, p2, p3 = _patched(experts, shares)
-    with p1, p2, p3:
-        resp = await _call(_app(OWNER), "PUT", "/experts/thomism/share")
+    resp = await _call(
+        api_app(OWNER, expert_repo=experts, shares=shares), "PUT", "/experts/thomism/share"
+    )
 
     assert resp.status_code == 200
     body = resp.json()
@@ -102,19 +75,22 @@ async def test_enable_returns_the_token_and_the_uploads_warning_count():
 
 
 @pytest.mark.asyncio
-async def test_share_state_when_off_has_no_token():
+async def test_share_state_when_off_has_no_token(api_app):
     experts = AsyncMock()
     experts.get_owned_for_user = AsyncMock(return_value=_expert())
     shares = AsyncMock()
     shares.get_active = AsyncMock(return_value=None)
     shares.uploaded_source_count = AsyncMock(return_value=0)
-    p1, p2, p3 = _patched(experts, shares)
-    with p1, p2, p3:
-        resp = await _call(_app(OWNER), "GET", "/experts/thomism/share")
+    resp = await _call(
+        api_app(OWNER, expert_repo=experts, shares=shares), "GET", "/experts/thomism/share"
+    )
 
     assert resp.json() == {
-        "enabled": False, "token": None, "created_at": None,
-        "viewer_count": 0, "uploaded_source_count": 0,
+        "enabled": False,
+        "token": None,
+        "created_at": None,
+        "viewer_count": 0,
+        "uploaded_source_count": 0,
     }
 
 
@@ -128,14 +104,12 @@ async def test_share_state_when_off_has_no_token():
     ],
 )
 @pytest.mark.asyncio
-async def test_only_the_owner_manages_the_link(method, path):
+async def test_only_the_owner_manages_the_link(api_app, method, path):
     """A viewer holding a grant resolves nothing through the ownership gate — 404."""
     experts = AsyncMock()
     experts.get_owned_for_user = AsyncMock(return_value=None)
     shares = AsyncMock()
-    p1, p2, p3 = _patched(experts, shares)
-    with p1, p2, p3:
-        resp = await _call(_app(VIEWER), method, path)
+    resp = await _call(api_app(VIEWER, expert_repo=experts, shares=shares), method, path)
 
     assert resp.status_code == 404
     shares.enable.assert_not_awaited()
@@ -144,17 +118,19 @@ async def test_only_the_owner_manages_the_link(method, path):
 
 
 @pytest.mark.asyncio
-async def test_reset_and_disable_call_through():
+async def test_reset_and_disable_call_through(api_app):
     experts = AsyncMock()
     experts.get_owned_for_user = AsyncMock(return_value=_expert())
     shares = AsyncMock()
     shares.reset = AsyncMock(return_value=_link())
     shares.viewer_count = AsyncMock(return_value=0)
     shares.uploaded_source_count = AsyncMock(return_value=0)
-    p1, p2, p3 = _patched(experts, shares)
-    with p1, p2, p3:
-        reset = await _call(_app(OWNER), "POST", "/experts/thomism/share/reset")
-        off = await _call(_app(OWNER), "DELETE", "/experts/thomism/share")
+    reset = await _call(
+        api_app(OWNER, expert_repo=experts, shares=shares), "POST", "/experts/thomism/share/reset"
+    )
+    off = await _call(
+        api_app(OWNER, expert_repo=experts, shares=shares), "DELETE", "/experts/thomism/share"
+    )
 
     assert reset.status_code == 200
     assert off.status_code == 204
@@ -166,12 +142,10 @@ async def test_reset_and_disable_call_through():
 
 
 @pytest.mark.asyncio
-async def test_share_card_is_anonymous_uncached_noindexed_and_narrow():
+async def test_share_card_is_anonymous_uncached_noindexed_and_narrow(api_app):
     experts = AsyncMock()
     experts.get_by_share_token = AsyncMock(return_value=_expert())
-    p1, p2, p3 = _patched(experts)
-    with p1, p2, p3:
-        resp = await _call(_app(None), "GET", f"/share/{TOKEN}")
+    resp = await _call(api_app(None, expert_repo=experts), "GET", f"/share/{TOKEN}")
 
     assert resp.status_code == 200
     assert resp.headers["cache-control"] == "no-store"
@@ -184,17 +158,15 @@ async def test_share_card_is_anonymous_uncached_noindexed_and_narrow():
 
 @pytest.mark.parametrize("token", ["short", "B" * 32, "has space" + "x" * 30])
 @pytest.mark.asyncio
-async def test_unknown_malformed_or_revoked_links_404(token):
+async def test_unknown_malformed_or_revoked_links_404(api_app, token):
     experts = AsyncMock()
     experts.get_by_share_token = AsyncMock(return_value=None)
-    p1, p2, p3 = _patched(experts)
-    with p1, p2, p3:
-        resp = await _call(_app(None), "GET", f"/share/{token}")
+    resp = await _call(api_app(None, expert_repo=experts), "GET", f"/share/{token}")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_accept_requires_a_session():
+async def test_accept_requires_a_session(api_app):
     from peritus.api.app import create_app
 
     # Without a Supabase project the API runs every request as the dev admin, so
@@ -205,27 +177,27 @@ async def test_accept_requires_a_session():
 
 
 @pytest.mark.asyncio
-async def test_accept_grants_a_viewer_and_returns_the_slug():
+async def test_accept_grants_a_viewer_and_returns_the_slug(api_app):
     experts = AsyncMock()
     experts.get_by_share_token = AsyncMock(return_value=_expert())
     shares = AsyncMock()
     shares.resolve = AsyncMock(return_value=_link())
-    p1, p2, p3 = _patched(experts, shares)
-    with p1, p2, p3:
-        resp = await _call(_app(VIEWER), "POST", f"/share/{TOKEN}/accept")
+    resp = await _call(
+        api_app(VIEWER, expert_repo=experts, shares=shares), "POST", f"/share/{TOKEN}/accept"
+    )
 
     assert resp.json() == {"slug": "thomism", "access": "viewer"}
     shares.grant.assert_awaited_once_with("link-1", VIEWER)
 
 
 @pytest.mark.asyncio
-async def test_the_owner_opening_their_own_link_gets_no_grant():
+async def test_the_owner_opening_their_own_link_gets_no_grant(api_app):
     experts = AsyncMock()
     experts.get_by_share_token = AsyncMock(return_value=_expert())
     shares = AsyncMock()
-    p1, p2, p3 = _patched(experts, shares)
-    with p1, p2, p3:
-        resp = await _call(_app(OWNER), "POST", f"/share/{TOKEN}/accept")
+    resp = await _call(
+        api_app(OWNER, expert_repo=experts, shares=shares), "POST", f"/share/{TOKEN}/accept"
+    )
 
     assert resp.json() == {"slug": "thomism", "access": "owner"}
     shares.grant.assert_not_awaited()
@@ -235,14 +207,16 @@ async def test_the_owner_opening_their_own_link_gets_no_grant():
 
 
 @pytest.mark.asyncio
-async def test_a_viewer_can_leave_but_an_owner_cannot():
+async def test_a_viewer_can_leave_but_an_owner_cannot(api_app):
     experts = AsyncMock()
     experts.get_for_user = AsyncMock(return_value=_expert())
     shares = AsyncMock()
-    p1, p2, p3 = _patched(experts, shares)
-    with p1, p2, p3:
-        left = await _call(_app(VIEWER), "DELETE", "/experts/thomism/access")
-        refused = await _call(_app(OWNER), "DELETE", "/experts/thomism/access")
+    left = await _call(
+        api_app(VIEWER, expert_repo=experts, shares=shares), "DELETE", "/experts/thomism/access"
+    )
+    refused = await _call(
+        api_app(OWNER, expert_repo=experts, shares=shares), "DELETE", "/experts/thomism/access"
+    )
 
     assert left.status_code == 204
     assert refused.status_code == 409
@@ -250,15 +224,11 @@ async def test_a_viewer_can_leave_but_an_owner_cannot():
 
 
 @pytest.mark.asyncio
-async def test_expert_detail_says_whether_the_caller_owns_it():
+async def test_expert_detail_says_whether_the_caller_owns_it(api_app):
     experts = AsyncMock()
     experts.get_for_user = AsyncMock(return_value=_expert())
-    with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=experts),
-    ):
-        as_viewer = await _call(_app(VIEWER), "GET", "/experts/thomism")
-        as_owner = await _call(_app(OWNER), "GET", "/experts/thomism")
+    as_viewer = await _call(api_app(VIEWER, expert_repo=experts), "GET", "/experts/thomism")
+    as_owner = await _call(api_app(OWNER, expert_repo=experts), "GET", "/experts/thomism")
 
     assert as_viewer.json()["access"] == "viewer"
     assert as_owner.json()["access"] == "owner"
@@ -277,54 +247,47 @@ async def test_expert_detail_says_whether_the_caller_owns_it():
     ],
 )
 @pytest.mark.asyncio
-async def test_an_owner_cannot_publish_or_reorder_the_shelf(body):
+async def test_an_owner_cannot_publish_or_reorder_the_shelf(api_app, body):
     experts = AsyncMock()
     experts.get_owned_for_user = AsyncMock(return_value=_expert())
-    with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=experts),
-    ):
-        resp = await _call(_app(OWNER), "PATCH", "/experts/thomism/catalog", json=body)
+    resp = await _call(
+        api_app(OWNER, expert_repo=experts), "PATCH", "/experts/thomism/catalog", json=body
+    )
 
     assert resp.status_code == 403
     experts.update_catalog.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_an_owner_can_still_unpublish_and_an_admin_can_publish():
+async def test_an_owner_can_still_unpublish_and_an_admin_can_publish(api_app):
     experts = AsyncMock()
     experts.get_owned_for_user = AsyncMock(return_value=_expert())
     experts.update_catalog = AsyncMock(return_value=_expert())
-    with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=experts),
-    ):
-        unpublish = await _call(
-            _app(OWNER), "PATCH", "/experts/thomism/catalog", json={"visibility": "private"}
-        )
-        publish = await _call(
-            _app(OWNER, is_admin=True),
-            "PATCH",
-            "/experts/thomism/catalog",
-            json={"visibility": "public", "is_featured": True},
-        )
+    unpublish = await _call(
+        api_app(OWNER, expert_repo=experts),
+        "PATCH",
+        "/experts/thomism/catalog",
+        json={"visibility": "private"},
+    )
+    publish = await _call(
+        api_app(OWNER, is_admin=True, expert_repo=experts),
+        "PATCH",
+        "/experts/thomism/catalog",
+        json={"visibility": "public", "is_featured": True},
+    )
 
     assert unpublish.status_code == 200
     assert publish.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_unlisted_is_rejected_as_a_visibility():
+async def test_unlisted_is_rejected_as_a_visibility(api_app):
     experts = AsyncMock()
     experts.get_owned_for_user = AsyncMock(return_value=_expert())
-    with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=experts),
-    ):
-        resp = await _call(
-            _app(OWNER, is_admin=True),
-            "PATCH",
-            "/experts/thomism/catalog",
-            json={"visibility": "unlisted"},
-        )
+    resp = await _call(
+        api_app(OWNER, is_admin=True, expert_repo=experts),
+        "PATCH",
+        "/experts/thomism/catalog",
+        json={"visibility": "unlisted"},
+    )
     assert resp.status_code == 422

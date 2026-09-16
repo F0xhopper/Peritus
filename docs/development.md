@@ -67,28 +67,58 @@ which looks exactly like a hang at the first pipeline stage.
 # API
 just dev / dev-solo / api / worker    # run it
 just migrate                          # apply migrations
-just lint                             # ruff check src tests && mypy src
+just lint                             # ruff check, ruff format --check, mypy
 just test                             # pytest
 just test-db [url]                    # pytest with the DB-backed tests enabled
 
 # Web
 just web                              # dev server
-just lint-web                         # eslint + tsc + vitest — exactly the web CI job
+just lint-web                         # prettier + eslint + tsc + vitest — exactly the web CI job
 just build-web                        # next build
 just e2e-web                          # Playwright, all seven device projects
 just e2e-web-fast                     # desktop only, for a fast loop
 just lighthouse-web                   # performance budgets
 
 # CLI
+just lint-cli                         # cargo fmt --check + clippy -D warnings + cargo test
 just build-cli / run-cli
 
 # Everything
-just check                            # every check CI runs, except the DB tests and Rust
+just format                           # write ruff format, prettier and cargo fmt
+just check                            # every check CI runs, except the DB tests
 ```
+
+## Formatting
+
+Three formatters, one 100-column budget: **ruff format** for Python, **rustfmt** for Rust,
+**Prettier** for the web app (no semicolons, single quotes, Tailwind classes sorted). `.editorconfig`
+carries the shared whitespace rules for everything else.
+
+`just format` writes all three. The checks live with each language's lint recipe (`just lint`,
+`just lint-web`, `just lint-cli`), which is exactly what CI runs. Nothing here is discretionary — if
+the formatter disagrees with you, the formatter is right.
+
+Install the hooks once per clone so a commit cannot introduce noise:
+
+```bash
+uvx pre-commit install     # or: pipx install pre-commit && pre-commit install
+```
+
+`.pre-commit-config.yaml` runs the three formatters, `ruff check --fix`, whitespace and
+large-file checks, and **gitleaks** over the staged files. It uses the repository's own pinned
+Prettier and rustfmt, so a hook and CI can never run different versions.
+
+## Adding a setting
+
+Two places, always: the field on `Settings` in `api/src/peritus/core/config.py` with the comment
+that explains it, and the same key in `api/.env.example` with the same comment.
+`tests/unit/test_env_example.py` fails if you do one without the other, or if the two defaults
+disagree. Enum-valued settings get a `Literal` type so a typo fails at startup rather than silently
+falling back at the point of use. `just settings` prints the current list.
 
 ## Tests
 
-**Python.** `just test` runs pytest. Around 50 DB-backed tests — job queue claim/heartbeat/reap,
+**Python.** `just test` runs pytest. The DB-backed tests — job queue claim/heartbeat/reap,
 conversation persistence, credit arithmetic, expert visibility, source uploads — **skip silently**
 without `PERITUS_TEST_DATABASE_URL`. To run them:
 
@@ -119,14 +149,23 @@ nothing reaches production without passing it.
 
 | Job | What |
 |---|---|
-| `api` | ruff, mypy, migrations, pytest against a real `pgvector/pgvector:pg17` service, and a CLI smoke check |
+| `api` | ruff, `ruff format --check`, mypy, `pip-audit` on the production lock, migrations, pytest against a real `pgvector/pgvector:pg17` service with a 67% coverage floor, and a CLI smoke check |
 | `api-image` | Builds the production Dockerfile and runs it the way Fly does: migrations twice (the second must be a no-op), `/health` and `/ready`, and the worker's SIGTERM drain (must exit 0) |
-| `web` | eslint, `tsc --noEmit`, vitest, `next build` |
+| `web` | eslint, `prettier --check`, `tsc --noEmit`, `npm audit --audit-level=high`, vitest, `next build` |
 | `web-e2e` | Playwright across seven device profiles |
 | `web-lighthouse` | LCP < 2.5s, CLS < 0.1, TBT < 200ms, on public and authenticated pages |
-| `cli` | `cargo check --locked` |
+| `cli` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo audit` |
 
-`just check` runs everything except the DB tests and Rust.
+Every job has a `timeout-minutes`, and a pull request touching only `docs/**` or
+`**/*.md` runs none of them — a push to `main` still runs the full suite, because
+that is the gate production depends on.
+
+`just check` runs everything except the DB tests and the audits; `just audit`
+runs those three separately, since they fail on the world changing rather than on
+this repository changing.
+
+The coverage floor is a ratchet. Raise it when coverage rises; never lower it to
+make a red run green.
 
 ## Conventions that matter
 

@@ -41,12 +41,12 @@ from typing import Any
 # it falls back to the monogram rather than rendering nothing.
 AVATAR_STYLES: frozenset[str] = frozenset(
     {
-        "sigil",      # monogram on a tinted rounded square (the default look)
-        "shapes",     # overlapping geometric shapes
-        "glass",      # soft translucent blobs
-        "rings",      # concentric arcs
+        "sigil",  # monogram on a tinted rounded square (the default look)
+        "shapes",  # overlapping geometric shapes
+        "glass",  # soft translucent blobs
+        "rings",  # concentric arcs
         "identicon",  # symmetric tile grid
-        "icons",      # a single line mark
+        "icons",  # a single line mark
         # Renders the found picture (migration 027) rather than a generated
         # drawing, so an owner who pinned a drawing can choose the picture
         # again. A `picture` recipe on an expert that has no picture row
@@ -101,11 +101,8 @@ def normalise(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     return {"style": style, "seed": seed, "hue": None}
 
 
-def default_seed(expert) -> str:
-    """What a derived avatar is seeded with: the persona name, else the slug.
-
-    The slug fallback matters — a queued or failed expert has no persona yet, and
-    seeding on the topic string would give two experts on the same topic the same
-    picture.
-    """
-    return (expert.persona_name or "").strip() or expert.name
+# The derived seed — persona name, else slug — is **not** computed here. Every
+# client renders the avatar itself (`web/lib/avatar.ts` `resolveRecipe`,
+# `cli/src/tui/widgets/avatar.rs`); the server validates and stores a recipe and
+# nothing more. A second copy of the rule here had no caller and could only
+# drift from the one that draws the picture.

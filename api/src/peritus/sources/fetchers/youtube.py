@@ -22,6 +22,7 @@ class YoutubeFetcher:
 
         try:
             from exa_py import Exa  # type: ignore
+
             client = Exa(api_key=settings.EXA_API_KEY)
             results = await asyncio.to_thread(
                 client.search_and_contents,
@@ -45,14 +46,16 @@ class YoutubeFetcher:
                 continue
             title = r.title or url
             description = (getattr(r, "text", None) or "").strip()
-            candidates.append(SourceCandidate(
-                source_type=SourceType.YOUTUBE,
-                url=f"https://www.youtube.com/watch?v={vid_id}",
-                title=title,
-                author=None,
-                snippet=f"{title}\n{description}" if description else title,
-                metadata={"video_id": vid_id},
-            ))
+            candidates.append(
+                SourceCandidate(
+                    source_type=SourceType.YOUTUBE,
+                    url=f"https://www.youtube.com/watch?v={vid_id}",
+                    title=title,
+                    author=None,
+                    snippet=f"{title}\n{description}" if description else title,
+                    metadata={"video_id": vid_id},
+                )
+            )
         return candidates
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
@@ -79,12 +82,13 @@ def _extract_video_id(url: str) -> str | None:
     try:
         parsed = urlparse(url)
         if parsed.hostname in ("www.youtube.com", "youtube.com", "m.youtube.com"):
-            vid_id = parse_qs(parsed.query).get("v", [None])[0]
-            return vid_id
+            return parse_qs(parsed.query).get("v", [None])[0]
         if parsed.hostname in ("youtu.be",):
             return parsed.path.lstrip("/") or None
-    except Exception:
-        pass
+    except ValueError as exc:
+        # urlsplit raises on a malformed IPv6 host or a bad port; anything else
+        # here would be a bug in this function rather than a bad URL.
+        logger.debug("Unparseable YouTube URL %r: %s", url, exc)
     return None
 
 
@@ -92,6 +96,11 @@ def _fetch_transcript(video_id: str) -> str:
     api = YouTubeTranscriptApi()
     try:
         fetched = api.fetch(video_id, languages=["en", "en-US", "en-GB"])
-    except Exception:
+    except Exception as exc:
+        # Almost always NoTranscriptFound for the English list: the video is
+        # captioned in another language, and the untargeted call takes whatever
+        # it has. Worth a line, because "transcript is a translation" explains a
+        # source that validates badly. A real failure raises again below.
+        logger.debug("No English transcript for %s (%s); taking any", video_id, exc)
         fetched = api.fetch(video_id)
     return " ".join(entry.text for entry in fetched)

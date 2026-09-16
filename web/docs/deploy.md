@@ -10,10 +10,10 @@ at the repository root.
 
 Two variables, per environment, and nothing else:
 
-| Variable | Example | Why |
-|---|---|---|
-| `PERITUS_API_URL` | `https://api.peritus.example` | The FastAPI base URL. **Server-only** — naming it `NEXT_PUBLIC_*` would put the API in the browser and defeat the design. |
-| `NEXT_PUBLIC_APP_URL` | `https://peritus.example` | This app's own public origin. Used to build the Google redirect and every server-side absolute URL. |
+| Variable              | Example                       | Why                                                                                                                       |
+| --------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `PERITUS_API_URL`     | `https://api.peritus.example` | The FastAPI base URL. **Server-only** — naming it `NEXT_PUBLIC_*` would put the API in the browser and defeat the design. |
+| `NEXT_PUBLIC_APP_URL` | `https://peritus.example`     | This app's own public origin. Used to build the Google redirect and every server-side absolute URL.                       |
 
 `NEXT_PUBLIC_APP_URL` is deliberately **not** derived from the request. A value
 taken from `Host` works in development and then silently becomes wrong behind a
@@ -54,7 +54,7 @@ directly, that is the moment to open it — not now.
   `/api/conversations/[id]/messages`, `/api/experts/build`, the source upload)
   set `dynamic = 'force-dynamic'` and their own `maxDuration`. A build runs for
   minutes but the client reconnects with `after=<seq>`, so a per-connection cap
-  of 60s is fine; what must not happen is a platform default that is *shorter*
+  of 60s is fine; what must not happen is a platform default that is _shorter_
   than the handler expects.
 - Security headers come from `next.config.ts` (`headers()`), not from the host,
   so they are the same everywhere and reviewable in the repo.

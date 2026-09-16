@@ -44,7 +44,8 @@ class JobRepository:
                     VALUES ($1, 'queued', $2, $3::jsonb, $4, $5, $6::jsonb)
                     RETURNING *
                     """,
-                    expert_id, tier,
+                    expert_id,
+                    tier,
                     json.dumps(source_filter) if source_filter is not None else None,
                     max_attempts,
                     str(job_type),
@@ -80,7 +81,8 @@ class JobRepository:
                   AND ($2::text IS NULL OR job_type = $2)
                 ORDER BY id DESC LIMIT 1
                 """,
-                expert_id, str(job_type) if job_type is not None else None,
+                expert_id,
+                str(job_type) if job_type is not None else None,
             )
         return _row_to_job(row) if row else None
 
@@ -143,7 +145,8 @@ class JobRepository:
                 UPDATE build_jobs SET heartbeat_at = NOW(), updated_at = NOW()
                 WHERE id = $1 AND locked_by = $2 AND status = 'running'
                 """,
-                job_id, worker_id,
+                job_id,
+                worker_id,
             )
         return result.endswith(" 1")
 
@@ -155,7 +158,8 @@ class JobRepository:
                     updated_at = NOW()
                 WHERE id = $1 AND locked_by = $2 AND status = 'running'
                 """,
-                job_id, worker_id,
+                job_id,
+                worker_id,
             )
 
     async def mark_failed(self, job_id: int, worker_id: str, error: str) -> None:
@@ -165,7 +169,9 @@ class JobRepository:
                 UPDATE build_jobs SET status = 'failed', last_error = $3, updated_at = NOW()
                 WHERE id = $1 AND locked_by = $2 AND status = 'running'
                 """,
-                job_id, worker_id, error[:2000],
+                job_id,
+                worker_id,
+                error[:2000],
             )
 
     async def requeue(
@@ -180,7 +186,10 @@ class JobRepository:
                     available_at = NOW() + make_interval(secs => $4), updated_at = NOW()
                 WHERE id = $1 AND locked_by = $2 AND status = 'running'
                 """,
-                job_id, worker_id, error[:2000], float(backoff_seconds),
+                job_id,
+                worker_id,
+                error[:2000],
+                float(backoff_seconds),
             )
 
     async def release_for_shutdown(self, job_id: int, worker_id: str) -> None:
@@ -195,7 +204,8 @@ class JobRepository:
                     updated_at = NOW()
                 WHERE id = $1 AND locked_by = $2 AND status = 'running'
                 """,
-                job_id, worker_id,
+                job_id,
+                worker_id,
             )
 
     # ── crash recovery / cancellation ───────────────────────────────────────
@@ -237,7 +247,8 @@ class JobRepository:
                       AND NOT (id = ANY($2::bigint[]))
                     RETURNING id
                     """,
-                float(timeout_seconds), protected,
+                float(timeout_seconds),
+                protected,
             )
             failed = await conn.fetch(
                 """
@@ -251,7 +262,8 @@ class JobRepository:
                       AND NOT (id = ANY($2::bigint[]))
                     RETURNING expert_id
                     """,
-                float(timeout_seconds), protected,
+                float(timeout_seconds),
+                protected,
             )
             for r in failed:
                 await conn.execute(
@@ -265,9 +277,7 @@ class JobRepository:
                 )
         return len(requeued) + len(failed)
 
-    async def request_cancel(
-        self, expert_id: int, job_type: JobType | None = None
-    ) -> bool:
+    async def request_cancel(self, expert_id: int, job_type: JobType | None = None) -> bool:
         """Cancel active jobs for an expert. A running job sees the heartbeat stop
         returning True and aborts cooperatively. Returns True if anything was cancelled.
 
@@ -283,7 +293,8 @@ class JobRepository:
                 WHERE expert_id = $1 AND status IN ('queued', 'running')
                   AND ($2::text IS NULL OR job_type = $2)
                 """,
-                expert_id, str(job_type) if job_type is not None else None,
+                expert_id,
+                str(job_type) if job_type is not None else None,
             )
         return not result.endswith(" 0")
 
@@ -297,7 +308,9 @@ class JobRepository:
                 VALUES ($1, $2, $3::jsonb)
                 RETURNING seq
                 """,
-                job_id, type_, json.dumps(payload),
+                job_id,
+                type_,
+                json.dumps(payload),
             )
         return int(seq)
 
@@ -313,7 +326,9 @@ class JobRepository:
                 ORDER BY seq
                 LIMIT $3
                 """,
-                job_id, after_seq, limit,
+                job_id,
+                after_seq,
+                limit,
             )
         return [_row_to_event(r) for r in rows]
 

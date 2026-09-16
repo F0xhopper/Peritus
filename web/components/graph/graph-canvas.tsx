@@ -9,6 +9,7 @@ import 'd3-transition'
 import { useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react'
 
 import { cn } from '@/lib/cn'
+import { paintGraph, readColours } from '@/lib/graph/paint'
 import { usePrefersReducedMotion } from '@/hooks/use-media-query'
 import type { SimulationRequest, SimulationResponse } from '@/lib/graph/simulation.worker'
 import type { GraphEdge, GraphNode } from '@/lib/api/types'
@@ -28,6 +29,19 @@ import type { GraphEdge, GraphNode } from '@/lib/api/types'
  * `touch-action: none` on the canvas: the graph is the one surface that wants
  * every gesture for itself, and letting the page interpret a pinch would zoom
  * the document instead of the graph.
+ *
+ * **Drawing lives in `lib/graph/paint.ts`**, as a pure function of an explicit
+ * state object. That is the part with real logic in it — the label collision
+ * pass, the alpha ramp, the screen-space grid — and it is unit-tested there,
+ * which it could not be while it read eight refs from this closure.
+ *
+ * The rest deliberately stays in one component. Splitting the worker and the
+ * zoom binding into hooks was tried and reverted: they share `positions`,
+ * `indexById`, `tree`, `hot` and `transform` between three concerns, and the
+ * React Compiler forbids a hook mutating a ref it was handed. Every way around
+ * that — a ref bag, a notify indirection — moved the coupling somewhere less
+ * visible rather than removing it. The refs below are the component's state
+ * machine, and they are clearer declared together than passed around.
  */
 
 export interface GraphCanvasHandle {
@@ -80,119 +94,18 @@ export function GraphCanvas({
     const canvas = canvasRef.current
     const context = canvas?.getContext('2d')
     if (!canvas || !context) return
-
-    const { width, height, dpr } = size.current
-    const style = getComputedStyle(canvas)
-    const expert = style.getPropertyValue('--expert').trim() || '#8b7cf6'
-    const fg = style.getPropertyValue('--fg').trim() || '#ececee'
-    const border = style.getPropertyValue('--border').trim() || '#26262a'
-    const fg3 = style.getPropertyValue('--fg-3').trim() || '#6b6b73'
-
-    context.save()
-    context.setTransform(dpr, 0, 0, dpr, 0, 0)
-    context.clearRect(0, 0, width, height)
-
-    // The faint dotted grid, drawn in screen space so it does not scale into
-    // an unreadable moiré when zoomed out.
-    const step = 24
-    context.fillStyle = border
-    context.globalAlpha = 0.5
-    for (let x = (transform.current.x % step + step) % step; x < width; x += step) {
-      for (let y = (transform.current.y % step + step) % step; y < height; y += step) {
-        context.fillRect(x, y, 1, 1)
-      }
-    }
-    context.globalAlpha = 1
-
-    context.translate(transform.current.x, transform.current.y)
-    context.scale(transform.current.k, transform.current.k)
-
-    const pos = positions.current
-    if (pos.length < nodes.length * 2) {
-      context.restore()
-      return
-    }
-
-    // Edges first, so nodes sit on top of them.
-    context.strokeStyle = border
-    context.lineWidth = 1 / transform.current.k
-    context.beginPath()
-    for (const edge of edges) {
-      const from = indexById.current.get(edge.source)
-      const to = indexById.current.get(edge.target)
-      if (from === undefined || to === undefined) continue
-      context.moveTo(pos[from * 2], pos[from * 2 + 1])
-      context.lineTo(pos[to * 2], pos[to * 2 + 1])
-    }
-    context.stroke()
-
-    const maxDegree = nodes.reduce((peak, node) => Math.max(peak, node.degree), 1)
-
-    for (let i = 0; i < nodes.length; i += 1) {
-      const node = nodes[i]
-      const x = pos[i * 2]
-      const y = pos[i * 2 + 1]
-      const radius = 3 + Math.sqrt(node.degree) * 1.6
-      const selected = node.id === selectedId
-      const isHovered = node.id === hovered.current
-
-      context.beginPath()
-      context.arc(x, y, radius, 0, Math.PI * 2)
-      // Alpha by degree: the graph's spine reads as the graph's spine.
-      context.globalAlpha = selected || isHovered ? 1 : 0.35 + (node.degree / maxDegree) * 0.5
-      context.fillStyle = selected ? fg : expert
-      context.fill()
-      context.globalAlpha = 1
-
-      if (selected) {
-        // The ring grows out of the node on selection.
-        context.beginPath()
-        context.arc(x, y, radius + 4 / transform.current.k, 0, Math.PI * 2)
-        context.strokeStyle = fg
-        context.lineWidth = 1.5 / transform.current.k
-        context.stroke()
-      }
-    }
-
-    // Labels: the busiest nodes always — at every width, fewer on a small
-    // screen — plus whatever is hovered or selected. Placed greedily in
-    // priority order and skipped when they would collide with one already
-    // drawn, so the canvas never turns into overlapping text.
-    const threshold = labelThreshold(nodes, labelBudget)
-    const k = transform.current.k
-    context.font = `${11 / k}px var(--font-sans, system-ui)`
-    context.textAlign = 'center'
-    context.textBaseline = 'top'
-    const candidates: number[] = []
-    for (let i = 0; i < nodes.length; i += 1) {
-      const node = nodes[i]
-      if (node.id === selectedId || node.id === hovered.current || node.degree >= threshold) {
-        candidates.push(i)
-      }
-    }
-    const priority = (i: number) =>
-      nodes[i].id === selectedId ? 2 : nodes[i].id === hovered.current ? 1 : 0
-    candidates.sort((a, b) => priority(b) - priority(a) || nodes[b].degree - nodes[a].degree)
-    const placed: { x0: number; y0: number; x1: number; y1: number }[] = []
-    for (const i of candidates) {
-      const node = nodes[i]
-      const forced = priority(i) > 0
-      const text = node.label.length > 32 ? `${node.label.slice(0, 31).trimEnd()}…` : node.label
-      const radius = 3 + Math.sqrt(node.degree) * 1.6
-      const width = context.measureText(text).width
-      const x = pos[i * 2]
-      const y = pos[i * 2 + 1] + radius + 3 / k
-      const box = { x0: x - width / 2, y0: y, x1: x + width / 2, y1: y + 13 / k }
-      const collides = placed.some(
-        (other) => box.x0 < other.x1 && box.x1 > other.x0 && box.y0 < other.y1 && box.y1 > other.y0,
-      )
-      if (collides && !forced) continue
-      placed.push(box)
-      context.fillStyle = forced ? fg : fg3
-      context.fillText(text, x, y)
-    }
-
-    context.restore()
+    paintGraph(context, {
+      nodes,
+      edges,
+      positions: positions.current,
+      indexById: indexById.current,
+      transform: transform.current,
+      ...size.current,
+      selectedId,
+      hoveredId: hovered.current,
+      labelBudget,
+      colours: readColours(canvas),
+    })
   }, [nodes, edges, selectedId, labelBudget])
 
   // The paint loop lives in a ref rather than as a self-referencing callback:
@@ -308,7 +221,11 @@ export function GraphCanvas({
     const padding = 72
     const scale = Math.max(
       0.15,
-      Math.min(2, (width - padding * 2) / Math.max(maxX - minX, 1), (height - padding * 2) / Math.max(maxY - minY, 1)),
+      Math.min(
+        2,
+        (width - padding * 2) / Math.max(maxX - minX, 1),
+        (height - padding * 2) / Math.max(maxY - minY, 1)
+      )
     )
     const target = zoomIdentity
       .translate(width / 2, height / 2)
@@ -442,7 +359,7 @@ export function GraphCanvas({
           .call(behaviour.transform, target)
       },
     }),
-    [reducedMotion],
+    [reducedMotion]
   )
 
   return (
@@ -479,11 +396,4 @@ export function GraphCanvas({
       />
     </div>
   )
-}
-
-/** Degree at or above which a node is always labelled: roughly the top `budget`. */
-function labelThreshold(nodes: GraphNode[], budget: number): number {
-  if (nodes.length === 0) return Number.POSITIVE_INFINITY
-  const degrees = nodes.map((node) => node.degree).sort((a, b) => b - a)
-  return degrees[Math.min(degrees.length - 1, budget - 1)] ?? Number.POSITIVE_INFINITY
 }

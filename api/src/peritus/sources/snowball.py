@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 import httpx
 
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import shared_client
 from peritus.sources.dedup import SeenSet
 from peritus.sources.domain import Identifiers, SourceCandidate, SourceType, ValidatedSource
 from peritus.sources.fetchers.pdf import identifiers_from_external, semantic_scholar_headers
@@ -105,10 +106,7 @@ class SnowballCandidate:
         return (self.co_citations, self.percentile, self.citations)
 
     def worth_fetching(self) -> bool:
-        return (
-            self.co_citations >= _CO_CITATION_OVERRIDE
-            or self.percentile >= _PERCENTILE_FLOOR
-        )
+        return self.co_citations >= _CO_CITATION_OVERRIDE or self.percentile >= _PERCENTILE_FLOOR
 
     @property
     def is_fetchable(self) -> bool:
@@ -224,18 +222,18 @@ async def snowball(
     pool: dict[str, SnowballCandidate] = {}
     semaphore = asyncio.Semaphore(_SEED_CONCURRENCY)
 
-    async with httpx.AsyncClient(
+    http = shared_client(
         timeout=_REQUEST_TIMEOUT, headers=semantic_scholar_headers(), follow_redirects=True
-    ) as http:
+    )
 
-        async def _one(key: str, source: ValidatedSource) -> None:
-            async with semaphore:
-                backward = await _fetch_list(http, key, "references", _REFERENCE_LIMIT)
-                forward = await _fetch_list(http, key, "citations", _CITATION_LIMIT)
-            _absorb(pool, backward, source, DISCOVERED_BACKWARD)
-            _absorb(pool, forward, source, DISCOVERED_FORWARD)
+    async def _one(key: str, source: ValidatedSource) -> None:
+        async with semaphore:
+            backward = await _fetch_list(http, key, "references", _REFERENCE_LIMIT)
+            forward = await _fetch_list(http, key, "citations", _CITATION_LIMIT)
+        _absorb(pool, backward, source, DISCOVERED_BACKWARD)
+        _absorb(pool, forward, source, DISCOVERED_FORWARD)
 
-        await asyncio.gather(*[_one(key, source) for key, source in seeds])
+    await asyncio.gather(*[_one(key, source) for key, source in seeds])
 
     # Never propose what the build has already seen — its own seeds included.
     seed_keys: set[str] = set()
@@ -243,7 +241,8 @@ async def snowball(
         seed_keys |= source.identifiers.keys()
 
     eligible = [
-        c for c in pool.values()
+        c
+        for c in pool.values()
         if c.worth_fetching()
         and not (c.identifiers.keys() & seed_keys)
         and not (seen is not None and seen.has(c.identifiers, ""))
@@ -270,7 +269,9 @@ async def snowball(
         logger.info(
             "Snowball: %d seed(s) → %d candidate(s) considered → %d proposed "
             "(%d backward, %d forward, %d co-cited by 2+)",
-            len(seeds), len(pool), len(ranked),
+            len(seeds),
+            len(pool),
+            len(ranked),
             sum(1 for c in ranked if c.direction == DISCOVERED_BACKWARD),
             sum(1 for c in ranked if c.direction == DISCOVERED_FORWARD),
             sum(1 for c in ranked if c.co_citations >= _CO_CITATION_OVERRIDE),
@@ -278,9 +279,7 @@ async def snowball(
     return [c.to_candidate() for c in ranked]
 
 
-async def _fetch_list(
-    http: httpx.AsyncClient, key: str, edge: str, limit: int
-) -> list[dict]:
+async def _fetch_list(http: httpx.AsyncClient, key: str, edge: str, limit: int) -> list[dict]:
     """One seed's references or citations, as bare paper records."""
     field_name = "citedPaper" if edge == "references" else "citingPaper"
     try:
@@ -351,9 +350,9 @@ def _absorb(
             existing.identifiers = existing.identifiers.merge(ids)
             existing.citations = max(existing.citations, count)
             existing.abstract = existing.abstract or str(paper.get("abstract") or "").strip()
-            existing.oa_pdf_url = existing.oa_pdf_url or (
-                paper.get("openAccessPdf") or {}
-            ).get("url")
+            existing.oa_pdf_url = existing.oa_pdf_url or (paper.get("openAccessPdf") or {}).get(
+                "url"
+            )
             # A work reached both ways is reported as backward: it is both an
             # ancestor and a descendant of the corpus, and "backward" is the
             # stronger claim about it being foundational.

@@ -59,7 +59,8 @@ def apply_composition_caps(
     dropped: list[DroppedSource] = []
 
     too_short = [
-        vs for vs in kept
+        vs
+        for vs in kept
         if vs.substance == SUBSTANCE_ABSTRACT and abstract_chars(vs.raw) < MIN_ABSTRACT_CHARS
     ]
     for vs in too_short:
@@ -69,21 +70,29 @@ def apply_composition_caps(
     abstract_cap = settings.COMPOSITION_ABSTRACT_SHARE_CAP
     tertiary_cap = settings.COMPOSITION_TERTIARY_SHARE_CAP
 
-    over = [] if abstract_cap <= 0 else _over_share(
-        [vs for vs in kept if vs.substance == SUBSTANCE_ABSTRACT],
-        abstract_cap,
-        accepted,
-        key=lambda vs: (vs.quality_score + vs.relevance_score, vs.relevance_score),
+    over = (
+        []
+        if abstract_cap <= 0
+        else _over_share(
+            [vs for vs in kept if vs.substance == SUBSTANCE_ABSTRACT],
+            abstract_cap,
+            accepted,
+            key=lambda vs: (vs.quality_score + vs.relevance_score, vs.relevance_score),
+        )
     )
     for vs in over:
         kept.remove(vs)
         dropped.append(_drop(vs, DROP_ABSTRACT_OVER_SHARE))
 
-    over = [] if tertiary_cap <= 0 else _over_share(
-        [vs for vs in kept if vs.source_tier == "tertiary"],
-        tertiary_cap,
-        accepted,
-        key=lambda vs: (vs.relevance_score, vs.quality_score),
+    over = (
+        []
+        if tertiary_cap <= 0
+        else _over_share(
+            [vs for vs in kept if vs.source_tier == "tertiary"],
+            tertiary_cap,
+            accepted,
+            key=lambda vs: (vs.relevance_score, vs.quality_score),
+        )
     )
     for vs in over:
         kept.remove(vs)
@@ -141,7 +150,7 @@ def corpus_composition(
     def share(count: int) -> float:
         return round(count / total, 3) if total else 0.0
 
-    tiers = {tier: 0 for tier in ("primary", "secondary", "tertiary")}
+    tiers = dict.fromkeys(("primary", "secondary", "tertiary"), 0)
     unclassified = 0
     for vs in passed:
         if vs.source_tier in tiers:
@@ -151,7 +160,8 @@ def corpus_composition(
     abstract_only = sum(1 for vs in passed if vs.substance == SUBSTANCE_ABSTRACT)
 
     junk = sum(
-        1 for ds in dropped
+        1
+        for ds in dropped
         if ds.relevance_score <= JUNK_RELEVANCE
         and not ds.drop_reason.startswith(_UNJUDGED_PREFIXES)
     )
@@ -171,7 +181,9 @@ def corpus_composition(
         "tertiary_share": share(tiers["tertiary"]),
         "abstract_only_share": share(abstract_only),
         "junk_fetched": junk,
-        "concept_shares": {c.concept: share(c.sources + c.abstract_only) for c in coverage.concepts},
+        "concept_shares": {
+            c.concept: share(c.sources + c.abstract_only) for c in coverage.concepts
+        },
         "concepts_without_primary": [c.concept for c in coverage.concepts if not c.has_primary],
         "concepts_missing_named_text": [
             {"concept": c.concept, "texts": list(named[c.concept].get("texts") or [])}
@@ -184,7 +196,9 @@ def corpus_composition(
 
 
 # Counts only — no concept is held to a target when describing the corpus.
-_NO_TARGET = CoverageTarget(min_sources=0, min_source_types=0, require_non_tertiary=False, max_rounds=0)
+_NO_TARGET = CoverageTarget(
+    min_sources=0, min_source_types=0, require_non_tertiary=False, max_rounds=0
+)
 
 
 def _measure(
@@ -194,7 +208,9 @@ def _measure(
     return compute_coverage(key_concepts, passed, _NO_TARGET, named_texts=statuses)
 
 
-def top_concept_shares(passed: list[ValidatedSource], key_concepts: list[str], n: int = 3) -> list[tuple[str, float]]:
+def top_concept_shares(
+    passed: list[ValidatedSource], key_concepts: list[str], n: int = 3
+) -> list[tuple[str, float]]:
     """The ``n`` concepts taking the largest share of the corpus, largest first."""
     total = len(passed)
     shares = [

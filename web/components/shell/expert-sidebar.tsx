@@ -120,9 +120,7 @@ function ExpertForm({
           <Avatar expert={expert} size={32} />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
-              <span className="truncate text-sm font-medium text-fg">
-                {displayName(expert)}
-              </span>
+              <span className="truncate text-sm font-medium text-fg">{displayName(expert)}</span>
               <StatusDot state={dotState(expert.status, expert.readiness, expert.build_active)} />
             </span>
             {subtitle(expert) && (
@@ -132,10 +130,7 @@ function ExpertForm({
         </Link>
       </div>
 
-      <nav
-        aria-label={`${displayName(expert)} pages`}
-        className="shrink-0 space-y-0.5 px-2 pb-1"
-      >
+      <nav aria-label={`${displayName(expert)} pages`} className="shrink-0 space-y-0.5 px-2 pb-1">
         <SidebarRow href={base} icon={FileText} active={pathname === base}>
           Overview
         </SidebarRow>
@@ -187,7 +182,7 @@ function ExpertForm({
           />
         )}
 
-        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain pan-y">
+        <div className="pan-y min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain">
           {filtered.length === 0 ? (
             <p className="px-1.5 py-2 text-xs text-fg-3">
               {conversations.length > 0
@@ -261,7 +256,12 @@ function HomeForm({
             // To the Credits section, and never "active": on /settings the page
             // is titled Settings and opens with Account, so highlighting Credits
             // there said you were somewhere you were not.
-            <SidebarRow href="/settings#credits" icon={Wallet} active={false} count={credits.balance}>
+            <SidebarRow
+              href="/settings#credits"
+              icon={Wallet}
+              active={false}
+              count={credits.balance}
+            >
               Credits
             </SidebarRow>
           )}
@@ -281,7 +281,7 @@ function HomeForm({
           />
         )}
 
-        <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain pan-y">
+        <div className="pan-y min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain">
           {filtered.length === 0 ? (
             <p className="px-1.5 py-2 text-xs text-fg-3">
               {conversations.length === 0
@@ -322,7 +322,7 @@ function SearchTrigger() {
   const shortcut = useSyncExternalStore(
     noopSubscribe,
     () => (/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'),
-    () => null,
+    () => null
   )
 
   return (
@@ -332,13 +332,15 @@ function SearchTrigger() {
         onClick={openPalette}
         className={cn(
           'flex h-(--row-h) w-full items-center gap-2 rounded-row border border-border bg-raised px-2 text-sm text-fg-3',
-          'transition-colors duration-(--dur-1) hover:border-fg-4 hover:text-fg-2',
+          'transition-colors duration-(--dur-1) hover:border-fg-4 hover:text-fg-2'
         )}
       >
         <Search className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-left">Search</span>
         {shortcut && (
-          <kbd aria-hidden className="hidden font-sans text-xs text-fg-3 pointer-fine:inline">{shortcut}</kbd>
+          <kbd aria-hidden className="hidden font-sans text-xs text-fg-3 pointer-fine:inline">
+            {shortcut}
+          </kbd>
         )}
       </button>
     </div>
@@ -370,7 +372,7 @@ function SidebarRow({
       className={cn(
         'flex h-(--row-h) items-center gap-2 rounded-row px-1.5 text-sm',
         'transition-colors duration-(--dur-1)',
-        active ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg',
+        active ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg'
       )}
     >
       <Icon className={cn('size-4 shrink-0', active ? 'text-fg-2' : 'text-fg-3')} />
@@ -400,9 +402,7 @@ function SectionHeader({
   return (
     <div className="flex h-(--row-h) shrink-0 items-center gap-1 px-1.5">
       <span className="text-label tracking-[0.04em] text-fg-3 uppercase">{label}</span>
-      {count !== undefined && count > 0 && (
-        <span className="text-xs text-fg-3">{count}</span>
-      )}
+      {count !== undefined && count > 0 && <span className="text-xs text-fg-3">{count}</span>}
       {action && (
         <Link
           href={action.href}
@@ -439,7 +439,7 @@ function ChatRow({
       className={cn(
         'flex h-(--row-h) items-center gap-2 rounded-row px-1.5 text-sm',
         'transition-colors duration-(--dur-1)',
-        active ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg',
+        active ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg'
       )}
     >
       {expert && (
@@ -447,13 +447,8 @@ function ChatRow({
           <Avatar expert={expert} size={18} />
         </span>
       )}
-      <span className="min-w-0 flex-1 truncate">
-        {chatTitle(conversation.title)}
-      </span>
-      <RelativeTime
-        iso={conversation.last_message_at}
-        className="shrink-0 text-xs text-fg-3"
-      />
+      <span className="min-w-0 flex-1 truncate">{chatTitle(conversation.title)}</span>
+      <RelativeTime iso={conversation.last_message_at} className="shrink-0 text-xs text-fg-3" />
     </Link>
   )
 }

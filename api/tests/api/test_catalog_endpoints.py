@@ -6,11 +6,12 @@ leak, and what a credit-denial body looks like.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from peritus.api import deps
 from peritus.billing.domain import FREE, CreditState
 from peritus.experts.domain import (
     CatalogMeta,
@@ -19,6 +20,7 @@ from peritus.experts.domain import (
     ExpertTier,
     ExpertVisibility,
 )
+from tests.conftest import lazy_dep, override_dep
 
 ADMIN_ID = "00000000-0000-0000-0000-000000000000"
 
@@ -58,15 +60,8 @@ def _make_expert(
 
 
 @pytest.fixture
-def app():
-    from peritus.api.app import create_app
-    from peritus.api.auth import AuthUser, require_user
-
-    app = create_app()
-    app.dependency_overrides[require_user] = lambda: AuthUser(
-        id=ADMIN_ID, email="admin@test", is_admin=True
-    )
-    return app
+def app(api_app):
+    return api_app(user=ADMIN_ID, is_admin=True, email="admin@test")
 
 
 @pytest.fixture
@@ -87,16 +82,13 @@ async def test_catalog_is_readable_without_a_token(app):
     app.dependency_overrides.pop(require_user, None)
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         repo = AsyncMock()
         repo.list_catalog = AsyncMock(return_value=[_make_expert()])
         MockRepo.return_value = repo
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as anon:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
             resp = await anon.get("/catalog")
 
     assert resp.status_code == 200
@@ -109,10 +101,9 @@ async def test_catalog_is_readable_without_a_token(app):
 
 
 @pytest.mark.asyncio
-async def test_catalog_card_never_exposes_owner_or_build_internals(client):
+async def test_catalog_card_never_exposes_owner_or_build_internals(app, client):
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         repo = AsyncMock()
         repo.list_catalog = AsyncMock(return_value=[_make_expert()])
@@ -125,10 +116,9 @@ async def test_catalog_card_never_exposes_owner_or_build_internals(client):
 
 
 @pytest.mark.asyncio
-async def test_catalog_passes_filters_through(client):
+async def test_catalog_passes_filters_through(app, client):
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         repo = AsyncMock()
         repo.list_catalog = AsyncMock(return_value=[])
@@ -141,11 +131,10 @@ async def test_catalog_passes_filters_through(client):
 
 
 @pytest.mark.asyncio
-async def test_catalog_detail_404s_for_an_unanswerable_expert(client):
+async def test_catalog_detail_404s_for_an_unanswerable_expert(app, client):
     """A public expert mid-rebuild has no corpus — it must not be offered."""
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         repo = AsyncMock()
         repo.get_public = AsyncMock(return_value=_make_expert(readiness="pending"))
@@ -156,11 +145,10 @@ async def test_catalog_detail_404s_for_an_unanswerable_expert(client):
 
 
 @pytest.mark.asyncio
-async def test_chat_ready_expert_is_still_offered(client):
+async def test_chat_ready_expert_is_still_offered(app, client):
     """Answerable a stage before the job finishes — that is the point of readiness."""
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         repo = AsyncMock()
         repo.get_public = AsyncMock(return_value=_make_expert(readiness="chat_ready"))
@@ -177,11 +165,10 @@ async def test_chat_ready_expert_is_still_offered(client):
 
 
 @pytest.mark.asyncio
-async def test_curation_is_owner_scoped(client):
+async def test_curation_is_owner_scoped(app, client):
     """Readable-but-not-owned must 404 on the curate path, not 403."""
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         repo = AsyncMock()
         repo.get_owned_for_user = AsyncMock(return_value=None)
@@ -193,10 +180,9 @@ async def test_curation_is_owner_scoped(client):
 
 
 @pytest.mark.asyncio
-async def test_publish_sets_visibility_and_echoes_catalog_meta(client):
+async def test_publish_sets_visibility_and_echoes_catalog_meta(app, client):
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         repo = AsyncMock()
         repo.get_owned_for_user = AsyncMock(return_value=_make_expert())
@@ -215,22 +201,29 @@ async def test_publish_sets_visibility_and_echoes_catalog_meta(client):
 
 
 @pytest.mark.asyncio
-async def test_over_long_blurb_is_rejected_before_the_db(client):
-    with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
-        resp = await client.patch(
-            "/experts/stoicism/catalog", json={"blurb": "x" * 500}
-        )
+async def test_over_long_blurb_is_rejected_before_anything_is_written(app, client):
+    """The blurb cap is a schema constraint, so nothing reaches `update_catalog`.
+
+    The ownership lookup does run first — it is a dependency now, and authorising
+    before validating is the right order — but a rejected request must never
+    write.
+    """
+    repo = AsyncMock()
+    repo.get_owned_for_user = AsyncMock(return_value=_make_expert())
+    with override_dep(app, deps.expert_repo, repo):
+        resp = await client.patch("/experts/stoicism/catalog", json={"blurb": "x" * 500})
+
     assert resp.status_code == 422
+    repo.update_catalog.assert_not_awaited()
 
 
 # ── billing ─────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_credit_state_exposes_the_price_ladder(client):
+async def test_credit_state_exposes_the_price_ladder(app, client):
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.EntitlementService") as MockService,
+        lazy_dep(app, deps.entitlements) as MockService,
     ):
         service = AsyncMock()
         service.credit_state = AsyncMock(
@@ -261,26 +254,20 @@ async def test_admin_grant_requires_admin(app):
         id="99999999-9999-9999-9999-999999999999", email="user@test", is_admin=False
     )
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.EntitlementService") as MockService,
+        lazy_dep(app, deps.entitlements) as MockService,
     ):
         MockService.return_value = AsyncMock()
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as c:
-            resp = await c.post(
-                "/admin/credits/grant", json={"owner": "a@b.com", "amount": 10}
-            )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/admin/credits/grant", json={"owner": "a@b.com", "amount": 10})
 
     # 404, not 403 — a non-admin should not learn the endpoint exists.
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_admin_grant_issues_credits(client):
+async def test_admin_grant_issues_credits(app, client):
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.EntitlementService") as MockService,
+        lazy_dep(app, deps.entitlements) as MockService,
     ):
         service = AsyncMock()
         service.resolve_owner = AsyncMock(return_value=ADMIN_ID)

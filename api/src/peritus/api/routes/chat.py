@@ -1,14 +1,15 @@
 import json
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
 from peritus.api.auth import AuthUser
+from peritus.api.deps import ExpertRepo, Pool
 from peritus.api.ratelimit import chat_rate_limit
 from peritus.api.schemas.chat import ChatRequest
 from peritus.core.logging import get_logger
-from peritus.experts.repository import ExpertRepository
-from peritus.infrastructure.database import get_pool
 from peritus.search.readiness import get_readiness
 
 logger = get_logger(__name__)
@@ -17,12 +18,23 @@ router = APIRouter(prefix="/experts", tags=["chat"])
 
 
 @router.post("/{slug}/chat")
-async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(chat_rate_limit)):
+async def chat_stream(
+    slug: str,
+    req: ChatRequest,
+    pool: Pool,
+    repo: ExpertRepo,
+    user: AuthUser = Depends(chat_rate_limit),
+) -> EventSourceResponse:
     """Stateless chat — the TUI/CLI contract. History arrives in the request
     body and nothing is persisted; the stateful web flow lives in
-    ``routes/conversations.py``. Both share ``chat.streaming``."""
-    pool = get_pool()
-    repo = ExpertRepository(pool)
+    ``routes/conversations.py``. Both share ``chat.streaming``.
+
+    **The expert is resolved here, not through the `ReadableExpert` dependency
+    every other route uses.** FastAPI does not order sibling dependencies, so a
+    throttled request would still have run the ownership query before
+    `chat_rate_limit` rejected it — and a throttle that does the expensive work
+    anyway is not a throttle. Resolving in the body puts it unambiguously after.
+    """
     expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
@@ -35,7 +47,7 @@ async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(chat
 
     history = [{"role": m.role, "content": m.content} for m in req.history]
 
-    async def stream_generator():
+    async def stream_generator() -> AsyncIterator[dict[str, Any]]:
         try:
             from peritus.chat.streaming import stream_expert_answer
 
@@ -43,9 +55,13 @@ async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(chat
                 yield {"data": json.dumps(event)}
         except Exception:
             logger.exception("Chat stream failed for %r", slug)
-            yield {"data": json.dumps({
-                "type": "error",
-                "message": "The expert hit an internal error while answering.",
-            })}
+            yield {
+                "data": json.dumps(
+                    {
+                        "type": "error",
+                        "message": "The expert hit an internal error while answering.",
+                    }
+                )
+            }
 
     return EventSourceResponse(stream_generator())

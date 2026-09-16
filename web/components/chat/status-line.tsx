@@ -25,8 +25,8 @@ export function StatusLine({
       aria-live="polite"
       className={cn(
         'flex items-center gap-2 text-sm text-fg-3',
-        'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-(--dur-2)',
-        className,
+        'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fade-in motion-safe:slide-in-from-bottom-1',
+        className
       )}
     >
       <span aria-hidden="true" className="animate-pulse-dot size-1.5 rounded-full bg-expert" />

@@ -41,10 +41,8 @@ class _FlakyJobs:
         if self.calls >= self._stop_after:
             self._worker.request_stop()
         if self.calls <= self._fail_times:
-            raise ConnectionDoesNotExistError(
-                "connection was closed in the middle of operation"
-            )
-        return None
+            raise ConnectionDoesNotExistError("connection was closed in the middle of operation")
+        return
 
     async def reap_stale(self, timeout, *, protect_job_ids=None):
         return 0
@@ -147,9 +145,7 @@ class _RecordingJobs:
     async def heartbeat(self, job_id, worker_id):
         self.calls += 1
         if self.calls <= self._fail_times:
-            raise ConnectionDoesNotExistError(
-                "connection was closed in the middle of operation"
-            )
+            raise ConnectionDoesNotExistError("connection was closed in the middle of operation")
         return self._answer
 
     async def reap_stale(self, timeout, *, protect_job_ids=None):

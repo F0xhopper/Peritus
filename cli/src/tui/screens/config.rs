@@ -1,13 +1,13 @@
-use ratatui::{
-    Frame,
-    layout::{Constraint, Direction, Layout, Rect},
-    text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
-};
 use crate::config::store::Config;
 use crate::events::AppAction;
 use crate::tui::theme::Theme;
 use crate::tui::widgets::input_box::TextInput;
+use ratatui::{
+    layout::{Constraint, Direction, Layout, Rect},
+    text::{Line, Span},
+    widgets::{Block, Borders, Paragraph},
+    Frame,
+};
 
 pub struct ConfigScreen {
     pub config: Config,
@@ -48,10 +48,16 @@ impl ConfigScreen {
 
     pub fn handle(&mut self, action: AppAction) {
         match action {
-            AppAction::Up if !self.editing => { self.field = 0; }
-            AppAction::Down if !self.editing => { self.field = 1; }
+            AppAction::Up if !self.editing => {
+                self.field = 0;
+            }
+            AppAction::Down if !self.editing => {
+                self.field = 1;
+            }
             AppAction::Tab => {
-                if self.editing { self.commit_edit(); }
+                if self.editing {
+                    self.commit_edit();
+                }
                 self.field = (self.field + 1) % 2;
             }
             // Enter toggles edit on a field and commits it — but does NOT save, so the
@@ -70,25 +76,29 @@ impl ConfigScreen {
             }
             // Ctrl+S persists everything and exits setup.
             AppAction::Save => {
-                if self.editing { self.commit_edit(); }
+                if self.editing {
+                    self.commit_edit();
+                }
                 self.config.configured = true;
                 self.saved = true;
             }
-            AppAction::Back => { self.editing = false; }
+            AppAction::Back => {
+                self.editing = false;
+            }
             // Editing keys flow to the focused field.
             other if self.editing => match other {
-                AppAction::Char(c)     => self.edit.insert(c),
-                AppAction::Backspace   => self.edit.backspace(),
-                AppAction::Delete      => self.edit.delete(),
-                AppAction::CursorLeft  => self.edit.left(),
+                AppAction::Char(c) => self.edit.insert(c),
+                AppAction::Backspace => self.edit.backspace(),
+                AppAction::Delete => self.edit.delete(),
+                AppAction::CursorLeft => self.edit.left(),
                 AppAction::CursorRight => self.edit.right(),
-                AppAction::WordLeft    => self.edit.word_left(),
-                AppAction::WordRight   => self.edit.word_right(),
-                AppAction::Home        => self.edit.home(),
-                AppAction::End         => self.edit.end(),
-                AppAction::CtrlW       => self.edit.delete_word_back(),
-                AppAction::CtrlU       => self.edit.kill_to_start(),
-                AppAction::KillToEnd   => self.edit.kill_to_end(),
+                AppAction::WordLeft => self.edit.word_left(),
+                AppAction::WordRight => self.edit.word_right(),
+                AppAction::Home => self.edit.home(),
+                AppAction::End => self.edit.end(),
+                AppAction::CtrlW => self.edit.delete_word_back(),
+                AppAction::CtrlU => self.edit.kill_to_start(),
+                AppAction::KillToEnd => self.edit.kill_to_end(),
                 _ => {}
             },
             _ => {}
@@ -96,40 +106,60 @@ impl ConfigScreen {
     }
 
     pub fn render(&mut self, f: &mut Frame, area: Rect) {
-        let block = Block::default().title(" Configuration ").borders(Borders::ALL).border_style(Theme::accent());
+        let block = Block::default()
+            .title(" Configuration ")
+            .borders(Borders::ALL)
+            .border_style(Theme::accent());
         let inner = block.inner(area);
         f.render_widget(block, area);
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Length(3), Constraint::Min(1), Constraint::Length(1)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(3),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
             .split(inner);
 
         let field_w = inner.width.saturating_sub(14) as usize;
 
-        let url_line = self.field_line(FieldSpec {
-            label: "Server URL: ",
-            field: 0,
-            value: &self.config.server_url,
-            placeholder: "(e.g. http://localhost:8000)",
-            mask: false,
-        }, field_w);
-        let key_line = self.field_line(FieldSpec {
-            label: "API Key:    ",
-            field: 1,
-            value: &self.config.api_key,
-            placeholder: "(optional — leave blank for a local server)",
-            mask: true,
-        }, field_w);
+        let url_line = self.field_line(
+            FieldSpec {
+                label: "Server URL: ",
+                field: 0,
+                value: &self.config.server_url,
+                placeholder: "(e.g. http://localhost:8000)",
+                mask: false,
+            },
+            field_w,
+        );
+        let key_line = self.field_line(
+            FieldSpec {
+                label: "API Key:    ",
+                field: 1,
+                value: &self.config.api_key,
+                placeholder: "(optional — leave blank for a local server)",
+                mask: true,
+            },
+            field_w,
+        );
 
         f.render_widget(
-            Paragraph::new(url_line)
-                .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::dim())),
+            Paragraph::new(url_line).block(
+                Block::default()
+                    .borders(Borders::BOTTOM)
+                    .border_style(Theme::dim()),
+            ),
             chunks[0],
         );
         f.render_widget(
-            Paragraph::new(key_line)
-                .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::dim())),
+            Paragraph::new(key_line).block(
+                Block::default()
+                    .borders(Borders::BOTTOM)
+                    .border_style(Theme::dim()),
+            ),
             chunks[1],
         );
 
@@ -150,7 +180,11 @@ impl ConfigScreen {
     }
 
     fn field_line(&self, spec: FieldSpec<'_>, width: usize) -> Line<'static> {
-        let style = if self.field == spec.field { Theme::accent() } else { Theme::dim() };
+        let style = if self.field == spec.field {
+            Theme::accent()
+        } else {
+            Theme::dim()
+        };
         let mut spans = vec![Span::styled(spec.label, style)];
         if self.editing && self.field == spec.field {
             spans.extend(self.edit.spans(width, style, true));

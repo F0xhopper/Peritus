@@ -20,9 +20,12 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 from peritus.sources.canonical import classify_extent, matching_work, title_key
 from peritus.sources.domain import SourceCandidate, SourceType
 from peritus.sources.hosts import host_and_path, suffix_matches
@@ -247,7 +250,10 @@ _HOST_ADJUSTMENTS: tuple[tuple[str, float], ...] = (
 # on domains no list can enumerate. Worst single match applies.
 _PATH_ADJUSTMENTS: tuple[tuple[re.Pattern[str], float], ...] = (
     (re.compile(r"/(?:top|best)[-_]?\d+"), -2.0),
-    (re.compile(r"\d+[-_](?:best|top|tips|ways|rules|habits|lessons|things|secrets|quotes)\b"), -2.0),
+    (
+        re.compile(r"\d+[-_](?:best|top|tips|ways|rules|habits|lessons|things|secrets|quotes)\b"),
+        -2.0,
+    ),
     (re.compile(r"(?:book|chapter|plot)[-_]summar(?:y|ies)"), -2.5),
     (re.compile(r"summary[-_]of[-_]"), -2.0),
     (re.compile(r"/(?:study|revision)[-_]guide"), -2.0),
@@ -362,10 +368,11 @@ async def triage_candidates(
         if attempt:
             logger.warning(
                 "Triage: re-asking %d unscored candidate(s) in batches of %d",
-                len(pending), size,
+                len(pending),
+                size,
             )
             reasked.update(pending)
-        batches = [pending[i: i + size] for i in range(0, len(pending), size)]
+        batches = [pending[i : i + size] for i in range(0, len(pending), size)]
         responses = await gather_claude_calls(
             [_triage_params(topic, key_concepts, [candidates[j] for j in b]) for b in batches],
             live_concurrency=settings.VALIDATE_CONCURRENCY,
@@ -382,7 +389,9 @@ async def triage_candidates(
                 continue
             if len(scores) < len(batch):
                 logger.warning(
-                    "Triage batch scored %d of %d candidates", len(scores), len(batch),
+                    "Triage batch scored %d of %d candidates",
+                    len(scores),
+                    len(batch),
                 )
             for local, value in scores.items():
                 model_scores[batch[local]] = value
@@ -391,7 +400,8 @@ async def triage_candidates(
     if pending:
         logger.warning(
             "Triage: %d of %d candidate(s) were never scored — they fail closed at 0.0",
-            len(pending), len(candidates),
+            len(pending),
+            len(candidates),
         )
 
     triaged: list[TriagedCandidate] = []
@@ -541,10 +551,9 @@ def _triage_params(
         for i, c in enumerate(batch)
     )
     concepts_block = (
-        "Key concepts the corpus must cover:\n"
-        + "\n".join(f"- {c}" for c in key_concepts)
-        + "\n\n"
-        if key_concepts else ""
+        "Key concepts the corpus must cover:\n" + "\n".join(f"- {c}" for c in key_concepts) + "\n\n"
+        if key_concepts
+        else ""
     )
     return {
         "model": settings.FAST_MODEL,
@@ -552,30 +561,32 @@ def _triage_params(
         "system": _SYSTEM,
         "tools": [_TRIAGE_TOOL],
         "tool_choice": {"type": "tool", "name": "triage_candidates"},
-        "messages": [{
-            "role": "user",
-            "content": (
-                f"Topic: {topic}\n\n"
-                f"{concepts_block}"
-                f"{candidates_block}\n\n"
-                f"Score all {len(batch)} candidates above."
-            ),
-        }],
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    f"Topic: {topic}\n\n"
+                    f"{concepts_block}"
+                    f"{candidates_block}\n\n"
+                    f"Score all {len(batch)} candidates above."
+                ),
+            }
+        ],
     }
 
 
 _ID_RE = re.compile(r"(\d+)\s*>?\s*$")
 
 
-def _parse_triage_response(resp: Any, batch_len: int) -> dict[int, float]:
+def _parse_triage_response(resp: Message | None, batch_len: int) -> dict[int, float]:
     """``{position in batch: score}`` for the entries the model actually scored.
 
     Keyed by the id each entry names. An entry with no readable id, an id outside
     the batch, a repeat of an id already scored, or no numeric value is ignored —
     its candidate simply stays unscored, which the caller re-asks.
     """
-    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    raw_scores = block.input.get("scores", [])
+    block = tool_input(resp) or {}
+    raw_scores = block.get("scores", [])
     scores: dict[int, float] = {}
     for entry in raw_scores if isinstance(raw_scores, list) else []:
         if not isinstance(entry, dict):

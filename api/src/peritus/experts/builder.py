@@ -53,42 +53,103 @@ from decimal import Decimal
 from typing import Any
 
 import asyncpg
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.billing.domain import discovery_budget_usd
 from peritus.billing.metering import current_meter
-from peritus.billing.pricing import estimated_ingest_cost_usd, estimated_ocr_pages
 from peritus.core.config import settings
 from peritus.core.exceptions import BuildError, IncompleteBuildError
 from peritus.core.logging import get_logger
+from peritus.experts.build.constants import (
+    _ACCEPTANCE_COLLAPSE,
+    _ACCEPTANCE_MIN_SAMPLE,
+    _BASE_FETCH_BUDGET,
+    _FETCH_CONCURRENCY,
+    _FETCHER_NAMES,
+    _FETCHER_SOURCE_TYPES,
+    _FLOOR_RELAX_MIN,
+    _LOOP_FETCHERS,
+    _LOOP_MAX_CONCEPTS,
+    _LOOP_ROUND_BUDGET_SHARE,
+    _PERSONA_ATTEMPTS,
+    _PLAN_QUERY_FETCHERS,
+    _PRIORITY_BUDGET_SHARE,
+    _ROUND0_BUDGET_SHARE,
+    OUTCOME_BELOW_FLOOR,
+    OUTCOME_BUDGET,
+    OUTCOME_CAPPED,
+    OUTCOME_CONTENT_DUPLICATE,
+    OUTCOME_FAILED,
+    OUTCOME_FETCHED,
+    OUTCOME_NEAR_DUPLICATE,
+    OUTCOME_NOT_ENGLISH,
+    OUTCOME_NOT_REACHED,
+    STOP_ACCEPTANCE_COLLAPSED,
+    STOP_BUDGET_EXHAUSTED,
+    STOP_LOOP_DISABLED,
+    STOP_MAX_ROUNDS,
+    STOP_NO_NEW_CANDIDATES,
+    STOP_SOURCE_LIMIT,
+    STOP_TARGETS_MET,
+)
+from peritus.experts.build.planning import (
+    _plan_research,
+    _route_must_have_works,
+)
+from peritus.experts.build.policy import (
+    _fetch_sort_key,
+    _graph_chunk_limit,
+    _ingest_estimate,
+    _log_previous_build,
+    _metered_spend,
+    _primary_text_ceilings,
+    _priority_reservation,
+    _search_breadth,
+    _type_caps,
+    discovery_loop_enabled,
+    resolve_execution,
+)
+from peritus.experts.build.reconcile import (
+    _merge_same_volume,
+    _reconcile_claims,
+    _resolve_entities,
+)
+from peritus.experts.build.selection import (
+    DiscoveryOutcome,
+    _as_score,
+    _boosted_must_have_titles,
+    _carry_candidate_metadata,
+    _count_outcomes,
+    _enforce_ceiling,
+    _fetcher_for,
+    _is_skipped,
+    _outcome_metadata,
+    _planned_works,
+    _quietly,
+    _raise_if_provider_down,
+    _safe_fetch_candidate,
+    _safe_search,
+)
 from peritus.experts.composition import (
     apply_composition_caps,
     corpus_composition,
     top_concept_shares,
 )
 from peritus.experts.coverage import ConceptCoverage, CoverageReport, compute_coverage
-from peritus.experts.domain import Expert, ExpertTier
+from peritus.experts.domain import Expert
 from peritus.experts.feedback import feedback_queries, suggest_primary_texts
 from peritus.experts.picture import PictureSkipped, find_picture
 from peritus.experts.picture_repository import ExpertPictureRepository
 from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
-from peritus.graph.reconciler import ReconcileStats, reconcile_claims
-from peritus.graph.repository import GraphRepository, node_embedding_text
-from peritus.graph.resolution import (
-    RESOLVE_THRESHOLD,
-    RESOLVE_THRESHOLD_SAME_HEAD,
-    canonical_merge_plan,
-    pair_threshold,
-)
+from peritus.graph.repository import GraphRepository
 from peritus.infrastructure.anthropic_batch import (
     BuildExecution,
     build_execution,
     current_execution,
-    provider_error_message,
     record_provider_error,
-    terminal_provider_error,
 )
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.infrastructure.wikimedia import WikimediaClient
 from peritus.ingestion.chunker import TextChunk
@@ -98,18 +159,13 @@ from peritus.sources.canonical import (
     FOUND_SECTIONS,
     FOUND_WHOLE,
     SCOPE_CONCEPT,
-    SCOPE_FIGURE,
     SCOPE_OVERALL,
-    WORK_KINDS,
-    ArchiveTextFetcher,
     MustHaveWork,
     WorkResolution,
-    archive_identifier,
     concept_named_texts,
     figure_outcomes,
     must_have_outcomes,
     resolve_works,
-    title_key,
 )
 from peritus.sources.capture import capture_for_screening
 from peritus.sources.dedup import (
@@ -131,14 +187,11 @@ from peritus.sources.domain import (
 from peritus.sources.fetchers.arxiv import ArxivFetcher
 from peritus.sources.fetchers.base import (
     HEALTHY_STATUSES,
-    STATUS_EMPTY,
     STATUS_ERROR,
     STATUS_OK,
     STATUS_SKIPPED,
     TRANSIENT_STATUSES,
     SearchOutcome,
-    begin_search_note,
-    end_search_note,
     worst_status,
 )
 from peritus.sources.fetchers.exa import ExaFetcher
@@ -151,15 +204,7 @@ from peritus.sources.fetchers.thought_leaders import ThoughtLeadersFetcher
 from peritus.sources.fetchers.web import WebFetcher
 from peritus.sources.fetchers.wikipedia import WikipediaFetcher
 from peritus.sources.fetchers.youtube import YoutubeFetcher
-from peritus.sources.fulltext import (
-    PAID_METHODS,
-    FullTextHints,
-    default_method_for,
-    expected_method,
-)
 from peritus.sources.language import is_expected_language
-from peritus.sources.orientation import OrientationPack, build_orientation_pack
-from peritus.sources.sections import apply_sections
 from peritus.sources.snowball import snowball
 from peritus.sources.substance import substance_of
 from peritus.sources.triage import (
@@ -174,475 +219,6 @@ from peritus.sources.validator import RUBRIC_VERSION, validate_sources
 logger = get_logger(__name__)
 
 EventCallback = Callable[[dict], Coroutine[Any, Any, None]]
-
-# Fetchers a later discovery round may use. Query-driven only: the
-# identify-then-fetch fetchers (gutenberg, thought_leaders) answer a broad
-# "who matters here" question that a narrow concept query cannot ask, and the
-# noisy ones (reddit, youtube) return worse results the narrower the query gets.
-# Round 0 still runs all of them.
-_LOOP_FETCHERS = ("exa", "web", "wikipedia", "arxiv", "pdf", "pubmed", "openalex")
-# …plus, in any later round, every fetcher whose last search *failed* rather
-# than came back empty. A Gutendex timeout in round 0 used to mean no classic
-# primary text for that build, ever. The identify-then-fetch fetchers re-run
-# with their round-0 plan queries, since a concept query is not what they answer.
-_PLAN_QUERY_FETCHERS = frozenset({"gutenberg", "thought_leaders"})
-# Weak concepts a single round tries to close. More than this and each gets too
-# little of the round's budget to reach a target.
-_LOOP_MAX_CONCEPTS = 4
-# A later round may add at most this share of the initial corpus, so no single
-# round can double the build.
-_LOOP_ROUND_BUDGET_SHARE = 0.5
-# Below this acceptance rate a round is telling you the search space is
-# exhausted: it fetched things, and validation wanted almost none of them.
-# Another round would be spend without return.
-_ACCEPTANCE_COLLAPSE = 0.2
-# Rounds smaller than this are not evidence of collapse, just small.
-_ACCEPTANCE_MIN_SAMPLE = 5
-# Tiers that guarantee a feedback round keep this share of the discovery budget
-# out of round 0's reach. Round 0 committed $2.10 of the Thomism build's $3.00
-# and left the loop about fifteen sources' worth of money, which made it a
-# one-shot however strict the target. The fetch floor usually stops round 0
-# short of the share on its own; this is the backstop.
-_ROUND0_BUDGET_SHARE = Decimal("0.65")
-# Round 0 relaxes the fetch floor when fewer than this many candidates reach it
-# — max(this, budget // 4) — so a thin topic cannot produce an empty round.
-_FLOOR_RELAX_MIN = 8
-
-# Fetch outcomes recorded per candidate in the screening ledger.
-OUTCOME_FETCHED = "fetched"
-OUTCOME_FAILED = "failed"
-OUTCOME_CAPPED = "capped"
-OUTCOME_BELOW_FLOOR = "below_floor"
-OUTCOME_NEAR_DUPLICATE = "near_duplicate"
-OUTCOME_BUDGET = "budget"
-OUTCOME_NOT_REACHED = "not_reached"
-OUTCOME_CONTENT_DUPLICATE = "content_duplicate"
-OUTCOME_NOT_ENGLISH = "not_english"
-
-# Candidate metadata that must survive into the fetched source, whatever the
-# fetcher copies: it is how the corpus summary knows which sources are the
-# must-have works, and how the ledger and `sources` agree on a triage score.
-_CARRIED_METADATA = (
-    "discovered_via",
-    "fetch_priority",
-    "must_have_title",
-    "must_have_extent",
-    "must_have_sections",
-    "canonical_route",
-    "must_have_scope",
-    "must_have_concepts",
-    "must_have_figure",
-    "sections_matched",
-)
-
-# Why the loop stopped. Recorded in experts.build_summary and emitted on
-# `discovery_done`, because "the build stopped looking" is only a defensible
-# statement if it comes with the reason.
-STOP_TARGETS_MET = "targets_met"
-STOP_MAX_ROUNDS = "max_rounds"
-STOP_BUDGET_EXHAUSTED = "budget_exhausted"
-# The count ceiling, which is a different thing from the money running out and
-# must not be reported as it. A live PRO build stopped with "budget_exhausted"
-# while $4.71 of its $7.00 discovery budget was unspent — the count had simply
-# filled. Two limits sharing one reason makes the stop reason a false statement,
-# and the stop reason is the whole surface this loop publishes.
-STOP_SOURCE_LIMIT = "source_limit"
-STOP_NO_NEW_CANDIDATES = "no_new_candidates"
-STOP_ACCEPTANCE_COLLAPSED = "acceptance_collapsed"
-STOP_LOOP_DISABLED = "loop_disabled"
-
-# Rough text length by source type, for ordering the fetch queue by expected
-# cost *before* anything is downloaded. Deliberately coarse: the
-# ordering only needs to know that a paper is two orders of magnitude more
-# expensive to ingest than a forum thread, which these numbers say.
-_EXPECTED_CHARS: dict[SourceType, int] = {
-    SourceType.ARXIV: 60_000,
-    SourceType.PUBMED: 40_000,
-    SourceType.OPENALEX: 40_000,
-    SourceType.PDF: 60_000,
-    SourceType.GUTENBERG: 120_000,
-    SourceType.WIKIPEDIA: 25_000,
-    SourceType.EXA: 15_000,
-    SourceType.WEB: 10_000,
-    SourceType.THOUGHT_LEADER: 12_000,
-    SourceType.YOUTUBE: 25_000,
-    SourceType.REDDIT: 6_000,
-}
-_DEFAULT_EXPECTED_CHARS = 15_000
-# Floor under the cost divisor when ranking by value per dollar, so a free
-# 800-character page does not outrank a paper by dividing by almost nothing.
-_VALUE_COST_FLOOR = Decimal("0.01")
-
-# Two-phase discovery: the tier multiplier scales the final corpus budget;
-# searching is cheap so candidates are gathered at _SEARCH_OVERFETCH× budget
-# and triage picks which ones are worth full downloads. Per-type caps keep a
-# single source type from flooding the corpus even if it triages well.
-# The count budget is a ceiling, not the budget. Since the discovery loop
-# spends against an estimate of ingest cost in dollars, a count that binds first
-# defeats the point — on a live PRO build round 0 used 56 of a 60-source count
-# and left round 1 able to add four sources while $4.75 of its money budget was
-# still unspent. Doubled so the money is what actually stops the search, which
-# is what makes "sixty mixed sources" and "a hundred and fifty open-access
-# papers" cost the same. Per-tier ceilings become 30 / 60 / 120.
-_BASE_FETCH_BUDGET = 60
-_SEARCH_OVERFETCH = 3
-_FETCH_CONCURRENCY = 6
-# In-stage retries for persona generation before the build is declared incomplete.
-_PERSONA_ATTEMPTS = 3
-# A single fetcher's search taking longer than this is worth a warning: discovery
-# waits on all of them, so one slow fetcher is the stage's duration.
-_SLOW_SEARCH_SECONDS = 30.0
-# No single source type may take more than this multiple of its *planned share*
-# of the corpus. The plan's per-fetcher weights already decide how much of the
-# search each type gets; this is the backstop that stops one type dominating the
-# result anyway, and triage decides everything in between.
-#
-# It replaces a fixed `quota × 2`, which was sized for a 30-source budget and
-# became the real limit once the budget grew: on a live STANDARD build, four of
-# the six productive types hit their cap at 43 sources while the count ceiling
-# (60) and the money budget ($1.58 of $3.00) were both untouched. A cap that
-# does not scale with the budget makes budgeting by cost decorative.
-#
-# Because the caps sum to `headroom × budget`, they constrain the *mix* and
-# never the total — which is the division of labour intended: the money says how
-# much corpus, the caps say how varied it has to be.
-_TYPE_CAP_HEADROOM = 2.0
-# Floor, so a fetcher with a small quota can still contribute a few sources on a
-# small build rather than being capped at one.
-_TYPE_CAP_MIN = 4
-
-# Floor under the search phase, per query. Quotas scale down with tier, but the
-# costs that tiers exist to bound — full fetch, OCR, validation, chunking,
-# graph — are all capped by the fetch budget, not by how many candidates triage
-# looks at; a search-API call is free and triage is a Haiku pass over
-# title+snippet. Without the floor, a lite build's overfetch worked out to 1–2
-# results per query, so triage picked winners out of ~50 candidates and could
-# not afford to be choosy. Quality comes from selectivity, and selectivity
-# needs a pool worth selecting from.
-_MIN_RESULTS_PER_QUERY = 10
-
-_FETCHER_SOURCE_TYPES: dict[str, SourceType] = {
-    "wikipedia": SourceType.WIKIPEDIA,
-    "gutenberg": SourceType.GUTENBERG,
-    "arxiv": SourceType.ARXIV,
-    "pdf": SourceType.PDF,
-    "youtube": SourceType.YOUTUBE,
-    "exa": SourceType.EXA,
-    "web": SourceType.WEB,
-    "reddit": SourceType.REDDIT,
-    "thought_leaders": SourceType.THOUGHT_LEADER,
-    "pubmed": SourceType.PUBMED,
-    "openalex": SourceType.OPENALEX,
-}
-
-_FETCHER_NAMES: tuple[str, ...] = (
-    "wikipedia",
-    "gutenberg",
-    "arxiv",
-    "pdf",
-    "youtube",
-    "exa",
-    "web",
-    "reddit",
-    "thought_leaders",
-    "pubmed",
-    "openalex",
-)
-
-# Public alias: the API layer validates BuildRequest.sources against this so an
-# unknown fetcher name is rejected at the door instead of producing an empty
-# discovery round minutes later.
-FETCHER_NAMES: tuple[str, ...] = _FETCHER_NAMES
-_MAX_QUERIES_PER_FETCHER = 3
-
-_FETCHER_PLAN_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "queries": {
-            "type": "array",
-            "items": {"type": "string"},
-            "minItems": 1,
-            "maxItems": _MAX_QUERIES_PER_FETCHER,
-            "description": "1–3 search queries, together spanning different facets of the topic.",
-        },
-        "weight": {
-            "type": "number",
-            "description": (
-                "Budget weight, 0–2. 0 = this source type would add noise for this "
-                "topic and must be skipped; 1 = normal; 2 = this source type is "
-                "especially valuable here."
-            ),
-        },
-    },
-    "required": ["queries", "weight"],
-}
-
-_WORK_PROPERTIES: dict[str, Any] = {
-    "title": {"type": "string", "description": "The title as scholarship or the field cites it."},
-    "author": {"type": "string"},
-    "kind": {
-        "type": "string",
-        "enum": list(WORK_KINDS),
-        "description": (
-            "text = a primary text (a treatise, scripture, a classic, a founding "
-            "document); book = a monograph; paper = a journal article or preprint; "
-            "standard = a specification, guideline, statute or official document."
-        ),
-    },
-    "public_domain": {
-        "type": "boolean",
-        "description": (
-            "True only if an English text of it is in the public domain (published "
-            "roughly 95+ years ago, or released openly) — it decides whether Project "
-            "Gutenberg and the Internet Archive are searched for it."
-        ),
-    },
-    "sections": {
-        "type": "string",
-        "description": (
-            "For a long work, the numbered parts that matter, in the work's own "
-            "numbering: 'qq. 90–97', 'Book II, chapters 1–10', 'sections 3–5', "
-            "'Lectures 4–6'. Empty if the work is short or matters whole."
-        ),
-    },
-    "open_text": {
-        "type": "boolean",
-        "description": (
-            "True if an authorised full English text is freely online although the "
-            "work is not public domain: an open-access edition, the publisher's free "
-            "text, the author's own site. False for an ordinary in-copyright book."
-        ),
-    },
-}
-
-# A work the planner names in place of one that cannot be had: same fields, no
-# substitute of its own.
-_SUBSTITUTE_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": _WORK_PROPERTIES,
-    "required": ["title", "kind", "public_domain"],
-    "description": (
-        "Only for a work that is neither public_domain nor open_text: a work with a "
-        "free English text that teaches the same thing, looked for if this one "
-        "cannot be had."
-    ),
-}
-
-_WORK_SCHEMA_PROPERTIES: dict[str, Any] = {**_WORK_PROPERTIES, "substitute": _SUBSTITUTE_SCHEMA}
-
-# Facets and concepts: docs/plans/syllabus.md, phase 2.
-_MAX_FACETS = 5
-_MAX_CONCEPTS_PER_FACET = 4
-# Figures: phase 3.A.
-_MAX_FIGURES = 6
-
-
-def _plan_tool(max_concepts: int) -> dict[str, Any]:
-    return {
-        "name": "create_research_plan",
-        "description": (
-            "Create a research plan: targeted queries and a budget weight per source "
-            "fetcher, the facets and key concepts the corpus must cover, the figures "
-            "whose own writing is primary, and must-have canonical works."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "orientation_note": {
-                    "type": "string",
-                    "description": (
-                        "Only if an overview you were shown is about something adjacent "
-                        "rather than this topic: say which, and that you relied on it "
-                        "less. Otherwise empty."
-                    ),
-                },
-                "fetcher_plans": {
-                    "type": "object",
-                    "description": (
-                        "A plan for each fetcher, with queries tuned to what that source "
-                        "type does best and a weight steering how much of the source budget "
-                        "it deserves for this topic."
-                    ),
-                    "properties": {name: _FETCHER_PLAN_SCHEMA for name in _FETCHER_NAMES},
-                },
-                "facets": {
-                    "type": "array",
-                    "minItems": 2,
-                    "maxItems": _MAX_FACETS,
-                    "description": (
-                        "The topic's major facets, each with the concepts under it an "
-                        f"expert must be able to teach: 2–{_MAX_FACETS} facets, "
-                        f"2–{_MAX_CONCEPTS_PER_FACET} concepts each, at most "
-                        f"{max_concepts} concepts in all. The corpus is checked against "
-                        "every concept and gaps are re-searched facet by facet. The count "
-                        "scales with the topic's actual breadth — see the system prompt."
-                    ),
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "concepts": {
-                                "type": "array",
-                                "items": {"type": "string"},
-                                "minItems": 1,
-                                "maxItems": _MAX_CONCEPTS_PER_FACET,
-                            },
-                        },
-                        "required": ["name", "concepts"],
-                    },
-                },
-                "key_concepts": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "maxItems": max_concepts,
-                    "description": (
-                        "Legacy flat list of the concepts. Leave empty when facets are given."
-                    ),
-                },
-                "primary_source_definition": {
-                    "type": "string",
-                    "description": (
-                        "One or two sentences: what counts as a PRIMARY source for this "
-                        "topic, as opposed to analysis of it. For a thinker or school: their "
-                        "own writings (and, for a tradition, its major figures' own works). For "
-                        "a science: original research reports, datasets, trials. For a craft: "
-                        "practitioners' first-hand accounts and technical standards. For "
-                        "history: documents from the period. Used to classify every source."
-                    ),
-                },
-                "figures": {
-                    "type": "array",
-                    "maxItems": _MAX_FIGURES,
-                    "description": (
-                        "People whose own writing is primary for this topic by your "
-                        "definition. For each, one work of theirs with a freely available "
-                        "English text: public domain, open access, or published by them "
-                        "online (a blog, a lecture transcript, a preprint). Set obtainable "
-                        "false and leave work out when nothing of theirs is freely "
-                        "available — name them anyway."
-                    ),
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "why": {"type": "string", "description": "One line: why their own voice matters here."},
-                            "work": {
-                                "type": "object",
-                                "properties": _WORK_PROPERTIES,
-                                "required": ["title", "kind", "public_domain"],
-                            },
-                            "obtainable": {"type": "boolean"},
-                        },
-                        "required": ["name", "why", "obtainable"],
-                    },
-                },
-                "must_have_works": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": _WORK_SCHEMA_PROPERTIES,
-                        "required": ["title", "kind", "public_domain"],
-                    },
-                    "maxItems": 4,
-                    "description": (
-                        "Named canonical works (books, papers, essays, standards) an expert "
-                        "corpus on this topic as a whole should contain, if any exist."
-                    ),
-                },
-                "concept_primary_texts": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "concept": {
-                                "type": "string",
-                                "description": "The key concept, copied verbatim from facets.",
-                            },
-                            **_WORK_SCHEMA_PROPERTIES,
-                        },
-                        "required": ["concept", "title", "kind", "public_domain"],
-                    },
-                    "maxItems": 16,
-                    "description": (
-                        "For each key concept, the one or two primary texts (as defined in "
-                        "primary_source_definition) where that concept is actually set out — "
-                        "with the sections that set it out when the text is long. Name a "
-                        "text only if you are confident it exists and teaches the concept; "
-                        "leave a concept out rather than guess."
-                    ),
-                },
-            },
-            "required": ["fetcher_plans", "facets", "primary_source_definition"],
-        },
-    }
-
-
-_ORIENTATION_PROMPT = (
-    "You may be shown how one or two reference overviews structure this topic — their "
-    "opening paragraphs and section outlines. Use them as a checklist of the topic's "
-    "facets, not as the syllabus: every major facet they treat should be represented in "
-    "your concepts unless it is clearly outside what an expert on this topic must teach, "
-    "and you should add what they omit. Take the field's own terms and names from them "
-    "for your queries. If an overview is about something adjacent rather than this "
-    "topic, say so in orientation_note and rely on it less."
-)
-
-
-def _plan_system(max_concepts: int) -> str:
-    return (
-        _PLAN_SYSTEM
-        + "\n\n"
-        + _ORIENTATION_PROMPT
-        + "\n\n"
-        f"Group the concepts under facets — the topic's major areas (for a tradition: its "
-        "doctrines, its history and schools, its modern debates; for a science: its "
-        "theory, its methods, its applications). The concept count must scale with how "
-        "much ground the topic actually covers — this is a judgment call, not a quota. A "
-        "narrow or single-threaded topic (one thinker, one event, one narrow technique) "
-        "genuinely has fewer concepts worth naming as separate teaching points; padding it "
-        "out means inventing overlapping or trivial ones. A broad field (a whole "
-        f"discipline, a wide practice, a tradition) earns more, up to {max_concepts}. "
-        "Default to the number the topic actually supports, not the maximum allowed.\n\n"
-        "Name the figures whose own writing is primary by your definition, and one work of "
-        "each that can be had freely in English. A corpus that defines a tradition's "
-        "commentators as primary and contains none of them in their own voice has not "
-        "found the tradition. For a canonical work still in copyright, mark public_domain "
-        "and open_text honestly and name a substitute with a free English text: name both, "
-        "never silently swap one for the other."
-    )
-
-
-_PLAN_SYSTEM = (
-    "You are planning the research for building a grounded AI expert. The sources this "
-    "plan discovers are the ONLY material the expert will ever know, so plan for breadth "
-    "(every major facet of the topic gets searched) and depth (primary and advanced "
-    "material, not just introductions). Tune queries to each source type: arxiv gets "
-    "STEM preprints (physics, math, CS), openalex gets peer-reviewed scholarship in "
-    "ANY discipline — it is the academic channel for humanities, social science, law, "
-    "economics, psychology, education, business and everything else arxiv and pubmed "
-    "don't reach — pubmed gets biomedical and clinical literature, gutenberg gets "
-    "classic public-domain primary texts, pdf gets open-access published papers, "
-    "thought_leaders finds the field's leading practitioners and their own writing, "
-    "reddit gets practitioner discussion, youtube gets lectures and talks, wikipedia "
-    "gets encyclopedic overviews, exa and web get high-quality articles and essays. "
-    "Give weight 0 to source types that would add noise for this topic (e.g. gutenberg "
-    "for modern technology, arxiv for a non-academic craft, pubmed for anything "
-    "non-biomedical) and weight 2 to the ones that carry it. Every topic has some "
-    "scholarly literature — a craft has ergonomics and materials-science studies, a "
-    "cuisine has food chemistry and anthropology — so before zeroing openalex, ask "
-    "what the adjacent research field is and query that.\n\n"
-    "A corpus that only contains material ABOUT its subject answers second-hand. So say "
-    "what counts as primary for this topic, name the works canonical for the topic as a "
-    "whole (must_have_works), and for each key concept name the primary text that "
-    "actually sets it out (concept_primary_texts). Works are looked for by title and cut "
-    "to the sections you name, so name them precisely: the title as the field cites it, "
-    "the author, and — for a long work — the numbered parts in the work's own numbering. "
-    "Mark public_domain honestly; it decides whether Project Gutenberg and the Internet "
-    "Archive are searched. The corpus is in English, so name works as English editions "
-    "cite them. For a long work named in must_have_works, leave sections empty unless "
-    "one part matters most for the topic as a whole — the concept entries say which "
-    "parts each concept needs."
-)
 
 
 @dataclass
@@ -850,9 +426,7 @@ class ExpertBuilder:
             _raise_if_provider_down("Research planning")
             raise IncompleteBuildError(["key concepts (research planning failed)"])
         await self._repo.update_key_concepts(expert.id, key_concepts)
-        await _quietly(
-            "store the research plan", self._repo.update_research_plan(expert.id, plan)
-        )
+        await _quietly("store the research plan", self._repo.update_research_plan(expert.id, plan))
         # The whole plan, not only the concepts: the queries, the weights and the
         # must-have works used to exist only in a worker log line, so a build's
         # search could not be reproduced or argued with afterwards. Clients read
@@ -914,7 +488,9 @@ class ExpertBuilder:
         if warning:
             logger.warning(
                 "Expert %d corpus is %d/%d tertiary",
-                expert.id, warning["tertiary"], warning["classified"],
+                expert.id,
+                warning["tertiary"],
+                warning["classified"],
             )
             await _emit_event(on_event, warning)
 
@@ -966,7 +542,8 @@ class ExpertBuilder:
             logger.info(
                 "Graph extraction skips %d chunk(s) past %d per source; they are embedded "
                 "and retrievable, and not read for concepts",
-                graph_skipped, settings.GRAPH_MAX_CHUNKS_PER_SOURCE,
+                graph_skipped,
+                settings.GRAPH_MAX_CHUNKS_PER_SOURCE,
             )
 
         if not all_chunk_ids:
@@ -1052,7 +629,10 @@ class ExpertBuilder:
 
         logger.info(
             "Resuming expert %d from %s: %d source(s), %d chunk(s)",
-            expert.id, from_readiness.value, current.source_count, current.chunk_count,
+            expert.id,
+            from_readiness.value,
+            current.source_count,
+            current.chunk_count,
         )
         return await self._enrich_and_finish(
             expert,
@@ -1158,7 +738,11 @@ class ExpertBuilder:
                 record_provider_error(exc)
                 logger.warning(
                     "Persona generation attempt %d/%d failed for expert %d (%s: %s)",
-                    attempt, _PERSONA_ATTEMPTS, expert.id, type(exc).__name__, exc,
+                    attempt,
+                    _PERSONA_ATTEMPTS,
+                    expert.id,
+                    type(exc).__name__,
+                    exc,
                     exc_info=attempt == _PERSONA_ATTEMPTS,
                 )
                 if attempt < _PERSONA_ATTEMPTS:
@@ -1184,7 +768,10 @@ class ExpertBuilder:
             logger.error(
                 "Expert %d built %d source(s) and %d chunk(s) but is INCOMPLETE: "
                 "missing %s — not marking ready",
-                expert.id, total_sources, total_chunks, " and ".join(missing),
+                expert.id,
+                total_sources,
+                total_chunks,
+                " and ".join(missing),
             )
             if not persona_name:
                 _raise_if_provider_down("Persona generation")
@@ -1301,9 +888,7 @@ class ExpertBuilder:
         coroutine running after the build it belongs to has gone.
         """
         if not settings.PICTURE_ENABLED:
-            await _emit_event(
-                on_event, {"type": "picture_skipped", "reason": "disabled"}
-            )
+            await _emit_event(on_event, {"type": "picture_skipped", "reason": "disabled"})
             return
 
         pictures = ExpertPictureRepository(self._pool)
@@ -1319,14 +904,14 @@ class ExpertBuilder:
         except asyncio.CancelledError:
             raise
         except PictureSkipped as skip:
-            await _emit_event(
-                on_event, {"type": "picture_skipped", "reason": skip.reason}
-            )
+            await _emit_event(on_event, {"type": "picture_skipped", "reason": skip.reason})
             return
         except Exception as exc:
             logger.warning(
                 "Picture search failed for expert %d (%s: %s)",
-                expert.id, type(exc).__name__, exc,
+                expert.id,
+                type(exc).__name__,
+                exc,
             )
             await _emit_event(
                 on_event, {"type": "picture_skipped", "reason": "provider_unavailable"}
@@ -1335,16 +920,23 @@ class ExpertBuilder:
 
         logger.info(
             "Picture for expert %d (%r): %s from %s (%s)",
-            expert.id, expert.name, found.file_name, found.page_title, found.license,
+            expert.id,
+            expert.name,
+            found.file_name,
+            found.page_title,
+            found.license,
         )
-        await _emit_event(on_event, {
-            "type": "picture_ready",
-            "provider": found.provider,
-            "title": found.page_title,
-            "page_url": found.page_url,
-            "license": found.license,
-            "version": found.version,
-        })
+        await _emit_event(
+            on_event,
+            {
+                "type": "picture_ready",
+                "provider": found.provider,
+                "title": found.page_title,
+                "page_url": found.page_url,
+                "license": found.license,
+                "version": found.version,
+            },
+        )
 
     async def _await_picture(self) -> None:
         """Let the picture task finish, but never wait on it indefinitely.
@@ -1397,15 +989,17 @@ class ExpertBuilder:
         def _measure() -> CoverageReport:
             named = concept_named_texts(self._all_works(plan, config), _outcome_metadata(passed))
             return compute_coverage(
-                key_concepts, passed, target, facets,
+                key_concepts,
+                passed,
+                target,
+                facets,
                 {concept: entry["status"] for concept, entry in named.items()},
             )
 
         base_budget = max(5, round(_BASE_FETCH_BUDGET * config.source_multiplier))
         budget_usd = Decimal(str(discovery_budget_usd(expert.tier, cap_usd=self._cap_usd())))
         batched = (
-            current_execution() is BuildExecution.BACKGROUND
-            and settings.ANTHROPIC_BATCH_ENABLED
+            current_execution() is BuildExecution.BACKGROUND and settings.ANTHROPIC_BATCH_ENABLED
         )
         loop_enabled = discovery_loop_enabled()
         max_rounds = target.max_rounds if loop_enabled else 0
@@ -1515,20 +1109,17 @@ class ExpertBuilder:
             remaining_count -= len(raw_sources)
 
             if not raw_sources:
-                stop_reason = (
-                    STOP_NO_NEW_CANDIDATES if round_n else stop_reason
-                )
+                stop_reason = STOP_NO_NEW_CANDIDATES if round_n else stop_reason
                 if round_n == 0:
-                    raise BuildError(
-                        "No sources discovered. Check API keys and network access."
-                    )
+                    raise BuildError("No sources discovered. Check API keys and network access.")
                 break
 
             round_passed, round_dropped = await self._validate_round(
                 expert, topic, raw_sources, key_concepts, on_event, round_n
             )
             unjudged = sum(
-                1 for d in round_dropped
+                1
+                for d in round_dropped
                 if d.drop_reason in ("validation error", "missing validation")
             )
             if unjudged and not round_passed:
@@ -1546,9 +1137,7 @@ class ExpertBuilder:
             # rejection-rate early: on a live STANDARD build it reserved $3.04
             # of a $3.00 budget for 60 fetched sources when the 48 that passed
             # were the only ones that would ever cost anything to ingest.
-            ingested_cost = sum(
-                _ingest_estimate(vs.raw, batched) for vs in round_passed
-            )
+            ingested_cost = sum(_ingest_estimate(vs.raw, batched) for vs in round_passed)
             committed_usd -= round_cost - ingested_cost
 
             rounds_run += 1
@@ -1583,10 +1172,7 @@ class ExpertBuilder:
             if remaining_count <= 0:
                 stop_reason = STOP_SOURCE_LIMIT
                 break
-            if (
-                judged >= _ACCEPTANCE_MIN_SAMPLE
-                and acceptance < _ACCEPTANCE_COLLAPSE
-            ):
+            if judged >= _ACCEPTANCE_MIN_SAMPLE and acceptance < _ACCEPTANCE_COLLAPSE:
                 # The search space is exhausted: this round fetched real
                 # sources and validation wanted almost none of them. Another
                 # round buys more of the same.
@@ -1608,7 +1194,10 @@ class ExpertBuilder:
             committed_usd=float(committed_usd),
             budget_usd=float(budget_usd),
             corpus=corpus_composition(
-                passed, all_dropped, key_concepts, must_have,
+                passed,
+                all_dropped,
+                key_concepts,
+                must_have,
                 named_texts=concept_named_texts(all_works, accepted_metadata),
                 figures=figure_outcomes(figures, all_works, accepted_metadata),
             ),
@@ -1667,17 +1256,18 @@ class ExpertBuilder:
         # when the work it stands in for is out of reach.
         queued = {w.key for w in self._queued_substitutes}
         substitutes = [
-            r.work.substitute for r in resolutions
-            if r.work.substitute is not None and not r.work.obtainable and not r.whole
+            r.work.substitute
+            for r in resolutions
+            if r.work.substitute is not None
+            and not r.work.obtainable
+            and not r.whole
             and r.work.substitute.key not in queued
         ]
         if substitutes:
             self._queued_substitutes += substitutes
             candidates += await self._resolve_canonical(substitutes, on_event, round_n)
 
-        return _merge_same_volume(
-            candidates, self._text_ceilings.get(SCOPE_OVERALL)
-        )
+        return _merge_same_volume(candidates, self._text_ceilings.get(SCOPE_OVERALL))
 
     async def _retry_canonical(
         self,
@@ -1705,9 +1295,7 @@ class ExpertBuilder:
             return []
         found = {
             o["title"]
-            for o in must_have_outcomes(
-                works, self._canonical, _outcome_metadata(passed)
-            )
+            for o in must_have_outcomes(works, self._canonical, _outcome_metadata(passed))
             if o["status"] in (FOUND_WHOLE, FOUND_SECTIONS)
         }
         retry = [w for w in works if w.title in failed and w.title not in found]
@@ -1770,7 +1358,8 @@ class ExpertBuilder:
                         flat.append(query)
             status = self._fetcher_status
             loop_fetchers = [
-                n for n in self._fetchers
+                n
+                for n in self._fetchers
                 if n in _LOOP_FETCHERS or status.get(n) in TRANSIENT_STATUSES | {STATUS_ERROR}
             ]
             retried = [n for n in loop_fetchers if n not in _LOOP_FETCHERS]
@@ -1841,11 +1430,13 @@ class ExpertBuilder:
                         "round": round_n,
                         "added": len(candidates),
                         "backward": sum(
-                            1 for c in candidates
+                            1
+                            for c in candidates
                             if c.metadata.get("discovered_via") == "snowball:backward"
                         ),
                         "forward": sum(
-                            1 for c in candidates
+                            1
+                            for c in candidates
                             if c.metadata.get("discovered_via") == "snowball:forward"
                         ),
                     },
@@ -1854,11 +1445,7 @@ class ExpertBuilder:
 
     def _all_works(self, plan: dict, config) -> list[MustHaveWork]:
         """Every work this discovery run has looked for: planned, suggested, substituted."""
-        return (
-            _planned_works(plan, config)
-            + self._suggested_works
-            + self._queued_substitutes
-        )
+        return _planned_works(plan, config) + self._suggested_works + self._queued_substitutes
 
     async def _search_authors(
         self,
@@ -1990,7 +1577,12 @@ class ExpertBuilder:
             fetcher, quota = self._fetchers[name]
             await _emit_event(
                 on_event,
-                {"type": "fetcher_retried", "round": round_n, "name": name, "after": outcome.status},
+                {
+                    "type": "fetcher_retried",
+                    "round": round_n,
+                    "name": name,
+                    "after": outcome.status,
+                },
             )
             _, searched[name] = await _search_one(name, fetcher, quota, attempt=1)
 
@@ -2006,9 +1598,7 @@ class ExpertBuilder:
         # This is where the same paper found as an arXiv preprint, a journal DOI
         # and a Semantic Scholar OA PDF becomes one candidate rather than three.
         candidates, dedup = deduplicate_candidates(pooled, seen)
-        await _emit_event(
-            on_event, {"type": "dedup_done", "round": round_n, **dedup.as_event()}
-        )
+        await _emit_event(on_event, {"type": "dedup_done", "round": round_n, **dedup.as_event()})
         if not candidates:
             return [], Decimal(0)
 
@@ -2061,7 +1651,8 @@ class ExpertBuilder:
                 "budget": budget,
                 "floor": floor,
                 "above_floor": sum(
-                    1 for t in ranked
+                    1
+                    for t in ranked
                     if t.score >= floor or t.candidate.metadata.get("fetch_priority")
                 ),
                 "unscored": sum(1 for t in triaged if t.model_score is None),
@@ -2070,8 +1661,16 @@ class ExpertBuilder:
 
         outcomes: dict[int, tuple[int | None, str]] = {}
         sources, committed = await self._fetch_with_refill(
-            ranked, budget, caps, type_counts, budget_usd, batched, on_event, round_n,
-            floor=floor, outcomes=outcomes,
+            ranked,
+            budget,
+            caps,
+            type_counts,
+            budget_usd,
+            batched,
+            on_event,
+            round_n,
+            floor=floor,
+            outcomes=outcomes,
         )
 
         # Content fingerprinting, on text that now exists. This is the
@@ -2194,9 +1793,7 @@ class ExpertBuilder:
                 {
                     "type": "composition_capped",
                     "round": round_n,
-                    "dropped": [
-                        {"title": d.raw.title, "reason": d.drop_reason} for d in capped
-                    ],
+                    "dropped": [{"title": d.raw.title, "reason": d.drop_reason} for d in capped],
                 },
             )
         await _emit_event(
@@ -2211,9 +1808,7 @@ class ExpertBuilder:
         )
         return passed, dropped
 
-    async def _load_upload_chunks(
-        self, expert_id: int
-    ) -> list[tuple[TextChunk, int]]:
+    async def _load_upload_chunks(self, expert_id: int) -> list[tuple[TextChunk, int]]:
         """Chunks belonging to user-supplied sources that survived the reset."""
         return await self._load_chunks(expert_id, uploads_only=True)
 
@@ -2235,7 +1830,8 @@ class ExpertBuilder:
                   AND (NOT $2 OR s.discovered_via = 'upload')
                 ORDER BY c.source_id, c.sequence_n
                 """,
-                expert_id, uploads_only,
+                expert_id,
+                uploads_only,
             )
         out: list[tuple[TextChunk, int]] = []
         per_source: dict[int, int] = {}
@@ -2247,25 +1843,30 @@ class ExpertBuilder:
             meta = r["chunk_meta"]
             if isinstance(meta, str):
                 meta = json.loads(meta)
-            out.append((
-                TextChunk(
-                    text=r["text"],
-                    sequence_n=r["sequence_n"],
-                    chunk_meta=meta or {},
-                ),
-                r["id"],
-            ))
+            out.append(
+                (
+                    TextChunk(
+                        text=r["text"],
+                        sequence_n=r["sequence_n"],
+                        chunk_meta=meta or {},
+                    ),
+                    r["id"],
+                )
+            )
         return out
 
     async def _count_upload_sources(self, expert_id: int) -> int:
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(
-                """
+            return (
+                await conn.fetchval(
+                    """
                 SELECT COUNT(*) FROM sources
                 WHERE expert_id = $1 AND passed = true AND discovered_via = 'upload'
                 """,
-                expert_id,
-            ) or 0
+                    expert_id,
+                )
+                or 0
+            )
 
     async def _fetch_with_refill(
         self,
@@ -2344,7 +1945,10 @@ class ExpertBuilder:
                 logger.info(
                     "Round %d stopped fetching at %d source(s): committed $%.3f of a "
                     "$%.3f estimated-ingest budget",
-                    round_n, len(results), float(committed), float(budget_usd),
+                    round_n,
+                    len(results),
+                    float(committed),
+                    float(budget_usd),
                 )
                 break
             wave: list[TriagedCandidate] = []
@@ -2378,9 +1982,7 @@ class ExpertBuilder:
                 break
             fetched = await asyncio.gather(
                 *[
-                    _safe_fetch_candidate(
-                        _fetcher_for(t.candidate, fetcher_by_type), t.candidate
-                    )
+                    _safe_fetch_candidate(_fetcher_for(t.candidate, fetcher_by_type), t.candidate)
                     for t in wave
                 ]
             )
@@ -2399,7 +2001,9 @@ class ExpertBuilder:
                         counts[candidate.source_type] -= 1
                     logger.info(
                         "Not %s: %r (%s) — dropped before validation",
-                        settings.CORPUS_LANGUAGE, candidate.title, candidate.url,
+                        settings.CORPUS_LANGUAGE,
+                        candidate.title,
+                        candidate.url,
                     )
                     record[id(candidate)] = (position, OUTCOME_NOT_ENGLISH)
                 else:
@@ -2430,7 +2034,8 @@ class ExpertBuilder:
                 record[id(candidate)] = (None, OUTCOME_BELOW_FLOOR)
             else:
                 record[id(candidate)] = (
-                    None, OUTCOME_BUDGET if stopped_on_money else OUTCOME_NOT_REACHED
+                    None,
+                    OUTCOME_BUDGET if stopped_on_money else OUTCOME_NOT_REACHED,
                 )
         return results, committed
 
@@ -2494,7 +2099,8 @@ class ExpertBuilder:
                     vs.first_pass_quality,
                     vs.first_pass_relevance,
                     json.dumps(meta["snowball_seed_urls"])
-                    if meta.get("snowball_seed_urls") else None,
+                    if meta.get("snowball_seed_urls")
+                    else None,
                     _as_score(meta.get("triage_score")),
                     vs.substance or substance_of(vs.raw),
                     json.dumps(vs.concept_depths) if vs.concept_depths else None,
@@ -2543,1007 +2149,7 @@ class ExpertBuilder:
         return passed_ids
 
 
-@dataclass
-class DiscoveryOutcome:
-    """What the discovery loop produced, and why it stopped.
-
-    Stored on ``experts.build_summary`` and emitted as ``discovery_done``. The
-    stop reason is the part that matters: "the corpus has 34 sources" is not a
-    claim anyone can check, and "the corpus met its coverage targets in two
-    rounds" or "the corpus stopped at the discovery budget with two concepts
-    short" both are.
-    """
-
-    passed: list[ValidatedSource]
-    dropped: list[DroppedSource]
-    coverage: CoverageReport
-    rounds: int
-    stop_reason: str
-    spent_usd: float
-    committed_usd: float
-    budget_usd: float
-    # What the corpus is made of — tier shares, abstract-only share, junk
-    # fetched, concept shares, must-have works found whole or in part. The
-    # numbers docs/plans/source-selection.md is judged by.
-    corpus: dict | None = None
-    # Channels whose last search failed rather than came back empty, by status.
-    channels: dict[str, str] | None = None
-
-    def summary(self) -> dict:
-        return {
-            "rounds": self.rounds,
-            "stop_reason": self.stop_reason,
-            "accepted": len(self.passed),
-            "rejected": len(self.dropped),
-            "spent_usd": round(self.spent_usd, 4),
-            "estimated_ingest_usd": round(self.committed_usd, 4),
-            "budget_usd": round(self.budget_usd, 4),
-            "rubric_version": RUBRIC_VERSION,
-            "coverage": self.coverage.as_dict(),
-            "corpus": self.corpus or {},
-            "failed_channels": self.channels or {},
-        }
-
-
-# Character ceilings for resolved works, per tier and scope. Ingest costs about
-# $0.27 per 100,000 characters, so a 200,000-character canonical work is about
-# $0.54 and a 60,000-character concept text about $0.16. The fetchers cut the
-# named sections first (sources/sections.py), so the ceiling is spent on the
-# parts the plan asked for rather than on a work's opening.
-# A figure's work gets a concept text's ceiling: it is there for the voice, and
-# six long books must not take the round's money.
-_PRIMARY_TEXT_CHARS: dict[ExpertTier, dict[str, int]] = {
-    ExpertTier.LITE: {SCOPE_OVERALL: 200_000, SCOPE_CONCEPT: 40_000, SCOPE_FIGURE: 40_000},
-    ExpertTier.STANDARD: {SCOPE_OVERALL: 200_000, SCOPE_CONCEPT: 60_000, SCOPE_FIGURE: 60_000},
-    ExpertTier.PRO: {SCOPE_OVERALL: 400_000, SCOPE_CONCEPT: 100_000, SCOPE_FIGURE: 100_000},
-}
-# Priority candidates skip the score floor and the queue. Past this share of a
-# round's money they stop doing so and compete on their scores, so a plan that
-# names many long texts cannot starve the rest of the corpus.
-_PRIORITY_BUDGET_SHARE = Decimal("0.5")
-
-
-def _priority_reservation(candidate: SourceCandidate, batched: bool) -> Decimal:
-    """What a priority candidate is expected to cost, before it is fetched.
-
-    A resolved work carries its text ceiling, which is the honest upper bound;
-    anything else falls back to its source type's typical length.
-    """
-    ceiling = candidate.metadata.get("text_max_chars")
-    if isinstance(ceiling, int) and ceiling > 0:
-        return estimated_ingest_cost_usd(ceiling, 0, batch=batched)
-    return _prefetch_cost_estimate(candidate, batched)
-
-
-def _outcome_metadata(passed: list[ValidatedSource]) -> list[tuple[str, dict]]:
-    """Accepted sources as the must-have outcome reads them: metadata plus tier."""
-    return [(vs.url, {**vs.raw.metadata, "source_tier": vs.source_tier}) for vs in passed]
-
-
-def _merge_same_volume(
-    candidates: list[SourceCandidate], ceiling: int | None = None
-) -> list[SourceCandidate]:
-    """One candidate per URL, carrying every concept's sections for it.
-
-    Two concepts can point at one volume — the Five Ways and the soul are both in
-    the first part of a long work — and URL de-duplication would keep only the
-    first lookup's sections. Merged here, the fetch cuts both.
-    """
-    by_url: dict[str, SourceCandidate] = {}
-    kept: list[SourceCandidate] = []
-    for candidate in candidates:
-        key = candidate.url.rstrip("/").lower()
-        first = by_url.get(key)
-        if first is None:
-            by_url[key] = candidate
-            kept.append(candidate)
-            continue
-        meta, other = first.metadata, candidate.metadata
-        sections = [p for p in (meta.get("must_have_sections"), other.get("must_have_sections")) if p]
-        if sections:
-            meta["must_have_sections"] = "; ".join(dict.fromkeys(sections))
-        concepts = list(dict.fromkeys([*meta.get("must_have_concepts", []), *other.get("must_have_concepts", [])]))
-        if concepts:
-            meta["must_have_concepts"] = concepts
-        if other.get("fetch_priority"):
-            meta["fetch_priority"] = True
-            meta["priority_rank"] = min(meta.get("priority_rank", 2), other.get("priority_rank", 2))
-        ceilings = [c for c in (meta.get("text_max_chars"), other.get("text_max_chars")) if c]
-        if ceilings:
-            # Two concepts' passages from one volume share one fetch, so the
-            # ceiling grows with them — but never past one canonical work's
-            # ceiling. Uncapped, three concept lookups on one Summa volume
-            # summed to 600,000 characters on a live build, and the reservation
-            # for that one volume starved the natural-law volume out of the
-            # round.
-            grown = sum(ceilings)
-            meta["text_max_chars"] = min(grown, ceiling) if ceiling else max(ceilings)
-    return kept
-
-
-def _graph_chunk_limit(chunk_count: int) -> int:
-    limit = settings.GRAPH_MAX_CHUNKS_PER_SOURCE
-    return chunk_count if limit <= 0 else min(chunk_count, limit)
-
-
-def _primary_text_ceilings(tier: ExpertTier) -> dict[str, int]:
-    return dict(_PRIMARY_TEXT_CHARS.get(tier, _PRIMARY_TEXT_CHARS[ExpertTier.STANDARD]))
-
-
-def _type_caps(fetchers: dict, budget: int) -> dict[SourceType, int]:
-    """The most of each source type one corpus may contain.
-
-    A type's cap is :data:`_TYPE_CAP_HEADROOM` times its *planned share* of the
-    budget — the share the research plan's own per-fetcher weights imply. So the
-    caps scale with the budget instead of being fixed at a number sized for a
-    30-source build, and they sum to ``headroom × budget``, which means they
-    shape the mix of the corpus and never cap its size. Deciding size is the
-    money's job.
-    """
-    quotas = {
-        _FETCHER_SOURCE_TYPES[name]: quota for name, (_, quota) in fetchers.items()
-    }
-    total = sum(quotas.values()) or 1
-    return {
-        source_type: max(
-            _TYPE_CAP_MIN,
-            math.ceil(budget * (quota / total) * _TYPE_CAP_HEADROOM),
-        )
-        for source_type, quota in quotas.items()
-    }
-
-
-def _log_previous_build(expert: Expert, batched: bool) -> None:
-    """Note what the last build of this expert concluded, before starting over.
-
-    A stub, deliberately. A rebuild currently wipes the corpus and runs round 0
-    blind, which means it re-discovers everything the previous build already
-    established and re-pays for all of it — and in BACKGROUND mode each round
-    queues its own Message Batch on top. The fix is a rebuild that starts from
-    the stored summary and reports what is *new* since the last build, which is
-    the "living review" follow-on in docs/plans/corpus-quality.md. Until then
-    this at least puts the previous conclusion in the log next to the new one,
-    so the two can be compared without querying the database.
-    """
-    summary = getattr(expert, "build_summary", None)
-    if not isinstance(summary, dict) or not summary:
-        return
-    logger.info(
-        "Rebuilding %r: the previous build ran %s round(s) and stopped with %r, "
-        "accepting %s source(s)%s. This build starts from nothing — the corpus was "
-        "wiped — so that work is being redone.",
-        expert.name,
-        summary.get("rounds"),
-        summary.get("stop_reason"),
-        summary.get("accepted"),
-        " (and this one batches each round separately)" if batched else "",
-    )
-
-
-def discovery_loop_enabled() -> bool:
-    """Whether this build may run more than one discovery round.
-
-    ``auto`` (the default) turns the loop on for interactive builds and off for
-    batched ones: in BACKGROUND mode each round's validation is its own Message
-    Batch that can queue for up to an hour, so three rounds of a PRO build could
-    take most of a day for a saving nobody is waiting on.
-    """
-    configured = settings.DISCOVERY_LOOP
-    if configured in ("true", "1", "yes", "on"):
-        return True
-    if configured in ("false", "0", "no", "off"):
-        return False
-    if configured != "auto":
-        logger.warning("Unknown DISCOVERY_LOOP=%r — falling back to 'auto'", configured)
-    return current_execution() is not BuildExecution.BACKGROUND
-
-
-def _metered_spend() -> Decimal:
-    """What this build has actually spent so far, per the meter. 0 with no meter."""
-    meter = current_meter()
-    return Decimal(str(meter.spent_usd)) if meter is not None else Decimal(0)
-
-
-def _ingest_estimate(source: RawSource, batched: bool) -> Decimal:
-    """Forecast of what ingesting this fetched source will cost."""
-    pages = (
-        estimated_ocr_pages(len(source.text))
-        if source.metadata.get("full_text_method") in PAID_METHODS
-        else 0
-    )
-    return estimated_ingest_cost_usd(len(source.text), pages, batch=batched)
-
-
-def _prefetch_cost_estimate(candidate: SourceCandidate, batched: bool) -> Decimal:
-    """Forecast of a candidate's ingest cost *before* it is fetched.
-
-    Length is a per-source-type prior (see :data:`_EXPECTED_CHARS`) rather than
-    a measurement, which is the best that can be done before the download. It
-    only has to be right about the order of magnitude, because all it decides is
-    the order of the fetch queue.
-    """
-    chars = _EXPECTED_CHARS.get(candidate.source_type, _DEFAULT_EXPECTED_CHARS)
-    method = expected_method(
-        candidate.identifiers, FullTextHints.from_candidate(candidate)
-    )
-    pages = estimated_ocr_pages(chars) if method in PAID_METHODS else 0
-    return estimated_ingest_cost_usd(chars, pages, batch=batched)
-
-
-def _fetch_sort_key(triaged: TriagedCandidate, batched: bool) -> tuple[int, float, float]:
-    """The order the fetch stage works through its ranked candidates.
-
-    Quality first, cost as the tiebreaker — **not** value per dollar.
-
-    Ordering by ``score / cost`` is what phase 6.C of the plan asked for, and it
-    is wrong in a way that only shows up in the finished corpus: cost scales
-    with length, the longest texts are the primary sources, so the rule
-    systematically strips a corpus of the material it most needs. Measured on a
-    live build of "Thomism": a Reddit thread scoring 4 outranked the Summa
-    Theologica scoring 9 by seven to one, Project Gutenberg's three hits were
-    buried below the fetch budget, and the finished expert contained no work by
-    Aquinas at all — while the research plan had correctly named the Summa a
-    must-have and weighted gutenberg at 2.0. The corpus came out 17 tertiary to
-    2 primary.
-
-    So the primary key is the triage score, which is the judgement about worth,
-    and cost only separates candidates the scoring could not tell apart. That
-    still buys what cost-awareness was for: between two equally-rated papers the
-    one with free full text is fetched first and OCR is paid for last.
-
-    Rank 0 is reserved for candidates the pipeline has independent evidence
-    about — a work the research plan named as canonical, or one that two or more
-    accepted sources both cite. Those are fetched before anything else, at any
-    price, because a corpus missing them is wrong in a way no saving repairs.
-
-    Scores are rounded to whole points first: the model's scale is not precise
-    to a tenth, and without rounding the gap between a 7.2 and a 7.0 would
-    decide the order ahead of a real difference in cost.
-    """
-    if triaged.candidate.metadata.get("fetch_priority"):
-        # Among priority candidates: the topic's canonical works, then concept
-        # primary texts, then co-cited snowball finds.
-        return (0, float(triaged.candidate.metadata.get("priority_rank", 2)), 0.0)
-    cost = max(_prefetch_cost_estimate(triaged.candidate, batched), _VALUE_COST_FLOOR)
-    return (1, -round(triaged.score), float(cost))
-
-
-def resolve_execution(expert: Expert) -> BuildExecution:
-    """Pick the cost/latency policy for a build that didn't state one.
-
-    ``BUILD_EXECUTION_DEFAULT=auto`` (the default) reads it off the expert: an
-    expert that has never produced a persona has never finished a build, so
-    somebody is sitting in front of the progress log waiting for their first
-    expert — that build runs live. Anything else is a rebuild or a refresh of an
-    expert that already works, which nobody is blocked on, so it takes the
-    half-price batched path.
-
-    ``reset_build_state`` deletes sources, chunks and the graph but leaves the
-    persona, so this signal survives the reset the worker does immediately
-    before calling us. A retry of a *failed* first build still reads as a first
-    build, which is what we want: the user is still waiting.
-    """
-    configured = settings.BUILD_EXECUTION_DEFAULT
-    if configured in (BuildExecution.INTERACTIVE, BuildExecution.BACKGROUND):
-        return BuildExecution(configured)
-    if configured != "auto":
-        logger.warning(
-            "Unknown BUILD_EXECUTION_DEFAULT=%r — falling back to 'auto'", configured
-        )
-    return BuildExecution.BACKGROUND if expert.persona_name else BuildExecution.INTERACTIVE
-
-
-def plan_user_message(topic: str, orientation: OrientationPack | None) -> str:
-    """The planner's input: the topic, then whatever the orientation pack read."""
-    if orientation is None or orientation.empty:
-        return f"Topic: {topic}"
-    return f"Topic: {topic}\n\n{orientation.render()}"
-
-
-async def _plan_research(topic: str, max_concepts: int = 8) -> dict:
-    """One call on the strong model — the brief shapes the whole corpus.
-
-    The planner reads a reference overview or two first (sources/orientation.py)
-    and is shown how they structure the topic. That lookup never fails the plan:
-    without it, the plan is written from the topic alone, as it always was.
-
-    Always returns a normalised plan: every fetcher has non-empty queries and a
-    clamped weight, even when the model call fails (fallback = raw topic, weight 1).
-    """
-    orientation = await build_orientation_pack(topic)
-    if orientation.empty:
-        logger.info("Orientation for %r: nothing read — planning from the topic alone", topic)
-    else:
-        logger.info(
-            "Orientation for %r: read %s",
-            topic,
-            "; ".join(f"{o.source} {o.title!r} ({len(o.headings)} headings)" for o in orientation.overviews),
-        )
-
-    raw_plan: dict = {}
-    try:
-        client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
-            model=settings.PLAN_MODEL,
-            max_tokens=4000,
-            system=_plan_system(max_concepts),
-            tools=[_plan_tool(max_concepts)],
-            tool_choice={"type": "tool", "name": "create_research_plan"},
-            messages=[{"role": "user", "content": plan_user_message(topic, orientation)}],
-        )
-        block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-        raw_plan = dict(block.input)
-    except Exception as exc:
-        logger.warning(
-            "Research planning failed (%s: %s) — falling back to raw topic. The build "
-            "continues DEGRADED: no key concepts, one query per fetcher instead of "
-            "several, and no coverage gap-fill.",
-            type(exc).__name__, exc, exc_info=True,
-        )
-
-    plan = _normalise_plan(raw_plan, topic, max_concepts)
-    plan["orientation"] = orientation.record(plan.pop("orientation_note", ""))
-    logger.info(
-        "Research plan for %r: facets=[%s] weights={%s} must_have=[%s] figures=[%s]",
-        topic,
-        "; ".join(f"{f['name']}: {', '.join(f['concepts'])}" for f in plan["facets"]),
-        ", ".join(f"{n}:{p['weight']:g}" for n, p in plan["fetcher_plans"].items()),
-        "; ".join(w["title"] for w in plan["must_have_works"]),
-        ", ".join(f["name"] for f in plan["figures"]),
-    )
-    if not plan["key_concepts"]:
-        # Reachable without an exception too — a model can return a well-formed
-        # plan with an empty concept list. Either way every downstream stage that
-        # takes key_concepts (triage, validation, gap-fill) is now working blind,
-        # and until this line said so the only evidence was an empty list buried
-        # in the plan_ready event.
-        logger.warning(
-            "Research plan for %r has NO key concepts — triage, validation and "
-            "gap-fill will all run without a syllabus to score against",
-            topic,
-        )
-    return plan
-
-
-def _normalise_plan(raw_plan: dict, topic: str, max_concepts: int = 8) -> dict:
-    """Coerce a model-produced plan into a safe, complete shape.
-
-    ``facets`` is the syllabus's two levels; ``key_concepts`` is the same
-    concepts flattened in facet order, which is what every downstream reader
-    (triage, validation, coverage, feedback, both clients) keeps reading.
-    """
-    fetcher_plans: dict[str, dict] = {}
-    raw_fetcher_plans = raw_plan.get("fetcher_plans") or {}
-    for name in _FETCHER_NAMES:
-        raw = raw_fetcher_plans.get(name) or {}
-        queries: list[str] = []
-        for q in raw.get("queries") or []:
-            if (
-                isinstance(q, str)
-                and q.strip()
-                and q.strip().casefold() not in {d.casefold() for d in queries}
-            ):
-                queries.append(q.strip())
-        try:
-            weight = float(raw.get("weight", 1.0))
-        except (TypeError, ValueError):
-            weight = 1.0
-        fetcher_plans[name] = {
-            "queries": queries[:_MAX_QUERIES_PER_FETCHER] or [topic],
-            "weight": min(max(weight, 0.0), 2.0),
-        }
-
-    facets = _normalise_facets(raw_plan, topic, max_concepts)
-    key_concepts = [c for facet in facets for c in facet["concepts"]]
-
-    must_have_works = [
-        work
-        for raw in raw_plan.get("must_have_works") or []
-        if isinstance(raw, dict) and (work := _normalise_work(raw)) is not None
-    ]
-
-    canonical_concepts = {c.casefold(): c for c in key_concepts}
-    concept_texts = []
-    for raw in raw_plan.get("concept_primary_texts") or []:
-        if not isinstance(raw, dict):
-            continue
-        work = _normalise_work(raw)
-        concept = canonical_concepts.get(str(raw.get("concept") or "").strip().casefold())
-        if work is None or concept is None:
-            continue
-        concept_texts.append({"concept": concept, **work})
-
-    definition = raw_plan.get("primary_source_definition")
-    note = raw_plan.get("orientation_note")
-    return {
-        "fetcher_plans": fetcher_plans,
-        "facets": facets,
-        "key_concepts": key_concepts,
-        "primary_source_definition": definition.strip() if isinstance(definition, str) else "",
-        "must_have_works": must_have_works[:4],
-        # At most two per concept: a third text for one concept is budget another
-        # concept's primary text does not get.
-        "concept_primary_texts": _at_most_per_concept(concept_texts, 2)[:16],
-        "figures": _normalise_figures(raw_plan.get("figures")),
-        "orientation_note": note.strip() if isinstance(note, str) else "",
-    }
-
-
-def _clean_concepts(raw: Any) -> list[str]:
-    return [c.strip() for c in raw or [] if isinstance(c, str) and c.strip()] if isinstance(raw, list) else []
-
-
-def _normalise_facets(raw_plan: dict, topic: str, max_concepts: int) -> list[dict]:
-    """Facets with their concepts, de-duplicated across facets and capped.
-
-    A model that ignores ``facets`` and returns only ``key_concepts`` gets one
-    facet named after the topic, and a concept listed in ``key_concepts`` but in
-    no facet joins a facet of its own rather than vanishing. The cap trims from
-    the largest facet first, so trimming never empties a facet.
-    """
-    seen: set[str] = set()
-    facets: list[dict] = []
-
-    def _take(concepts: list[str]) -> list[str]:
-        kept = []
-        for concept in concepts:
-            if concept.casefold() not in seen:
-                seen.add(concept.casefold())
-                kept.append(concept)
-        return kept
-
-    for raw in raw_plan.get("facets") or [] if isinstance(raw_plan.get("facets"), list) else []:
-        if not isinstance(raw, dict):
-            continue
-        name = raw.get("name")
-        concepts = _take(_clean_concepts(raw.get("concepts"))[:_MAX_CONCEPTS_PER_FACET])
-        if concepts:
-            facets.append({
-                "name": name.strip() if isinstance(name, str) and name.strip() else f"Facet {len(facets) + 1}",
-                "concepts": concepts,
-            })
-        if len(facets) >= _MAX_FACETS:
-            break
-
-    orphans = _take(_clean_concepts(raw_plan.get("key_concepts")))
-    if orphans:
-        facets.append({"name": topic if not facets else "Other", "concepts": orphans})
-
-    limit = max(1, max_concepts)
-    while sum(len(f["concepts"]) for f in facets) > limit:
-        largest = max(range(len(facets)), key=lambda i: (len(facets[i]["concepts"]), i))
-        if len(facets[largest]["concepts"]) > 1:
-            facets[largest]["concepts"].pop()
-        else:
-            facets.pop()
-    return facets
-
-
-def _normalise_figures(raw: Any) -> list[dict]:
-    """Up to six named figures, each with one obtainable work or none."""
-    figures: list[dict] = []
-    seen: set[str] = set()
-    for entry in raw if isinstance(raw, list) else []:
-        if not isinstance(entry, dict):
-            continue
-        name = entry.get("name")
-        if not isinstance(name, str) or not name.strip() or name.strip().casefold() in seen:
-            continue
-        seen.add(name.strip().casefold())
-        why = entry.get("why")
-        work = _normalise_work(entry["work"]) if isinstance(entry.get("work"), dict) else None
-        obtainable = entry.get("obtainable") is True and work is not None
-        if work is not None:
-            work.pop("substitute", None)
-            work["author"] = work["author"] or name.strip()
-        figures.append({
-            "name": name.strip(),
-            "why": why.strip() if isinstance(why, str) else "",
-            "work": work if obtainable else None,
-            "obtainable": obtainable,
-        })
-        if len(figures) >= _MAX_FIGURES:
-            break
-    return figures
-
-
-def _normalise_work(work: dict, allow_substitute: bool = True) -> dict | None:
-    title = work.get("title")
-    if not isinstance(title, str) or not title.strip():
-        return None
-    author = work.get("author")
-    kind = work.get("kind")
-    sections = work.get("sections")
-    normalised: dict[str, Any] = {
-        "title": title.strip(),
-        "author": author.strip() if isinstance(author, str) else "",
-        "kind": kind if kind in WORK_KINDS else "book",
-        "public_domain": work.get("public_domain") is True,
-        "sections": sections.strip() if isinstance(sections, str) else "",
-        "open_text": work.get("open_text") is True,
-    }
-    substitute = work.get("substitute")
-    if allow_substitute and isinstance(substitute, dict):
-        normalised_substitute = _normalise_work(substitute, allow_substitute=False)
-        if (
-            normalised_substitute is not None
-            and title_key(normalised_substitute["title"]) != title_key(normalised["title"])
-        ):
-            normalised["substitute"] = normalised_substitute
-    return normalised
-
-
-def _at_most_per_concept(texts: list[dict], limit: int) -> list[dict]:
-    counts: dict[str, int] = {}
-    kept = []
-    for text in texts:
-        counts[text["concept"]] = counts.get(text["concept"], 0) + 1
-        if counts[text["concept"]] <= limit:
-            kept.append(text)
-    return kept
-
-
-def _route_must_have_works(plan: dict) -> None:
-    """Add exact-title queries for named works to the fetchers that answer them.
-
-    Works are looked for by the canonical resolver (sources/canonical.py), which
-    searches the Gutenberg catalogue, the Internet Archive and Exa by title and
-    records whether it found the whole work. What is left for the planned search:
-
-    - **papers** also go to OpenAlex, the scholarly channel, as a title query;
-    - **without an Exa key** the resolver's Exa routes cannot run, so every work
-      goes to the web fetcher as a quoted title, as before.
-
-    Each extra query gets at least one result slot in the fan-out, so a must-have
-    work costs little budget but is actively looked for.
-    """
-    works = plan["must_have_works"]
-    if not works:
-        return
-
-    def _add(target: str, selected: list[dict]) -> None:
-        queries = [f'"{w["title"]}" {w.get("author", "")}'.strip() for w in selected]
-        if not queries:
-            return
-        fetcher_plan = plan["fetcher_plans"][target]
-        existing = {q.casefold() for q in fetcher_plan["queries"]}
-        fetcher_plan["queries"] += [q for q in queries if q.casefold() not in existing]
-        fetcher_plan["weight"] = max(fetcher_plan["weight"], 1.0)
-
-    if not settings.EXA_API_KEY:
-        _add("web", works)
-    _add("openalex", [w for w in works if w.get("kind") == "paper"])
-
-
-async def _reconcile_claims(
-    topic: str,
-    expert_id: int,
-    graph_repo: GraphRepository,
-    on_event: EventCallback | None = None,
-) -> int:
-    """Relate the claims different sources make about the same concept.
-
-    Best-effort inside a stage that is itself best-effort: a graph with claims,
-    concepts and an index between them is already useful, so a failure here
-    leaves that standing rather than degrading the whole stage and sending the
-    build back through the worker's retry loop.
-
-    ``claims_reconciled`` is emitted on every run, including the ones that
-    insert nothing. It used to fire only when a relation was inserted, and
-    production reconciliation has never inserted one: the church-fathers build
-    spent 23 seconds in this stage — too short for ~120 model calls to have
-    run, and four seconds before the API refused its persona call — and the
-    log could not say whether the calls failed, returned nothing, or returned
-    relations that were all rejected. The event now says which.
-    """
-    stats = ReconcileStats()
-    groups: list = []
-    inserted = 0
-    error: str | None = None
-    try:
-        groups = await graph_repo.claims_by_concept(expert_id)
-        if groups:
-            relations = await reconcile_claims(topic, groups, stats=stats)
-            inserted = await graph_repo.insert_relations(expert_id, relations)
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        error = f"{type(exc).__name__}: {exc}"
-        logger.warning("Claim reconciliation failed for expert %d: %s", expert_id, exc)
-
-    parsed = stats.relations_returned - sum(stats.rejected.values())
-    event: dict[str, Any] = {
-        "type": "claims_reconciled",
-        "concepts": len(groups),
-        "relations": inserted,
-        **stats.as_event(),
-        # Parsed but refused at insert (endpoint types, missing property).
-        "relations_refused_at_insert": max(0, parsed - inserted),
-    }
-    if error:
-        event["error"] = error
-    await _emit_event(on_event, event)
-
-    if stats.concepts_examined and stats.calls_failed == stats.concepts_examined:
-        provider = terminal_provider_error()
-        logger.error(
-            "Reconciliation for expert %d: every one of %d call(s) failed%s",
-            expert_id, stats.calls_failed,
-            f" — {provider_error_message(provider)}" if provider else "",
-        )
-    logger.info(
-        "Reconciliation for expert %d: %d concept group(s), %d eligible, %d examined, "
-        "%d call(s) failed, %d relation(s) returned, %d rejected %s, %d inserted",
-        expert_id, len(groups), stats.concepts_eligible, stats.concepts_examined,
-        stats.calls_failed, stats.relations_returned, sum(stats.rejected.values()),
-        dict(stats.rejected), inserted,
-    )
-    return inserted
-
-
-async def _resolve_entities(
-    expert_id: int,
-    graph_repo: GraphRepository,
-    on_event: EventCallback | None = None,
-) -> int:
-    """Merge duplicate graph nodes: by canonical label, then by embedding.
-
-    See :mod:`peritus.graph.resolution` for the rules and why cosine alone was
-    not enough.
-    """
-    try:
-        import numpy as np
-    except ImportError:
-        logger.debug("numpy not available — skipping entity resolution")
-        return 0
-
-    nodes = await graph_repo.get_all_nodes(expert_id)
-    if len(nodes) < 2:
-        return 0
-
-    merge_count = 0
-
-    async def _merge(keep: dict, drop: dict, how: str) -> None:
-        nonlocal merge_count
-        await graph_repo.merge_nodes(expert_id, keep["id"], drop["id"])
-        merge_count += 1
-        logger.debug("Merged node %r → %r (%s)", drop["label"], keep["label"], how)
-        if on_event and merge_count % 25 == 0:
-            await _emit_event(on_event, {"type": "resolve_progress", "merged": merge_count})
-
-    # 1. Same concept by label: "Varroa mites" / "Varroa mite",
-    #    "Deformed Wing Virus (DWV)" / "DWV (Deformed Wing Virus)".
-    label_merged: set[int] = set()
-    for keep, drops in canonical_merge_plan(nodes):
-        for drop in drops:
-            await _merge(keep, drop, "canonical label")
-            label_merged.add(drop["id"])
-    by_label = merge_count
-    nodes = [n for n in nodes if n["id"] not in label_merged]
-    if len(nodes) < 2:
-        return merge_count
-
-    # 2. Same thing by meaning. Node embeddings are persisted at insert time;
-    # only nodes that missed embedding (e.g. an API blip during insert) get
-    # re-embedded here. Batched so a graph whose embeddings all failed at insert
-    # can't overflow one call.
-    missing = [i for i, n in enumerate(nodes) if n.get("embedding") is None]
-    if missing:
-        texts = [
-            node_embedding_text(nodes[i]["label"], nodes[i].get("description")) for i in missing
-        ]
-        try:
-            fresh = await embed_in_batches(texts)
-        except Exception as exc:
-            logger.warning("Entity resolution embedding failed: %s", exc)
-            return merge_count
-        for i, emb in zip(missing, fresh, strict=True):
-            nodes[i]["embedding"] = emb
-
-    matrix = np.array([np.asarray(n["embedding"], dtype=np.float32) for n in nodes])
-    norms = np.linalg.norm(matrix, axis=1, keepdims=True)
-    norms = np.where(norms == 0, 1.0, norms)
-    normalized = matrix / norms
-    sim = normalized @ normalized.T  # (N, N)
-
-    # Candidate pairs at C speed (upper triangle, i < j) at the lowest threshold
-    # any pair could use; the per-pair rule then decides. The old pure-Python
-    # O(N²) double loop had no ``await`` on the common no-merge path, so on a
-    # large graph it blocked the event loop — starving the job heartbeat — for
-    # the whole pass. np.where keeps row-major order (increasing i, then j).
-    floor = min(RESOLVE_THRESHOLD, RESOLVE_THRESHOLD_SAME_HEAD)
-    rows, cols = np.where(np.triu(sim >= floor, k=1))
-
-    merged_away: set[int] = set()
-    for i, j in zip(rows.tolist(), cols.tolist(), strict=True):
-        keep, drop = nodes[i], nodes[j]
-        if keep["id"] in merged_away or drop["id"] in merged_away:
-            continue
-        threshold = pair_threshold(keep, drop)
-        if threshold is None or sim[i, j] < threshold:
-            continue
-        await _merge(keep, drop, f"sim={float(sim[i, j]):.3f}")
-        merged_away.add(drop["id"])
-
-    if merge_count:
-        logger.info(
-            "Entity resolution: merged %d duplicate nodes for expert %d "
-            "(%d by label, %d by embedding)",
-            merge_count, expert_id, by_label, merge_count - by_label,
-        )
-    return merge_count
-
-
-def _search_breadth(quota: int, query_count: int) -> int:
-    """Results to request per search query for a fetcher with this fetch quota.
-
-    Overfetch scales with the quota so a heavily-weighted fetcher hands triage
-    proportionally more to choose from, but never drops below
-    ``_MIN_RESULTS_PER_QUERY`` — see the note on that constant.
-    """
-    return max(
-        _MIN_RESULTS_PER_QUERY,
-        math.ceil(quota * _SEARCH_OVERFETCH / max(1, query_count)),
-    )
-
-
-def _is_skipped(name: str, results: list) -> tuple[bool, str]:
-    if results:
-        return False, ""
-    if name in ("youtube", "exa") and not settings.EXA_API_KEY:
-        return True, "no EXA_API_KEY"
-    if name == "pdf" and not settings.MISTRAL_API_KEY:
-        return True, "no MISTRAL_API_KEY"
-    return False, ""
-
-
-async def _safe_search(name: str, fetcher, query: str, max_results: int) -> SearchOutcome:
-    """One search call, and why it came back with what it did. Never raises.
-
-    ``empty`` means the channel answered and had nothing; ``timeout``,
-    ``rate_limited`` and ``error`` mean it did not answer — whether the fetcher
-    raised or swallowed the failure and noted it (see fetchers/base.py).
-    """
-    from peritus.sources.fetchers.exa import classify_search_error
-
-    started = time.monotonic()
-    note, token = begin_search_note()
-    try:
-        results = await fetcher.search(query, max_results)
-    except Exception as exc:
-        elapsed = time.monotonic() - started
-        logger.warning(
-            "Fetcher %r search failed for %r after %.1fs (%s: %s)",
-            name, query, elapsed, type(exc).__name__, exc,
-            exc_info=True,
-        )
-        status, error = classify_search_error(exc, name)
-        return SearchOutcome([], status, error, elapsed)
-    finally:
-        end_search_note(token)
-    elapsed = time.monotonic() - started
-    # Discovery gathers every fetcher, so the slowest one sets the stage's floor.
-    # Naming it at WARNING is what turns "discovery took five minutes" into
-    # "gutenberg took four and a half of them".
-    log = logger.warning if elapsed > _SLOW_SEARCH_SECONDS else logger.debug
-    log(
-        "Fetcher %r search %r: %d result(s) in %.1fs%s",
-        name, query, len(results), elapsed,
-        " — slow, this holds up the whole discovery stage"
-        if elapsed > _SLOW_SEARCH_SECONDS else "",
-    )
-    if results:
-        return SearchOutcome(list(results), STATUS_OK, "", elapsed)
-    if note.failures:
-        status = worst_status([status for status, _ in note.failures])
-        error = next(err for st, err in note.failures if st == status)
-        logger.warning("Fetcher %r search %r returned nothing: %s (%s)", name, query, status, error)
-        return SearchOutcome([], status, error, elapsed)
-    return SearchOutcome([], STATUS_EMPTY, "", elapsed)
-
-
-def _fetcher_for(candidate: SourceCandidate, fetcher_by_type: dict):
-    """The fetcher that can download this candidate.
-
-    Canonical-work candidates can come from routes no planned fetcher covers — an
-    Internet Archive item, a Gutenberg volume when the planner weighted
-    gutenberg to 0 — and must still be fetchable.
-    """
-    # Any archive.org item, however it was found: its catalogue page is not its
-    # text, and only the archive fetcher checks the item may be reused.
-    if candidate.metadata.get("canonical_fetcher") == "archive" or archive_identifier(
-        candidate.url
-    ):
-        return ArchiveTextFetcher()
-    fetcher = fetcher_by_type.get(candidate.source_type)
-    if fetcher is None and candidate.metadata.get("canonical_route"):
-        if candidate.source_type is SourceType.GUTENBERG:
-            return GutenbergFetcher()
-        if candidate.source_type is SourceType.EXA:
-            return ExaFetcher()
-        if candidate.source_type is SourceType.OPENALEX:
-            return OpenAlexFetcher()
-    return fetcher
-
-
-def _carry_candidate_metadata(
-    candidate: SourceCandidate, source: RawSource, score: float
-) -> None:
-    """Copy the selection facts a fetcher may not have onto the fetched source."""
-    for key in _CARRIED_METADATA:
-        if key in candidate.metadata and key not in source.metadata:
-            source.metadata[key] = candidate.metadata[key]
-    source.metadata["triage_score"] = round(score, 2)
-
-
-def _planned_works(plan: dict, config) -> list[MustHaveWork]:
-    """The works the plan names, as many as the tier affords.
-
-    The topic's canonical works, then the primary text for each concept, then a
-    work in each named figure's own voice. A work named at more than one scope
-    is resolved once (sources/canonical.py, merge_works).
-    """
-    return (
-        [MustHaveWork.from_plan(w, SCOPE_OVERALL) for w in plan.get("must_have_works") or []]
-        + [
-            MustHaveWork.from_plan(w, SCOPE_CONCEPT)
-            for w in (plan.get("concept_primary_texts") or [])[
-                : config.concept_primary_texts
-            ]
-        ]
-        + _figure_works(plan.get("figures") or [], config.figure_texts)
-    )
-
-
-def _figure_works(figures: list[dict], limit: int) -> list[MustHaveWork]:
-    """One lookup per named figure with an obtainable work, up to the tier's limit."""
-    works: list[MustHaveWork] = []
-    for figure in figures:
-        if len(works) >= limit:
-            break
-        # The plan keeps a work only for an obtainable figure, with the figure as
-        # its author when none was given (_normalise_figures).
-        if isinstance(figure.get("work"), dict):
-            work = MustHaveWork.from_plan(figure["work"], SCOPE_FIGURE)
-            work.figure = str(figure.get("name") or "")
-            works.append(work)
-    return works
-
-
-def _enforce_ceiling(candidate: SourceCandidate, source: RawSource) -> None:
-    """Cut a fetched text to the ceiling its candidate was stamped with.
-
-    The fetchers that cut named sections apply the ceiling themselves, and a
-    live Thomism build still stored the Summa's first part at 584,000
-    characters against a 200,000 ceiling — a third of the round's estimated
-    ingest in one volume. Whichever path skipped it, the ceiling is enforced
-    here, where every fetch arrives, and the log names the fetcher so the next
-    build says which path it was. The cut is the same one the fetchers make —
-    the named sections first, then the ceiling — so a path that skipped it keeps
-    the passages the plan asked for rather than the work's opening.
-    """
-    ceiling = candidate.metadata.get("text_max_chars")
-    if not isinstance(ceiling, int) or ceiling <= 0 or len(source.text) <= ceiling:
-        return
-    logger.warning(
-        "ceiling_enforced: %s returned %d chars for %r against a %d ceiling — cut",
-        candidate.metadata.get("canonical_fetcher") or candidate.source_type.value,
-        len(source.text), candidate.title, ceiling,
-    )
-    source.text, selected = apply_sections(source.text, candidate.metadata, ceiling)
-    source.metadata.update(selected, truncated=True, ceiling_enforced=True)
-
-
-def _boosted_must_have_titles(
-    titles: list[str],
-    round_n: int,
-    resolutions: list[WorkResolution],
-    passed: list[ValidatedSource],
-) -> list[str]:
-    """The must-have titles a round's triage still lifts to the front of the queue.
-
-    Not a work already found whole. The boost exists so a canonical work found by
-    search is not lost to its score; once the work is in hand it only lifts pages
-    that share its name. Round 1 of a live Thomism build fetched five boosted
-    hits with the Summa's first part already in the corpus, three of them not
-    the work.
-
-    Round 0 has no corpus yet, so a work the resolver found whole (its
-    candidate already jumps the queue) is dropped from the boost; later rounds
-    drop a work once it is found whole in the accepted corpus — which keeps the
-    boost for a work whose whole copy failed to download.
-    """
-    if round_n == 0:
-        whole = {title_key(r.work.title) for r in resolutions if r.whole}
-    else:
-        whole = {
-            title_key(o["title"])
-            for o in must_have_outcomes(
-                [MustHaveWork(t) for t in titles], resolutions, _outcome_metadata(passed)
-            )
-            if o["status"] == FOUND_WHOLE
-        }
-    return [t for t in titles if title_key(t) not in whole]
-
-
-def _count_outcomes(outcomes) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for _rank, outcome in outcomes:
-        counts[outcome] = counts.get(outcome, 0) + 1
-    return counts
-
-
-def _as_score(value) -> float | None:
-    try:
-        return float(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-async def _quietly(what: str, awaitable) -> None:
-    """Await a record-keeping write that must never fail the build it records.
-
-    The ledger, the stored plan and their links are for auditing selection
-    afterwards. A database blip there costs the audit trail for one build, and
-    says so in the log; it must not cost the build.
-    """
-    try:
-        await awaitable
-    except asyncio.CancelledError:
-        raise
-    except Exception as exc:
-        logger.warning("Could not %s (%s: %s)", what, type(exc).__name__, exc)
-
-
-async def _safe_fetch_candidate(fetcher, candidate: SourceCandidate) -> RawSource | None:
-    """Fetch one candidate's full content, or None. Never raises, never hangs.
-
-    The wall-clock cap matters as much as the exception handling. Each fetcher
-    sets httpx timeouts, but httpx's are per-operation: a server that sends a
-    byte before every read deadline satisfies all of them forever. One such URL
-    inside a fetch wave stalls the wave, and the fetch stage is the longest
-    event-silent stretch of the build — so the symptom is a build that simply
-    stops, with a full progress bar and nothing to say why.
-    """
-    if fetcher is None:
-        return None
-    try:
-        source = await asyncio.wait_for(
-            fetcher.fetch(candidate), timeout=settings.SOURCE_FETCH_TIMEOUT
-        )
-        if source is not None:
-            _stamp_retrieval_method(source)
-        return source
-    except TimeoutError:
-        logger.warning(
-            "Full fetch timed out after %.0fs for %s %r — abandoning candidate",
-            settings.SOURCE_FETCH_TIMEOUT, candidate.source_type.value, candidate.url,
-        )
-        return None
-    except Exception as exc:
-        logger.warning(
-            "Full fetch failed for %s %r (%s: %s)",
-            candidate.source_type.value, candidate.url, type(exc).__name__, exc,
-        )
-        return None
-
-
-def _stamp_retrieval_method(source: RawSource) -> None:
-    """Record how this source's text was obtained, for fetchers that don't.
-
-    The scholarly fetchers go through the full-text resolver and record the step
-    it took. The rest have exactly one way of getting text, so the value is
-    known — and leaving it NULL would say "unknown" about a retrieval that was
-    never in doubt, both in the ledger and in the preview the validator reads.
-    """
-    if source.metadata.get("full_text_method"):
-        return
-    method = default_method_for(source.source_type.value)
-    if method:
-        source.metadata["full_text_method"] = method
-
-
-_PERSONA_TOOL: dict[str, Any] = {
+_PERSONA_TOOL: ToolParam = {
     "name": "generate_persona",
     "description": "Generate a named expert persona grounded in the corpus.",
     "input_schema": {
@@ -3648,7 +2254,7 @@ async def generate_persona(
     concept_list = ", ".join(n["label"] for n in top_nodes[:20])
 
     client = get_anthropic_client()
-    resp = await client.messages.create(  # type: ignore[call-overload]
+    resp = await client.messages.create(
         model=settings.CLAUDE_MODEL,
         # 1024 was enough when `style` was a sentence about how the expert cites.
         # A teaching profile is several paragraphs, and `style` is the last field
@@ -3658,20 +2264,20 @@ async def generate_persona(
         max_tokens=3072,
         system=_PERSONA_SYSTEM,
         tools=[_PERSONA_TOOL],
-        tool_choice={"type": "tool", "name": "generate_persona"},
+        tool_choice=ToolChoiceToolParam(type="tool", name="generate_persona"),
         messages=[
-            {
-                "role": "user",
-                "content": (
+            MessageParam(
+                role="user",
+                content=(
                     f"Topic: {topic}\n\n"
                     f"Sources ingested:\n{_persona_digest(sources)}\n\n"
                     f"Top concepts extracted: {concept_list}"
                 ),
-            }
+            )
         ],
     )
-    block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-    persona = dict(block.input)
+    block = tool_input(resp) or {}
+    persona = dict(block)
 
     # A tool call cut off by the token budget still parses — it just arrives
     # missing its trailing fields. Catching it here names the cause; letting it
@@ -3714,7 +2320,7 @@ def corpus_tier_warning(passed: list[ValidatedSource]) -> dict | None:
     could not classify are counted separately and never held against the corpus:
     an unclassified source is unknown, not tertiary.
     """
-    counts = {tier: 0 for tier in ("primary", "secondary", "tertiary")}
+    counts = dict.fromkeys(("primary", "secondary", "tertiary"), 0)
     unclassified = 0
     for vs in passed:
         if vs.source_tier in counts:
@@ -3753,34 +2359,6 @@ def _avg_quality(passed: list[ValidatedSource]) -> float | None:
     return round(sum(scores) / len(scores), 2) if scores else None
 
 
-def _deduplicate_by_url[T: (RawSource, SourceCandidate)](items: list[T]) -> list[T]:
-    """Remove items with duplicate URLs, keeping the first occurrence."""
-    seen: set[str] = set()
-    unique: list[T] = []
-    for item in items:
-        key = item.url.rstrip("/").lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-    return unique
-
-
-def _raise_if_provider_down(stage: str) -> None:
-    """Fail with the provider's own words when the LLM was never reachable.
-
-    A ``BuildError`` deliberately: the worker treats those as non-retryable, and
-    an empty credit balance or a rejected key will fail identically on every
-    attempt. Retrying costs three builds' worth of fetching to reach the same
-    place, and buries the one sentence that says how to fix it.
-    """
-    exc = terminal_provider_error()
-    if exc is None:
-        return
-    message = provider_error_message(exc)
-    logger.error("%s could not run — terminal provider error: %s", stage, message)
-    raise BuildError(f"{stage} could not run — the Anthropic API rejected every request: {message}")
-
-
 async def _emit_event(cb: EventCallback | None, event: dict) -> None:
     _log_event(event)
     if cb:
@@ -3798,16 +2376,39 @@ _stage_started: ContextVar[tuple[str, float] | None] = ContextVar(
 # Events worth a log line of their own. The rest (per-source validation, per-batch
 # graph progress) are high-volume and already visible in the durable event log —
 # logging those too would bury the ones that matter.
-_LOGGED_EVENTS = frozenset({
-    "stage", "plan_ready", "picture_ready", "picture_skipped",
-    "discovery_started", "round_started", "canonical_resolved", "fetcher_retried",
-    "floor_relaxed", "composition_capped",
-    "feedback_queries", "dedup_done", "triage_done", "fetch_done",
-    "validate_done", "coverage_report", "discovery_done", "snowball_done",
-    "corpus_warning", "chat_ready", "graph_ready", "entities_resolved",
-    "claims_reconciled", "build_resumed",
-    "persona_ready", "stage_degraded", "error", "cancelled", "done",
-})
+_LOGGED_EVENTS = frozenset(
+    {
+        "stage",
+        "plan_ready",
+        "picture_ready",
+        "picture_skipped",
+        "discovery_started",
+        "round_started",
+        "canonical_resolved",
+        "fetcher_retried",
+        "floor_relaxed",
+        "composition_capped",
+        "feedback_queries",
+        "dedup_done",
+        "triage_done",
+        "fetch_done",
+        "validate_done",
+        "coverage_report",
+        "discovery_done",
+        "snowball_done",
+        "corpus_warning",
+        "chat_ready",
+        "graph_ready",
+        "entities_resolved",
+        "claims_reconciled",
+        "build_resumed",
+        "persona_ready",
+        "stage_degraded",
+        "error",
+        "cancelled",
+        "done",
+    }
+)
 
 
 def _clip(value: Any, limit: int = 160) -> str:
@@ -3840,9 +2441,7 @@ def _log_event(event: dict) -> None:
     # Values are model output (concept lists, warning prose) and can run to
     # hundreds of characters. Truncated per field so one verbose event cannot
     # push a whole build's worth of real log lines off the screen.
-    detail = ", ".join(
-        f"{k}={_clip(v)}" for k, v in event.items() if k != "type"
-    )
+    detail = ", ".join(f"{k}={_clip(v)}" for k, v in event.items() if k != "type")
     if kind in ("error", "cancelled"):
         logger.error("Build event %s: %s", kind, detail)
     elif kind in ("stage_degraded", "corpus_warning"):

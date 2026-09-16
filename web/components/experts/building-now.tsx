@@ -24,9 +24,7 @@ export function BuildingNow({ expert }: { expert: ExpertSummary }) {
   const { state, reconnecting } = useBuildEvents(expert.name)
   const elapsed = useElapsed(expert.created_at)
 
-  const stageIndex = state.activeStage
-    ? TIMELINE.findIndex((s) => s.key === state.activeStage)
-    : -1
+  const stageIndex = state.activeStage ? TIMELINE.findIndex((s) => s.key === state.activeStage) : -1
   const stageLabel =
     stageIndex >= 0 ? TIMELINE[stageIndex].label : state.terminal ? 'Finishing' : 'Waiting to start'
   // A batched build can genuinely run for hours, so the counter is never
@@ -43,7 +41,7 @@ export function BuildingNow({ expert }: { expert: ExpertSummary }) {
       href={`/experts/${expert.name}/build`}
       className={cn(
         'flex items-center gap-3 rounded-card bg-panel p-3',
-        'transition-colors duration-(--dur-1) hover:bg-raised',
+        'transition-colors duration-(--dur-1) hover:bg-raised'
       )}
     >
       <span className="relative">
@@ -58,7 +56,7 @@ export function BuildingNow({ expert }: { expert: ExpertSummary }) {
         <span className="block truncate text-sm font-medium text-fg">{displayName(expert)}</span>
         {/* The stage text crossfades on change; nothing slides. */}
         <span key={stageLabel} className="mt-0.5 flex items-center gap-1.5 text-xs">
-          <span className="animate-in fade-in duration-(--dur-2) text-warn">{stageLabel}</span>
+          <span className="animate-in text-warn duration-(--dur-2) fade-in">{stageLabel}</span>
           {detail && <span className="truncate text-fg-3">{detail}</span>}
           {reconnecting && <span className="text-fg-3">reconnecting…</span>}
         </span>

@@ -19,8 +19,10 @@ def _construct_with_captured_kwargs() -> dict:
         def __init__(self, **kwargs):
             captured.update(kwargs)
 
-    with patch.object(anthropic_client, "_client", None), \
-         patch.object(anthropic_client.anthropic, "AsyncAnthropic", _FakeAnthropic):
+    with (
+        patch.object(anthropic_client, "_client", None),
+        patch.object(anthropic_client.anthropic, "AsyncAnthropic", _FakeAnthropic),
+    ):
         anthropic_client.get_anthropic_client()
     return captured
 

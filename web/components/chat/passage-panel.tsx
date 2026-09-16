@@ -30,9 +30,7 @@ export function PassagePanel({
   return (
     <div className="space-y-3 text-sm">
       <div>
-        <p className="text-label tracking-[0.04em] text-fg-3 uppercase">
-          Passage {citation.n}
-        </p>
+        <p className="text-label tracking-[0.04em] text-fg-3 uppercase">Passage {citation.n}</p>
         {/* The cited span itself, washed in the expert's colour. */}
         <blockquote className="mt-1.5 rounded-card bg-expert-soft p-2.5 text-fg-2">
           {citation.label}
@@ -94,10 +92,7 @@ export function PassagePanel({
       ) : (
         <p className="text-xs text-fg-3">
           The full record for this passage&rsquo;s source is on the{' '}
-          <Link
-            href={`/experts/${slug}/sources`}
-            className="text-fg underline underline-offset-2"
-          >
+          <Link href={`/experts/${slug}/sources`} className="text-fg underline underline-offset-2">
             Sources page
           </Link>
           .

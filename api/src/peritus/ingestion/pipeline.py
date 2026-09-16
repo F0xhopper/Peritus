@@ -63,7 +63,10 @@ async def ingest_sources(
     # 3. Embed + store per source.
     results: list[tuple[list[int], list[TextChunk]]] = []
     for source, src_db_id, chunks in zip(
-        sources, source_db_ids, per_source_chunks, strict=True,
+        sources,
+        source_db_ids,
+        per_source_chunks,
+        strict=True,
     ):
         if not chunks:
             results.append(([], []))
@@ -73,11 +76,17 @@ async def ingest_sources(
         contexts = next(job_contexts)
         try:
             chunk_ids = await _embed_and_store(
-                pool, expert_id, src_db_id, chunks, contexts,
+                pool,
+                expert_id,
+                src_db_id,
+                chunks,
+                contexts,
             )
             logger.info(
                 "Ingested %d chunks for source %r (expert %d)",
-                len(chunk_ids), source.title, expert_id,
+                len(chunk_ids),
+                source.title,
+                expert_id,
             )
             results.append((chunk_ids, chunks))
             if on_ingested:
@@ -112,7 +121,9 @@ async def ingest_source(
         chunk_ids = await _embed_and_store(pool, expert_id, source_db_id, chunks, contexts)
         logger.info(
             "Ingested %d chunks for source %r (expert %d)",
-            len(chunk_ids), source.title, expert_id,
+            len(chunk_ids),
+            source.title,
+            expert_id,
         )
         return chunk_ids, chunks
 
@@ -137,9 +148,7 @@ async def _embed_and_store(
     ]
     embeddings = await embed_in_batches(embed_inputs)
 
-    return await _bulk_insert(
-        pool, expert_id, source_db_id, chunks, contexts, embeddings
-    )
+    return await _bulk_insert(pool, expert_id, source_db_id, chunks, contexts, embeddings)
 
 
 async def _bulk_insert(

@@ -26,12 +26,7 @@ export function LedgerCards({
   pending: boolean
 }) {
   return (
-    <ul
-      className={cn(
-        'space-y-2 transition-opacity duration-(--dur-1)',
-        pending && 'opacity-60',
-      )}
-    >
+    <ul className={cn('space-y-2 transition-opacity duration-(--dur-1)', pending && 'opacity-60')}>
       {sources.map((source) => (
         <li key={source.id}>
           <button
@@ -42,7 +37,7 @@ export function LedgerCards({
               // selected card is the one that gains a ring.
               'w-full rounded-card bg-panel p-3 text-left',
               'transition-colors duration-(--dur-1)',
-              selectedId === source.id ? 'ring-1 ring-fg-3 ring-inset' : 'hover:bg-raised',
+              selectedId === source.id ? 'ring-1 ring-fg-3 ring-inset' : 'hover:bg-raised'
             )}
           >
             <div className="flex items-start justify-between gap-2">
@@ -58,7 +53,10 @@ export function LedgerCards({
               {sourceKind(source.source_type)}
               {source.url && <> · {hostOf(source.url)}</>}
               {source.full_text_method === 'abstract' && (
-                <> · <span className="text-warn">abstract only</span></>
+                <>
+                  {' '}
+                  · <span className="text-warn">abstract only</span>
+                </>
               )}
             </p>
 
@@ -75,9 +73,7 @@ export function LedgerCards({
               />
             </dl>
 
-            {source.drop_reason && (
-              <p className="mt-2 text-xs text-fg-3">{source.drop_reason}</p>
-            )}
+            {source.drop_reason && <p className="mt-2 text-xs text-fg-3">{source.drop_reason}</p>}
             {source.discovered_via && (
               <p className="mt-1 text-xs text-fg-3">{describeDiscovery(source.discovered_via)}</p>
             )}
@@ -107,7 +103,7 @@ function ScoreRow({
             className={cn(
               'block h-full w-full origin-left rounded-full',
               accepted ? 'bg-ok' : 'bg-bad',
-              'motion-safe:transition-transform motion-safe:duration-(--dur-3) motion-safe:ease-(--ease-out)',
+              'motion-safe:transition-transform motion-safe:duration-(--dur-3) motion-safe:ease-(--ease-out)'
             )}
           />
         </span>

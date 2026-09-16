@@ -72,7 +72,7 @@ export default async function ExpertsHomePage() {
           <div
             className={cn(
               'mt-6 hidden gap-2 md:grid',
-              building.length > 0 ? 'grid-cols-3' : 'grid-cols-2',
+              building.length > 0 ? 'grid-cols-3' : 'grid-cols-2'
             )}
           >
             <StatTile label="Experts" value={experts.length} />

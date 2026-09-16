@@ -55,7 +55,7 @@ just test-db     # pytest with the DB-backed tests enabled
 just migrate     # apply migrations
 ```
 
-**The DB-backed tests skip silently without `PERITUS_TEST_DATABASE_URL`** — around 50 tests
+**The DB-backed tests skip silently without `PERITUS_TEST_DATABASE_URL`** — the tests
 covering the job queue, conversations, credits, uploads and visibility. CI provides a
 `pgvector/pgvector:pg17` service so they always run there. The fixture `TRUNCATE`s: never point
 that variable at a database you care about.
@@ -68,6 +68,17 @@ table inside the same transaction as the migration itself. It is idempotent, it 
 
 Migrations are **forward-only**. A rollback across a schema change needs that migration to have
 been backwards-compatible.
+
+`python migrations/apply.py --status` lists what has run and what is pending, and changes nothing.
+A `pg_advisory_lock` around the apply loop means two runners cannot both decide the same file is
+pending.
+
+Thirteen of them (010, 013, 018, 024, 031, 032) migrate or delete **data**, not just schema. Those
+rely on the transaction wrapper for idempotence: the `UPDATE` and the `INSERT INTO _migrations`
+commit together, so a crash rolls both back and the next run repeats the whole thing from a
+consistent state. A data migration that is not safe to re-run from scratch does not belong here.
+032 is stricter again — it drops the pre-expert tables, so it refuses and aborts the release if any
+of them still holds a row.
 
 ## Dependencies are locked
 

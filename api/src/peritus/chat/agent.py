@@ -6,14 +6,13 @@ context. Both the non-streaming :meth:`respond` (Rich CLI) and the streaming SSE
 route consume it, so the two paths cannot drift.
 """
 
-import copy
 import math
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, cast
 
 import asyncpg
-from anthropic.types import MessageParam, TextBlockParam
+from anthropic.types import MessageParam, TextBlockParam, ToolChoiceToolParam, ToolParam
 
 from peritus.chat.grounding import (
     Passage,
@@ -26,14 +25,18 @@ from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.graph.retriever import GraphRetriever
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.search.service import SearchService
 
 logger = get_logger(__name__)
 
 ASKER_LEVELS: tuple[str, ...] = ("novice", "informed", "expert")
 QUESTION_TYPES: tuple[str, ...] = (
-    "orientation", "specific_fact", "comparison", "how_to", "open_ended",
+    "orientation",
+    "specific_fact",
+    "comparison",
+    "how_to",
+    "open_ended",
 )
 
 # What each classification means for the answer. Deterministic rather than asked
@@ -74,85 +77,89 @@ _TYPE_GUIDANCE: dict[str, str] = {
         "they want to do something. Give the practice or the steps, in order, "
         "concretely enough to act on"
     ),
-    "open_ended": (
-        "answer directly first, then develop only what genuinely serves the "
-        "question"
-    ),
+    "open_ended": ("answer directly first, then develop only what genuinely serves the question"),
 }
 
-_DEFAULT_DIRECTIVE = (
-    "Answer the question directly and concretely, organised by the subject."
-)
+_DEFAULT_DIRECTIVE = "Answer the question directly and concretely, organised by the subject."
 
-_PLAN_TOOL: dict[str, Any] = {
-    "name": "create_plan",
-    "description": (
-        "Plan the answer: how to search for evidence, and who is asking for what."
-    ),
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "subqueries": {
-                "type": "array",
-                "items": {"type": "string"},
-                "minItems": 2,
-                "maxItems": 4,
-                "description": "2–4 declarative retrieval-phrased subqueries.",
+
+def _plan_tool(max_subqueries: int) -> ToolParam:
+    """The planner's tool, with the subquery bounds this turn allows.
+
+    A builder rather than a module constant that gets `deepcopy`'d and poked:
+    the bounds are the only thing that varies, and reaching four levels into a
+    schema by string key to set them is not something a type can check — mypy
+    says so, and it is right. Depth also does not survive being read: the old
+    form put `maxItems` a long way from the description that explains it.
+    """
+    return {
+        "name": "create_plan",
+        "description": ("Plan the answer: how to search for evidence, and who is asking for what."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "subqueries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": min(2, max_subqueries),
+                    "maxItems": max_subqueries,
+                    "description": "2–4 declarative retrieval-phrased subqueries.",
+                },
+                "fallback_queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "maxItems": 2,
+                    "description": (
+                        "Up to two broader or differently-angled retrieval phrasings, "
+                        "used only if the subqueries find little. Not paraphrases of "
+                        "the subqueries: approach the question from a wider concept, "
+                        "a neighbouring term of art, or the underlying mechanism."
+                    ),
+                },
+                "standalone_question": {
+                    "type": "string",
+                    "description": (
+                        "The question rewritten to stand on its own, with every "
+                        "reference to the conversation ('the second one', 'he', "
+                        "'that method') replaced by what it refers to. Identical to "
+                        "the question when it already stands alone."
+                    ),
+                },
+                "asker_level": {
+                    "type": "string",
+                    "enum": list(ASKER_LEVELS),
+                    "description": (
+                        "How much background the asker has, judged from the question "
+                        "itself: how they use (or avoid) terminology, and anything "
+                        "they say about themselves. When a question is broad and "
+                        "plainly worded, 'novice' is usually right; do not read "
+                        "'expert' into a question just because the topic is technical."
+                    ),
+                },
+                "question_type": {
+                    "type": "string",
+                    "enum": list(QUESTION_TYPES),
+                    "description": (
+                        "What kind of answer would satisfy them: 'orientation' for "
+                        "getting into a subject, 'specific_fact' for one definite "
+                        "thing, 'comparison' for how options differ, 'how_to' for "
+                        "doing something, 'open_ended' when none of those fit."
+                    ),
+                },
+                "answer_directive": {
+                    "type": "string",
+                    "description": (
+                        "One sentence, imperative, telling the answering expert what "
+                        "this particular answer has to do — the substance to lead "
+                        "with and what would make it useful. About the subject, never "
+                        "about the sources or the search."
+                    ),
+                },
             },
-            "fallback_queries": {
-                "type": "array",
-                "items": {"type": "string"},
-                "maxItems": 2,
-                "description": (
-                    "Up to two broader or differently-angled retrieval phrasings, "
-                    "used only if the subqueries find little. Not paraphrases of "
-                    "the subqueries: approach the question from a wider concept, "
-                    "a neighbouring term of art, or the underlying mechanism."
-                ),
-            },
-            "standalone_question": {
-                "type": "string",
-                "description": (
-                    "The question rewritten to stand on its own, with every "
-                    "reference to the conversation ('the second one', 'he', "
-                    "'that method') replaced by what it refers to. Identical to "
-                    "the question when it already stands alone."
-                ),
-            },
-            "asker_level": {
-                "type": "string",
-                "enum": list(ASKER_LEVELS),
-                "description": (
-                    "How much background the asker has, judged from the question "
-                    "itself: how they use (or avoid) terminology, and anything "
-                    "they say about themselves. When a question is broad and "
-                    "plainly worded, 'novice' is usually right; do not read "
-                    "'expert' into a question just because the topic is technical."
-                ),
-            },
-            "question_type": {
-                "type": "string",
-                "enum": list(QUESTION_TYPES),
-                "description": (
-                    "What kind of answer would satisfy them: 'orientation' for "
-                    "getting into a subject, 'specific_fact' for one definite "
-                    "thing, 'comparison' for how options differ, 'how_to' for "
-                    "doing something, 'open_ended' when none of those fit."
-                ),
-            },
-            "answer_directive": {
-                "type": "string",
-                "description": (
-                    "One sentence, imperative, telling the answering expert what "
-                    "this particular answer has to do — the substance to lead "
-                    "with and what would make it useful. About the subject, never "
-                    "about the sources or the search."
-                ),
-            },
+            "required": ["subqueries", "asker_level", "question_type", "answer_directive"],
         },
-        "required": ["subqueries", "asker_level", "question_type", "answer_directive"],
-    },
-}
+    }
+
 
 # How much of a previous turn the planner sees. Enough to resolve "the second
 # one" or "and how does Fisher differ?"; not so much that planning a follow-up
@@ -207,7 +214,8 @@ class QueryPlan:
         qtype = data.get("question_type")
         directive = data.get("answer_directive")
         fallbacks = [
-            f.strip() for f in data.get("fallback_queries") or []
+            f.strip()
+            for f in data.get("fallback_queries") or []
             if isinstance(f, str) and f.strip()
         ]
         standalone = data.get("standalone_question")
@@ -215,9 +223,7 @@ class QueryPlan:
         return cls(
             fallback_queries=fallbacks[:2],
             standalone_question=(
-                standalone.strip()
-                if isinstance(standalone, str) and standalone.strip()
-                else None
+                standalone.strip() if isinstance(standalone, str) and standalone.strip() else None
             ),
             subqueries=subqueries or [question],
             asker_level=level if level in ASKER_LEVELS else "informed",
@@ -256,9 +262,9 @@ class RetrievalStep:
     source_title: str
     source_type: str
     quality_score: float | None
-    rank: int          # 1-based, in the order retrieval produced it
-    score: float       # fused RRF score, or the reranker's score when reranking ran
-    via: str           # "primary" | "coverage_followup" (the fallback-query pass)
+    rank: int  # 1-based, in the order retrieval produced it
+    score: float  # fused RRF score, or the reranker's score when reranking ran
+    via: str  # "primary" | "coverage_followup" (the fallback-query pass)
 
 
 @dataclass
@@ -286,6 +292,7 @@ class RetrievalTrail:
 @dataclass
 class RetrievedContext:
     """Everything the composition step needs, produced by the retrieval pipeline."""
+
     context_block: str
     passages: list[Passage]
     has_contradiction: bool
@@ -330,7 +337,9 @@ def _contradiction_block(points: list[str]) -> str:
     the same rule the note restates: name the dispute, never the bibliography.
     """
     stated = "\n".join(f"  • {p}" for p in points[:3])
-    return f"{_CONTRADICTION_NOTE}\n\nWhat is disputed:\n{stated}" if stated else _CONTRADICTION_NOTE
+    return (
+        f"{_CONTRADICTION_NOTE}\n\nWhat is disputed:\n{stated}" if stated else _CONTRADICTION_NOTE
+    )
 
 
 def build_user_message(
@@ -353,8 +362,7 @@ def build_user_message(
     """
     plan = plan or QueryPlan.fallback(question)
     contradiction = (
-        f"{_contradiction_block(contradiction_points or [])}\n\n"
-        if has_contradiction else ""
+        f"{_contradiction_block(contradiction_points or [])}\n\n" if has_contradiction else ""
     )
     return {
         "role": "user",
@@ -375,8 +383,14 @@ def build_user_message(
 # Models that think adaptively — and, for Sonnet 5 and later, by default when
 # the request says nothing. Everything else takes the plain request.
 _ADAPTIVE_THINKING_PREFIXES = (
-    "claude-sonnet-5", "claude-opus-5", "claude-fable", "claude-mythos",
-    "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-fable",
+    "claude-mythos",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
 )
 
 
@@ -414,11 +428,13 @@ def build_cached_system(persona_style: str | None, topic: str) -> list[TextBlock
     prompt cache at ~0.1× input price once it clears the model's minimum
     cacheable prefix.
     """
-    return [{
-        "type": "text",
-        "text": build_system_prompt(persona_style, topic),
-        "cache_control": {"type": "ephemeral"},
-    }]
+    return [
+        {
+            "type": "text",
+            "text": build_system_prompt(persona_style, topic),
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
 
 
 def _trim_start(history_len: int) -> int:
@@ -463,7 +479,7 @@ def build_composition_messages(
     final message, which sits after the last breakpoint, so nothing here varies
     a cached prefix.
     """
-    trimmed = list(history[_trim_start(len(history)):])
+    trimmed = list(history[_trim_start(len(history)) :])
     while trimmed and trimmed[0].get("role") != "user":
         trimmed.pop(0)
 
@@ -474,14 +490,16 @@ def build_composition_messages(
         last = messages[-1]
         content = last.get("content")
         if isinstance(content, str) and content.strip():
-            last["content"] = [{
-                "type": "text",
-                "text": content,
-                "cache_control": {"type": "ephemeral"},
-            }]
-    messages.append(build_user_message(
-        question, context_block, plan, has_contradiction, contradiction_points
-    ))
+            last["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+    messages.append(
+        build_user_message(question, context_block, plan, has_contradiction, contradiction_points)
+    )
     return messages
 
 
@@ -609,8 +627,7 @@ def _message_text(content: Any) -> str:
         return content
     if isinstance(content, list):
         return " ".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
+            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
         )
     return ""
 
@@ -711,20 +728,25 @@ class ChatAgent:
             context_cap=cfg.max_context_passages,
         )
         shown = {p.chunk_id for p in indexed}
-        yield ("context", RetrievedContext(
-            context_block=context_block,
-            passages=indexed,
-            # What the prompt carries, so only the passages it carries count.
-            has_contradiction=any(
-                e.has_contradiction for e in in_context if e.result.chunk_id in shown
+        yield (
+            "context",
+            RetrievedContext(
+                context_block=context_block,
+                passages=indexed,
+                # What the prompt carries, so only the passages it carries count.
+                has_contradiction=any(
+                    e.has_contradiction for e in in_context if e.result.chunk_id in shown
+                ),
+                contradiction_points=_dedupe(
+                    p
+                    for e in in_context
+                    if e.result.chunk_id in shown
+                    for p in e.contradiction_points
+                ),
+                trail=trail,
+                plan=plan,
             ),
-            contradiction_points=_dedupe(
-                p for e in in_context if e.result.chunk_id in shown
-                for p in e.contradiction_points
-            ),
-            trail=trail,
-            plan=plan,
-        ))
+        )
 
     async def gather_context(
         self, expert: Expert, question: str, history: list[dict] | None = None
@@ -747,10 +769,14 @@ class ChatAgent:
 
         client = get_anthropic_client()
         messages = build_composition_messages(
-            history, question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+            history,
+            question,
+            ctx.context_block,
+            ctx.plan,
+            ctx.has_contradiction,
             ctx.contradiction_points,
         )
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.CLAUDE_MODEL,
             system=build_cached_system(expert.persona_style, expert.topic),
             messages=messages,
@@ -787,18 +813,17 @@ class ChatAgent:
         reference rather than the thing.
         """
         try:
-            tool = copy.deepcopy(_PLAN_TOOL)
-            tool["input_schema"]["properties"]["subqueries"]["maxItems"] = max_subqueries
-            tool["input_schema"]["properties"]["subqueries"]["minItems"] = min(2, max_subqueries)
+            tool = _plan_tool(max_subqueries)
 
             conversation = _conversation_block(history)
             content = (
                 f"Conversation so far:\n{conversation}\n\nQuestion: {question}"
-                if conversation else f"Question: {question}"
+                if conversation
+                else f"Question: {question}"
             )
 
             client = get_anthropic_client()
-            resp = await client.messages.create(  # type: ignore[call-overload]
+            resp = await client.messages.create(
                 model=settings.FAST_MODEL,
                 max_tokens=768,
                 system=(
@@ -816,11 +841,11 @@ class ChatAgent:
                     "question as written, not from how technical the field is."
                 ),
                 tools=[tool],
-                tool_choice={"type": "tool", "name": "create_plan"},
-                messages=[{"role": "user", "content": content}],
+                tool_choice=ToolChoiceToolParam(type="tool", name="create_plan"),
+                messages=[MessageParam(role="user", content=content)],
             )
-            block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
-            return QueryPlan.from_tool_input(dict(block.input), question)
+            block = tool_input(resp) or {}
+            return QueryPlan.from_tool_input(dict(block), question)
         except Exception as exc:
             logger.warning("Planning failed: %s", exc)
             return QueryPlan.fallback(question)

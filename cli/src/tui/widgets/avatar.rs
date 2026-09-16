@@ -39,9 +39,19 @@ pub fn tone_for(label: &str) -> Color {
 pub fn lines(label: &str, is_selected: bool) -> Vec<Line<'static>> {
     let tone = tone_for(label);
     let (frame, letters) = if is_selected {
-        (tone, Style::default().fg(Color::Rgb(235, 238, 250)).add_modifier(Modifier::BOLD))
+        (
+            tone,
+            Style::default()
+                .fg(Color::Rgb(235, 238, 250))
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
-        (scale(tone, 0.55), Style::default().fg(scale(tone, 0.9)).add_modifier(Modifier::BOLD))
+        (
+            scale(tone, 0.55),
+            Style::default()
+                .fg(scale(tone, 0.9))
+                .add_modifier(Modifier::BOLD),
+        )
     };
     let frame_style = Style::default().fg(frame);
 
@@ -64,14 +74,33 @@ pub fn lines(label: &str, is_selected: bool) -> Vec<Line<'static>> {
 /// falls back to its slug ("stoic-philosophy" → "SP").
 fn initials(label: &str) -> String {
     const HONORIFICS: &[&str] = &[
-        "dr", "prof", "professor", "sir", "dame", "rev", "fr", "st", "mx",
-        "mr", "mrs", "ms", "lord", "lady", "capt", "captain", "maj", "major",
-        "col", "colonel", "gen", "general",
+        "dr",
+        "prof",
+        "professor",
+        "sir",
+        "dame",
+        "rev",
+        "fr",
+        "st",
+        "mx",
+        "mr",
+        "mrs",
+        "ms",
+        "lord",
+        "lady",
+        "capt",
+        "captain",
+        "maj",
+        "major",
+        "col",
+        "colonel",
+        "gen",
+        "general",
     ];
 
     let mut words: Vec<&str> = label
         .split(|c: char| c.is_whitespace() || c == '-' || c == '_')
-        .filter(|w| w.chars().any(|c| c.is_alphanumeric()))
+        .filter(|w| w.chars().any(char::is_alphanumeric))
         .collect();
 
     if let Some(first) = words.first() {
@@ -85,10 +114,14 @@ fn initials(label: &str) -> String {
         .iter()
         .take(2)
         .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
-        .flat_map(|c| c.to_uppercase())
+        .flat_map(char::to_uppercase)
         .collect();
 
-    if letters.is_empty() { "?".to_string() } else { letters }
+    if letters.is_empty() {
+        "?".to_string()
+    } else {
+        letters
+    }
 }
 
 /// Darken an RGB colour by a factor. Non-RGB colours pass through unchanged
@@ -96,9 +129,9 @@ fn initials(label: &str) -> String {
 fn scale(color: Color, factor: f32) -> Color {
     match color {
         Color::Rgb(r, g, b) => Color::Rgb(
-            (r as f32 * factor) as u8,
-            (g as f32 * factor) as u8,
-            (b as f32 * factor) as u8,
+            (f32::from(r) * factor) as u8,
+            (f32::from(g) * factor) as u8,
+            (f32::from(b) * factor) as u8,
         ),
         other => other,
     }

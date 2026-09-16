@@ -77,7 +77,7 @@ export function ShellProvider({ children }: { children: React.ReactNode }) {
       chatExpert,
       setChatExpert,
     }),
-    [navOpen, contextOpen, paletteOpen, chatExpert],
+    [navOpen, contextOpen, paletteOpen, chatExpert]
   )
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>

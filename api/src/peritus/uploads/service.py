@@ -13,6 +13,7 @@ as it was, still answering questions from the corpus it already had.
 from typing import Any
 
 import asyncpg
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
 from peritus.core.exceptions import IngestionError
@@ -21,7 +22,7 @@ from peritus.experts.domain import Expert
 from peritus.graph.extractor import extract_graph_from_chunks
 from peritus.graph.reconciler import reconcile_claims
 from peritus.graph.repository import GraphRepository
-from peritus.infrastructure.anthropic_client import get_anthropic_client
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.pipeline import ingest_sources
 from peritus.sources.domain import RawSource, ValidatedSource
@@ -30,7 +31,7 @@ from peritus.uploads.repository import UploadRepository
 
 logger = get_logger(__name__)
 
-_TAG_TOOL: dict[str, Any] = {
+_TAG_TOOL: ToolParam = {
     "name": "tag_document",
     "description": "Describe an uploaded document so it fits the corpus index.",
     "input_schema": {
@@ -38,8 +39,15 @@ _TAG_TOOL: dict[str, Any] = {
         "properties": {
             "content_type": {
                 "type": "string",
-                "enum": ["textbook", "paper", "tutorial", "reference",
-                         "opinion", "transcript", "other"],
+                "enum": [
+                    "textbook",
+                    "paper",
+                    "tutorial",
+                    "reference",
+                    "opinion",
+                    "transcript",
+                    "other",
+                ],
             },
             "difficulty": {
                 "type": "integer",
@@ -107,14 +115,21 @@ async def ingest_upload(
             await on_event(event)
 
     # 1. Extract.
-    await emit({"type": "stage", "stage": 1, "name": "extract",
-                "message": f"Reading {upload.title}…"})
+    await emit(
+        {"type": "stage", "stage": 1, "name": "extract", "message": f"Reading {upload.title}…"}
+    )
     raw = await extract(upload)
     await emit({"type": "upload_extracted", "title": raw.title, "chars": len(raw.text)})
 
     # 2. Tag. Never gates admission.
-    await emit({"type": "stage", "stage": 2, "name": "tag",
-                "message": "Indexing against the expert's concepts…"})
+    await emit(
+        {
+            "type": "stage",
+            "stage": 2,
+            "name": "tag",
+            "message": "Indexing against the expert's concepts…",
+        }
+    )
     tags = await _tag_document(raw, expert)
 
     # 3. The sources row.
@@ -134,8 +149,7 @@ async def ingest_upload(
     # 4. Chunk → contextualise → embed → store. `ingest_sources` takes
     #    ValidatedSource; the scores on it are never read for an upload (the row
     #    above already stored NULLs), only `raw` is.
-    await emit({"type": "stage", "stage": 3, "name": "embed",
-                "message": "Chunking and embedding…"})
+    await emit({"type": "stage", "stage": 3, "name": "embed", "message": "Chunking and embedding…"})
     validated = ValidatedSource(
         raw=raw,
         quality_score=0.0,
@@ -153,8 +167,7 @@ async def ingest_upload(
         # retrieval and would still inflate source_count. Remove it.
         await repo.delete_source(expert.id, source_db_id)
         raise IngestionError(
-            "Nothing could be indexed from this document. It may contain no "
-            "extractable text."
+            "Nothing could be indexed from this document. It may contain no extractable text."
         )
     await emit({"type": "upload_embedded", "chunks": len(chunk_ids)})
 
@@ -163,14 +176,16 @@ async def ingest_upload(
     #    the next rebuild will pick it up regardless.
     nodes = edges = 0
     if expert.graph_expanded:
-        await emit({"type": "stage", "stage": 4, "name": "graph",
-                    "message": "Extracting concepts…"})
+        await emit(
+            {"type": "stage", "stage": 4, "name": "graph", "message": "Extracting concepts…"}
+        )
         try:
             nodes, edges = await _extend_graph(pool, expert, chunks, chunk_ids)
         except Exception:
             logger.exception("Graph extension failed for upload %d", upload_id)
-            await emit({"type": "graph_skipped",
-                        "message": "Indexed, but concept extraction failed."})
+            await emit(
+                {"type": "graph_skipped", "message": "Indexed, but concept extraction failed."}
+            )
 
     # 6. Counts, then drop the stored payload.
     await _bump_counts(pool, expert.id)
@@ -194,32 +209,33 @@ async def _tag_document(raw: RawSource, expert: Expert) -> dict[str, Any]:
     concepts = expert.key_concepts or []
     concept_block = (
         "The expert's key concepts:\n" + "\n".join(f"- {c}" for c in concepts) + "\n\n"
-        if concepts else ""
+        if concepts
+        else ""
     )
     try:
         client = get_anthropic_client()
-        resp = await client.messages.create(  # type: ignore[call-overload]
+        resp = await client.messages.create(
             model=settings.FAST_MODEL,
             max_tokens=1024,
             system=_TAG_SYSTEM,
             tools=[_TAG_TOOL],
-            tool_choice={"type": "tool", "name": "tag_document"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Corpus topic: {expert.topic}\n\n"
-                    f"{concept_block}"
-                    f"Document title: {raw.title}\n"
-                    f"Opening text:\n{raw.text[:_TAG_PREVIEW_CHARS]}"
-                ),
-            }],
+            tool_choice=ToolChoiceToolParam(type="tool", name="tag_document"),
+            messages=[
+                MessageParam(
+                    role="user",
+                    content=(
+                        f"Corpus topic: {expert.topic}\n\n"
+                        f"{concept_block}"
+                        f"Document title: {raw.title}\n"
+                        f"Opening text:\n{raw.text[:_TAG_PREVIEW_CHARS]}"
+                    ),
+                )
+            ],
         )
-        block = next(
-            (b for b in resp.content if getattr(b, "type", None) == "tool_use"), None
-        )
+        block = tool_input(resp)
         if block is None:
             return dict(_UNTAGGED)
-        data = dict(block.input)
+        data = dict(block)
         # Only concepts the expert actually declares may be recorded, or
         # coverage statistics start counting concepts nothing ever planned for.
         allowed = set(concepts)
@@ -227,9 +243,7 @@ async def _tag_document(raw: RawSource, expert: Expert) -> dict[str, Any]:
             "content_type": data.get("content_type") or "other",
             "difficulty": int(data.get("difficulty") or 3),
             "key_claims": list(data.get("key_claims") or []),
-            "covered_concepts": [
-                c for c in (data.get("covered_concepts") or []) if c in allowed
-            ],
+            "covered_concepts": [c for c in (data.get("covered_concepts") or []) if c in allowed],
         }
     except Exception as exc:
         logger.warning("Tagging failed for %r: %s", raw.title, exc)

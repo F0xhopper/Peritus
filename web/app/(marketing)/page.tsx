@@ -70,10 +70,9 @@ export default function LandingPage() {
               An expert on any subject — and the receipts for every source behind it.
             </h1>
             <p className="mt-4 text-base leading-relaxed text-fg-2">
-              Peritus searches real sources, screens every one of them against a written rubric,
-              and answers with citations you can open. It keeps the sources it rejected too, with
-              the reason — because the ones it threw away are the evidence that the rest were
-              chosen.
+              Peritus searches real sources, screens every one of them against a written rubric, and
+              answers with citations you can open. It keeps the sources it rejected too, with the
+              reason — because the ones it threw away are the evidence that the rest were chosen.
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-2">
               <Link

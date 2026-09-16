@@ -60,10 +60,7 @@ export function Rail({
   return (
     <nav
       aria-label="Experts"
-      className={cn(
-        'relative flex w-rail flex-col items-center gap-2 bg-panel py-2',
-        className,
-      )}
+      className={cn('relative flex w-rail flex-col items-center gap-2 bg-panel py-2', className)}
     >
       {/* The one moving thing in the shell. `--fg`, not the expert colour: it
           marks *where you are*, which is not a property of the expert. */}
@@ -75,11 +72,11 @@ export function Rail({
         className={cn(
           'pointer-events-none absolute top-2 left-0 h-8 w-[3px] rounded-r-full bg-fg',
           'transition-transform duration-(--dur-3) ease-(--ease-out)',
-          activeSlot === null && 'opacity-0',
+          activeSlot === null && 'opacity-0'
         )}
       />
 
-      <div className="flex w-full flex-col items-center gap-2 overflow-y-auto overscroll-contain pan-y">
+      <div className="pan-y flex w-full flex-col items-center gap-2 overflow-y-auto overscroll-contain">
         <Tooltip content="Home" side="right">
           <Link
             href="/experts"
@@ -87,7 +84,7 @@ export function Rail({
             className={cn(
               'grid size-(--rail-item) place-items-center rounded-card text-fg-3',
               'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
-              homeActive && 'bg-raised text-fg',
+              homeActive && 'bg-raised text-fg'
             )}
           >
             <Home className="size-4" />
@@ -106,7 +103,7 @@ export function Rail({
               'grid size-(--rail-item) place-items-center rounded-card text-fg-3',
               'border border-dashed border-border',
               'transition-colors duration-(--dur-1) hover:border-expert hover:text-expert',
-              pathname === '/experts/new' && 'border-expert text-expert',
+              pathname === '/experts/new' && 'border-expert text-expert'
             )}
           >
             <Plus className="size-4" />
@@ -122,7 +119,7 @@ export function Rail({
             className={cn(
               'grid size-(--rail-item) place-items-center rounded-card text-fg-3',
               'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
-              pathname.startsWith('/settings') && 'bg-raised text-fg',
+              pathname.startsWith('/settings') && 'bg-raised text-fg'
             )}
           >
             <Settings className="size-4" />
@@ -175,7 +172,7 @@ function RailAvatar({ expert, active }: { expert: ExpertSummary; active: boolean
         className={cn(
           'relative grid size-(--rail-item) place-items-center rounded-card',
           'transition-opacity duration-(--dur-1)',
-          active ? 'opacity-100' : 'opacity-70 hover:opacity-100',
+          active ? 'opacity-100' : 'opacity-70 hover:opacity-100'
         )}
       >
         <Avatar expert={expert} size={AVATAR_SIZE} eager />
@@ -215,7 +212,7 @@ export function useActiveSlug(conversations: ConversationSummary[]): string | nu
 /** The expert a `/chats/[id]` path belongs to, via the shell's own chat list. */
 export function slugFromChat(
   pathname: string,
-  conversations: ConversationSummary[],
+  conversations: ConversationSummary[]
 ): string | null {
   const match = /^\/chats\/([^/]+)/.exec(pathname)
   if (!match) return null

@@ -92,9 +92,7 @@ async def test_finish_stream_persists_assistant_with_citations(db_pool):
     await repo.add_user_message(conv.id, "What is virtue?", "What is virtue?")
     await repo.claim_stream(conv.id)
 
-    await repo.finish_stream(
-        conv.id, "Virtue is enough. [1]", CITATIONS, True, interrupted=False
-    )
+    await repo.finish_stream(conv.id, "Virtue is enough. [1]", CITATIONS, True, interrupted=False)
 
     messages = await repo.get_messages(conv.id)
     assert [m.role for m in messages] == ["user", "assistant"]

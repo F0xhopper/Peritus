@@ -36,7 +36,7 @@ from peritus.search.readiness import Readiness
 # applies them rather than restated here: a copy would silently drift the day
 # someone retunes the rubric, and this API's whole value is that its numbers
 # match the ones the pipeline actually used.
-from peritus.sources.validator import (  # noqa: PLC2701
+from peritus.sources.validator import (
     _PASS_THRESHOLD_Q,
     _PASS_THRESHOLD_R,
     RUBRIC_VERSION,
@@ -158,9 +158,7 @@ class AuditService:
                 "considered": considered,
                 "accepted": accepted,
                 "rejected": int(totals.get("rejected") or 0),
-                "acceptance_rate": (
-                    round(accepted / considered, 4) if considered else None
-                ),
+                "acceptance_rate": (round(accepted / considered, 4) if considered else None),
                 "accepted_with_passages": ingestion.get("accepted_with_passages"),
                 "accepted_without_passages": ingestion.get("accepted_without_passages"),
                 "passages_total": ingestion.get("passages_total"),
@@ -337,8 +335,7 @@ class AuditService:
                         if funnel is None
                         or funnel.reported_validated_passed is None
                         or funnel.reported_validated_dropped is None
-                        else funnel.reported_validated_passed
-                        + funnel.reported_validated_dropped
+                        else funnel.reported_validated_passed + funnel.reported_validated_dropped
                     ),
                     "build_log_note": (
                         "The build log's validate_done event covers the first "
@@ -349,14 +346,10 @@ class AuditService:
                 },
                 "excluded_at_validation": {
                     "count": excluded,
-                    "by_reason": [
-                        {"reason": r["reason"], "count": r["n"]} for r in drop_reasons
-                    ],
+                    "by_reason": [{"reason": r["reason"], "count": r["n"]} for r in drop_reasons],
                     "by_threshold": {
                         "quality_below_threshold": buckets.get("quality_below_threshold", 0),
-                        "relevance_below_threshold": buckets.get(
-                            "relevance_below_threshold", 0
-                        ),
+                        "relevance_below_threshold": buckets.get("relevance_below_threshold", 0),
                         "both_below_threshold": buckets.get("both_below_threshold", 0),
                         "above_both_thresholds": buckets.get("above_both_thresholds", 0),
                         "unscored": buckets.get("unscored", 0),
@@ -474,9 +467,7 @@ class AuditService:
                 "thin": strengths.count(CoverageStrength.THIN.value),
                 "adequate": strengths.count(CoverageStrength.ADEQUATE.value),
                 "strong": strengths.count(CoverageStrength.STRONG.value),
-                "concepts_needing_gap_fill": sum(
-                    1 for c in concepts if c["needed_gap_fill"]
-                ),
+                "concepts_needing_gap_fill": sum(1 for c in concepts if c["needed_gap_fill"]),
                 "off_plan_concepts": len(off_plan),
             },
             "tagging": {
@@ -561,18 +552,10 @@ class AuditService:
                 "contradictions": total,
                 "claims_involved": int(summary.get("claims_involved") or 0),
                 "relationships_total": total_edges,
-                "share_of_relationships": (
-                    round(total / total_edges, 4) if total_edges else None
-                ),
-                "cross_source_on_page": sum(
-                    1 for i in items if i["kind"] == "cross_source"
-                ),
-                "within_source_on_page": sum(
-                    1 for i in items if i["kind"] == "within_source"
-                ),
-                "undetermined_on_page": sum(
-                    1 for i in items if i["kind"] == "undetermined"
-                ),
+                "share_of_relationships": (round(total / total_edges, 4) if total_edges else None),
+                "cross_source_on_page": sum(1 for i in items if i["kind"] == "cross_source"),
+                "within_source_on_page": sum(1 for i in items if i["kind"] == "within_source"),
+                "undetermined_on_page": sum(1 for i in items if i["kind"] == "undetermined"),
             },
             "relationship_mix": [
                 {
@@ -773,9 +756,7 @@ def _distribution(rows: list[dict[str, Any]]) -> dict[str, dict[str, list[int]]]
 def _provenance_block(gaps: dict[str, Any]) -> dict[str, Any]:
     total = int(gaps.get("total") or 0)
     missing = {
-        k.removeprefix("missing_"): int(v or 0)
-        for k, v in gaps.items()
-        if k.startswith("missing_")
+        k.removeprefix("missing_"): int(v or 0) for k, v in gaps.items() if k.startswith("missing_")
     }
     incomplete = {k: v for k, v in missing.items() if v}
     return {
@@ -983,20 +964,14 @@ def _discovery_block(
                 "with the actual cost in build/usage."
             ),
         },
-        "coverage_targets": (funnel.coverage_targets if funnel else None)
-        or coverage.get("target"),
+        "coverage_targets": (funnel.coverage_targets if funnel else None) or coverage.get("target"),
         "coverage_met": coverage.get("met"),
-        "final_coverage": (funnel.final_coverage if funnel else [])
-        or coverage.get("concepts", []),
+        "final_coverage": (funnel.final_coverage if funnel else []) or coverage.get("concepts", []),
         "duplicates_removed": {
             "by_identifier": funnel.identity_duplicates_removed if funnel else None,
             "by_url": funnel.url_duplicates_removed if funnel else None,
-            "already_seen_in_an_earlier_round": (
-                funnel.already_seen_skipped if funnel else None
-            ),
-            "by_content_fingerprint": (
-                funnel.content_duplicates_removed if funnel else None
-            ),
+            "already_seen_in_an_earlier_round": (funnel.already_seen_skipped if funnel else None),
+            "by_content_fingerprint": (funnel.content_duplicates_removed if funnel else None),
             "note": (
                 "Removed as duplicates rather than judged. By identifier is "
                 "certain (a shared DOI, arXiv id, PMID or PMCID); by URL is "
@@ -1112,9 +1087,7 @@ def _gapfill_block(funnel: DiscoveryFunnel | None) -> dict[str, Any]:
         "sources_accepted": funnel.gapfill_accepted,
         "still_uncovered_after": funnel.gapfill_still_uncovered,
         "candidates_identified": None,
-        "candidates_identified_unavailable_reason": UNPERSISTED[
-            "gapfill_candidates_identified"
-        ],
+        "candidates_identified_unavailable_reason": UNPERSISTED["gapfill_candidates_identified"],
         "note": (
             "After validation, any key concept no accepted source covered gets one "
             "targeted re-search. Concepts still listed in still_uncovered_after "
@@ -1142,14 +1115,10 @@ def _concept_block(
     gapfill: dict[str, Any] | None,
 ) -> dict[str, Any]:
     qualities = [float(r["quality_score"]) for r in rows if r["quality_score"] is not None]
-    relevances = [
-        float(r["relevance_score"]) for r in rows if r["relevance_score"] is not None
-    ]
+    relevances = [float(r["relevance_score"]) for r in rows if r["relevance_score"] is not None]
     types = sorted({r["source_type"] for r in rows})
     mean_quality = safe_mean(qualities)
-    gap_filled_here = [
-        r for r in rows if (r.get("discovered_via") or "").startswith("gapfill:")
-    ]
+    gap_filled_here = [r for r in rows if (r.get("discovered_via") or "").startswith("gapfill:")]
     strength = classify_coverage(len(rows), mean_quality, len(types))
 
     return {
@@ -1289,7 +1258,7 @@ def _search_strategy_block(
 
 
 def _gapfill_rounds(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """"This concept was uncovered, so this search ran, and it returned these."
+    """ "This concept was uncovered, so this search ran, and it returned these."
 
     Grouped from ``discovered_via = 'gapfill:<concept>'`` on the sources
     themselves, so it survives even when the build event log does not. Rejected
@@ -1440,9 +1409,7 @@ def _side(
     passages_per_side: int,
 ) -> dict[str, Any]:
     all_ids = list(edge[f"{prefix}_chunk_ids"] or [])
-    passages = [
-        _passage(chunks[cid]) for cid in chunk_ids if cid in chunks
-    ]
+    passages = [_passage(chunks[cid]) for cid in chunk_ids if cid in chunks]
     return {
         "node": {
             "id": edge[f"{prefix}_id"],

@@ -40,6 +40,7 @@ from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 
 logger = get_logger(__name__)
 
@@ -66,8 +67,8 @@ class GoldItem:
 @dataclass
 class ItemResult:
     question: str
-    hit_rank: int | None          # 1-based rank of the first matching chunk
-    source_hit: bool              # any chunk from the gold source in the top k
+    hit_rank: int | None  # 1-based rank of the first matching chunk
+    source_hit: bool  # any chunk from the gold source in the top k
 
 
 @dataclass
@@ -88,7 +89,7 @@ def _shingles(text: str) -> set[tuple[str, ...]]:
     words = re.findall(r"\w+", text.casefold())
     if len(words) < _SHINGLE:
         return {tuple(words)} if words else set()
-    return {tuple(words[i:i + _SHINGLE]) for i in range(len(words) - _SHINGLE + 1)}
+    return {tuple(words[i : i + _SHINGLE]) for i in range(len(words) - _SHINGLE + 1)}
 
 
 def same_passage(gold_text: str, retrieved_text: str) -> bool:
@@ -100,7 +101,9 @@ def same_passage(gold_text: str, retrieved_text: str) -> bool:
     return max(shared / len(gold), shared / len(got)) >= MATCH_CONTAINMENT
 
 
-def score(items: list[GoldItem], retrieved: list[list[tuple[str, str | None]]], k: int) -> RetrievalReport:
+def score(
+    items: list[GoldItem], retrieved: list[list[tuple[str, str | None]]], k: int
+) -> RetrievalReport:
     """Recall@k, MRR and source recall@k. ``retrieved[i]`` is ``(text, source_url)``
     per ranked chunk for ``items[i]``. Pure, so the metric is testable."""
     results: list[ItemResult] = []
@@ -170,7 +173,8 @@ async def sample_chunks(pool: asyncpg.Pool, expert_id: int, n: int, seed: int) -
             FROM source_chunks sc JOIN sources s ON s.id = sc.source_id
             WHERE sc.expert_id = $1 AND length(sc.text) >= $2
             """,
-            expert_id, _MIN_PROSE_CHARS,
+            expert_id,
+            _MIN_PROSE_CHARS,
         )
     rng = random.Random(seed)
     by_source: dict[int, list[dict]] = {}
@@ -186,9 +190,11 @@ async def sample_chunks(pool: asyncpg.Pool, expert_id: int, n: int, seed: int) -
     return picked
 
 
-async def generate(pool: asyncpg.Pool, expert: Expert, n: int = 80, seed: int = 7) -> list[GoldItem]:
+async def generate(
+    pool: asyncpg.Pool, expert: Expert, n: int = 80, seed: int = 7
+) -> list[GoldItem]:
     chunks = await sample_chunks(pool, expert.id, n, seed)
-    batches = [chunks[i:i + _CHUNKS_PER_CALL] for i in range(0, len(chunks), _CHUNKS_PER_CALL)]
+    batches = [chunks[i : i + _CHUNKS_PER_CALL] for i in range(0, len(chunks), _CHUNKS_PER_CALL)]
     params = [
         {
             "model": settings.FAST_MODEL,
@@ -196,31 +202,36 @@ async def generate(pool: asyncpg.Pool, expert: Expert, n: int = 80, seed: int = 
             "system": _SYSTEM.format(topic=expert.topic),
             "tools": [_TOOL],
             "tool_choice": {"type": "tool", "name": "write_questions"},
-            "messages": [{
-                "role": "user",
-                "content": "\n\n".join(f"[{i}] {c['text']}" for i, c in enumerate(batch)),
-            }],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": "\n\n".join(f"[{i}] {c['text']}" for i, c in enumerate(batch)),
+                }
+            ],
         }
         for batch in batches
     ]
     responses = await gather_claude_calls(params, description="retrieval-golden")
     items: list[GoldItem] = []
     for batch, resp in zip(batches, responses, strict=True):
-        block = next(
-            (b for b in (resp.content if resp else []) if getattr(b, "type", None) == "tool_use"),
-            None,
-        )
-        for q in (dict(block.input).get("questions", []) if block else []):
+        payload = tool_input(resp) if resp else None
+        for q in (payload or {}).get("questions", []):
             idx, question = q.get("index"), q.get("question")
             if not isinstance(idx, int) or not 0 <= idx < len(batch):
                 continue
             if not isinstance(question, str) or not question.strip():
                 continue
             c = batch[idx]
-            items.append(GoldItem(
-                question=question.strip(), chunk_id=c["id"], source_id=c["source_id"],
-                source_url=c["url"], source_title=c["title"], text=c["text"],
-            ))
+            items.append(
+                GoldItem(
+                    question=question.strip(),
+                    chunk_id=c["id"],
+                    source_id=c["source_id"],
+                    source_url=c["url"],
+                    source_title=c["title"],
+                    text=c["text"],
+                )
+            )
     return items
 
 
@@ -242,10 +253,13 @@ async def from_audits(pool: asyncpg.Pool, expert_id: int, limit: int = 200) -> l
             ORDER BY a.created_at DESC, p.retrieval_rank
             LIMIT $2
             """,
-            expert_id, limit,
+            expert_id,
+            limit,
         )
     return [
-        GoldItem(r["question"], r["chunk_id"], r["source_id"], r["url"], r["source_title"], r["text"])
+        GoldItem(
+            r["question"], r["chunk_id"], r["source_id"], r["url"], r["source_title"], r["text"]
+        )
         for r in rows
     ]
 
@@ -301,10 +315,13 @@ async def _source_urls(pool: asyncpg.Pool, source_ids: set[int]) -> dict[int, st
 
 def save(items: list[GoldItem], path: Path, expert: Expert) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(
-        {"expert": expert.name, "topic": expert.topic, "items": [asdict(i) for i in items]},
-        indent=2, ensure_ascii=False,
-    ))
+    path.write_text(
+        json.dumps(
+            {"expert": expert.name, "topic": expert.topic, "items": [asdict(i) for i in items]},
+            indent=2,
+            ensure_ascii=False,
+        )
+    )
 
 
 def load(path: Path) -> list[GoldItem]:
@@ -326,8 +343,12 @@ async def _main(argv: list[str] | None = None) -> None:
     run_p.add_argument("expert")
     run_p.add_argument("path", type=Path, nargs="?")
     run_p.add_argument("--k", type=int, default=10)
-    run_p.add_argument("--pace", type=float, default=0.0,
-                       help="Seconds between questions (6.5 keeps a Cohere trial key under 10/min)")
+    run_p.add_argument(
+        "--pace",
+        type=float,
+        default=0.0,
+        help="Seconds between questions (6.5 keeps a Cohere trial key under 10/min)",
+    )
     aud = sub.add_parser("audits", help="Measure against cited passages from the audit trail")
     aud.add_argument("expert")
     aud.add_argument("--k", type=int, default=10)
@@ -346,7 +367,9 @@ async def _main(argv: list[str] | None = None) -> None:
         print(f"Wrote {len(items)} questions to {out}")
         return
 
-    items = load(args.path or default_path) if args.cmd == "run" else await from_audits(pool, expert.id)
+    items = (
+        load(args.path or default_path) if args.cmd == "run" else await from_audits(pool, expert.id)
+    )
     report = await run(pool, expert, items, args.k, args.pace)
     summary = {k: v for k, v in asdict(report).items() if k != "per_question"}
     print(json.dumps(summary, indent=2))

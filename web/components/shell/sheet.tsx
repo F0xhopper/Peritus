@@ -76,8 +76,8 @@ export function Sheet({
       {swipeToOpen && (
         <Drawer.SwipeArea
           className={cn(
-            'fixed inset-y-0 z-30 w-5 pan-y md:hidden',
-            side === 'left' ? 'left-0' : 'right-0',
+            'pan-y fixed inset-y-0 z-30 w-5 md:hidden',
+            side === 'left' ? 'left-0' : 'right-0'
           )}
         />
       )}
@@ -90,15 +90,15 @@ export function Sheet({
             'opacity-[calc(0.5*(1-var(--drawer-swipe-progress)))]',
             'transition-opacity duration-(--dur-3) ease-(--ease-out)',
             'data-swiping:duration-0',
-            'data-starting-style:opacity-0 data-ending-style:opacity-0',
+            'data-ending-style:opacity-0 data-starting-style:opacity-0'
           )}
         />
         <Drawer.Viewport
           className={cn(
             'fixed inset-0 z-40 flex',
-            vertical ? 'items-end justify-center touch-none' : 'items-stretch',
+            vertical ? 'touch-none items-end justify-center' : 'items-stretch',
             side === 'left' && 'justify-start',
-            side === 'right' && 'justify-end',
+            side === 'right' && 'justify-end'
           )}
         >
           <Drawer.Popup
@@ -108,7 +108,7 @@ export function Sheet({
               'transition-transform duration-(--dur-3) ease-(--ease-out)',
               'data-ending-style:duration-[calc(var(--drawer-swipe-strength)*var(--dur-3))]',
               vertical && [
-                'w-full max-h-[calc(100dvh-1rem)] rounded-t-panel border-t border-border',
+                'max-h-[calc(100dvh-1rem)] w-full rounded-t-panel border-t border-border',
                 // The snap offset and the live drag are one transform, so the
                 // finger and the sheet never disagree.
                 '[transform:translateY(calc(var(--drawer-snap-point-offset)+var(--drawer-swipe-movement-y)))]',
@@ -128,14 +128,14 @@ export function Sheet({
                 'data-starting-style:[transform:translateX(100%)]',
                 'data-ending-style:[transform:translateX(100%)]',
               ],
-              className,
+              className
             )}
           >
             {vertical && (
               // The drag handle. `touch-none` on the header and `touch-auto` on
               // the content below is what lets the sheet be dragged by its top
               // while its body scrolls normally.
-              <div className="shrink-0 touch-none select-none px-4 pt-2.5 pb-3">
+              <div className="shrink-0 touch-none px-4 pt-2.5 pb-3 select-none">
                 <div className="mx-auto mb-2.5 h-1 w-10 rounded-full bg-border" />
                 <SheetHeader title={title} hideTitle={hideTitle} description={description} />
               </div>
@@ -148,7 +148,7 @@ export function Sheet({
             <Drawer.Content
               className={cn(
                 'min-h-0 flex-1 touch-auto overflow-y-auto overscroll-contain',
-                vertical ? 'px-4 pb-safe-4' : 'px-3 pb-safe-4',
+                vertical ? 'pb-safe-4 px-4' : 'pb-safe-4 px-3'
               )}
             >
               {children}
@@ -173,11 +173,15 @@ function SheetHeader({
   return (
     <div className="flex items-start justify-between gap-2">
       <div className="min-w-0">
-        <Drawer.Title className={cn('truncate text-sm font-medium text-fg', hideTitle && 'sr-only')}>
+        <Drawer.Title
+          className={cn('truncate text-sm font-medium text-fg', hideTitle && 'sr-only')}
+        >
           {title}
         </Drawer.Title>
         {description && (
-          <Drawer.Description className="mt-0.5 text-xs text-fg-3">{description}</Drawer.Description>
+          <Drawer.Description className="mt-0.5 text-xs text-fg-3">
+            {description}
+          </Drawer.Description>
         )}
       </div>
       <Drawer.Close
@@ -185,7 +189,7 @@ function SheetHeader({
         className={cn(
           'grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3',
           'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
-          hideTitle && '-mt-0.5',
+          hideTitle && '-mt-0.5'
         )}
       >
         <X className="size-4" />

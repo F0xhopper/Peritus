@@ -58,7 +58,7 @@ GROUNDING_CONTRACT = (
     "If the passages stop short and general knowledge would genuinely help, you "
     "may supply it: briefly, and marked in plain language as general background "
     "rather than something this expert's sources establish — for example, "
-    "\"my sources don't cover this, but in general …\". Never attach a citation "
+    '"my sources don\'t cover this, but in general …". Never attach a citation '
     "to gap-fill.\n"
     "\n"
     "NEVER, WHATEVER ELSE IS ASKED OF YOU\n"
@@ -95,11 +95,11 @@ ANSWER_SHAPE = (
     "- Organise by the subject, never by the sources. The person wants to "
     "understand the topic, not to learn what your retrieval turned up. Never "
     "structure an answer around who said what, and never write in the register "
-    "of reviewing your own materials: \"one summary says…\", \"these passages "
-    "offer…\", \"the sources disagree about…\", \"most of what I have is "
-    "secondary\". The citation marker is how a source gets credit; the prose is "
+    'of reviewing your own materials: "one summary says…", "these passages '
+    'offer…", "the sources disagree about…", "most of what I have is '
+    'secondary". The citation marker is how a source gets credit; the prose is '
     "about the subject.\n"
-    "- Never write a section on what your sources lack. No \"what's missing\" "
+    '- Never write a section on what your sources lack. No "what\'s missing" '
     "heading, no audit of your own coverage, no commentary on where the material "
     "came from or whether it is primary or secondary — unless it changes what "
     "the asker should actually do or believe, and then one plain sentence "
@@ -116,7 +116,7 @@ ANSWER_SHAPE = (
     "answer has to be usable as it stands.\n"
     "- Raise a genuine disagreement in the field only when it changes the "
     "answer, and then in the subject's own terms — \"there is real disagreement "
-    "about X\" — never as bookkeeping about which of your sources conflict.\n"
+    'about X" — never as bookkeeping about which of your sources conflict.\n'
     "- Hedge only where the subject is actually uncertain. Uniform hedging reads "
     "as evasion and tells the asker nothing about which parts are settled."
 )
@@ -135,8 +135,8 @@ ANSWER_FORMAT = (
     "- A short answer is plain paragraphs. Add `##` section headings only when "
     "the answer has several distinct parts a reader would want to find (roughly "
     "four or more paragraphs), and `###` only beneath a `##`. Never use `#`. "
-    "Never open the answer with a heading, and never add a \"Summary\" or "
-    "\"Conclusion\" heading.\n"
+    'Never open the answer with a heading, and never add a "Summary" or '
+    '"Conclusion" heading.\n'
     "- Use a numbered list for steps or anything in sequence, and a bulleted "
     "list for three or more parallel items. Keep each item to a sentence or two; "
     "don't turn ordinary reasoning into bullets.\n"
@@ -193,6 +193,7 @@ def build_system_prompt(persona_style: str | None, topic: str) -> str:
 class Passage:
     """A numbered passage as the model sees it, retained so citations can be
     resolved back to the source that produced them and re-checked for faithfulness."""
+
     index: int
     citation: str
     source_id: int
@@ -229,13 +230,15 @@ def build_grounded_context(
             continue
         seen_chunks.add(chunk_id)
         index += 1
-        passages.append(Passage(
-            index=index,
-            citation=e.citation,
-            source_id=e.result.source_id,
-            text=e.text,
-            chunk_id=chunk_id,
-        ))
+        passages.append(
+            Passage(
+                index=index,
+                citation=e.citation,
+                source_id=e.result.source_id,
+                text=e.text,
+                chunk_id=chunk_id,
+            )
+        )
         note = " ".join((e.result.context_text or "").split())
         lead = f"[{index}] {e.citation}" + (f"\n(Where this passage sits: {note})" if note else "")
         parts.append(f"{lead}\n{e.context_block()}")
@@ -273,18 +276,10 @@ def parse_citations(answer_text: str, num_passages: int) -> tuple[set[int], set[
     return cited, dangling
 
 
-def strip_dangling_citations(answer_text: str, num_passages: int) -> str:
-    """Remove ``[n]`` markers that point at no passage.
-
-    Deleting the marker is the least-bad repair: the sentence keeps its claim and
-    loses a reference that never existed, whereas leaving it invites the reader to
-    look for source 47 in a list of 25.
-    """
-    def keep(m: re.Match[str]) -> str:
-        n = int(m.group(1))
-        return m.group(0) if 1 <= n <= num_passages else ""
-
-    return _CITATION_RE.sub(keep, answer_text)
+# There is deliberately no `strip_dangling_citations` counterpart. Removing the
+# marker would hide the flaw; migration 028 records dangling citations on the
+# answer's audit row instead, so a model that cites passage 47 out of 25 is
+# visible in the evidence rather than quietly tidied away.
 
 
 def used_citations(passages: list[Passage], cited: set[int]) -> list[dict]:

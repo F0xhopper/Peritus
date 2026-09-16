@@ -26,12 +26,7 @@ export function RelativeTime({
 }) {
   if (!iso) return <span className={className}>—</span>
   return (
-    <time
-      dateTime={iso}
-      title={formatDateTime(iso)}
-      suppressHydrationWarning
-      className={className}
-    >
+    <time dateTime={iso} title={formatDateTime(iso)} suppressHydrationWarning className={className}>
       {relativeTime(iso)}
     </time>
   )
@@ -59,12 +54,7 @@ export function DateText({
 }) {
   if (!iso) return <span className={className}>—</span>
   return (
-    <time
-      dateTime={iso}
-      title={formatDateTime(iso)}
-      suppressHydrationWarning
-      className={className}
-    >
+    <time dateTime={iso} title={formatDateTime(iso)} suppressHydrationWarning className={className}>
       {withTime ? formatDateTime(iso) : formatDate(iso)}
     </time>
   )

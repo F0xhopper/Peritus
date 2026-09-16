@@ -108,9 +108,7 @@ async def set_readiness(pool: asyncpg.Pool, expert_id: int, readiness: Readiness
     }.get(readiness)
     stamp = f", {timestamp_col} = NOW()" if timestamp_col else ""
     reset = (
-        ", chat_ready_at = NULL, graph_ready_at = NULL"
-        if readiness is Readiness.PENDING
-        else ""
+        ", chat_ready_at = NULL, graph_ready_at = NULL" if readiness is Readiness.PENDING else ""
     )
     try:
         async with pool.acquire() as conn:

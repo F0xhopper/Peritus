@@ -98,8 +98,10 @@ def test_distance_expr_falls_back_to_plain_vector():
 def test_distance_expr_follows_configured_dimension():
     from peritus.core.config import settings
 
-    with patch.object(settings, "EMBED_DIM", 1536), \
-         patch("peritus.search.service.halfvec_supported", return_value=True):
+    with (
+        patch.object(settings, "EMBED_DIM", 1536),
+        patch("peritus.search.service.halfvec_supported", return_value=True),
+    ):
         column, param = _distance_expr()
     assert "halfvec(1536)" in column
     assert "halfvec(1536)" in param
@@ -127,10 +129,10 @@ async def test_limit_is_the_direct_parent_of_the_vector_scan():
     over the already-limited subquery.
     """
     conn = await _capture_sql(halfvec=True)
-    semantic = conn.sql[conn.sql.index("WITH semantic"):conn.sql.index("keyword AS")]
+    semantic = conn.sql[conn.sql.index("WITH semantic") : conn.sql.index("keyword AS")]
 
     # The distance ordering and the candidate LIMIT are in the inner subquery…
-    inner = semantic[semantic.index("SELECT sc.id"):]
+    inner = semantic[semantic.index("SELECT sc.id") :]
     assert "ORDER BY sc.embedding::halfvec" in inner
     assert "LIMIT $3" in inner
     # …and ROW_NUMBER is applied outside it, over `ranked`.
@@ -143,7 +145,7 @@ async def test_limit_is_the_direct_parent_of_the_vector_scan():
 
 async def test_keyword_arm_also_ranks_outside_its_limit():
     conn = await _capture_sql(halfvec=True)
-    keyword = conn.sql[conn.sql.index("keyword AS"):conn.sql.index("fused AS")]
+    keyword = conn.sql[conn.sql.index("keyword AS") : conn.sql.index("fused AS")]
 
     assert "ROW_NUMBER() OVER (ORDER BY rank DESC)" in keyword
     assert "ORDER BY rank DESC" in keyword
@@ -164,7 +166,7 @@ async def test_candidate_arms_project_ids_only():
     projects the wide columns, and neither joins ``sources``.
     """
     conn = await _capture_sql(halfvec=True)
-    candidates = conn.sql[conn.sql.index("WITH semantic"):conn.sql.index("fused AS")]
+    candidates = conn.sql[conn.sql.index("WITH semantic") : conn.sql.index("fused AS")]
 
     for column in ("sc.chunk_meta", "sc.sequence_n", "source_title"):
         assert column not in candidates, f"{column} is fetched per candidate"
@@ -178,7 +180,7 @@ async def test_candidate_arms_project_ids_only():
     assert candidates.count("sc.context_text") == 2
 
     # The wide columns are still selected once, at the end, for the fused ids.
-    final = conn.sql[conn.sql.index("fused AS"):]
+    final = conn.sql[conn.sql.index("fused AS") :]
     assert "sc.context_text" in final
     assert "JOIN sources s ON s.id = sc.source_id" in final
 
@@ -194,7 +196,7 @@ async def test_null_embeddings_are_excluded_from_the_semantic_arm():
 async def test_both_arms_are_scoped_to_the_expert():
     conn = await _capture_sql(halfvec=True)
     # $2 is expert_id; it must appear in the semantic and the keyword arm.
-    candidates = conn.sql[conn.sql.index("WITH semantic"):conn.sql.index("fused AS")]
+    candidates = conn.sql[conn.sql.index("WITH semantic") : conn.sql.index("fused AS")]
     assert len(re.findall(r"sc\.expert_id = \$2", candidates)) == 2
 
 
@@ -283,7 +285,7 @@ async def test_keyword_arm_matches_any_term_not_all_of_them():
     The lexemes still come from `plainto_tsquery`; only the operator changes.
     """
     conn = await _capture_sql(halfvec=True)
-    keyword = conn.sql[conn.sql.index("keyword AS"):conn.sql.index("fused AS")]
+    keyword = conn.sql[conn.sql.index("keyword AS") : conn.sql.index("fused AS")]
     assert "@@ plainto_tsquery" not in keyword
     assert keyword.count("replace(plainto_tsquery('english', $4)::text, '&', '|')::tsquery") == 2
 
@@ -292,7 +294,8 @@ def test_question_is_searched_alongside_the_subqueries():
     from peritus.search.service import _with_question
 
     assert _with_question("What is potency?", ["potency act Aristotle"]) == [
-        "potency act Aristotle", "What is potency?",
+        "potency act Aristotle",
+        "What is potency?",
     ]
     # Not twice, when the planner fell back to the question verbatim.
     assert _with_question("What is potency?", ["what is potency? "]) == ["what is potency? "]
@@ -305,7 +308,12 @@ def test_all_zero_ranking_is_not_a_relevance_judgement():
 
     def hit(i):
         return SearchResult(
-            chunk_id=i, expert_id=1, source_id=1, text="t", context_text=None, score=0.03,
+            chunk_id=i,
+            expert_id=1,
+            source_id=1,
+            text="t",
+            context_text=None,
+            score=0.03,
             source_ref=SourceRef(source_id=1, title="T", source_type="web", quality_score=None),
         )
 

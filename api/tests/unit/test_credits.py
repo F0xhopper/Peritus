@@ -25,13 +25,12 @@ OTHER = "44444444-4444-4444-4444-444444444444"
 
 
 async def _job(pool, name: str = "credited", tier: ExpertTier = ExpertTier.LITE):
-    expert = await ExpertRepository(pool).create(
-        name=name, topic=name, tier=tier, owner_id=OWNER
-    )
+    expert = await ExpertRepository(pool).create(name=name, topic=name, tier=tier, owner_id=OWNER)
     return await JobRepository(pool).enqueue(expert.id, tier.value, None, max_attempts=3)
 
 
 # ── provisioning ────────────────────────────────────────────────────────────
+
 
 async def test_account_is_provisioned_once_with_its_signup_grant(db_pool):
     service = EntitlementService(db_pool)
@@ -62,6 +61,7 @@ async def test_grant_by_email_resolves_the_account(db_pool):
 
 
 # ── authorisation ───────────────────────────────────────────────────────────
+
 
 async def test_build_is_denied_without_enough_credits(db_pool):
     service = EntitlementService(db_pool)
@@ -120,6 +120,7 @@ async def test_held_credits_are_reported_while_a_build_is_in_flight(db_pool):
 
 # ── settlement ──────────────────────────────────────────────────────────────
 
+
 async def test_failed_build_is_refunded_exactly_once(db_pool):
     """The over-cap / failure policy: no usable expert means no charge."""
     service = EntitlementService(db_pool)
@@ -160,6 +161,7 @@ async def test_successful_build_keeps_the_hold_and_records_its_cost(db_pool):
 
 # ── metering persistence ────────────────────────────────────────────────────
 
+
 async def test_usage_rolls_up_onto_the_job_and_breaks_down_by_stage(db_pool):
     from peritus.billing.metering import BuildMeter, Stage
 
@@ -170,8 +172,16 @@ async def test_usage_rolls_up_onto_the_job_and_breaks_down_by_stage(db_pool):
     meter.set_stage(Stage.CONTEXTUALIZATION)
     meter.record_message(
         "claude-haiku-4-5",
-        type("U", (), {"input_tokens": 1_000_000, "output_tokens": 0,
-                       "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0})(),
+        type(
+            "U",
+            (),
+            {
+                "input_tokens": 1_000_000,
+                "output_tokens": 0,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 0,
+            },
+        )(),
         batch=True,
     )
     meter.record_embedding("text-embedding-3-large", 100_000)
@@ -194,8 +204,16 @@ async def test_repeated_flushes_accumulate_rather_than_overwrite(db_pool):
     repo = BillingRepository(db_pool)
     job = await _job(db_pool, name="twice-flushed")
     meter = BuildMeter(job_id=job.id, expert_id=job.expert_id, owner_id=OWNER)
-    usage = type("U", (), {"input_tokens": 1_000_000, "output_tokens": 0,
-                           "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0})
+    usage = type(
+        "U",
+        (),
+        {
+            "input_tokens": 1_000_000,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        },
+    )
 
     meter.set_stage(Stage.VALIDATION)
     meter.record_message("claude-haiku-4-5", usage(), batch=False)

@@ -2,8 +2,7 @@
 
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useRef } from 'react'
-import { useForm } from 'react-hook-form'
-import { z } from 'zod'
+import { useForm, useWatch } from 'react-hook-form'
 
 import { Button } from '@/components/ui/button'
 import { DenialNotice } from '@/components/experts/denial-notice'
@@ -12,6 +11,7 @@ import { Notice } from '@/components/ui/notice'
 import { CostLine, TierPicker } from '@/components/experts/tier-picker'
 import { useStartBuild } from '@/hooks/use-start-build'
 import type { ExpertTier, TierPrice } from '@/lib/api/types'
+import { z } from '@/lib/validation'
 
 /**
  * The full build form.
@@ -81,8 +81,11 @@ export function NewExpertForm({
     mode: 'onSubmit',
   })
 
-  const tier = form.watch('tier')
-  const topic = form.watch('topic')
+  // `useWatch`, not `form.watch()`: the latter returns a fresh function every
+  // render, so React cannot memoize around it and the lint rule is right to say
+  // so. `useWatch` subscribes to the field and re-renders only this component.
+  const tier = useWatch({ control: form.control, name: 'tier' })
+  const topic = useWatch({ control: form.control, name: 'topic' })
 
   // The registration's own ref has to be kept and called alongside ours, or
   // react-hook-form loses the element and the field stops being read.
@@ -153,18 +156,13 @@ export function NewExpertForm({
 
       {/* Inline at `md` and up; a sticky footer below, above the safe area. */}
       <div className="mt-6 hidden items-center justify-between gap-4 md:flex">
-        <CostLine
-          tier={tier}
-          tiers={tiers}
-          balance={balance}
-          creditsEnforced={creditsEnforced}
-        />
+        <CostLine tier={tier} tiers={tiers} balance={balance} creditsEnforced={creditsEnforced} />
         <Button type="submit" variant="primary" size="lg" loading={submitting} minWidth={120}>
           Build
         </Button>
       </div>
 
-      <div className="fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg px-4 pt-3 pb-safe-4 md:hidden">
+      <div className="pb-safe-4 fixed inset-x-0 bottom-0 z-20 border-t border-border bg-bg px-4 pt-3 md:hidden">
         <CostLine
           tier={tier}
           tiers={tiers}
@@ -172,13 +170,7 @@ export function NewExpertForm({
           creditsEnforced={creditsEnforced}
           className="mb-2"
         />
-        <Button
-          type="submit"
-          variant="primary"
-          size="lg"
-          loading={submitting}
-          className="w-full"
-        >
+        <Button type="submit" variant="primary" size="lg" loading={submitting} className="w-full">
           Build
         </Button>
       </div>

@@ -21,9 +21,7 @@ pytestmark = pytest.mark.asyncio
 
 
 async def _expert(pool, name: str):
-    return await ExpertRepository(pool).create(
-        name=name, topic=name, tier=ExpertTier.LITE
-    )
+    return await ExpertRepository(pool).create(name=name, topic=name, tier=ExpertTier.LITE)
 
 
 async def _source(pool, expert_id: int, title: str, *, upload: bool) -> int:
@@ -31,9 +29,16 @@ async def _source(pool, expert_id: int, title: str, *, upload: bool) -> int:
     repo = UploadRepository(pool)
     if upload:
         return await repo.insert_source(
-            expert_id=expert_id, source_type="upload", url="", title=title,
-            author=None, content_type="textbook", difficulty=3,
-            key_claims=["a claim"], covered_concepts=[], uploaded_by="user-1",
+            expert_id=expert_id,
+            source_type="upload",
+            url="",
+            title=title,
+            author=None,
+            content_type="textbook",
+            difficulty=3,
+            key_claims=["a claim"],
+            covered_concepts=[],
+            uploaded_by="user-1",
         )
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
@@ -43,7 +48,8 @@ async def _source(pool, expert_id: int, title: str, *, upload: bool) -> int:
             VALUES ($1, 'web', 'https://e.test/x', $2, true, 'plan', 8.0, 8.0)
             RETURNING id
             """,
-            expert_id, title,
+            expert_id,
+            title,
         )
     return row["id"]
 
@@ -56,12 +62,15 @@ async def _chunk(pool, expert_id: int, source_id: int, n: int = 0) -> int:
             VALUES ($1, $2, $3, 'chunk text', '{}'::jsonb)
             RETURNING id
             """,
-            expert_id, source_id, n,
+            expert_id,
+            source_id,
+            n,
         )
     return row["id"]
 
 
 # ── the rebuild invariant ───────────────────────────────────────────────────
+
 
 async def test_rebuild_preserves_uploads_and_wipes_discovered(db_pool):
     expert = await _expert(db_pool, "reset-preserve")
@@ -73,12 +82,16 @@ async def test_rebuild_preserves_uploads_and_wipes_discovered(db_pool):
     await ExpertRepository(db_pool).reset_build_state(expert.id)
 
     async with db_pool.acquire() as conn:
-        ids = [r["id"] for r in await conn.fetch(
-            "SELECT id FROM sources WHERE expert_id = $1", expert.id
-        )]
-        chunk_sources = [r["source_id"] for r in await conn.fetch(
-            "SELECT source_id FROM source_chunks WHERE expert_id = $1", expert.id
-        )]
+        ids = [
+            r["id"]
+            for r in await conn.fetch("SELECT id FROM sources WHERE expert_id = $1", expert.id)
+        ]
+        chunk_sources = [
+            r["source_id"]
+            for r in await conn.fetch(
+                "SELECT source_id FROM source_chunks WHERE expert_id = $1", expert.id
+            )
+        ]
     assert ids == [uploaded]
     assert chunk_sources == [uploaded]
     assert found not in ids
@@ -116,6 +129,7 @@ async def test_reset_still_zeroes_an_expert_with_no_uploads(db_pool):
 
 # ── job typing ──────────────────────────────────────────────────────────────
 
+
 async def test_ingest_jobs_queue_alongside_a_running_build(db_pool):
     """The one-active-job index is build-scoped, so a user is not blocked from
     queueing documents by an unrelated build, and two documents do not collapse
@@ -124,12 +138,8 @@ async def test_ingest_jobs_queue_alongside_a_running_build(db_pool):
     jobs = JobRepository(db_pool)
 
     build = await jobs.enqueue(expert.id, "lite", None, 3)
-    first = await jobs.enqueue(
-        expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 1}
-    )
-    second = await jobs.enqueue(
-        expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 2}
-    )
+    first = await jobs.enqueue(expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 1})
+    second = await jobs.enqueue(expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 2})
 
     assert len({build.id, first.id, second.id}) == 3
     assert first.job_type is JobType.INGEST_SOURCE
@@ -151,9 +161,7 @@ async def test_cancelling_a_build_leaves_queued_ingests_alone(db_pool):
     expert = await _expert(db_pool, "jobs-cancel")
     jobs = JobRepository(db_pool)
     build = await jobs.enqueue(expert.id, "lite", None, 3)
-    ingest = await jobs.enqueue(
-        expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 9}
-    )
+    ingest = await jobs.enqueue(expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 9})
 
     await jobs.request_cancel(expert.id, job_type=JobType.BUILD)
 
@@ -165,9 +173,7 @@ async def test_deleting_an_expert_cancels_everything(db_pool):
     expert = await _expert(db_pool, "jobs-cancel-all")
     jobs = JobRepository(db_pool)
     build = await jobs.enqueue(expert.id, "lite", None, 3)
-    ingest = await jobs.enqueue(
-        expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 9}
-    )
+    ingest = await jobs.enqueue(expert.id, "lite", None, 3, JobType.INGEST_SOURCE, {"upload_id": 9})
 
     await jobs.request_cancel(expert.id)  # unscoped
 
@@ -177,13 +183,18 @@ async def test_deleting_an_expert_cancels_everything(db_pool):
 
 # ── upload payload storage ──────────────────────────────────────────────────
 
+
 async def test_pending_upload_round_trips(db_pool):
     expert = await _expert(db_pool, "upload-roundtrip")
     repo = UploadRepository(db_pool)
     created = await repo.create(
-        expert_id=expert.id, owner_id="user-1", kind=UploadKind.PDF,
-        title="The Intelligent Investor", filename="tii.pdf",
-        media_type="application/pdf", content=b"%PDF-1.7 body",
+        expert_id=expert.id,
+        owner_id="user-1",
+        kind=UploadKind.PDF,
+        title="The Intelligent Investor",
+        filename="tii.pdf",
+        media_type="application/pdf",
+        content=b"%PDF-1.7 body",
     )
     loaded = await repo.get(created.id)
     assert loaded.kind is UploadKind.PDF

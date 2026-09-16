@@ -195,9 +195,7 @@ def test_a_preprint_and_its_published_version_are_one_document():
     edits — a handful of bits of simhash, far inside the threshold.
     """
     preprint = _source("https://a.test/preprint", _BODY)
-    published = _source(
-        "https://b.test/published", "Journal of Thomistic Studies\n\n" + _BODY
-    )
+    published = _source("https://b.test/published", "Journal of Thomistic Studies\n\n" + _BODY)
     kept, duplicates = deduplicate_sources_by_content([preprint, published])
 
     assert len(kept) == 1
@@ -295,9 +293,11 @@ def test_the_threshold_still_keeps_distinct_papers_on_one_topic_apart():
     of their vocabulary, which is what makes this the hard direction — and it is
     why the threshold sits at the largest distance with no observed false merge
     rather than at the one with the best recall."""
-    kept, duplicates = deduplicate_sources_by_content([
-        _source("https://a.test", _varied("the analogy of names")),
-        _source("https://b.test", _varied("participation in being")),
-    ])
+    kept, duplicates = deduplicate_sources_by_content(
+        [
+            _source("https://a.test", _varied("the analogy of names")),
+            _source("https://b.test", _varied("participation in being")),
+        ]
+    )
     assert len(kept) == 2
     assert duplicates == []

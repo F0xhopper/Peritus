@@ -50,3 +50,6 @@ next-env.d.ts
 /127_0_0_1*.report.html
 /127_0_0_1*.report.json
 .lighthouseci/
+
+# lhci run manifest (absolute local paths)
+/manifest.json

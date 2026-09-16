@@ -24,7 +24,7 @@ export function LegalPage({
           // Typography for the prose inside, scoped here so each page stays
           // plain markup.
           '[&_h2]:mt-8 [&_h2]:text-lg [&_h2]:font-medium [&_h2]:text-fg',
-          '[&_ul]:space-y-2 [&_ul]:pl-5 [&_ul]:list-disc',
+          '[&_ul]:list-disc [&_ul]:space-y-2 [&_ul]:pl-5',
           '[&_li]:leading-relaxed',
           '[&_strong]:font-medium [&_strong]:text-fg',
           '[&_a]:text-fg [&_a]:underline [&_a]:underline-offset-2',

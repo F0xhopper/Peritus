@@ -11,8 +11,6 @@ that reach a query — because those must be validated before they reach SQL.
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
-
 from peritus.audit.repository import SOURCE_SORTS
 
 
@@ -50,8 +48,7 @@ def _assert_sorts_match() -> None:
     implemented = set(SOURCE_SORTS)
     if declared != implemented:
         raise RuntimeError(
-            "SourceSort and audit.repository.SOURCE_SORTS have diverged: "
-            f"{declared ^ implemented}"
+            f"SourceSort and audit.repository.SOURCE_SORTS have diverged: {declared ^ implemented}"
         )
 
 
@@ -92,13 +89,3 @@ GRAPH_NODES_MAX = 1500
 # export, so this sits far above any real corpus and the route reports a
 # truncation rather than emitting a silently partial file.
 EXPORT_MAX_ROWS = 20_000
-
-
-class AuditPage(BaseModel):
-    """Standard pagination echoed back on every paginated audit response."""
-
-    limit: int = Field(ge=1)
-    offset: int = Field(ge=0)
-    returned: int
-    total_matching: int | None
-    has_more: bool

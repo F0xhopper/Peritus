@@ -9,7 +9,9 @@
   contradiction flag are local to each passage, not global)
 """
 
-from types import SimpleNamespace
+from typing import Any
+
+from anthropic.types import Message
 
 from peritus.graph.domain import EdgeType, NodeType, edge_is_valid
 from peritus.graph.extractor import attach_chunk_db_ids
@@ -17,6 +19,7 @@ from peritus.graph.reconciler import ClaimRow, _select_claims, parse_relations
 from peritus.graph.repository import merge_node_extractions, node_embedding_text
 from peritus.graph.retriever import GraphRetriever
 from peritus.search.domain import SearchResult, SourceRef
+from tests.conftest import tool_use_response
 
 # --- the vocabulary ---------------------------------------------------------
 
@@ -37,36 +40,49 @@ def test_about_and_part_of_are_directional():
     assert edge_is_valid(EdgeType.PART_OF, NodeType.CONCEPT, NodeType.CONCEPT)
     assert not edge_is_valid(EdgeType.PART_OF, NodeType.CLAIM, NodeType.CONCEPT)
 
+
 # --- merge_node_extractions -------------------------------------------------
 
+
 def _node(label, description="", chunk_db_ids=None, node_type="concept", **props):
-    return {"label": label, "description": description, "node_type": node_type,
-            "chunk_db_ids": chunk_db_ids or [], **props}
+    return {
+        "label": label,
+        "description": description,
+        "node_type": node_type,
+        "chunk_db_ids": chunk_db_ids or [],
+        **props,
+    }
 
 
 def test_merge_dedupes_by_normalised_label():
-    merged = merge_node_extractions([
-        {"nodes": [_node("Stoicism", chunk_db_ids=[1])]},
-        {"nodes": [_node("  stoicism ", chunk_db_ids=[2])]},
-    ])
+    merged = merge_node_extractions(
+        [
+            {"nodes": [_node("Stoicism", chunk_db_ids=[1])]},
+            {"nodes": [_node("  stoicism ", chunk_db_ids=[2])]},
+        ]
+    )
     assert list(merged) == ["stoicism"]
     assert sorted(merged["stoicism"]["chunk_ids"]) == [1, 2]
 
 
 def test_merge_keeps_longest_description():
-    merged = merge_node_extractions([
-        {"nodes": [_node("Virtue", description="short")]},
-        {"nodes": [_node("virtue", description="a much longer description")]},
-        {"nodes": [_node("virtue", description="")]},
-    ])
+    merged = merge_node_extractions(
+        [
+            {"nodes": [_node("Virtue", description="short")]},
+            {"nodes": [_node("virtue", description="a much longer description")]},
+            {"nodes": [_node("virtue", description="")]},
+        ]
+    )
     assert merged["virtue"]["description"] == "a much longer description"
 
 
 def test_merge_keeps_first_non_null_properties():
-    merged = merge_node_extractions([
-        {"nodes": [_node("Logos", difficulty=None, confidence=0.9)]},
-        {"nodes": [_node("logos", difficulty=3, confidence=0.2)]},
-    ])
+    merged = merge_node_extractions(
+        [
+            {"nodes": [_node("Logos", difficulty=None, confidence=0.9)]},
+            {"nodes": [_node("logos", difficulty=3, confidence=0.2)]},
+        ]
+    )
     props = merged["logos"]["properties"]
     assert props["difficulty"] == 3
     assert props["confidence"] == 0.9
@@ -75,23 +91,29 @@ def test_merge_keeps_first_non_null_properties():
 def test_merge_drops_nodes_typed_outside_the_enum():
     """The tool schema always declared the enum and nothing enforced it, which
     is how the graph filled up with nodes typed `definition` and `argument`."""
-    merged = merge_node_extractions([
-        {"nodes": [
-            _node("Virtue"),
-            _node("Eudaimonia", node_type="definition"),
-            _node("Akrasia", node_type=None),
-        ]},
-    ])
+    merged = merge_node_extractions(
+        [
+            {
+                "nodes": [
+                    _node("Virtue"),
+                    _node("Eudaimonia", node_type="definition"),
+                    _node("Akrasia", node_type=None),
+                ]
+            },
+        ]
+    )
     assert list(merged) == ["virtue"]
 
 
 def test_merge_drops_content_type_outside_the_enum():
     """`content_type` picked up edge type names in the same exchange that put
     edge types into `node_type`."""
-    merged = merge_node_extractions([
-        {"nodes": [_node("Virtue", content_type="supports")]},
-        {"nodes": [_node("virtue", content_type="definition")]},
-    ])
+    merged = merge_node_extractions(
+        [
+            {"nodes": [_node("Virtue", content_type="supports")]},
+            {"nodes": [_node("virtue", content_type="definition")]},
+        ]
+    )
     assert merged["virtue"]["properties"]["content_type"] == "definition"
 
 
@@ -102,6 +124,7 @@ def test_node_embedding_text_includes_description():
 
 
 # --- attach_chunk_db_ids ----------------------------------------------------
+
 
 def test_attach_chunk_db_ids_drops_out_of_range_indices():
     data = {"nodes": [{"label": "A", "chunk_indices": [0, 2, -1, 99, "x"]}]}
@@ -116,10 +139,8 @@ def _claim(node_id: int, source_id: int) -> ClaimRow:
     return ClaimRow(node_id=node_id, label=f"claim {node_id}", source_id=source_id)
 
 
-def _response(relations: list[dict]):
-    return SimpleNamespace(
-        content=[SimpleNamespace(type="tool_use", input={"relations": relations})]
-    )
+def _response(relations: list[Any]) -> Message:
+    return tool_use_response({"relations": relations})
 
 
 def test_select_claims_spreads_the_budget_across_sources():
@@ -133,12 +154,21 @@ def test_select_claims_spreads_the_budget_across_sources():
 
 def test_parse_relations_requires_a_stated_point():
     claims = [_claim(1, 1), _claim(2, 2)]
-    parsed = parse_relations(_response([
-        {"from_claim": 0, "to_claim": 1, "relation": "contradicts"},
-        {"from_claim": 0, "to_claim": 1, "relation": "contradicts", "point": "  "},
-        {"from_claim": 1, "to_claim": 0, "relation": "contradicts",
-         "point": "whether the effect survives co-infection"},
-    ]), claims)
+    parsed = parse_relations(
+        _response(
+            [
+                {"from_claim": 0, "to_claim": 1, "relation": "contradicts"},
+                {"from_claim": 0, "to_claim": 1, "relation": "contradicts", "point": "  "},
+                {
+                    "from_claim": 1,
+                    "to_claim": 0,
+                    "relation": "contradicts",
+                    "point": "whether the effect survives co-infection",
+                },
+            ]
+        ),
+        claims,
+    )
 
     assert len(parsed) == 1
     assert parsed[0]["from_node_id"] == 2
@@ -148,24 +178,35 @@ def test_parse_relations_requires_a_stated_point():
 
 def test_parse_relations_rejects_bad_indices_and_types():
     claims = [_claim(1, 1), _claim(2, 2)]
-    parsed = parse_relations(_response([
-        {"from_claim": 0, "to_claim": 0, "relation": "supports"},
-        {"from_claim": 0, "to_claim": 7, "relation": "supports"},
-        {"from_claim": 0, "to_claim": 1, "relation": "builds_on"},
-        {"from_claim": 0, "to_claim": 1, "relation": "about"},
-    ]), claims)
+    parsed = parse_relations(
+        _response(
+            [
+                {"from_claim": 0, "to_claim": 0, "relation": "supports"},
+                {"from_claim": 0, "to_claim": 7, "relation": "supports"},
+                {"from_claim": 0, "to_claim": 1, "relation": "builds_on"},
+                {"from_claim": 0, "to_claim": 1, "relation": "about"},
+            ]
+        ),
+        claims,
+    )
     assert parsed == []
 
 
 def test_parse_relations_marks_within_source_pairs():
     claims = [_claim(1, 5), _claim(2, 5)]
-    parsed = parse_relations(_response([
-        {"from_claim": 0, "to_claim": 1, "relation": "supports"},
-    ]), claims)
+    parsed = parse_relations(
+        _response(
+            [
+                {"from_claim": 0, "to_claim": 1, "relation": "supports"},
+            ]
+        ),
+        claims,
+    )
     assert parsed[0]["properties"]["cross_source"] is False
 
 
 # --- GraphRetriever.expand ---------------------------------------------------
+
 
 def _result(chunk_id: int) -> SearchResult:
     return SearchResult(
@@ -189,19 +230,40 @@ class FakeRepo:
             {"id": 1, "label": "A", "node_type": "claim", "description": "a", "chunk_ids": [100]},
             {"id": 2, "label": "B", "node_type": "claim", "description": "b", "chunk_ids": [200]},
         ]
-        self.all_nodes = self.nodes + [
+        self.all_nodes = [
+            *self.nodes,
             {"id": 3, "label": "C", "node_type": "claim", "description": "c"},
             {"id": 4, "label": "D", "node_type": "concept", "description": "d"},
         ]
         self.edges = [
-            {"from_node_id": 1, "to_node_id": 3, "edge_type": "contradicts", "evidence": 1,
-             "properties": {"point": "whether D holds without co-infection"}},
-            {"from_node_id": 2, "to_node_id": 3, "edge_type": "supports", "evidence": 3,
-             "properties": {}},
-            {"from_node_id": 1, "to_node_id": 4, "edge_type": "about", "evidence": 2,
-             "properties": {}},
-            {"from_node_id": 2, "to_node_id": 4, "edge_type": "about", "evidence": 2,
-             "properties": {}},
+            {
+                "from_node_id": 1,
+                "to_node_id": 3,
+                "edge_type": "contradicts",
+                "evidence": 1,
+                "properties": {"point": "whether D holds without co-infection"},
+            },
+            {
+                "from_node_id": 2,
+                "to_node_id": 3,
+                "edge_type": "supports",
+                "evidence": 3,
+                "properties": {},
+            },
+            {
+                "from_node_id": 1,
+                "to_node_id": 4,
+                "edge_type": "about",
+                "evidence": 2,
+                "properties": {},
+            },
+            {
+                "from_node_id": 2,
+                "to_node_id": 4,
+                "edge_type": "about",
+                "evidence": 2,
+                "properties": {},
+            },
         ]
 
     async def get_nodes_for_chunks(self, expert_id, chunk_ids):
@@ -246,9 +308,7 @@ async def test_expand_carries_the_stated_point_of_a_contradiction():
     enriched = await _retriever().expand([_result(100), _result(200)], expert_id=1)
 
     by_chunk = {e.result.chunk_id: e for e in enriched}
-    assert by_chunk[100].contradiction_points == [
-        "whether D holds without co-infection"
-    ]
+    assert by_chunk[100].contradiction_points == ["whether D holds without co-infection"]
     assert by_chunk[200].contradiction_points == []
     assert "whether D holds without co-infection" in by_chunk[100].context_block()
 
@@ -267,17 +327,8 @@ async def test_expand_no_anchor_nodes_returns_bare_results():
 # with it — ten chunks' worth of graph, or five sources' worth of validation.
 
 
-class _Block:
-    type = "tool_use"
-
-    def __init__(self, payload: dict) -> None:
-        self.input = payload
-
-
-class _Response:
-    def __init__(self, payload: dict) -> None:
-        self.content = [_Block(payload)]
-        self.stop_reason = "tool_use"
+def _extract_response(payload: dict) -> Message:
+    return tool_use_response(payload)
 
 
 def test_a_string_where_a_node_was_expected_does_not_take_the_batch_with_it():
@@ -291,7 +342,7 @@ def test_a_string_where_a_node_was_expected_does_not_take_the_batch_with_it():
         ],
         "edges": [],
     }
-    result = _parse_extract_response(_Response(payload), [1, 2])
+    result = _parse_extract_response(_extract_response(payload), [1, 2])
     assert [n["label"] for n in result["nodes"]] == ["Analogy", "Esse"]
 
 
@@ -305,14 +356,14 @@ def test_a_string_where_an_edge_was_expected_is_dropped_the_same_way():
             "Analogy -> Esse",
         ],
     }
-    result = _parse_extract_response(_Response(payload), [1])
+    result = _parse_extract_response(_extract_response(payload), [1])
     assert len(result["edges"]) == 1
 
 
 def test_a_non_list_where_a_list_was_expected_yields_nothing_rather_than_raising():
     from peritus.graph.extractor import _parse_extract_response
 
-    result = _parse_extract_response(_Response({"nodes": "none found", "edges": None}), [1])
+    result = _parse_extract_response(_extract_response({"nodes": "none found", "edges": None}), [1])
     assert result["nodes"] == []
     assert result["edges"] == []
 
@@ -320,8 +371,13 @@ def test_a_non_list_where_a_list_was_expected_yields_nothing_rather_than_raising
 async def test_context_block_shows_the_whole_passage():
     """It used to show text[:800] while the citation resolved to the full chunk."""
     long = SearchResult(
-        chunk_id=100, expert_id=1, source_id=1, text="x" * 1400, context_text=None,
-        score=0.5, source_ref=SourceRef(source_id=1, title="T", source_type="web", quality_score=7.0),
+        chunk_id=100,
+        expert_id=1,
+        source_id=1,
+        text="x" * 1400,
+        context_text=None,
+        score=0.5,
+        source_ref=SourceRef(source_id=1, title="T", source_type="web", quality_score=7.0),
     )
     enriched = await _retriever().expand([long], expert_id=1)
     assert "x" * 1400 in enriched[0].context_block()
@@ -365,8 +421,9 @@ def test_orphan_claim_is_attached_to_concepts_sharing_its_chunk():
             {"label": "Queen rearing", "node_type": "concept", "chunk_indices": [2]},
         ],
         # An `about` edge to a concept this batch never emitted resolves to nothing.
-        "edges": [{"from_label": "Varroa suppresses immunity", "to_label": "Mites",
-                   "edge_type": "about"}],
+        "edges": [
+            {"from_label": "Varroa suppresses immunity", "to_label": "Mites", "edge_type": "about"}
+        ],
     }
     assert attach_orphan_claims(data) == 2
     inferred = {(e["from_label"], e["to_label"]) for e in data["edges"][1:]}
@@ -385,8 +442,13 @@ def test_claim_with_a_resolvable_about_edge_is_left_alone():
             {"label": "varroa destructor", "node_type": "concept", "chunk_indices": [0]},
             {"label": "Immune response", "node_type": "concept", "chunk_indices": [0]},
         ],
-        "edges": [{"from_label": "varroa suppresses immunity", "to_label": "Varroa Destructor",
-                   "edge_type": "about"}],
+        "edges": [
+            {
+                "from_label": "varroa suppresses immunity",
+                "to_label": "Varroa Destructor",
+                "edge_type": "about",
+            }
+        ],
     }
     assert attach_orphan_claims(data) == 0
     assert len(data["edges"]) == 1
@@ -410,24 +472,37 @@ def test_orphan_claim_with_no_shared_chunk_stays_orphaned():
 
 def test_parse_relations_counts_every_rejection_by_reason():
     from collections import Counter
-    from types import SimpleNamespace
 
     from peritus.graph.reconciler import ClaimRow, parse_relations
 
-    claims = [ClaimRow(node_id=1, label="a", source_id=1), ClaimRow(node_id=2, label="b", source_id=2)]
-    block = SimpleNamespace(type="tool_use", input={"relations": [
-        {"from_claim": 0, "to_claim": 1, "relation": "contradicts"},             # no point
-        {"from_claim": 0, "to_claim": 9, "relation": "supports"},                # out of range
-        {"from_claim": 0, "to_claim": 1, "relation": "refines"},                 # unknown type
-        {"from_claim": 1, "to_claim": 0, "relation": "qualifies", "condition": "only in winter"},
-    ]})
+    claims = [
+        ClaimRow(node_id=1, label="a", source_id=1),
+        ClaimRow(node_id=2, label="b", source_id=2),
+    ]
+    response = _response(
+        [
+            {"from_claim": 0, "to_claim": 1, "relation": "contradicts"},  # no point
+            {"from_claim": 0, "to_claim": 9, "relation": "supports"},  # out of range
+            {"from_claim": 0, "to_claim": 1, "relation": "refines"},  # unknown type
+            {
+                "from_claim": 1,
+                "to_claim": 0,
+                "relation": "qualifies",
+                "condition": "only in winter",
+            },
+        ]
+    )
     rejected: Counter = Counter()
-    kept = parse_relations(SimpleNamespace(content=[block]), claims, rejected)
+    kept = parse_relations(response, claims, rejected)
 
     assert [r["edge_type"] for r in kept] == ["qualifies"]
-    assert rejected == Counter({
-        "missing_point": 1, "claim_index_out_of_range": 1, "relation:refines": 1,
-    })
+    assert rejected == Counter(
+        {
+            "missing_point": 1,
+            "claim_index_out_of_range": 1,
+            "relation:refines": 1,
+        }
+    )
 
 
 async def test_reconcile_stats_distinguish_failed_calls_from_empty_answers():
@@ -436,13 +511,19 @@ async def test_reconcile_stats_distinguish_failed_calls_from_empty_answers():
     from peritus.graph.reconciler import ClaimRow, ConceptClaims, ReconcileStats, reconcile_claims
 
     def group(cid):
-        return ConceptClaims(concept_id=cid, concept_label=f"c{cid}", claims=[
-            ClaimRow(node_id=cid * 10, label="x", source_id=1),
-            ClaimRow(node_id=cid * 10 + 1, label="y", source_id=2),
-        ])
+        return ConceptClaims(
+            concept_id=cid,
+            concept_label=f"c{cid}",
+            claims=[
+                ClaimRow(node_id=cid * 10, label="x", source_id=1),
+                ClaimRow(node_id=cid * 10 + 1, label="y", source_id=2),
+            ],
+        )
 
     stats = ReconcileStats()
-    with patch("peritus.graph.reconciler.gather_claude_calls", AsyncMock(return_value=[None, None])):
+    with patch(
+        "peritus.graph.reconciler.gather_claude_calls", AsyncMock(return_value=[None, None])
+    ):
         relations = await reconcile_claims("bees", [group(1), group(2)], stats=stats)
 
     assert relations == []
@@ -458,10 +539,18 @@ async def test_reconcile_stage_reports_a_pass_that_inserted_nothing():
     from peritus.graph.reconciler import ClaimRow, ConceptClaims
 
     repo = MagicMock()
-    repo.claims_by_concept = AsyncMock(return_value=[ConceptClaims(
-        concept_id=1, concept_label="c",
-        claims=[ClaimRow(node_id=1, label="x", source_id=1), ClaimRow(node_id=2, label="y", source_id=2)],
-    )])
+    repo.claims_by_concept = AsyncMock(
+        return_value=[
+            ConceptClaims(
+                concept_id=1,
+                concept_label="c",
+                claims=[
+                    ClaimRow(node_id=1, label="x", source_id=1),
+                    ClaimRow(node_id=2, label="y", source_id=2),
+                ],
+            )
+        ]
+    )
     repo.insert_relations = AsyncMock(return_value=0)
     events: list[dict] = []
 

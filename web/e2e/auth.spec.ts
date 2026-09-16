@@ -26,7 +26,7 @@ test('an app route redirects to sign-in and comes back to where it was aimed', a
   await expect(page).toHaveURL(/\/login\?next=/)
   // The destination survives the redirect, which is the whole point.
   expect(new URL(page.url()).searchParams.get('next')).toBe(
-    '/experts/varroa-mite-control-in-temperate-beekeeping/sources',
+    '/experts/varroa-mite-control-in-temperate-beekeeping/sources'
   )
   await expect(page.getByRole('heading', { name: 'Sign in to Peritus' })).toBeVisible()
   await expectResponsive(page, isTouchProject(testInfo.project.name))

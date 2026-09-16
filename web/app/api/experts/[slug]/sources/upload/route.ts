@@ -8,7 +8,12 @@ interface Ctx {
 
 /** Matches `MAX_UPLOAD_BYTES` in `api/src/peritus/api/schemas/sources.py`. */
 const MAX_BYTES = 20 * 1024 * 1024
-const ACCEPTED_TYPES = new Set(['application/pdf', 'text/plain', 'text/markdown', 'text/x-markdown'])
+const ACCEPTED_TYPES = new Set([
+  'application/pdf',
+  'text/plain',
+  'text/markdown',
+  'text/x-markdown',
+])
 const ACCEPTED_SUFFIXES = ['.pdf', '.txt', '.md', '.markdown', '.text']
 
 /**
@@ -48,7 +53,7 @@ export async function POST(request: Request, { params }: Ctx) {
   if (file.size > MAX_BYTES) {
     return NextResponse.json(
       { detail: `That file is larger than the ${MAX_BYTES / (1024 * 1024)} MB limit.` },
-      { status: 413 },
+      { status: 413 }
     )
   }
 
@@ -60,10 +65,9 @@ export async function POST(request: Request, { params }: Ctx) {
   if (!looksAccepted) {
     return NextResponse.json(
       {
-        detail:
-          'Only PDF, .txt and .md files can be uploaded. For a web page, use the URL tab.',
+        detail: 'Only PDF, .txt and .md files can be uploaded. For a web page, use the URL tab.',
       },
-      { status: 415 },
+      { status: 415 }
     )
   }
 

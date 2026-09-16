@@ -48,6 +48,7 @@ class ExaFetcher:
         )
         try:
             from exa_py import Exa  # type: ignore
+
             client = Exa(api_key=settings.EXA_API_KEY)
             # exa_py is a sync client — keep it off the event loop.
             results = await asyncio.to_thread(
@@ -66,15 +67,17 @@ class ExaFetcher:
                 # Exa lands on doi.org and arxiv.org constantly. Without this
                 # the same paper found by exa and by openalex are two sources.
                 doi, arxiv_id = identifiers_from_url(r.url)
-                candidates.append(SourceCandidate(
-                    source_type=SourceType.EXA,
-                    url=r.url,
-                    title=r.title or r.url,
-                    author=None,
-                    snippet=snippet,
-                    metadata={"exa_id": r.id},
-                    identifiers=Identifiers.build(doi=doi, arxiv_id=arxiv_id),
-                ))
+                candidates.append(
+                    SourceCandidate(
+                        source_type=SourceType.EXA,
+                        url=r.url,
+                        title=r.title or r.url,
+                        author=None,
+                        snippet=snippet,
+                        metadata={"exa_id": r.id},
+                        identifiers=Identifiers.build(doi=doi, arxiv_id=arxiv_id),
+                    )
+                )
             return candidates
         except Exception as exc:
             logger.warning("Exa search failed for %r: %s", query, exc)
@@ -105,6 +108,7 @@ async def fetch_exa_contents(url: str) -> str:
         return ""
     try:
         from exa_py import Exa  # type: ignore
+
         client = Exa(api_key=settings.EXA_API_KEY)
         results = await asyncio.to_thread(client.get_contents, [url], text=True)
         for r in results.results:

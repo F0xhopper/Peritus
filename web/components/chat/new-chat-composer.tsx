@@ -3,13 +3,14 @@
 import { ArrowUp } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useEffect, useRef, useState } from 'react'
-import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import { stashPendingQuestion } from '@/hooks/use-chat-stream'
 import { cn } from '@/lib/cn'
 import type { ConversationSummary, ExpertSummary } from '@/lib/api/types'
+import { useApiAction } from '@/hooks/use-api-action'
+import { apiSend } from '@/lib/api/client'
 
 /**
  * The id of the question field, so the Overview's own "Ask" action can put the
@@ -57,7 +58,9 @@ export function focusAskField(href: string): boolean {
   const field = document.getElementById(ASK_FIELD_ID)
   if (!field) return false
   const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  document.getElementById('ask')?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' })
+  document
+    .getElementById('ask')
+    ?.scrollIntoView({ behavior: still ? 'auto' : 'smooth', block: 'start' })
   field.focus({ preventScroll: true })
   return true
 }
@@ -80,7 +83,6 @@ export function NewChatComposer({
 }) {
   const router = useRouter()
   const [question, setQuestion] = useState('')
-  const [starting, setStarting] = useState(false)
   const field = useRef<HTMLTextAreaElement>(null)
 
   // Arriving from a "New chat" or "Ask about this" link (`…#ask`). The router's
@@ -97,28 +99,25 @@ export function NewChatComposer({
     field.current?.focus({ preventScroll: true })
   }, [expert.name])
 
+  const { run: startChat, pending: starting } = useApiAction(
+    () =>
+      apiSend<ConversationSummary>(
+        `/api/experts/${encodeURIComponent(expert.name)}/conversations`,
+        'POST',
+        undefined,
+        'Could not start that chat.'
+      ),
+    { error: 'Could not start that chat.', refresh: false }
+  )
+
   const send = async () => {
     const trimmed = question.trim()
     if (!trimmed || starting) return
-    setStarting(true)
-    try {
-      const res = await fetch(
-        `/api/experts/${encodeURIComponent(expert.name)}/conversations`,
-        { method: 'POST' },
-      )
-      if (res.status === 409) {
-        toast.error('This expert cannot answer yet.')
-        return
-      }
-      if (!res.ok) throw new Error()
-      const conversation = (await res.json()) as ConversationSummary
-      stashPendingQuestion(conversation.id, trimmed)
-      router.push(`/chats/${conversation.id}`)
-    } catch {
-      toast.error('Could not start that chat.')
-    } finally {
-      setStarting(false)
-    }
+    const conversation = await startChat()
+    if (!conversation) return
+    // Carried across the navigation so the new chat sends it on arrival.
+    stashPendingQuestion(conversation.id, trimmed)
+    router.push(`/chats/${conversation.id}`)
   }
 
   return (
@@ -132,7 +131,11 @@ export function NewChatComposer({
           // Enter sends, Shift+Enter breaks — but only with a fine pointer. On
           // a phone Enter is the keyboard's newline and the button is the only
           // way to send.
-          if (event.key === 'Enter' && !event.shiftKey && window.matchMedia('(hover: hover)').matches) {
+          if (
+            event.key === 'Enter' &&
+            !event.shiftKey &&
+            window.matchMedia('(hover: hover)').matches
+          ) {
             event.preventDefault()
             void send()
           }

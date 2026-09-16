@@ -15,7 +15,7 @@ import { guardOrigin, pickParams, query } from '@/lib/api/route'
 function request(
   method: string,
   headers: Record<string, string> = {},
-  url = 'http://localhost:3000/api/experts/build',
+  url = 'http://localhost:3000/api/experts/build'
 ) {
   return new Request(url, { method, headers })
 }
@@ -61,7 +61,7 @@ describe('guardOrigin', () => {
   it('guards DELETE, PATCH and PUT as well as POST', () => {
     for (const method of ['DELETE', 'PATCH', 'PUT']) {
       expect(guardOrigin(request(method, { 'sec-fetch-site': 'cross-site' }))?.status, method).toBe(
-        403,
+        403
       )
     }
   })
@@ -71,7 +71,7 @@ describe('pickParams', () => {
   it('forwards only the named parameters', () => {
     const params = pickParams(
       'http://localhost:3000/api/experts/x/sources?decision=rejected&sort=quality&evil=1',
-      ['decision', 'sort'],
+      ['decision', 'sort']
     )
     expect(params.get('decision')).toBe('rejected')
     expect(params.get('sort')).toBe('quality')

@@ -89,10 +89,19 @@ def looks_like_refusal(answer_text: str) -> bool:
     """Heuristic: did the expert decline for lack of evidence?"""
     t = answer_text.lower()
     cues = (
-        "don't have enough", "do not have enough", "not enough information",
-        "cannot answer", "can't answer", "no information", "isn't covered",
-        "is not covered", "passages do not", "passages don't", "insufficient",
-        "not addressed in", "outside the scope",
+        "don't have enough",
+        "do not have enough",
+        "not enough information",
+        "cannot answer",
+        "can't answer",
+        "no information",
+        "isn't covered",
+        "is not covered",
+        "passages do not",
+        "passages don't",
+        "insufficient",
+        "not addressed in",
+        "outside the scope",
     )
     return any(c in t for c in cues)
 
@@ -272,9 +281,7 @@ def answer_quality(
 # ---------------------------------------------------------------------------
 
 
-def screening_precision_recall(
-    predicted: list[bool], actual: list[bool]
-) -> dict[str, float | int]:
+def screening_precision_recall(predicted: list[bool], actual: list[bool]) -> dict[str, float | int]:
     """Precision, recall and F1 of the ``keep`` decision against human labels.
 
     ``predicted`` is what the validator decided, ``actual`` what a human said.
@@ -294,11 +301,7 @@ def screening_precision_recall(
     tn = sum(1 for p, a in zip(predicted, actual, strict=True) if not p and not a)
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
-    f1 = (
-        2 * precision * recall / (precision + recall)
-        if (precision + recall)
-        else 0.0
-    )
+    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) else 0.0
     total = tp + fp + fn + tn
     return {
         "precision": round(precision, 4),

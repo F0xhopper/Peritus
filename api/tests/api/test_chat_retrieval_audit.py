@@ -24,9 +24,14 @@ ANSWER = "Virtue is the only good [1]. Fate is indifferent [2]."
 
 def _expert() -> Expert:
     return Expert(
-        id=1, name="stoicism", topic="stoicism", status=ExpertStatus.READY,
-        tier=ExpertTier.STANDARD, config=ExpertConfig.from_tier(ExpertTier.STANDARD),
-        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        id=1,
+        name="stoicism",
+        topic="stoicism",
+        status=ExpertStatus.READY,
+        tier=ExpertTier.STANDARD,
+        config=ExpertConfig.from_tier(ExpertTier.STANDARD),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 
@@ -36,17 +41,38 @@ def _context() -> RetrievedContext:
         Passage(index=2, citation="Enchiridion — Gutenberg", source_id=11, text="…"),
     ]
     steps = [
-        RetrievalStep(chunk_id=100, source_id=10, source_title="Meditations",
-                      source_type="gutenberg", quality_score=9.0, rank=1, score=0.9,
-                      via="primary"),
-        RetrievalStep(chunk_id=101, source_id=11, source_title="Enchiridion",
-                      source_type="gutenberg", quality_score=8.0, rank=2, score=0.8,
-                      via="primary"),
+        RetrievalStep(
+            chunk_id=100,
+            source_id=10,
+            source_title="Meditations",
+            source_type="gutenberg",
+            quality_score=9.0,
+            rank=1,
+            score=0.9,
+            via="primary",
+        ),
+        RetrievalStep(
+            chunk_id=101,
+            source_id=11,
+            source_title="Enchiridion",
+            source_type="gutenberg",
+            quality_score=8.0,
+            rank=2,
+            score=0.8,
+            via="primary",
+        ),
         # Retrieved but below the context cap — invisible in the answer, and
         # exactly what the trail exists to surface.
-        RetrievalStep(chunk_id=102, source_id=12, source_title="A blog",
-                      source_type="web", quality_score=6.0, rank=3, score=0.3,
-                      via="coverage_followup"),
+        RetrievalStep(
+            chunk_id=102,
+            source_id=12,
+            source_title="A blog",
+            source_type="web",
+            quality_score=6.0,
+            rank=3,
+            score=0.3,
+            via="coverage_followup",
+        ),
     ]
     return RetrievedContext(
         context_block="[1] …\n\n[2] …",
@@ -108,8 +134,11 @@ async def _collect(
 
     with (
         patch.object(streaming, "ChatAgent", return_value=_agent_with(context or _context())),
-        patch.object(streaming, "get_anthropic_client",
-                     return_value=_anthropic_streaming(ANSWER, stop_reason)),
+        patch.object(
+            streaming,
+            "get_anthropic_client",
+            return_value=_anthropic_streaming(ANSWER, stop_reason),
+        ),
         patch.object(streaming, "get_readiness", new=_get_readiness),
         patch.object(streaming, "AuditService", return_value=service),
     ):
@@ -127,6 +156,7 @@ def _find(events, type_):
 
 
 # ── event ordering ──
+
 
 @pytest.mark.asyncio
 async def test_done_says_whether_the_answer_was_cut_off_at_the_length_limit():
@@ -151,17 +181,18 @@ async def test_audit_event_sits_between_sources_and_done():
 
 # ── content ──
 
+
 @pytest.mark.asyncio
 async def test_audit_reports_retrieved_considered_and_cited():
     events, _ = await _collect()
     audit = _find(events, "retrieval_audit")
 
     counts = audit["passages"]
-    assert counts["unique"] == 3          # everything retrieval surfaced
+    assert counts["unique"] == 3  # everything retrieval surfaced
     assert counts["duplicate_hits"] == 1
     assert counts["retrieved"] == 4
-    assert counts["in_context"] == 2      # what the model was actually shown
-    assert counts["cited"] == 2           # what the answer used
+    assert counts["in_context"] == 2  # what the model was actually shown
+    assert counts["cited"] == 2  # what the answer used
     assert counts["not_in_context"] == 1
     assert counts["context_cap"] == 2
 
@@ -171,7 +202,9 @@ async def test_audit_gives_every_passage_a_disposition():
     events, _ = await _collect()
     audit = _find(events, "retrieval_audit")
     assert [d["disposition"] for d in audit["dispositions"]] == [
-        "cited", "cited", "not_in_context",
+        "cited",
+        "cited",
+        "not_in_context",
     ]
     assert [d["chunk_id"] for d in audit["dispositions"]] == [100, 101, 102]
     assert audit["dispositions"][2]["retrieved_via"] == "coverage_followup"
@@ -199,6 +232,7 @@ async def test_audit_carries_no_score_for_the_answer():
 
 # ── the graph-not-built distinction ──
 
+
 @pytest.mark.asyncio
 async def test_ungraphed_expert_reports_contradictions_as_unknown():
     events, _ = await _collect(readiness=Readiness.CHAT_READY)
@@ -216,6 +250,7 @@ async def test_graphed_expert_reports_a_traversed_contradiction():
 
 
 # ── persistence ──
+
 
 @pytest.mark.asyncio
 async def test_audit_is_persisted_against_the_conversation():
@@ -241,6 +276,7 @@ async def test_unpersisted_audit_still_streams_and_says_so():
 
 # ── the audit must never cost the user an answer ──
 
+
 @pytest.mark.asyncio
 async def test_answer_survives_a_failing_audit():
     """The answer has already been delivered by this point; a failure to account
@@ -252,8 +288,7 @@ async def test_answer_survives_a_failing_audit():
 
     with (
         patch.object(streaming, "ChatAgent", return_value=_agent_with(_context())),
-        patch.object(streaming, "get_anthropic_client",
-                     return_value=_anthropic_streaming(ANSWER)),
+        patch.object(streaming, "get_anthropic_client", return_value=_anthropic_streaming(ANSWER)),
         patch.object(streaming, "get_readiness", new=_boom),
     ):
         events = [

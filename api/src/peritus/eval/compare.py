@@ -145,7 +145,9 @@ async def _score(
 ) -> ArmResult:
     shape = metrics.answer_quality({}, answer)
     judged = await assess_helpfulness(
-        gq.question, answer, passages,
+        gq.question,
+        answer,
+        passages,
         asker_level=gq.asker_level,
         question_type=gq.question_type,
     )
@@ -190,19 +192,24 @@ async def compare(expert_name: str, gold: list[GoldQuestion]) -> ComparisonRepor
         after_answer = await _compose(
             build_cached_system(expert.persona_style, expert.topic),
             build_user_message(
-                gq.question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+                gq.question,
+                ctx.context_block,
+                ctx.plan,
+                ctx.has_contradiction,
                 ctx.contradiction_points,
             ),
             expert,
         )
 
-        comparisons.append(Comparison(
-            question=gq.question,
-            asker_level=gq.asker_level,
-            num_passages=len(ctx.passages),
-            before=await _score("before", before_answer, gq, ctx.passages),
-            after=await _score("after", after_answer, gq, ctx.passages),
-        ))
+        comparisons.append(
+            Comparison(
+                question=gq.question,
+                asker_level=gq.asker_level,
+                num_passages=len(ctx.passages),
+                before=await _score("before", before_answer, gq, ctx.passages),
+                after=await _score("after", after_answer, gq, ctx.passages),
+            )
+        )
 
     def _mean(vals: list[float | None]) -> float:
         return metrics.aggregate([v for v in vals if v is not None])

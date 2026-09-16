@@ -11,7 +11,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 
-from peritus.core.exceptions import BuildError, ConflictError
+from peritus.core.exceptions import BuildError, ConflictError, NotFoundError
 from peritus.experts.builder import ExpertBuilder
 from peritus.experts.service import ExpertService
 from peritus.infrastructure.database import get_pool, init_pool
@@ -201,12 +201,17 @@ async def _build_async(topic: str, depth: str, sources_flag: str | None, rebuild
     source_filter = [s.strip() for s in sources_flag.split(",")] if sources_flag else None
 
     if rebuild:
+        # Only "there was nothing to delete" is expected here. Catching
+        # everything meant a delete that failed on a live foreign key looked
+        # identical to a clean slate, and the build then ran against the rows it
+        # was supposed to have replaced.
         try:
             existing = await svc.get(topic)
+        except NotFoundError:
+            existing = None
+        if existing is not None:
             await svc.delete(existing.id)
             console.print(f"  [dim]Deleted existing expert: {existing.name!r}[/dim]")
-        except Exception:
-            pass
 
     # Experts built locally are owned by the signed-in user (if any); otherwise
     # they're left unowned, which the API treats as belonging to the admin.

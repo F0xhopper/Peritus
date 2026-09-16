@@ -38,6 +38,7 @@ jobs:
   changes:
     name: Detect changes
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     outputs:
       api: ${{ steps.filter.outputs.api }}
       web: ${{ steps.filter.outputs.web }}
@@ -65,13 +66,16 @@ jobs:
       (github.event_name == 'push' && needs.changes.outputs.api == 'true') ||
       (github.event_name == 'workflow_dispatch' && inputs.target != 'web')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: production-api
       url: ${{ env.API_URL }}
     steps:
       - uses: actions/checkout@v7
 
-      - uses: superfly/flyctl-actions/setup-flyctl@master
+      # Pinned: `@master` on the production deploy path means an upstream
+      # commit can change how a release ships without a PR here.
+      - uses: superfly/flyctl-actions/setup-flyctl@1.6
         with:
           version: 0.4.87
 
@@ -104,6 +108,7 @@ jobs:
       ((github.event_name == 'push' && needs.changes.outputs.web == 'true') ||
        (github.event_name == 'workflow_dispatch' && inputs.target != 'api'))
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: production-web
       url: ${{ env.WEB_URL }}

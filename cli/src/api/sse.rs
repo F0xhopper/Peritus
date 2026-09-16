@@ -30,7 +30,7 @@ pub fn parse_sse_stream_with_seq<T: DeserializeOwned + Send + 'static>(
         tokio::pin!(byte_stream);
         while let Some(chunk) = byte_stream.next().await {
             match chunk {
-                Err(e) => { yield Err(anyhow::anyhow!("Stream error: {}", e)); break; }
+                Err(e) => { yield Err(anyhow::anyhow!("Stream error: {e}")); break; }
                 Ok(bytes) => {
                     buf.extend_from_slice(&bytes);
                     while let Some(pos) = buf.iter().position(|&b| b == b'\n') {

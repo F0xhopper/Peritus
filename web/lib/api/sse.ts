@@ -66,7 +66,7 @@ export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator
   // unify with `ReadableStream<Uint8Array>` even though it accepts one. The
   // cast is the narrowing, not a loosening.
   const decoded = body.pipeThrough(
-    new TextDecoderStream() as unknown as ReadableWritablePair<string, Uint8Array>,
+    new TextDecoderStream() as unknown as ReadableWritablePair<string, Uint8Array>
   )
   const reader = decoded.getReader()
   let buffer = ''
@@ -98,7 +98,7 @@ export async function* readSse(body: ReadableStream<Uint8Array>): AsyncGenerator
  */
 export async function* streamSse<T>(
   res: Response,
-  onMalformed?: (raw: string) => void,
+  onMalformed?: (raw: string) => void
 ): AsyncGenerator<{ id: string | null; data: T }> {
   if (!res.body) return
   for await (const frame of readSse(res.body)) {

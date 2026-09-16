@@ -103,6 +103,7 @@ class TestDownload:
         A server is free to omit or lie about Content-Length, and the point of
         the cap is that a hostile or mistaken response cannot cost us memory.
         """
+
         def handler(request):
             return httpx.Response(200, content=b"x" * 5000)  # no Content-Length claim of ours
 

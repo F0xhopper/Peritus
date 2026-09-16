@@ -54,9 +54,6 @@
   --expert: oklch(var(--expert-l) 0 0);
   --expert-soft: oklch(var(--expert-l) 0 0 / 0.12);
 
-  /* Backdrop: flat, never blurred (web-design.md §9) */
-  --backdrop: rgb(0 0 0 / 0.5);
-
   color-scheme: light;
 }
 
@@ -173,8 +170,11 @@
   --dur-1: 120ms;
   --dur-2: 200ms;
   --dur-3: 320ms;
+  /* One easing, deliberately. Everything in this app decelerates into place;
+     there was an `--ease-in` beside this and nothing ever used it, because
+     anything accelerating *away* from the reader is an animation asking to be
+     watched rather than one getting out of the way. */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
-  --ease-in: cubic-bezier(0.4, 0, 1, 1);
 
   /* Fixed heights the skeletons and the shell grid both depend on.
      The bar is deliberately taller than the control inside it: at 40px a 32px
@@ -184,7 +184,6 @@
   --spacing-topbar: 44px;
   --spacing-topbar-touch: 52px;
   --spacing-rail: 56px;
-  --spacing-sidebar: 260px;
   --spacing-context: 360px;
 }
 

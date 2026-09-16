@@ -1,3 +1,6 @@
+-- HISTORICAL. `specialties` and `specialty_books` predate experts and are referenced
+-- by nothing in `src/`. 032 drops them.
+
 -- Migration 002: specialties — named, persona-bearing slices of the library
 -- A specialty groups books into a scoped "expert" that agents can query.
 

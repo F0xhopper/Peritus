@@ -8,7 +8,7 @@ they like the product; chat over an already-built expert is cheap. So **builds a
 and chat is not** — chat over a catalog expert is free and never checks entitlements.
 
 Contracts live in `peritus/api/schemas/experts.py`; behaviour in
-`peritus/api/routes/experts.py` and `peritus/billing/`.
+`peritus/api/routes/catalog.py`, `peritus/api/routes/billing.py` and `peritus/billing/`.
 
 ---
 

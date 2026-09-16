@@ -1,7 +1,7 @@
 import asyncio
-import hashlib
-import secrets
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from importlib.metadata import version
 
 import uvicorn
 from fastapi import FastAPI
@@ -11,6 +11,8 @@ from peritus.api.middleware import RequestContextMiddleware, install_error_handl
 from peritus.api.routes import (
     audit,
     auth,
+    billing,
+    catalog,
     chat,
     conversations,
     experts,
@@ -21,12 +23,14 @@ from peritus.api.routes import (
 from peritus.core.config import settings
 from peritus.core.logging import get_logger, setup_logging
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
+from peritus.infrastructure.http import close_shared
+from peritus.infrastructure.supabase_auth import close_client as close_supabase_client
 
 logger = get_logger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     missing = settings.check_required_vars()
     if missing:
         raise RuntimeError(
@@ -53,6 +57,18 @@ async def lifespan(app: FastAPI):
             "includes {{ .Token }} so users receive a 6-digit code."
         )
 
+    # Both configured means the HS256 fallback in auth._decode stays reachable
+    # beside the JWKS path it exists to precede. The fallback is there for
+    # self-hosters on a project that never published asymmetric keys; where JWKS
+    # works, a live shared secret is one more thing that can leak and still
+    # mint a valid token.
+    if settings.SUPABASE_URL and settings.SUPABASE_JWT_SECRET:
+        logger.warning(
+            "Both SUPABASE_URL and SUPABASE_JWT_SECRET are set. Token verification "
+            "uses JWKS; the HS256 shared-secret fallback stays live behind it. Unset "
+            "SUPABASE_JWT_SECRET unless this project has not published asymmetric keys."
+        )
+
     await init_pool()
 
     worker = None
@@ -73,6 +89,8 @@ async def lifespan(app: FastAPI):
             worker.request_stop()
             with suppress(asyncio.CancelledError):
                 await worker_task
+        await close_supabase_client()
+        await close_shared()
         await close_pool()
 
 
@@ -82,7 +100,10 @@ def create_app() -> FastAPI:
     # call in this app using Python's default (unformatted, no file handler) setup.
     setup_logging(settings.LOG_LEVEL, log_file=settings.LOG_FILE or None)
 
-    app = FastAPI(title="Peritus API", version="1.0.0", lifespan=lifespan)
+    # Read from the installed distribution rather than written here: this said
+    # 1.0.0 while pyproject.toml and the git tag both said 2.0.0, and
+    # /openapi.json is what clients generate against.
+    app = FastAPI(title="Peritus API", version=version("peritus"), lifespan=lifespan)
     # Order matters: middleware added last runs first, so the request id is bound
     # before CORS and is therefore available on every log line and error body,
     # including the ones CORS itself produces.
@@ -98,6 +119,8 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(catalog.router)
+    app.include_router(billing.router)
     app.include_router(experts.router)
     app.include_router(chat.router)
     app.include_router(conversations.router)
@@ -113,13 +136,3 @@ app = create_app()
 def start() -> None:
     # log_config=None keeps uvicorn from installing its own dictConfig over ours.
     uvicorn.run("peritus.api.app:app", host="0.0.0.0", port=8000, reload=False, log_config=None)
-
-
-def keygen() -> None:
-    """Print a new API key + its SHA-256 hash."""
-    key = "prt_" + secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(key.encode()).hexdigest()
-    print(f"API Key:  {key}")
-    print(f"Key Hash: {key_hash}")
-    print("\nAdd to .env:")
-    print(f"PERITUS_API_KEY_HASH={key_hash}")

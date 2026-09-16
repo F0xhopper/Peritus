@@ -57,7 +57,8 @@ export async function callApi(path: string, init: CallInit = {}): Promise<Respon
 /** Decode a FastAPI error body into `(message, detail)`. */
 export async function decodeError(res: Response): Promise<{ message: string; detail: unknown }> {
   const text = await res.text().catch(() => '')
-  if (!text) return { message: res.statusText || `Request failed (${res.status})`, detail: undefined }
+  if (!text)
+    return { message: res.statusText || `Request failed (${res.status})`, detail: undefined }
   try {
     const body = JSON.parse(text) as unknown
     if (body && typeof body === 'object' && 'detail' in body) {

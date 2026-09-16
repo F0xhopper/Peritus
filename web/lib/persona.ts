@@ -60,9 +60,7 @@ export function nameHash(label: string): number {
  */
 export function personaInitials(label: string | null | undefined): string {
   if (!label) return '?'
-  const words = label
-    .split(/[\s\-_]+/)
-    .filter((w) => /[\p{L}\p{N}]/u.test(w))
+  const words = label.split(/[\s\-_]+/).filter((w) => /[\p{L}\p{N}]/u.test(w))
 
   if (words.length > 1) {
     const bare = words[0].replace(/\.+$/, '').toLowerCase()

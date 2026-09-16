@@ -62,7 +62,7 @@ describe('dates are formatted without Intl', () => {
    */
   it('spells every month with three letters', () => {
     const months = Array.from({ length: 12 }, (_, month) =>
-      formatDate(new Date(new Date().getFullYear(), month, 8).toISOString()),
+      formatDate(new Date(new Date().getFullYear(), month, 8).toISOString())
     )
     expect(months).toEqual([
       '8 Jan',

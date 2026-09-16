@@ -106,7 +106,7 @@ describe('readSse', () => {
   it('buffers a frame split across chunks', async () => {
     // The ordinary case for a token event, not an edge case.
     const frames = await collect(
-      readSse(stream('id: 1\nda', 'ta: hel', 'lo world\r\n', '\r\nid: 2\ndata: next\r\n\r\n')),
+      readSse(stream('id: 1\nda', 'ta: hel', 'lo world\r\n', '\r\nid: 2\ndata: next\r\n\r\n'))
     )
     expect(frames.map((frame) => frame.data)).toEqual(['hello world', 'next'])
   })
@@ -147,7 +147,7 @@ describe('streamSse', () => {
 
   it('decodes JSON payloads with their cursor', async () => {
     const events = await collect(
-      streamSse<{ type: string }>(response('id: 3\ndata: {"type":"stage"}\r\n\r\n')),
+      streamSse<{ type: string }>(response('id: 3\ndata: {"type":"stage"}\r\n\r\n'))
     )
     expect(events).toEqual([{ id: '3', data: { type: 'stage' } }])
   })
@@ -158,8 +158,8 @@ describe('streamSse', () => {
     const events = await collect(
       streamSse<{ type: string }>(
         response('data: not json\r\n\r\ndata: {"type":"done"}\r\n\r\n'),
-        (raw) => malformed.push(raw),
-      ),
+        (raw) => malformed.push(raw)
+      )
     )
     expect(events.map((event) => event.data)).toEqual([{ type: 'done' }])
     expect(malformed).toEqual(['not json'])

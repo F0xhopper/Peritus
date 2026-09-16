@@ -7,10 +7,55 @@ edition = "2021"
 name = "peritus"
 path = "src/main.rs"
 
+# The release binary ships to users through release.yml; size and speed both
+# matter more than a fast release build.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Pedantic on, with the groups that are either wrong for a TUI or are Phase 7
+# of docs/plans/codebase-cleanup.md allowed explicitly. CI runs clippy with
+# `-D warnings`, so every one of these has to be listed rather than tolerated.
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+
+# Progress bars, gauges and colour blending: every one of these is arithmetic
+# on a value already known to fit the target, and the checked forms read far
+# worse. Phase 7.4 of the cleanup plan reviews them individually.
+cast_possible_truncation = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+cast_possible_wrap = "allow"
+float_cmp = "allow"
+
+# The long functions and their duplicated match arms are exactly what Phase 7.1
+# splits up; the lints stay on the list so they come back when it lands.
+too_many_lines = "allow"
+match_same_arms = "allow"
+unused_async = "allow"
+
+# Screen state genuinely is a handful of independent flags, and `clone_from`
+# reads worse than assignment at every site that triggers it.
+struct_excessive_bools = "allow"
+assigning_clones = "allow"
+
+# Style preferences, not defects.
+items_after_statements = "allow"
+similar_names = "allow"
+many_single_char_names = "allow"
+unused_self = "allow"
+needless_pass_by_value = "allow"
+comparison_chain = "allow"
+
 [dependencies]
 ratatui = { version = "0.30.2", features = ["crossterm", "unstable-rendered-line-info"] }
-crossterm = "0.28"
-tokio = { version = "1", features = ["full"] }
+# Must track the version ratatui-crossterm resolves, or both get compiled in.
+crossterm = "0.29"
+# Enumerated rather than "full": the TUI drives a runtime, spawns tasks, selects
+# on channels and sleeps. It never touches tokio's process, signal, fs or
+# io-std support, and "full" compiles all of it.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 futures-util = "0.3"
 bytes = "1"

@@ -18,6 +18,8 @@ import { takePendingQuestion, useChatStream } from '@/hooks/use-chat-stream'
 import { cn } from '@/lib/cn'
 import { chatTitle } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
+import { useApiAction } from '@/hooks/use-api-action'
+import { apiSend, apiVoid, messageFor } from '@/lib/api/client'
 import type {
   Citation,
   ConversationDetail,
@@ -81,8 +83,7 @@ export function ChatView({
   // expert even when the chat is not in the layout's recents.
   useEffect(() => {
     setChatExpert({ chatId: conversation.id, slug: expert.name })
-    return () =>
-      setChatExpert((current) => (current?.chatId === conversation.id ? null : current))
+    return () => setChatExpert((current) => (current?.chatId === conversation.id ? null : current))
   }, [conversation.id, expert.name, setChatExpert])
 
   /**
@@ -137,7 +138,7 @@ export function ChatView({
     if (citation.source_id !== null && !ledgerRequested.current) {
       ledgerRequested.current = true
       void fetch(
-        `/api/experts/${encodeURIComponent(expert.name)}/sources?decision=accepted&limit=500`,
+        `/api/experts/${encodeURIComponent(expert.name)}/sources?decision=accepted&limit=500`
       )
         .then((res) => (res.ok ? (res.json() as Promise<CorpusReport>) : null))
         .then((report) => {
@@ -167,31 +168,24 @@ export function ChatView({
     setTitle(trimmed)
     setRenaming(false)
     try {
-      const res = await fetch(`/api/conversations/${conversation.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: trimmed }),
-      })
-      if (!res.ok) throw new Error()
+      await apiSend(`/api/conversations/${conversation.id}`, 'PATCH', { title: trimmed })
       router.refresh()
-    } catch {
+    } catch (error) {
       setTitle(previous)
-      toast.error('Could not rename that chat.')
+      toast.error(messageFor(error, 'Could not rename that chat.'))
     }
   }
 
-  const remove = async () => {
-    try {
-      const res = await fetch(`/api/conversations/${conversation.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      toast.success('Chat deleted')
-      router.push(unavailable ? '/chats' : `/experts/${expert.name}`)
-      // The sidebar's chat list belongs to the layout, not this page.
-      router.refresh()
-    } catch {
-      toast.error('Could not delete that chat.')
+  // The refresh is not optional: the sidebar's chat list belongs to the layout,
+  // and a push reuses it.
+  const { run: remove } = useApiAction(
+    () => apiVoid(`/api/conversations/${conversation.id}`, { method: 'DELETE' }),
+    {
+      success: 'Chat deleted',
+      error: 'Could not delete that chat.',
+      onSuccess: () => router.push(unavailable ? '/chats' : `/experts/${expert.name}`),
     }
-  }
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -286,8 +280,8 @@ export function ChatView({
 
       {chattable && expert.readiness === 'chat_ready' && (
         <p className="shrink-0 px-3 pb-1 text-xs text-fg-3 md:px-4">
-          The concept graph is still building, so answers are not yet expanded with related
-          concepts or flagged where sources disagree.
+          The concept graph is still building, so answers are not yet expanded with related concepts
+          or flagged where sources disagree.
         </p>
       )}
 
@@ -327,9 +321,7 @@ export function ChatView({
         <ContextSlot title="Cited passage" open onClose={() => setSelected(null)}>
           <PassagePanel
             citation={selected}
-            source={
-              selected.source_id !== null ? (ledger?.get(selected.source_id) ?? null) : null
-            }
+            source={selected.source_id !== null ? (ledger?.get(selected.source_id) ?? null) : null}
             slug={expert.name}
             onAsk={(title) => {
               setDraft({ text: `What else does “${title}” say about this?`, id: Date.now() })

@@ -188,7 +188,8 @@ async def run(golden_path: Path, floor: float | None = None) -> TriageReport:
                 "status": item.status,
                 "would_fetch": would_fetch,
                 "fetched_at_build": label.ledger_outcome == "fetched"
-                if label.ledger_outcome is not None else None,
+                if label.ledger_outcome is not None
+                else None,
                 "why": label.why,
             }
         )
@@ -205,13 +206,16 @@ async def run(golden_path: Path, floor: float | None = None) -> TriageReport:
         now=screening_precision_recall(predicted, actual),
         at_build=screening_precision_recall(
             [r["fetched_at_build"] for r in at_build_rows], [r["keep"] for r in at_build_rows]
-        ) if at_build_rows else None,
+        )
+        if at_build_rows
+        else None,
         spearman_score_vs_keep=spearman([r["score"] for r in rows], [float(k) for k in actual]),
         keep_rate_by_score_band=_bands(rows),
         by_source_type=_split(rows, "source_type"),
         by_discovered_via=_split(rows, "discovered_via"),
         labelled_drops_fetched_below_3=[
-            r["title"] for r in rows
+            r["title"]
+            for r in rows
             if not r["keep"] and r["would_fetch"] and (r["model_score"] or 0.0) < 3.0
         ],
         rows=rows,
@@ -314,7 +318,7 @@ async def export(job_id: int | None, out: Path, size: int, expert_name: str | No
     golden.dump(out)
     print(
         f"Wrote {len(sample)} of {len(screenings)} candidates to {out}. Label each one's "
-        "\"keep\" (true/false) and \"why\" without looking at ledger_score.",
+        '"keep" (true/false) and "why" without looking at ledger_score.',
         file=sys.stderr,
     )
 

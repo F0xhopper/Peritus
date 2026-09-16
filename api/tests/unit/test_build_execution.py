@@ -40,6 +40,7 @@ def batch_on(monkeypatch):
 
 # ── policy resolution ────────────────────────────────────────────────────────
 
+
 def test_auto_first_build_runs_interactive(monkeypatch):
     """No persona = never finished a build = a user is watching this one."""
     monkeypatch.setattr(settings, "BUILD_EXECUTION_DEFAULT", "auto")
@@ -70,6 +71,7 @@ def test_unknown_default_falls_back_to_auto(monkeypatch):
 
 
 # ── the three gates on should_batch ──────────────────────────────────────────
+
 
 def test_interactive_build_never_batches(batch_on):
     with build_execution(BuildExecution.INTERACTIVE):
@@ -106,6 +108,7 @@ def test_context_restores_previous_mode(batch_on):
 
 # ── isolation between concurrent builds ──────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_concurrent_builds_do_not_leak_policy(batch_on):
     """Two builds in one worker process must not see each other's mode."""
@@ -131,9 +134,10 @@ async def test_policy_reaches_gather_claude_calls(batch_on):
     """The four stage call sites route through here; no signature carries the flag."""
     params = [{"model": "m", "messages": []} for _ in range(10)]
 
-    with patch("peritus.infrastructure.anthropic_batch._run_live") as live, patch(
-        "peritus.infrastructure.anthropic_batch._run_batch"
-    ) as batch:
+    with (
+        patch("peritus.infrastructure.anthropic_batch._run_live") as live,
+        patch("peritus.infrastructure.anthropic_batch._run_batch") as batch,
+    ):
         live.side_effect = AsyncMock(return_value=[None] * 10)
         batch.side_effect = AsyncMock(return_value=[object()] * 10)
 
@@ -148,6 +152,7 @@ async def test_policy_reaches_gather_claude_calls(batch_on):
 
 
 # ── per-result progress callback ─────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_live_on_result_fires_as_each_call_completes():
@@ -173,9 +178,10 @@ async def test_live_on_result_fires_as_each_call_completes():
 
     client = AsyncMock()
     client.messages.create.side_effect = fake_create
-    with patch(
-        "peritus.infrastructure.anthropic_batch.get_anthropic_client", return_value=client
-    ), build_execution(BuildExecution.INTERACTIVE):
+    with (
+        patch("peritus.infrastructure.anthropic_batch.get_anthropic_client", return_value=client),
+        build_execution(BuildExecution.INTERACTIVE),
+    ):
         results = await gather_claude_calls(
             [{"i": 0}, {"i": 1}], live_concurrency=1, on_result=on_result
         )
@@ -195,10 +201,11 @@ async def test_on_result_receives_none_for_failed_calls_and_may_raise():
 
     client = AsyncMock()
     client.messages.create.side_effect = Exception("api down")
-    with patch(
-        "peritus.infrastructure.anthropic_batch.get_anthropic_client", return_value=client
-    ), patch("peritus.infrastructure.anthropic_batch.asyncio.sleep", new=AsyncMock()), \
-        build_execution(BuildExecution.INTERACTIVE):
+    with (
+        patch("peritus.infrastructure.anthropic_batch.get_anthropic_client", return_value=client),
+        patch("peritus.infrastructure.anthropic_batch.asyncio.sleep", new=AsyncMock()),
+        build_execution(BuildExecution.INTERACTIVE),
+    ):
         results = await gather_claude_calls([{"i": 0}], on_result=on_result)
 
     assert results == [None]
@@ -214,13 +221,14 @@ async def test_batch_path_reports_every_result_after_harvest(batch_on):
         reported.append((i, msg))
 
     msgs = [f"msg{i}" for i in range(5)]
-    with patch(
-        "peritus.infrastructure.anthropic_batch._run_batch",
-        new=AsyncMock(return_value=list(msgs)),
-    ), build_execution(BuildExecution.BACKGROUND):
-        results = await gather_claude_calls(
-            [{"i": i} for i in range(5)], on_result=on_result
-        )
+    with (
+        patch(
+            "peritus.infrastructure.anthropic_batch._run_batch",
+            new=AsyncMock(return_value=list(msgs)),
+        ),
+        build_execution(BuildExecution.BACKGROUND),
+    ):
+        results = await gather_claude_calls([{"i": i} for i in range(5)], on_result=on_result)
 
     assert results == msgs
     assert reported == list(enumerate(msgs))

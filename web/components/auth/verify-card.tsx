@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Notice } from '@/components/ui/notice'
 import { cn } from '@/lib/cn'
+import { ClientApiError, apiSend, apiVoid, messageFor } from '@/lib/api/client'
 
 /**
  * The six-cell code input.
@@ -48,33 +49,25 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
     setNotice(null)
 
     try {
-      const res = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, token: value }),
-      })
-
-      if (res.ok) {
-        // A full navigation, not `router.push`: the session cookies were just
-        // set on this response, and `proxy.ts` has to see them on the way in.
-        window.location.assign(next)
-        return
-      }
-
-      if (res.status === 429) {
-        const seconds = Number(res.headers.get('retry-after'))
+      await apiSend('/api/auth/verify', 'POST', { email, token: value })
+      // A full navigation, not `router.push`: the session cookies were just
+      // set on this response, and `proxy.ts` has to see them on the way in.
+      window.location.assign(next)
+      return
+    } catch (error) {
+      if (error instanceof ClientApiError && error.status === 429) {
         setNotice(
-          Number.isFinite(seconds) && seconds > 0
-            ? `Too many attempts. Try again in ${seconds}s.`
-            : 'Too many attempts. Wait a moment and try again.',
+          error.retryAfter
+            ? `Too many attempts. Try again in ${error.retryAfter}s.`
+            : 'Too many attempts. Wait a moment and try again.'
         )
+      } else if (error instanceof ClientApiError) {
+        setNotice(messageFor(error, 'That code is wrong or has expired. Ask for a new one.'))
       } else {
-        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-        setNotice(
-          typeof body?.detail === 'string'
-            ? body.detail
-            : 'That code is wrong or has expired. Ask for a new one.',
-        )
+        setNotice('Could not reach Peritus. Check your connection.')
+        attempted.current = null
+        setSubmitting(false)
+        return
       }
       // Clear the cells so the next attempt starts from an empty field rather
       // than the user having to select and delete six characters — and put the
@@ -82,9 +75,6 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
       setCode('')
       attempted.current = null
       requestAnimationFrame(() => cells.current?.querySelector<HTMLInputElement>('input')?.focus())
-    } catch {
-      setNotice('Could not reach Peritus. Check your connection.')
-      attempted.current = null
     } finally {
       setSubmitting(false)
     }
@@ -94,24 +84,22 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
     setResending(true)
     setNotice(null)
     try {
-      const res = await fetch('/api/auth/otp', {
+      // 204, like the login card's first request.
+      await apiVoid('/api/auth/otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email }),
       })
-      if (res.status === 429) {
-        const seconds = Number(res.headers.get('retry-after'))
-        setCooldown(Number.isFinite(seconds) && seconds > 0 ? seconds : RESEND_COOLDOWN)
+      setCooldown(RESEND_COOLDOWN)
+      setCode('')
+      attempted.current = null
+    } catch (error) {
+      if (error instanceof ClientApiError && error.status === 429) {
+        setCooldown(error.retryAfter ?? RESEND_COOLDOWN)
         setNotice('Too many requests — the countdown has been extended.')
-      } else if (!res.ok) {
-        setNotice('Could not send another code.')
-      } else {
-        setCooldown(RESEND_COOLDOWN)
-        setCode('')
-        attempted.current = null
+        return
       }
-    } catch {
-      setNotice('Could not reach Peritus.')
+      setNotice(messageFor(error, 'Could not send another code.'))
     } finally {
       setResending(false)
     }
@@ -149,13 +137,13 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
               autoFocus={index === 0}
               aria-label={index === 0 ? undefined : `Digit ${index + 1} of ${CODE_LENGTH}`}
               className={cn(
-                'h-12 w-full min-w-0 max-w-12 rounded-row border border-border bg-raised',
+                'h-12 w-full max-w-12 min-w-0 rounded-row border border-border bg-raised',
                 'text-center font-mono text-base text-fg',
                 'transition-colors duration-(--dur-1)',
                 'focus:border-expert focus:outline-none',
                 // A filled cell reads as filled without a border change, so
                 // the focus ring stays the only thing the eye tracks.
-                'data-filled:bg-border',
+                'data-filled:bg-border'
               )}
             />
           ))}
@@ -179,7 +167,7 @@ export function VerifyCard({ email, next }: { email: string; next: string }) {
         {notice && (
           <Notice
             tone="bad"
-            className="animate-in fade-in slide-in-from-bottom-1 duration-(--dur-2)"
+            className="animate-in duration-(--dur-2) fade-in slide-in-from-bottom-1"
           >
             {notice}
           </Notice>

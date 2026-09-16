@@ -49,7 +49,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       siteName: 'Peritus',
       title,
       description,
-      ...(image ? { images: [{ url: image, width: expert.picture?.width, height: expert.picture?.height }] } : {}),
+      ...(image
+        ? { images: [{ url: image, width: expert.picture?.width, height: expert.picture?.height }] }
+        : {}),
     },
     twitter: { card: 'summary', title, description, ...(image ? { images: [image] } : {}) },
   }

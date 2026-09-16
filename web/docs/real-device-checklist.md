@@ -70,4 +70,4 @@ tunnel URL for the whole pass rather than switching halfway.
 For each failure: the device, the OS version, the page, and a screen recording.
 A layout bug on a real phone is usually a token or a breakpoint, not a page —
 fix it in `app/globals.css` or in the component's variant, and add the assertion
-to `e2e/helpers.ts` if it is something an emulated run *could* have caught.
+to `e2e/helpers.ts` if it is something an emulated run _could_ have caught.

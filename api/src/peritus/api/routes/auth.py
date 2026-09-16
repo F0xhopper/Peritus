@@ -62,7 +62,9 @@ async def send_otp(req: OtpRequest) -> None:
     try:
         await supabase_auth.request_otp(req.email, create_user=settings.AUTH_ALLOW_SIGNUP)
     except SupabaseAuthError as exc:
-        logger.warning("OTP request failed: email=%s status=%s error=%s", req.email, exc.status, exc)
+        logger.warning(
+            "OTP request failed: email=%s status=%s error=%s", req.email, exc.status, exc
+        )
         raise HTTPException(exc.status, str(exc)) from exc
     logger.info("OTP sent: email=%s", req.email)
 
@@ -175,7 +177,8 @@ async def refresh(req: RefreshRequest) -> dict:
     except httpx.HTTPError as exc:
         logger.warning(
             "Session refresh could not reach Supabase (%s: %s)",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
         raise HTTPException(
             status.HTTP_503_SERVICE_UNAVAILABLE,

@@ -19,7 +19,7 @@ describe('build state', () => {
     // The real "Thomism · Queued · 117h" case: answerable, no job.
     expect(dotState('queued', 'graph_ready', false)).toBe('ready')
     expect(isBuilding({ status: 'queued', readiness: 'graph_ready', build_active: false })).toBe(
-      false,
+      false
     )
     // And one that cannot answer says the build never started.
     expect(dotState('queued', 'pending', false)).toBe('stalled')
@@ -52,7 +52,9 @@ describe('numberCitations', () => {
 
 describe('endsMidSentence', () => {
   it('flags prose that stops without finishing', () => {
-    expect(endsMidSentence('A full paragraph.\n\nletting a beekeeper watch the colony’s')).toBe(true)
+    expect(endsMidSentence('A full paragraph.\n\nletting a beekeeper watch the colony’s')).toBe(
+      true
+    )
   })
 
   it('accepts a finished sentence, with or without a trailing citation', () => {
@@ -70,7 +72,7 @@ describe('endsMidSentence', () => {
 describe('describeBuildFailure', () => {
   it('turns the planning failure into a sentence for the reader', () => {
     const { headline, advice } = describeBuildFailure(
-      'Build finished without: key concepts (research planning failed). An expert is only ready once…',
+      'Build finished without: key concepts (research planning failed). An expert is only ready once…'
     )
     expect(headline).toBe('Planning the search failed, so nothing was searched.')
     expect(advice).toBe('Rebuilding usually fixes this.')
@@ -99,7 +101,7 @@ describe('vocabulary', () => {
     expect(sourceKind('exa')).toBe('Web page')
     expect(describeDiscovery('plan')).toBe('Planned search')
     expect(describeDiscovery('gapfill:acaricide resistance')).toBe(
-      'Follow-up search: acaricide resistance',
+      'Follow-up search: acaricide resistance'
     )
     expect(describeTextRead('oa_landing_html')).toBe('Open-access web page')
   })

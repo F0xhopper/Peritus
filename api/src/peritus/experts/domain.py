@@ -15,9 +15,9 @@ class ExpertStatus(StrEnum):
 
 
 class ExpertTier(StrEnum):
-    LITE     = "lite"
+    LITE = "lite"
     STANDARD = "standard"
-    PRO      = "pro"
+    PRO = "pro"
 
 
 class ExpertVisibility(StrEnum):
@@ -27,8 +27,8 @@ class ExpertVisibility(StrEnum):
     of visibility — see ``ExpertRepository.get_owned_for_user``.
     """
 
-    PRIVATE  = "private"    # owner, plus anyone holding a grant on a live share link
-    PUBLIC   = "public"     # anyone; appears in the curated catalog (admin-published)
+    PRIVATE = "private"  # owner, plus anyone holding a grant on a live share link
+    PUBLIC = "public"  # anyone; appears in the curated catalog (admin-published)
 
 
 class ExpertAccess(StrEnum):
@@ -39,7 +39,7 @@ class ExpertAccess(StrEnum):
     ownership itself.
     """
 
-    OWNER  = "owner"
+    OWNER = "owner"
     VIEWER = "viewer"
 
 
@@ -57,6 +57,7 @@ class ShareLink:
     created_at: datetime
     created_by: str | None = None
     revoked_at: datetime | None = None
+
 
 # Readiness values (migration 018) at which an expert can answer a question.
 # The catalog lists on this rather than on job status: a public expert whose
@@ -249,9 +250,11 @@ class TierEconomics:
 # every tier, so a loop that spends its whole discovery budget still completes.
 # Override per deployment with PERITUS_TIER_DISCOVERY_{LITE,STANDARD,PRO}_USD.
 _TIER_ECONOMICS: dict[ExpertTier, TierEconomics] = {
-    ExpertTier.LITE:     TierEconomics(credit_cost=1, spend_cap_usd=3.00, discovery_budget_usd=1.25),
-    ExpertTier.STANDARD: TierEconomics(credit_cost=3, spend_cap_usd=6.00, discovery_budget_usd=3.00),
-    ExpertTier.PRO:      TierEconomics(credit_cost=8, spend_cap_usd=12.00, discovery_budget_usd=7.00),
+    ExpertTier.LITE: TierEconomics(credit_cost=1, spend_cap_usd=3.00, discovery_budget_usd=1.25),
+    ExpertTier.STANDARD: TierEconomics(
+        credit_cost=3, spend_cap_usd=6.00, discovery_budget_usd=3.00
+    ),
+    ExpertTier.PRO: TierEconomics(credit_cost=8, spend_cap_usd=12.00, discovery_budget_usd=7.00),
 }
 
 
@@ -337,12 +340,14 @@ class ExpertPicture:
 @dataclass
 class Expert:
     id: int
-    name: str          # user-facing slug, e.g. "stoic-philosophy"
-    topic: str         # raw build topic string
+    name: str  # user-facing slug, e.g. "stoic-philosophy"
+    topic: str  # raw build topic string
     status: ExpertStatus
     owner_id: str | None = None  # Supabase auth.users.id; NULL = legacy/admin-owned
     tier: ExpertTier = ExpertTier.STANDARD
-    config: ExpertConfig = field(default_factory=lambda: ExpertConfig.from_tier(ExpertTier.STANDARD))
+    config: ExpertConfig = field(
+        default_factory=lambda: ExpertConfig.from_tier(ExpertTier.STANDARD)
+    )
     persona_name: str | None = None
     persona_bio: str | None = None
     persona_style: str | None = None

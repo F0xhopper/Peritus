@@ -98,9 +98,9 @@ class ExpertPictureRepository:
 
     async def exists(self, expert_id: int) -> bool:
         async with self._pool.acquire() as conn:
-            return bool(await conn.fetchval(
-                "SELECT 1 FROM expert_pictures WHERE expert_id = $1", expert_id
-            ))
+            return bool(
+                await conn.fetchval("SELECT 1 FROM expert_pictures WHERE expert_id = $1", expert_id)
+            )
 
     async def upsert(
         self, expert_id: int, found: FoundPicture, chosen_by: str = "build"
@@ -142,11 +142,25 @@ class ExpertPictureRepository:
                     chosen_by = EXCLUDED.chosen_by,
                     found_at = NOW()
                 """,
-                expert_id, found.image, found.content_type, found.width, found.height,
-                found.byte_size, found.sha256, found.provider, found.file_name,
-                found.file_url, found.file_page_url, found.page_url, found.page_title,
-                found.artist, found.license, found.license_url, found.query,
-                json.dumps(found.candidates), chosen_by,
+                expert_id,
+                found.image,
+                found.content_type,
+                found.width,
+                found.height,
+                found.byte_size,
+                found.sha256,
+                found.provider,
+                found.file_name,
+                found.file_url,
+                found.file_page_url,
+                found.page_url,
+                found.page_title,
+                found.artist,
+                found.license,
+                found.license_url,
+                found.query,
+                json.dumps(found.candidates),
+                chosen_by,
             )
         return ExpertPicture(
             provider=found.provider,

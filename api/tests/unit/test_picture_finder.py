@@ -261,9 +261,7 @@ async def test_bytes_that_are_not_an_image_are_refused():
         infos={"File:Broken.jpg": _imageinfo()},
         # Keyed on the `pageimages` thumbnail, which is the URL actually
         # fetched — `imageinfo`'s `thumburl` can be the unscaled original.
-        downloads={
-            "https://upload.wikimedia.org/thumb/Broken.jpg/512px.jpg": b"<html>404</html>"
-        },
+        downloads={"https://upload.wikimedia.org/thumb/Broken.jpg/512px.jpg": b"<html>404</html>"},
     )
 
     with pytest.raises(PictureSkipped) as exc:

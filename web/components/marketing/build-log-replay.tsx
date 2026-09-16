@@ -131,10 +131,9 @@ export function BuildLogReplay({ className }: { className?: string }) {
   useEffect(() => {
     const element = wrapper.current
     if (!element) return
-    const observer = new IntersectionObserver(
-      ([entry]) => setInView(entry.isIntersecting),
-      { threshold: 0.1 },
-    )
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), {
+      threshold: 0.1,
+    })
     observer.observe(element)
     return () => observer.disconnect()
   }, [])
@@ -178,10 +177,13 @@ export function BuildLogReplay({ className }: { className?: string }) {
               'flex items-baseline gap-2 py-0.5 leading-4',
               // Fade and rise per row, and only when it actually animates.
               !reducedMotion &&
-                'motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-safe:duration-(--dur-2)',
+                'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fade-in motion-safe:slide-in-from-bottom-1'
             )}
           >
-            <span aria-hidden="true" className={cn('w-3 shrink-0 text-center', MARK_COLOUR[row.kind])}>
+            <span
+              aria-hidden="true"
+              className={cn('w-3 shrink-0 text-center', MARK_COLOUR[row.kind])}
+            >
               {MARK[row.kind]}
             </span>
             <span className="hidden w-16 shrink-0 text-fg-3 sm:inline">{row.stage}</span>
@@ -189,9 +191,7 @@ export function BuildLogReplay({ className }: { className?: string }) {
             {row.scores && <span className="shrink-0 text-fg-3">{row.scores}</span>}
           </div>
         ))}
-        {visible >= ROWS.length && (
-          <p className="mt-2 text-fg-3">— end of log —</p>
-        )}
+        {visible >= ROWS.length && <p className="mt-2 text-fg-3">— end of log —</p>}
       </div>
     </div>
   )

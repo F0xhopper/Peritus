@@ -84,7 +84,8 @@ class ConversationRepository:
                 VALUES ($1, $2::uuid)
                 RETURNING *
                 """,
-                expert_id, owner_id,
+                expert_id,
+                owner_id,
             )
         return _row_to_conversation(row)
 
@@ -101,7 +102,8 @@ class ConversationRepository:
                 {_EXPERT_PICTURE_JOIN}
                 WHERE c.id = $1::uuid AND {clause}
                 """,
-                conversation_id, *params,
+                conversation_id,
+                *params,
             )
         return _row_to_conversation(row) if row else None
 
@@ -122,7 +124,8 @@ class ConversationRepository:
                 ORDER BY c.last_message_at DESC
                 LIMIT $1
                 """,
-                limit, *params,
+                limit,
+                *params,
             )
         return [_row_to_conversation(r) for r in rows]
 
@@ -147,7 +150,9 @@ class ConversationRepository:
                 ORDER BY c.last_message_at DESC
                 LIMIT $2
                 """,
-                expert_id, limit, *params,
+                expert_id,
+                limit,
+                *params,
             )
         return [_row_to_conversation(r) for r in rows]
 
@@ -158,18 +163,19 @@ class ConversationRepository:
         async with self._pool.acquire() as conn:
             result = await conn.execute(
                 f"UPDATE conversations SET title = $2 WHERE id = $1::uuid AND {clause}",
-                conversation_id, title, *params,
+                conversation_id,
+                title,
+                *params,
             )
         return result.rsplit(" ", 1)[-1] != "0"
 
-    async def delete(
-        self, conversation_id: str, owner_id: str, include_unowned: bool
-    ) -> bool:
+    async def delete(self, conversation_id: str, owner_id: str, include_unowned: bool) -> bool:
         clause, params = _visibility_clause(owner_id, include_unowned, alias="conversations", idx=2)
         async with self._pool.acquire() as conn:
             result = await conn.execute(
                 f"DELETE FROM conversations WHERE id = $1::uuid AND {clause}",
-                conversation_id, *params,
+                conversation_id,
+                *params,
             )
         return result.rsplit(" ", 1)[-1] != "0"
 
@@ -200,7 +206,8 @@ class ConversationRepository:
                     LIMIT $2
                 ) latest ORDER BY id
                 """,
-                conversation_id, limit,
+                conversation_id,
+                limit,
             )
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
@@ -243,7 +250,8 @@ class ConversationRepository:
                 INSERT INTO conversation_messages (conversation_id, role, content)
                 VALUES ($1::uuid, 'user', $2)
                 """,
-                conversation_id, content,
+                conversation_id,
+                content,
             )
             row = await conn.fetchrow(
                 """
@@ -254,7 +262,8 @@ class ConversationRepository:
                 WHERE id = $1::uuid
                 RETURNING *
                 """,
-                conversation_id, fallback_title,
+                conversation_id,
+                fallback_title,
             )
         return _row_to_conversation(row)
 
@@ -281,9 +290,11 @@ class ConversationRepository:
                         (conversation_id, role, content, citations, has_contradiction, interrupted)
                     VALUES ($1::uuid, 'assistant', $2, $3::jsonb, $4, $5)
                     """,
-                    conversation_id, content,
+                    conversation_id,
+                    content,
                     json.dumps(citations) if citations is not None else None,
-                    has_contradiction, interrupted,
+                    has_contradiction,
+                    interrupted,
                 )
                 await conn.execute(
                     """

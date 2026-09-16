@@ -13,9 +13,17 @@ Where settings live, and the ones worth understanding before you change them.
 | Production (web) | Vercel project settings | Vercel |
 
 **[`api/.env.example`](../api/.env.example) is the reference.** Every setting there carries a
-comment explaining what it does and what breaks if it is wrong, and it is kept current with the
-code. This page does not repeat it — it covers the decisions behind the settings you are most
-likely to reach for.
+comment explaining what it does and what breaks if it is wrong, and it is kept current with the code
+by a test: `tests/unit/test_env_example.py` fails if a setting exists in `Settings` and not in the
+example, if the example names a key that is not a setting, or if a stated default disagrees with the
+code. This page does not repeat it — it covers the decisions behind the settings you are most likely
+to reach for. `just settings` prints the whole list with types and defaults.
+
+Settings are a `pydantic_settings.BaseSettings` model, so a bad value fails the process at startup
+with the field named, and **all** invalid settings are reported at once rather than the first. The
+enum-valued ones (`CHAT_EFFORT`, `BUILD_EXECUTION_DEFAULT`, `PICTURE_RANKER`, `DISCOVERY_LOOP`,
+`HNSW_ITERATIVE_SCAN`) are `Literal` types, so a typo is caught there rather than hours later as a
+strange build.
 
 Prices, plans and tier depths are deliberately **not** environment settings. They live in
 `api/src/peritus/billing/domain.py` and `api/src/peritus/experts/domain.py` so they are reviewable

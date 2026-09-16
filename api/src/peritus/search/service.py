@@ -84,9 +84,7 @@ class SearchService:
         else:
             results, scored = results[:top_k], False
 
-        return SearchResponse(
-            query=query, results=results, total=len(results), reranked=scored
-        )
+        return SearchResponse(query=query, results=results, total=len(results), reranked=scored)
 
     async def batch_search(
         self,
@@ -113,19 +111,21 @@ class SearchService:
 
         embeddings = await asyncio.gather(*[embed_query(q) for q in queries])
 
-        all_hits = await asyncio.gather(*[
-            self._hybrid_search(
-                expert_id=expert_id,
-                query_embedding=emb,
-                query_text=q,
-                candidate_k=candidate_k,
-                top_k=fetch_k,
-            )
-            for q, emb in zip(queries, embeddings, strict=True)
-        ])
+        all_hits = await asyncio.gather(
+            *[
+                self._hybrid_search(
+                    expert_id=expert_id,
+                    query_embedding=emb,
+                    query_text=q,
+                    candidate_k=candidate_k,
+                    top_k=fetch_k,
+                )
+                for q, emb in zip(queries, embeddings, strict=True)
+            ]
+        )
 
         merged = _merge_hits([[_row_to_result(r) for r in hits] for hits in all_hits])
-        merged = merged[:max(fetch_k, top_k)]
+        merged = merged[: max(fetch_k, top_k)]
 
         if rerank_on and len(merged) > 1:
             merged, scored = _apply_ranking(
@@ -134,9 +134,7 @@ class SearchService:
         else:
             merged, scored = merged[:top_k], False
 
-        return SearchResponse(
-            query=question, results=merged, total=len(merged), reranked=scored
-        )
+        return SearchResponse(query=question, results=merged, total=len(merged), reranked=scored)
 
     async def _hybrid_search(
         self,
@@ -228,9 +226,7 @@ class SearchService:
                     return await conn.fetch(
                         sql, query_embedding, expert_id, candidate_k, query_text, top_k
                     )
-            return await conn.fetch(
-                sql, query_embedding, expert_id, candidate_k, query_text, top_k
-            )
+            return await conn.fetch(sql, query_embedding, expert_id, candidate_k, query_text, top_k)
 
 
 def _row_to_result(row) -> SearchResult:

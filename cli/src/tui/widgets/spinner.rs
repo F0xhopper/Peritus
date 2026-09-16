@@ -9,7 +9,9 @@ pub const BRAILLE: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", 
 pub const DOTS: &[&str] = &["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"];
 
 /// Pulsing block — slow breathe for streaming text.
-pub const PULSE: &[&str] = &["▏", "▎", "▍", "▌", "▋", "▊", "▉", "█", "▉", "▊", "▋", "▌", "▍", "▎", "▏"];
+pub const PULSE: &[&str] = &[
+    "▏", "▎", "▍", "▌", "▋", "▊", "▉", "█", "▉", "▊", "▋", "▌", "▍", "▎", "▏",
+];
 
 /// Pick the frame for `frames` at the app tick, advancing at `fps` per second.
 /// The global render loop is 60fps; this scales down to the desired cadence.
@@ -19,10 +21,16 @@ pub fn frame<'a>(frames: &'a [&'a str], fps: u64, tick: u64) -> &'a str {
 }
 
 /// Braille spinner at 12fps.
-pub fn braille(tick: u64) -> &'static str { frame(BRAILLE, 12, tick) }
+pub fn braille(tick: u64) -> &'static str {
+    frame(BRAILLE, 12, tick)
+}
 
 /// Dense-dot spinner at 10fps (slightly different feel from braille).
-pub fn dots(tick: u64) -> &'static str { frame(DOTS, 10, tick) }
+pub fn dots(tick: u64) -> &'static str {
+    frame(DOTS, 10, tick)
+}
 
 /// Pulsing streaming indicator at 8fps.
-pub fn pulse(tick: u64) -> &'static str { frame(PULSE, 8, tick) }
+pub fn pulse(tick: u64) -> &'static str {
+    frame(PULSE, 8, tick)
+}

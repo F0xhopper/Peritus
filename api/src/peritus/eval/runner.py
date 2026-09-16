@@ -155,20 +155,22 @@ async def evaluate(expert_name: str, gold: list[GoldQuestion], top_k: int = 10) 
             contradicts = bool(judged.get("contradicts_passages", False))
             notes = str(judged.get("notes", ""))
 
-        scores.append(QuestionScore(
-            question=gq.question,
-            recall_at_k=round(recall, 4),
-            citation_validity=round(cit_validity, 4),
-            citation_source_recall=round(cit_source_recall, 4),
-            groundedness=groundedness,
-            refusal_correct=refusal_correct,
-            helpfulness=helpfulness,
-            overall_quality=overall,
-            citation_density=shape["citation_density"],
-            narration_hits=int(shape["narration_hits"]),
-            contradicts_passages=contradicts,
-            judge_notes=notes,
-        ))
+        scores.append(
+            QuestionScore(
+                question=gq.question,
+                recall_at_k=round(recall, 4),
+                citation_validity=round(cit_validity, 4),
+                citation_source_recall=round(cit_source_recall, 4),
+                groundedness=groundedness,
+                refusal_correct=refusal_correct,
+                helpfulness=helpfulness,
+                overall_quality=overall,
+                citation_density=shape["citation_density"],
+                narration_hits=int(shape["narration_hits"]),
+                contradicts_passages=contradicts,
+                judge_notes=notes,
+            )
+        )
 
     grounded = [s.groundedness for s in scores if s.groundedness is not None]
     refusals = [s.refusal_correct for s in scores if s.refusal_correct is not None]

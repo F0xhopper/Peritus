@@ -111,9 +111,9 @@ async def test_context_does_not_leak_between_requests(client):
 
 
 async def test_concurrent_requests_get_distinct_ids(client):
-    responses = await asyncio.gather(*[
-        client.get("/ok", headers={REQUEST_ID_HEADER: f"req-{i}"}) for i in range(8)
-    ])
+    responses = await asyncio.gather(
+        *[client.get("/ok", headers={REQUEST_ID_HEADER: f"req-{i}"}) for i in range(8)]
+    )
     assert [r.json()["request_id"] for r in responses] == [f"req-{i}" for i in range(8)]
 
 
@@ -198,10 +198,17 @@ async def test_sse_streams_incrementally(app):
         return StreamingResponse(body(), media_type="text/event-stream")
 
     scope = {
-        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
-        "method": "GET", "path": "/stream", "raw_path": b"/stream",
-        "query_string": b"", "root_path": "", "scheme": "http",
-        "headers": [(b"host", b"test")], "client": ("127.0.0.1", 1234),
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "path": "/stream",
+        "raw_path": b"/stream",
+        "query_string": b"",
+        "root_path": "",
+        "scheme": "http",
+        "headers": [(b"host", b"test")],
+        "client": ("127.0.0.1", 1234),
         "server": ("test", 80),
     }
     sent: list[dict] = []
@@ -298,6 +305,46 @@ def test_log_format_renders_records_from_any_logger():
     assert "[-]" in logging.Formatter(_LOG_FORMAT).format(record)
 
 
+# ── the same slot, filled by the worker ──
+
+
+def test_job_context_labels_records_so_a_build_is_greppable():
+    """The worker's half of the correlation field.
+
+    Every build line used to read `-`, across `WORKER_CONCURRENCY` concurrent
+    jobs, so which build produced a line had to be inferred from its text.
+    """
+    from peritus.core.logging import job_context
+
+    with job_context(53, expert_id=12):
+        record = logging.LogRecord("peritus.experts.builder", logging.INFO, "f", 1, "x", None, None)
+        RequestIdFilter().filter(record)
+        assert record.request_id == "job=53 expert=12"
+
+    # Restored on the way out, so a worker that finishes a job does not label the
+    # next one's lines — or the idle loop's — with it.
+    record = logging.LogRecord("peritus.jobs.worker", logging.INFO, "f", 1, "x", None, None)
+    RequestIdFilter().filter(record)
+    assert record.request_id == "-"
+
+
+async def test_job_context_follows_into_gathered_tasks():
+    """A build fetches, validates and embeds concurrently. Context variables are
+    copied into each task at creation, so those lines carry the label too."""
+    import asyncio
+
+    from peritus.core.logging import current_request_id, job_context
+
+    async def _inner() -> str:
+        await asyncio.sleep(0)
+        return current_request_id()
+
+    with job_context(7):
+        labels = await asyncio.gather(_inner(), _inner())
+
+    assert labels == ["job=7", "job=7"]
+
+
 # ── readiness ──
 
 
@@ -314,9 +361,7 @@ def health_app():
 
 @pytest.fixture
 async def health_client(health_app):
-    async with AsyncClient(
-        transport=ASGITransport(app=health_app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=health_app), base_url="http://test") as c:
         yield c
 
 
@@ -344,8 +389,10 @@ async def test_liveness_touches_nothing(health_client):
 async def test_readiness_reports_the_vector_index_state(health_client):
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value=1)
-    with patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)), \
-         patch("peritus.api.routes.health.halfvec_supported", return_value=True):
+    with (
+        patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)),
+        patch("peritus.api.routes.health.halfvec_supported", return_value=True),
+    ):
         resp = await health_client.get("/ready")
 
     assert resp.status_code == 200
@@ -355,8 +402,10 @@ async def test_readiness_reports_the_vector_index_state(health_client):
 async def test_readiness_flags_a_missing_vector_index(health_client):
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value=1)
-    with patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)), \
-         patch("peritus.api.routes.health.halfvec_supported", return_value=False):
+    with (
+        patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)),
+        patch("peritus.api.routes.health.halfvec_supported", return_value=False),
+    ):
         resp = await health_client.get("/ready")
 
     assert resp.json()["vector_index"] == "none"

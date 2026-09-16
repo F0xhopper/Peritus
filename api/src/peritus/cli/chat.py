@@ -8,8 +8,8 @@ from rich.console import Console
 
 from peritus.chat.agent import ChatAgent
 from peritus.chat.history import ConversationHistory
-from peritus.chat.renderer import render_answer, render_thinking
 from peritus.cli.display import credential_card, print_error
+from peritus.cli.render import render_answer, render_thinking
 from peritus.core.exceptions import NotFoundError
 from peritus.experts.domain import ExpertStatus
 from peritus.experts.service import ExpertService
@@ -59,14 +59,18 @@ async def _chat_async(name: str) -> None:
     console.print()
 
     persona = expert.persona_name or expert.name
-    console.print(f"[bold cyan]Chatting with {persona}[/bold cyan]  [dim](type 'quit' to exit)[/dim]\n")
+    console.print(
+        f"[bold cyan]Chatting with {persona}[/bold cyan]  [dim](type 'quit' to exit)[/dim]\n"
+    )
 
     agent = ChatAgent(pool)
     history = ConversationHistory()
 
     while True:
         try:
-            question = input("You: ").strip()
+            # `input()` blocks the event loop, which stalls the streaming
+            # response the agent is about to produce on the next turn.
+            question = (await asyncio.to_thread(input, "You: ")).strip()
         except (EOFError, KeyboardInterrupt):
             console.print("\n[dim]Session ended.[/dim]")
             break

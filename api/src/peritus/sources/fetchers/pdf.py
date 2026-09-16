@@ -10,6 +10,7 @@ import httpx
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.infrastructure.pdf_parser import parse_pdf_url
 from peritus.sources.domain import (
     Identifiers,
@@ -28,9 +29,9 @@ from peritus.sources.fetchers.base import (
 logger = get_logger(__name__)
 
 _SS_URL = "https://api.semanticscholar.org/graph/v1/paper/search"
-_PDF_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_PDF_HEADERS = {"User-Agent": RESEARCH_UA}
 _SS_FIELDS = "title,authors,year,openAccessPdf,abstract,externalIds"
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 _MAX_CHARS = 200_000
 
 
@@ -65,22 +66,24 @@ class PdfFetcher:
             # all — and paid for OCR on papers Europe PMC serves free.
             ids = identifiers_from_external(paper.get("externalIds"))
             ids = ids.with_(s2_id=paper.get("paperId")) if paper.get("paperId") else ids
-            candidates.append(SourceCandidate(
-                source_type=SourceType.PDF,
-                url=pdf_url,
-                title=paper.get("title") or "Untitled",
-                author=authors,
-                snippet=paper.get("abstract") or "",
-                metadata={
-                    "semantic_scholar_id": paper.get("paperId"),
-                    "year": paper.get("year"),
-                    "abstract": paper.get("abstract") or "",
-                    "oa_pdf_url": pdf_url,
-                    "is_open_access": True,
-                    **ids.to_dict(),
-                },
-                identifiers=ids,
-            ))
+            candidates.append(
+                SourceCandidate(
+                    source_type=SourceType.PDF,
+                    url=pdf_url,
+                    title=paper.get("title") or "Untitled",
+                    author=authors,
+                    snippet=paper.get("abstract") or "",
+                    metadata={
+                        "semantic_scholar_id": paper.get("paperId"),
+                        "year": paper.get("year"),
+                        "abstract": paper.get("abstract") or "",
+                        "oa_pdf_url": pdf_url,
+                        "is_open_access": True,
+                        **ids.to_dict(),
+                    },
+                    identifiers=ids,
+                )
+            )
         return candidates
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
@@ -141,58 +144,54 @@ async def _is_pdf_url(url: str) -> bool:
     if url.lower().endswith(".pdf"):
         return True
     try:
-        async with httpx.AsyncClient(
-            timeout=10, headers=_PDF_HEADERS, follow_redirects=True
-        ) as client:
-            resp = await client.head(url)
-            ct = resp.headers.get("content-type", "")
-            return "pdf" in ct.lower()
-    except Exception:
+        client = shared_client(timeout=10, headers=_PDF_HEADERS, guarded=True)
+        resp = await client.head(url)
+        ct = resp.headers.get("content-type", "")
+        return "pdf" in ct.lower()
+    except Exception as exc:
+        logger.debug("PDF content-type probe failed for %r: %s", url, exc)
         return False
 
 
 async def _search_semantic_scholar(topic: str, limit: int) -> list[dict]:
     for attempt in range(3):
         try:
-            async with httpx.AsyncClient(timeout=20, headers=semantic_scholar_headers()) as client:
-                resp = await client.get(
-                    _SS_URL,
-                    params={"query": topic, "fields": _SS_FIELDS, "limit": limit * 2},
+            client = shared_client(
+                timeout=20, headers=semantic_scholar_headers(), follow_redirects=False
+            )
+            resp = await client.get(
+                _SS_URL,
+                params={"query": topic, "fields": _SS_FIELDS, "limit": limit * 2},
+            )
+            if resp.status_code == 429:
+                wait = 5 * (attempt + 1)
+                # WARNING, and named: a pdf channel that returns nothing
+                # because of this used to be invisible at DEBUG.
+                logger.warning(
+                    "pdf fetcher: Semantic Scholar rate-limited (429%s), retrying in %ds",
+                    "" if settings.S2_API_KEY else ", no S2_API_KEY",
+                    wait,
                 )
-                if resp.status_code == 429:
-                    wait = 5 * (attempt + 1)
-                    # WARNING, and named: a pdf channel that returns nothing
-                    # because of this used to be invisible at DEBUG.
-                    logger.warning(
-                        "pdf fetcher: Semantic Scholar rate-limited (429%s), retrying in %ds",
-                        "" if settings.S2_API_KEY else ", no S2_API_KEY", wait,
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-                resp.raise_for_status()
-                papers = resp.json().get("data", [])
-                with_pdf = [
-                    p for p in papers
-                    if (p.get("openAccessPdf") or {}).get("url")
-                ]
-                if len(with_pdf) < limit and resp.json().get("next"):
-                    # Not enough open-access results — fetch a second page
-                    resp2 = await client.get(
-                        _SS_URL,
-                        params={
-                            "query": topic,
-                            "fields": _SS_FIELDS,
-                            "limit": limit * 3,
-                            "offset": limit * 2,
-                        },
-                    )
-                    if resp2.status_code == 200:
-                        extra = resp2.json().get("data", [])
-                        with_pdf += [
-                            p for p in extra
-                            if (p.get("openAccessPdf") or {}).get("url")
-                        ]
-                return with_pdf[:limit]
+                await asyncio.sleep(wait)
+                continue
+            resp.raise_for_status()
+            papers = resp.json().get("data", [])
+            with_pdf = [p for p in papers if (p.get("openAccessPdf") or {}).get("url")]
+            if len(with_pdf) < limit and resp.json().get("next"):
+                # Not enough open-access results — fetch a second page
+                resp2 = await client.get(
+                    _SS_URL,
+                    params={
+                        "query": topic,
+                        "fields": _SS_FIELDS,
+                        "limit": limit * 3,
+                        "offset": limit * 2,
+                    },
+                )
+                if resp2.status_code == 200:
+                    extra = resp2.json().get("data", [])
+                    with_pdf += [p for p in extra if (p.get("openAccessPdf") or {}).get("url")]
+            return with_pdf[:limit]
         except httpx.TimeoutException as exc:
             logger.warning("Semantic Scholar search timed out for %r: %s", topic, exc)
             note_search_failure(STATUS_TIMEOUT, f"Semantic Scholar: {exc}")

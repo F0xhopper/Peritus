@@ -17,8 +17,9 @@ from peritus.audit.domain import (
 
 # ── discovery provenance ──
 
+
 @pytest.mark.parametrize(
-    "value,expected",
+    ("value", "expected"),
     [
         ("plan", ("plan", None)),
         ("snowball", ("snowball", None)),
@@ -44,6 +45,7 @@ def test_missing_discovery_is_unknown_not_plan():
 
 
 # ── coverage strength ──
+
 
 def test_no_sources_is_absent_not_thin():
     """'Nothing on this concept' and 'a little on this concept' demand
@@ -74,6 +76,7 @@ def test_unscored_sources_skip_the_quality_gates():
 
 
 # ── jsonb decoding ──
+
 
 def test_decode_json_field_handles_str_and_native():
     assert decode_json_field('["a","b"]', []) == ["a", "b"]

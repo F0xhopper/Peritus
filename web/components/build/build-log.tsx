@@ -73,6 +73,11 @@ export function BuildLog({
     return out
   }, [groups, openGroups])
 
+  // React Compiler skips memoizing this component because `useVirtualizer`
+  // returns functions it cannot memoize safely. That is the correct trade here:
+  // a build log is thousands of rows, and virtualizing it is worth more than
+  // compiler memoization of a component that re-renders on every event anyway.
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual, by design
   const virtualizer = useVirtualizer({
     count: items.length,
     getScrollElement: () => scroller.current,

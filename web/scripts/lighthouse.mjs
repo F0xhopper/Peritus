@@ -19,6 +19,14 @@
  */
 import { spawn } from 'node:child_process'
 
+// Fetched on demand rather than installed. `@lhci/cli` drags in Lighthouse,
+// puppeteer-core and extract-zip, which between them account for every one of
+// the twelve advisories `npm audit` reports on this project — all of them in a
+// tool that never ships and only ever runs against 127.0.0.1. Keeping it out of
+// devDependencies means `npm ci` installs a clean tree and the audit gate in CI
+// is meaningful; the version here is the pin.
+const LHCI = '@lhci/cli@0.15.1'
+
 const MOCK_API_PORT = process.env.MOCK_API_PORT ?? '8788'
 const PORT = '3200'
 const BASE_URL = `http://127.0.0.1:${PORT}`
@@ -42,7 +50,7 @@ await waitFor(`http://127.0.0.1:${MOCK_API_PORT}/auth/status`)
 
 let failed = false
 for (const config of ['lighthouserc.public.json', 'lighthouserc.app.json']) {
-  const code = await run('npx', ['lhci', 'autorun', `--config=${config}`])
+  const code = await run('npx', ['--yes', LHCI, 'autorun', `--config=${config}`])
   if (code !== 0) failed = true
 }
 

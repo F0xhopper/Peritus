@@ -12,9 +12,12 @@ once per concept, with the claims from every source in front of it.
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from anthropic.types import Message
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.infrastructure.anthropic_batch import gather_claude_calls
+from peritus.infrastructure.anthropic_client import tool_input
 from peritus.ingestion.chunker import TextChunk
 
 logger = get_logger(__name__)
@@ -47,8 +50,11 @@ _TOOL: dict[str, Any] = {
                         "content_type": {
                             "type": "string",
                             "enum": [
-                                "definition", "theorem", "example",
-                                "argument", "counterargument",
+                                "definition",
+                                "theorem",
+                                "example",
+                                "argument",
+                                "counterargument",
                             ],
                         },
                         "confidence": {
@@ -127,7 +133,8 @@ def attach_orphan_claims(data: dict) -> int:
     """
     nodes = data.get("nodes", [])
     concepts = [
-        n for n in nodes
+        n
+        for n in nodes
         if str(n.get("node_type", "")).strip().lower() == "concept" and n.get("label")
     ]
     concept_keys = {c["label"].lower().strip() for c in concepts}
@@ -157,11 +164,13 @@ def attach_orphan_claims(data: dict) -> int:
         for shared, concept in overlap[:_MAX_INFERRED_ABOUT]:
             if shared == 0:
                 break
-            data.setdefault("edges", []).append({
-                "from_label": claim["label"],
-                "to_label": concept["label"],
-                "edge_type": "about",
-            })
+            data.setdefault("edges", []).append(
+                {
+                    "from_label": claim["label"],
+                    "to_label": concept["label"],
+                    "edge_type": "about",
+                }
+            )
             added += 1
     return added
 
@@ -195,13 +204,12 @@ async def extract_graph_from_chunks(
     size = batch_size or settings.GRAPH_BATCH_SIZE
 
     batches = [
-        (chunks[i: i + size], chunk_db_ids[i: i + size])
-        for i in range(0, len(chunks), size)
+        (chunks[i : i + size], chunk_db_ids[i : i + size]) for i in range(0, len(chunks), size)
     ]
 
     parsed: dict[int, dict] = {}
 
-    async def _on_result(i: int, resp: Any) -> None:
+    async def _on_result(i: int, resp: Message | None) -> None:
         if resp is None:
             logger.warning("Graph extraction failed for batch %d", i)
             return
@@ -227,22 +235,19 @@ async def extract_graph_from_chunks(
 
 def _extract_params(topic: str, chunks: list[TextChunk]) -> dict[str, Any]:
     """Request params for one extraction batch (consumed by gather_claude_calls)."""
-    chunk_block = "\n\n".join(
-        f"[{i}] {c.text}" for i, c in enumerate(chunks)
-    )
+    chunk_block = "\n\n".join(f"[{i}] {c.text}" for i, c in enumerate(chunks))
     return {
         "model": settings.GRAPH_MODEL,
         "max_tokens": 8192,
         "system": _SYSTEM,
         "tools": [_TOOL],
         "tool_choice": {"type": "tool", "name": "extract_graph"},
-        "messages": [{
-            "role": "user",
-            "content": (
-                f"Topic: {topic}\n\n"
-                f"Chunks ({len(chunks)} total):\n\n{chunk_block}"
-            ),
-        }],
+        "messages": [
+            {
+                "role": "user",
+                "content": (f"Topic: {topic}\n\nChunks ({len(chunks)} total):\n\n{chunk_block}"),
+            }
+        ],
     }
 
 
@@ -268,16 +273,16 @@ def _complete(entries: Any, required: tuple[str, ...] | list[str], kind: str) ->
             return []
         entries = decoded
     if not isinstance(entries, list):
-        logger.warning("Graph extraction returned %s as %s, not a list", kind, type(entries).__name__)
+        logger.warning(
+            "Graph extraction returned %s as %s, not a list", kind, type(entries).__name__
+        )
         return []
-    valid = [
-        e for e in entries
-        if isinstance(e, dict) and all(e.get(k) for k in required)
-    ]
+    valid = [e for e in entries if isinstance(e, dict) and all(e.get(k) for k in required)]
     if len(valid) != len(entries):
         logger.warning(
             "Dropped %d unusable %s(s) — truncated JSON or a non-object entry",
-            len(entries) - len(valid), kind,
+            len(entries) - len(valid),
+            kind,
         )
     return valid
 
@@ -311,15 +316,15 @@ def decode_json_list(text: str) -> list | None:
     return items or None
 
 
-def _parse_extract_response(resp: Any, chunk_db_ids: list[int]) -> dict:
-    if resp.stop_reason == "max_tokens":
+def _parse_extract_response(resp: Message | None, chunk_db_ids: list[int]) -> dict:
+    if resp is not None and resp.stop_reason == "max_tokens":
         logger.warning(
             "Graph extraction batch hit max_tokens — output truncated, some nodes/edges lost"
         )
-    block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
+    block = tool_input(resp)
     if block is None:
         raise ValueError("Graph extraction response contained no tool_use block")
-    data = dict(block.input)
+    data = dict(block)
 
     # Both lists are filtered rather than trusted. A truncated tool call arrives
     # missing its trailing fields, and a malformed one arrives with a bare

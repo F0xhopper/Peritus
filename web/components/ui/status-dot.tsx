@@ -21,7 +21,7 @@ export type DotState = 'queued' | 'building' | 'chat-ready' | 'ready' | 'failed'
 export function dotState(
   status: ExpertStatus,
   readiness?: Readiness,
-  buildActive?: boolean | null,
+  buildActive?: boolean | null
 ): DotState {
   if (status === 'failed') return 'failed'
   if (status === 'ready') return 'ready'

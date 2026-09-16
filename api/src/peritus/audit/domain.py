@@ -36,7 +36,10 @@ SNOWBALL_BACKWARD = "backward"
 SNOWBALL_FORWARD = "forward"
 
 KNOWN_DISCOVERY_METHODS = (
-    DISCOVERY_PLAN, DISCOVERY_SNOWBALL, DISCOVERY_GAPFILL, DISCOVERY_CANONICAL,
+    DISCOVERY_PLAN,
+    DISCOVERY_SNOWBALL,
+    DISCOVERY_GAPFILL,
+    DISCOVERY_CANONICAL,
 )
 
 
@@ -161,8 +164,7 @@ DISPOSITION_MEANINGS = {
         "was irrelevant."
     ),
     DISPOSITION_NOT_IN_CONTEXT: (
-        "Retrieved but never shown to the model — it ranked below the tier's "
-        "context-passage cap."
+        "Retrieved but never shown to the model — it ranked below the tier's context-passage cap."
     ),
 }
 

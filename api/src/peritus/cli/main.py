@@ -33,13 +33,16 @@ def default(ctx: typer.Context) -> None:
 
     async def _pick_and_chat() -> None:
         from peritus.infrastructure.database import init_pool
+
         await init_pool()
 
         pairs = await _experts_with_concepts()
         ready = [(e, c) for e, c in pairs if e.status.value == "ready"]
 
         if not pairs:
-            console.print("\n[dim]No experts yet. Run [bold]peritus build <topic>[/bold] to create one.[/dim]\n")
+            console.print(
+                "\n[dim]No experts yet. Run [bold]peritus build <topic>[/bold] to create one.[/dim]\n"
+            )
             raise typer.Exit()
 
         if not ready:
@@ -47,17 +50,21 @@ def default(ctx: typer.Context) -> None:
             raise typer.Exit()
 
         choices = [
-            questionary.Choice(title=f"{e.persona_name or e.name.title()}  ({e.topic})", value=e.name)
+            questionary.Choice(
+                title=f"{e.persona_name or e.name.title()}  ({e.topic})", value=e.name
+            )
             for e, _ in ready
         ]
         name = await questionary.select(
             "Select an expert",
             choices=choices,
-            style=questionary.Style([
-                ("selected", "bold cyan"),
-                ("pointer", "bold cyan"),
-                ("question", "bold"),
-            ]),
+            style=questionary.Style(
+                [
+                    ("selected", "bold cyan"),
+                    ("pointer", "bold cyan"),
+                    ("question", "bold"),
+                ]
+            ),
         ).ask_async()
 
         if name is None:
@@ -67,6 +74,7 @@ def default(ctx: typer.Context) -> None:
         await _chat_async(name)
 
     asyncio.run(_pick_and_chat())
+
 
 app.command("build")(build_command)
 app.command("chat")(chat_command)
@@ -115,10 +123,15 @@ def config(
 
     if action == "show":
         console.print("[bold]Current configuration:[/bold]")
+
         def _key(val: str, required: bool = True) -> str:
             if val:
                 return "[green]set[/green]"
-            return "[red]missing[/red]" if required else "[yellow]optional — enables more sources[/yellow]"
+            return (
+                "[red]missing[/red]"
+                if required
+                else "[yellow]optional — enables more sources[/yellow]"
+            )
 
         console.print(f"  DATABASE_URL       {_key(settings.DATABASE_URL)}")
         console.print(f"  OPENAI_API_KEY     {_key(settings.OPENAI_API_KEY)}")
@@ -132,6 +145,7 @@ def config(
         console.print(f"  FAST_MODEL         {settings.FAST_MODEL}")
     elif action == "set" and item:
         from pathlib import Path
+
         env_file = Path(".env")
         key, _, value = item.partition("=")
         lines = env_file.read_text().splitlines() if env_file.exists() else []

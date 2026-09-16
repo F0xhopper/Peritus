@@ -115,10 +115,7 @@ class GraphRetriever:
         )
         node_by_id = {n["id"]: n for n in neighbour_nodes}
 
-        return [
-            self._enrich_one(result, anchor_nodes, edges, node_by_id)
-            for result in results
-        ]
+        return [self._enrich_one(result, anchor_nodes, edges, node_by_id) for result in results]
 
     def _enrich_one(
         self,
@@ -130,12 +127,12 @@ class GraphRetriever:
         """Enrich a single passage with the concepts and relations local to it,
         rather than one global neighbour list shared by every passage."""
         local_anchor_ids = {
-            n["id"] for n in anchor_nodes
-            if result.chunk_id in (n.get("chunk_ids") or [])
+            n["id"] for n in anchor_nodes if result.chunk_id in (n.get("chunk_ids") or [])
         }
         local_edges = sorted(
             (
-                e for e in edges
+                e
+                for e in edges
                 if e["from_node_id"] in local_anchor_ids or e["to_node_id"] in local_anchor_ids
             ),
             # Contradictions and qualifications are what the product surfaces —
@@ -143,9 +140,7 @@ class GraphRetriever:
             key=lambda e: (e["edge_type"] not in _REPORTABLE, -(e["evidence"] or 0)),
         )
 
-        has_contradiction = any(
-            e["edge_type"] == EdgeType.CONTRADICTS for e in local_edges
-        )
+        has_contradiction = any(e["edge_type"] == EdgeType.CONTRADICTS for e in local_edges)
         local_edges = local_edges[:_MAX_EDGES_PER_RESULT]
 
         # Concepts for this passage: its anchors first, then the neighbours its
@@ -158,8 +153,7 @@ class GraphRetriever:
         related_concepts = [
             node
             for nid in concept_ids[:_MAX_CONCEPTS_PER_RESULT]
-            if (node := node_by_id.get(nid)) is not None
-            and node.get("node_type") != "claim"
+            if (node := node_by_id.get(nid)) is not None and node.get("node_type") != "claim"
         ]
 
         relationships = [

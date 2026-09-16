@@ -17,10 +17,9 @@ contributes its densest paragraph instead of being lost.
 
 import re
 
-import httpx
-
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA, shared_client
 from peritus.sources.domain import (
     Identifiers,
     RawSource,
@@ -34,7 +33,7 @@ logger = get_logger(__name__)
 
 _WORKS_URL = "https://api.openalex.org/works"
 
-HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+HEADERS = {"User-Agent": RESEARCH_UA}
 MIN_FULL_TEXT = 3_000
 MAX_FULL_TEXT = 120_000
 # Below this an abstract is a stub, not something worth an embedding slot.
@@ -62,10 +61,10 @@ class OpenAlexFetcher:
         if settings.OPENALEX_MAILTO:
             params["mailto"] = settings.OPENALEX_MAILTO
         try:
-            async with httpx.AsyncClient(timeout=30, headers=HEADERS) as http:
-                resp = await http.get(_WORKS_URL, params=params)
-                resp.raise_for_status()
-                payload = resp.json()
+            http = shared_client(timeout=30, headers=HEADERS, follow_redirects=False)
+            resp = await http.get(_WORKS_URL, params=params)
+            resp.raise_for_status()
+            payload = resp.json()
         except Exception as exc:
             from peritus.sources.fetchers.exa import classify_search_error
 
@@ -126,10 +125,10 @@ async def search_by_title(title: str, author: str = "", limit: int = 5) -> list[
     }
     if settings.OPENALEX_MAILTO:
         params["mailto"] = settings.OPENALEX_MAILTO
-    async with httpx.AsyncClient(timeout=30, headers=HEADERS) as http:
-        resp = await http.get(_WORKS_URL, params=params)
-        resp.raise_for_status()
-        results = resp.json().get("results", []) or []
+    http = shared_client(timeout=30, headers=HEADERS, follow_redirects=False)
+    resp = await http.get(_WORKS_URL, params=params)
+    resp.raise_for_status()
+    results = resp.json().get("results", []) or []
     candidates = [c for c in (_to_candidate(w) for w in results) if c is not None]
     surname = (author or "").split()[-1:]
     if surname:
@@ -153,11 +152,11 @@ async def fetch_by_doi(doi: str) -> SourceCandidate | None:
     if settings.OPENALEX_MAILTO:
         params["mailto"] = settings.OPENALEX_MAILTO
     try:
-        async with httpx.AsyncClient(timeout=30, headers=HEADERS) as http:
-            resp = await http.get(f"{_WORKS_URL}/https://doi.org/{doi}", params=params)
-            if resp.status_code != 200:
-                return None
-            return _to_candidate(resp.json())
+        http = shared_client(timeout=30, headers=HEADERS, follow_redirects=False)
+        resp = await http.get(f"{_WORKS_URL}/https://doi.org/{doi}", params=params)
+        if resp.status_code != 200:
+            return None
+        return _to_candidate(resp.json())
     except Exception as exc:
         logger.debug("OpenAlex DOI lookup failed for %r: %s", doi, exc)
         return None

@@ -20,7 +20,7 @@ export function Chip({
       className={cn(
         'inline-flex h-(--chip-h) shrink-0 items-center rounded-chip px-1.5 text-xs font-medium',
         TONES[tone],
-        className,
+        className
       )}
     >
       {children}

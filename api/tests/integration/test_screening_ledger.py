@@ -48,11 +48,20 @@ async def test_the_ledger_records_every_candidate_and_links_what_was_kept(db_poo
 
     source = ValidatedSource(
         raw=RawSource(
-            SourceType.WEB, "https://x.test/summa", "Summa", None, "x" * 3000,
+            SourceType.WEB,
+            "https://x.test/summa",
+            "Summa",
+            None,
+            "x" * 3000,
             metadata={"triage_score": 9.0, "full_text_method": "web_html"},
         ),
-        quality_score=9, relevance_score=9, content_type="reference", difficulty=4,
-        key_claims=[], source_tier="primary", substance="full",
+        quality_score=9,
+        relevance_score=9,
+        content_type="reference",
+        difficulty=4,
+        key_claims=[],
+        source_tier="primary",
+        substance="full",
     )
     builder = ExpertBuilder(db_pool)
     [source_id] = await builder._persist_sources(expert.id, [source], [])
@@ -70,7 +79,8 @@ async def test_the_ledger_records_every_candidate_and_links_what_was_kept(db_poo
         plan = await conn.fetchval("SELECT research_plan FROM experts WHERE id = $1", expert.id)
 
     assert [(r["title"], r["fetch_outcome"]) for r in rows] == [
-        ("summa", "fetched"), ("tracie-thoms", "below_floor"),
+        ("summa", "fetched"),
+        ("tracie-thoms", "below_floor"),
     ]
     assert rows[0]["source_id"] == source_id
     assert rows[1]["source_id"] is None
@@ -83,9 +93,13 @@ async def test_the_ledger_records_every_candidate_and_links_what_was_kept(db_poo
 async def test_a_retried_job_does_not_double_its_ledger(db_pool):
     repo = ExpertRepository(db_pool)
     expert = await repo.create("thomism-retry", "Thomism")
-    await repo.insert_candidate_screenings(expert.id, None, [_row("https://x.test/a", "fetched", 8, 1)])
+    await repo.insert_candidate_screenings(
+        expert.id, None, [_row("https://x.test/a", "fetched", 8, 1)]
+    )
     await repo.clear_candidate_screenings(expert.id, None)
-    await repo.insert_candidate_screenings(expert.id, None, [_row("https://x.test/a", "fetched", 8, 1)])
+    await repo.insert_candidate_screenings(
+        expert.id, None, [_row("https://x.test/a", "fetched", 8, 1)]
+    )
 
     async with db_pool.acquire() as conn:
         count = await conn.fetchval(

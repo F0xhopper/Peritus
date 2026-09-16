@@ -66,7 +66,7 @@ def counting_tags(source: ValidatedSource) -> list[tuple[str, str]]:
     cut_for = meta.get("must_have_concepts") if meta.get("sections_matched") else None
     if cut_for:
         return [(str(c), DEPTH_SETS_OUT) for c in dict.fromkeys(cut_for)]
-    depths = source.concept_depths or {c: DEPTH_TREATS for c in source.covered_concepts}
+    depths = source.concept_depths or dict.fromkeys(source.covered_concepts, DEPTH_TREATS)
     tags = [(c, d) for c, d in depths.items() if d in COUNTING_DEPTHS]
     tags.sort(key=lambda tag: DEPTHS.index(tag[1]))
     return tags[:MAX_COUNTING_TAGS]
@@ -356,20 +356,14 @@ def _score(
 ) -> ConceptCoverage:
     missing_sources = max(0, target.min_sources - tally.sources)
     missing_types = max(0, target.min_source_types - len(tally.types))
-    missing_tier = (
-        1
-        if target.require_non_tertiary and not (tally.tiers & NON_TERTIARY)
-        else 0
-    )
+    missing_tier = 1 if target.require_non_tertiary and not (tally.tiers & NON_TERTIARY) else 0
     primary_met = has_primary(tally.primary, tally.primary_sets_out, named_text)
     missing_primary = 1 if target.require_primary and not primary_met else 0
     # Weighted so "no sources at all" always outranks "has sources, wrong mix".
     # A concept with nothing is a hole in the syllabus; one with two blog posts
     # is a weakness, and the loop should close holes first. A missing primary
     # source sits between the two: it is a gap in depth, not in breadth.
-    shortfall = (
-        missing_sources * 10 + missing_primary * 5 + missing_types * 3 + missing_tier * 2
-    )
+    shortfall = missing_sources * 10 + missing_primary * 5 + missing_types * 3 + missing_tier * 2
     return ConceptCoverage(
         concept=concept,
         sources=tally.sources,

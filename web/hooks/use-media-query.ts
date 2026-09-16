@@ -22,13 +22,13 @@ export function useMediaQuery(query: string): boolean {
       list.addEventListener('change', onChange)
       return () => list.removeEventListener('change', onChange)
     },
-    [query],
+    [query]
   )
 
   return useSyncExternalStore(
     subscribe,
     () => window.matchMedia(query).matches,
-    () => false,
+    () => false
   )
 }
 

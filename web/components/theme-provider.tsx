@@ -21,8 +21,7 @@ import { ThemeProvider as NextThemes } from 'next-themes'
  * a plain script, and the hydrated element keeps it: the script already carries
  * `suppressHydrationWarning`, and React does not patch attributes on hydrate.
  */
-const scriptProps =
-  typeof window === 'undefined' ? undefined : { type: 'text/plain' }
+const scriptProps = typeof window === 'undefined' ? undefined : { type: 'text/plain' }
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (

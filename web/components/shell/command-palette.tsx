@@ -208,7 +208,9 @@ export function CommandPalette({
   const matches = useMemo(() => {
     const needle = queryText.trim().toLowerCase()
     const filtered = needle
-      ? items.filter((item) => item.haystack.includes(needle) || item.label.toLowerCase().includes(needle))
+      ? items.filter(
+          (item) => item.haystack.includes(needle) || item.label.toLowerCase().includes(needle)
+        )
       : // With no query, the sub-page actions are noise.
         items.filter((item) => !item.id.startsWith('sources:') && !item.id.startsWith('graph:'))
     return filtered.slice(0, 40)
@@ -268,7 +270,7 @@ export function CommandPalette({
         id={listId}
         role="listbox"
         aria-label="Results"
-        className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5 pan-y"
+        className="pan-y min-h-0 flex-1 overflow-y-auto overscroll-contain p-1.5"
       >
         {sections.length === 0 ? (
           <p className="px-2 py-6 text-center text-sm text-fg-3">Nothing matches.</p>
@@ -296,7 +298,7 @@ export function CommandPalette({
                     className={cn(
                       'flex h-(--row-h) min-h-9 w-full items-center gap-2 rounded-row px-2 text-left text-sm',
                       'transition-colors duration-(--dur-1)',
-                      index === cursor ? 'bg-border text-fg' : 'text-fg-2',
+                      index === cursor ? 'bg-border text-fg' : 'text-fg-2'
                     )}
                   >
                     {item.icon}
@@ -332,9 +334,12 @@ export function CommandPalette({
   }
 
   return (
-    <BaseDialog.Root open={paletteOpen} onOpenChange={(open) => (open ? setPaletteOpen(true) : close())}>
+    <BaseDialog.Root
+      open={paletteOpen}
+      onOpenChange={(open) => (open ? setPaletteOpen(true) : close())}
+    >
       <BaseDialog.Portal>
-        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black/50 transition-opacity duration-(--dur-2) data-starting-style:opacity-0 data-ending-style:opacity-0 data-ending-style:duration-(--dur-1)" />
+        <BaseDialog.Backdrop className="fixed inset-0 z-40 bg-black/50 transition-opacity duration-(--dur-2) data-ending-style:opacity-0 data-ending-style:duration-(--dur-1) data-starting-style:opacity-0" />
         <BaseDialog.Popup
           initialFocus={inputRef}
           className={cn(
@@ -343,7 +348,7 @@ export function CommandPalette({
             'overflow-hidden rounded-panel border border-border bg-raised shadow-2xl shadow-black/40 outline-none',
             'transition-[opacity,transform] duration-(--dur-2) ease-(--ease-out)',
             'data-starting-style:scale-[0.98] data-starting-style:opacity-0',
-            'data-ending-style:opacity-0 data-ending-style:duration-(--dur-1)',
+            'data-ending-style:opacity-0 data-ending-style:duration-(--dur-1)'
           )}
         >
           <BaseDialog.Title className="sr-only">Search</BaseDialog.Title>

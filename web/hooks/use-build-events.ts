@@ -61,7 +61,7 @@ export interface BuildEventsResult {
 
 export function useBuildEvents(
   slug: string | null,
-  options: UseBuildEventsOptions = {},
+  options: UseBuildEventsOptions = {}
 ): BuildEventsResult {
   const { enabled = true, seed, refreshOnTerminal = true, onTerminal } = options
   const router = useRouter()
@@ -118,7 +118,7 @@ export function useBuildEvents(
         try {
           const res = await fetch(
             `/api/experts/${encodeURIComponent(slug)}/build/events?after=${lastSeq.current}`,
-            { headers: { Accept: 'text/event-stream' }, cache: 'no-store' },
+            { headers: { Accept: 'text/event-stream' }, cache: 'no-store' }
           )
 
           if (res.status === 404) {

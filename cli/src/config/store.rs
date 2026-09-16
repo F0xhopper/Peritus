@@ -81,10 +81,10 @@ impl Config {
     /// The credential to send as `Authorization: Bearer`. Prefers a live Supabase
     /// session, falling back to the legacy static key.
     pub fn bearer(&self) -> String {
-        if !self.access_token.is_empty() {
-            self.access_token.clone()
-        } else {
+        if self.access_token.is_empty() {
             self.api_key.clone()
+        } else {
+            self.access_token.clone()
         }
     }
 
@@ -126,6 +126,5 @@ impl Config {
 pub fn now_unix() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs() as i64)
 }

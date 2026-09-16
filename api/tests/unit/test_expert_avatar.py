@@ -12,7 +12,6 @@ from peritus.experts.avatar import (
     AVATAR_STYLES,
     SEED_MAX_CHARS,
     InvalidAvatar,
-    default_seed,
     normalise,
 )
 from peritus.experts.domain import Expert, ExpertStatus
@@ -93,17 +92,3 @@ class TestNormalise:
     def test_a_non_dict_is_refused(self):
         with pytest.raises(InvalidAvatar):
             normalise(["shapes"])  # type: ignore[arg-type]
-
-
-class TestDefaultSeed:
-    def test_persona_name_when_there_is_one(self):
-        assert default_seed(_expert(persona_name="Dr. Elena Vasquez")) == "Dr. Elena Vasquez"
-
-    def test_falls_back_to_the_slug_not_the_topic(self):
-        # Two experts on the same topic have different slugs and must not share
-        # a picture while they are still building.
-        assert default_seed(_expert()) == "stoic-philosophy"
-        assert default_seed(_expert(name="stoic-philosophy-2")) == "stoic-philosophy-2"
-
-    def test_blank_persona_name_falls_back(self):
-        assert default_seed(_expert(persona_name="   ")) == "stoic-philosophy"

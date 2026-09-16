@@ -34,6 +34,7 @@ import httpx
 
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.infrastructure.http import RESEARCH_UA
 
 logger = get_logger(__name__)
 
@@ -44,7 +45,7 @@ _DOWNLOAD_TIMEOUT = 90.0
 # After a failed download, don't try again for this long: a build must not pay
 # a 90-second timeout per fetcher call while gutenberg.org is down.
 _RETRY_AFTER_FAILURE_SECONDS = 600.0
-_HEADERS = {"User-Agent": "Peritus/2.0 (research corpus builder)"}
+_HEADERS = {"User-Agent": RESEARCH_UA}
 
 _TITLE_STOPWORDS = frozenset({"the", "a", "an", "of", "and", "or", "on", "in", "to"})
 _NORM_RE = re.compile(r"[^a-z0-9 ]")
@@ -130,9 +131,7 @@ class GutenbergCatalogue:
             )
         return cls(books)
 
-    def resolve(
-        self, title: str, author: str | None = None, limit: int = 3
-    ) -> list[CatalogueBook]:
+    def resolve(self, title: str, author: str | None = None, limit: int = 3) -> list[CatalogueBook]:
         """Books whose title matches ``title``, best first.
 
         A token of the wanted title that the catalogue has never seen is widened
@@ -162,13 +161,10 @@ class GutenbergCatalogue:
                 hits[position] += 1
 
         needed = max(1, round(len(wanted_tokens) * 0.6))
+        matches = [self._books[position] for position, count in hits.items() if count >= needed]
         matches = [
-            self._books[position]
-            for position, count in hits.items()
-            if count >= needed
-        ]
-        matches = [
-            book for book in matches
+            book
+            for book in matches
             if title_matches(title, book.title.splitlines()[0])
             or hits_fraction(wanted_tokens, book.title) >= 0.6
         ]
@@ -256,7 +252,8 @@ async def load_catalogue() -> GutenbergCatalogue | None:
             _failed_at = time.monotonic()
             logger.warning(
                 "Gutenberg catalogue unavailable (%s: %s) — falling back to Gutendex",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             return _catalogue
         if not len(loaded):
@@ -266,14 +263,6 @@ async def load_catalogue() -> GutenbergCatalogue | None:
         _catalogue, _loaded_at, _failed_at = loaded, time.monotonic(), 0.0
         logger.info("Gutenberg catalogue loaded: %d English texts", len(loaded))
         return _catalogue
-
-
-def set_catalogue(catalogue: GutenbergCatalogue | None) -> None:
-    """Install a catalogue directly. For tests, and for a worker that preloads."""
-    global _catalogue, _loaded_at, _failed_at
-    _catalogue = catalogue
-    _loaded_at = time.monotonic() if catalogue is not None else 0.0
-    _failed_at = 0.0
 
 
 def _is_fresh(path: Path) -> bool:
@@ -286,9 +275,12 @@ def _is_fresh(path: Path) -> bool:
 async def _download(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".csv.part")
-    async with httpx.AsyncClient(
-        timeout=_DOWNLOAD_TIMEOUT, headers=_HEADERS, follow_redirects=True
-    ) as client, client.stream("GET", CATALOGUE_URL) as resp:
+    async with (
+        httpx.AsyncClient(
+            timeout=_DOWNLOAD_TIMEOUT, headers=_HEADERS, follow_redirects=True
+        ) as client,
+        client.stream("GET", CATALOGUE_URL) as resp,
+    ):
         resp.raise_for_status()
         with partial.open("wb") as handle:
             async for chunk in resp.aiter_bytes():

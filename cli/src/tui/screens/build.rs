@@ -1,14 +1,14 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
+use futures_util::StreamExt;
 use ratatui::{
-    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, BorderType, Borders, List, ListItem, Paragraph, Wrap},
+    Frame,
 };
+use std::collections::VecDeque;
+use std::sync::Arc;
 use tokio::sync::{mpsc, Notify};
-use futures_util::StreamExt;
 
 use crate::api::client::ApiClient;
 use crate::api::types::{stop_reason_text, BuildEvent};
@@ -18,19 +18,23 @@ use crate::tui::widgets::spinner;
 // Index == backend stage number: 0 plan, 1 discover, 2 validate, 3 chunk/ingest,
 // 4 graph, 5 persona. Keep this aligned with builder.py's emitted `stage` values.
 const STAGES: &[(&str, &str)] = &[
-    ("plan",      "Plan"),
+    ("plan", "Plan"),
     ("discovery", "Discover"),
-    ("validate",  "Validate"),
-    ("ingest",    "Ingest"),
-    ("graph",     "Graph"),
-    ("persona",   "Persona"),
+    ("validate", "Validate"),
+    ("ingest", "Ingest"),
+    ("graph", "Graph"),
+    ("persona", "Persona"),
 ];
 
 #[derive(Debug, Clone, PartialEq)]
 // No `Waiting`: a fetcher is either running (`active` in discovery_started),
 // finished, or was never planned for this build — and that last case is Skipped,
 // not pending. Nothing sits in limbo waiting to start.
-pub enum FetcherState { Fetching, Done(u64), Skipped }
+pub enum FetcherState {
+    Fetching,
+    Done(u64),
+    Skipped,
+}
 
 pub struct BuildCardInfo {
     pub topic: String,
@@ -40,9 +44,18 @@ pub struct BuildCardInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-enum LogLevel { Stage, Success, Info, Error }
+enum LogLevel {
+    Stage,
+    Success,
+    Info,
+    Error,
+}
 
-struct LogEntry { at_secs: u64, msg: String, level: LogLevel }
+struct LogEntry {
+    at_secs: u64,
+    msg: String,
+    level: LogLevel,
+}
 
 pub struct BuildScreen {
     topic: String,
@@ -52,7 +65,7 @@ pub struct BuildScreen {
     /// Armed by the first [x]; the second [x] actually cancels.
     pub confirm_cancel: bool,
     cancel_sent: bool,
-    /// Written by the cancel task on failure, drained in tick() so a rejected
+    /// Written by the cancel task on failure, drained in `tick()` so a rejected
     /// cancel un-latches instead of showing "Cancelling…" forever.
     cancel_failed: Arc<std::sync::Mutex<Option<String>>>,
     start_time: std::time::Instant,
@@ -62,7 +75,7 @@ pub struct BuildScreen {
     stage_name: String,
     // Discovery
     fetchers: indexmap::IndexMap<String, FetcherState>,
-    triage: Option<(u64, u64)>,  // (candidates, ranked), summed over rounds
+    triage: Option<(u64, u64)>, // (candidates, ranked), summed over rounds
     fetched: Option<(u64, u64)>, // (fetched, budget), summed over rounds
     snowball_added: Option<u64>,
     /// Which discovery round is running. Discovery iterates, and the funnel
@@ -135,7 +148,11 @@ impl BuildScreen {
         let topic_clone = topic.clone();
         // "auto" means "let the server pick the deepest tier the account
         // affords" — expressed on the wire by omitting the field.
-        let tier_clone = if tier == "auto" { None } else { Some(tier.clone()) };
+        let tier_clone = if tier == "auto" {
+            None
+        } else {
+            Some(tier.clone())
+        };
         let cancel_clone = cancel.clone();
         let slug = crate::api::client::slugify(&topic);
         let slug_clone = slug.clone();
@@ -157,7 +174,9 @@ impl BuildScreen {
 
             'outer: loop {
                 let stream_res = if first {
-                    api_clone.build_stream(topic_clone.clone(), tier_clone.clone()).await
+                    api_clone
+                        .build_stream(topic_clone.clone(), tier_clone.clone())
+                        .await
                 } else {
                     api_clone.build_events_stream(&slug, last_seq).await
                 };
@@ -168,15 +187,19 @@ impl BuildScreen {
                     Err(e) => {
                         empty_reconnects += 1;
                         if empty_reconnects > MAX_EMPTY_RECONNECTS {
-                            let _ = tx.send(BuildEvent::Error {
-                                message: format!("Lost connection to build: {}", e),
-                                code: None, spent_usd: None, cap_usd: None,
-                            }).await;
+                            let _ = tx
+                                .send(BuildEvent::Error {
+                                    message: format!("Lost connection to build: {e}"),
+                                    code: None,
+                                    spent_usd: None,
+                                    cap_usd: None,
+                                })
+                                .await;
                             break 'outer;
                         }
                         tokio::select! {
-                            _ = cancel_clone.notified() => break 'outer,
-                            _ = tokio::time::sleep(BACKOFF) => continue 'outer,
+                            () = cancel_clone.notified() => break 'outer,
+                            () = tokio::time::sleep(BACKOFF) => continue 'outer,
                         }
                     }
                 };
@@ -185,7 +208,7 @@ impl BuildScreen {
                 let mut terminal = false;
                 loop {
                     tokio::select! {
-                        _ = cancel_clone.notified() => break 'outer,
+                        () = cancel_clone.notified() => break 'outer,
                         item = stream.next() => match item {
                             Some(Ok(se)) => {
                                 got_event = true;
@@ -203,7 +226,9 @@ impl BuildScreen {
                     }
                 }
 
-                if terminal { break 'outer; }
+                if terminal {
+                    break 'outer;
+                }
 
                 // Guard against spinning forever if the build vanished (deleted) and
                 // reconnects keep yielding nothing.
@@ -212,17 +237,21 @@ impl BuildScreen {
                 } else {
                     empty_reconnects += 1;
                     if empty_reconnects > MAX_EMPTY_RECONNECTS {
-                        let _ = tx.send(BuildEvent::Error {
-                            message: "Build stream ended unexpectedly.".to_string(),
-                            code: None, spent_usd: None, cap_usd: None,
-                        }).await;
+                        let _ = tx
+                            .send(BuildEvent::Error {
+                                message: "Build stream ended unexpectedly.".to_string(),
+                                code: None,
+                                spent_usd: None,
+                                cap_usd: None,
+                            })
+                            .await;
                         break 'outer;
                     }
                 }
 
                 tokio::select! {
-                    _ = cancel_clone.notified() => break 'outer,
-                    _ = tokio::time::sleep(BACKOFF) => {}
+                    () = cancel_clone.notified() => break 'outer,
+                    () = tokio::time::sleep(BACKOFF) => {}
                 }
             }
         });
@@ -278,13 +307,19 @@ impl BuildScreen {
 
     /// Stop reading the event stream (client-side detach). Does not affect the
     /// build on the server; use [`request_server_cancel`] for that.
-    pub fn cancel(&self) { self.cancel.notify_one(); }
-    pub fn topic(&self) -> &str { &self.topic }
+    pub fn cancel(&self) {
+        self.cancel.notify_one();
+    }
+    pub fn topic(&self) -> &str {
+        &self.topic
+    }
 
     /// Ask the server to cancel the build. The terminal `cancelled` event then
     /// arrives through the normal event stream and lands in the activity log.
     pub fn request_server_cancel(&mut self) {
-        if self.cancel_sent { return; }
+        if self.cancel_sent {
+            return;
+        }
         self.cancel_sent = true;
         self.confirm_cancel = false;
         self.log("Cancelling build…", LogLevel::Info);
@@ -303,26 +338,39 @@ impl BuildScreen {
 
     pub fn card_info(&self) -> BuildCardInfo {
         let detail = match self.stage {
-            0 => if self.key_concepts.is_empty() {
-                "Identifying key concepts…".to_string()
-            } else {
-                format!("{} concepts identified", self.key_concepts.len())
-            },
+            0 => {
+                if self.key_concepts.is_empty() {
+                    "Identifying key concepts…".to_string()
+                } else {
+                    format!("{} concepts identified", self.key_concepts.len())
+                }
+            }
             1 => {
-                let done = self.fetchers.values()
+                let done = self
+                    .fetchers
+                    .values()
                     .filter(|s| matches!(s, FetcherState::Done(_) | FetcherState::Skipped))
                     .count();
                 format!("{}/{} fetchers done", done, self.fetchers.len())
             }
             2 => {
                 let done = self.validate_passed + self.validate_dropped;
-                if done == 0 { "Scoring sources…".to_string() }
-                else { format!("{} accepted  ·  {} dropped", self.validate_passed, self.validate_dropped) }
+                if done == 0 {
+                    "Scoring sources…".to_string()
+                } else {
+                    format!(
+                        "{} accepted  ·  {} dropped",
+                        self.validate_passed, self.validate_dropped
+                    )
+                }
             }
             3 => format!("{} sources ingested", self.ingest_count),
-            4 => format!("{} concepts  ·  {} edges", self.graph_total_nodes, self.graph_total_edges),
+            4 => format!(
+                "{} concepts  ·  {} edges",
+                self.graph_total_nodes, self.graph_total_edges
+            ),
             5 => match &self.persona_name {
-                Some(name) => format!("Persona: {}", name),
+                Some(name) => format!("Persona: {name}"),
                 None => "Creating persona…".to_string(),
             },
             _ => "Finalising…".to_string(),
@@ -336,9 +384,15 @@ impl BuildScreen {
     }
 
     fn log(&mut self, msg: impl Into<String>, level: LogLevel) {
-        if self.log_lines.len() >= 500 { self.log_lines.pop_front(); }
+        if self.log_lines.len() >= 500 {
+            self.log_lines.pop_front();
+        }
         let at_secs = self.start_time.elapsed().as_secs();
-        self.log_lines.push_back(LogEntry { at_secs, msg: msg.into(), level });
+        self.log_lines.push_back(LogEntry {
+            at_secs,
+            msg: msg.into(),
+            level,
+        });
     }
 
     /// Reset per-attempt progress. A retry re-runs the whole pipeline, so stale
@@ -385,7 +439,7 @@ impl BuildScreen {
         let cancel_err = self.cancel_failed.lock().ok().and_then(|mut g| g.take());
         if let Some(e) = cancel_err {
             self.cancel_sent = false;
-            self.log(format!("Cancel failed: {}", e), LogLevel::Error);
+            self.log(format!("Cancel failed: {e}"), LogLevel::Error);
         }
         loop {
             let event = match self.rx.try_recv() {
@@ -398,7 +452,8 @@ impl BuildScreen {
                     if !self.done && self.error.is_none() {
                         self.error = Some(
                             "Build stream closed — the build may still be running on the \
-                             server; re-open it from Home with [b]".to_string(),
+                             server; re-open it from Home with [b]"
+                                .to_string(),
                         );
                     }
                     break;
@@ -411,7 +466,7 @@ impl BuildScreen {
                     self.slug = slug.clone();
                     if !tier.is_empty() && self.tier == "auto" {
                         self.tier = tier.clone();
-                        self.log(format!("Tier resolved: {}", tier), LogLevel::Info);
+                        self.log(format!("Tier resolved: {tier}"), LogLevel::Info);
                     }
                 }
                 BuildEvent::ExecutionMode { mode, batched } => {
@@ -424,23 +479,39 @@ impl BuildScreen {
                         self.log("Running live", LogLevel::Info);
                     }
                 }
-                BuildEvent::BuildStarted { attempt, max_attempts } => {
+                BuildEvent::BuildStarted {
+                    attempt,
+                    max_attempts,
+                } => {
                     if *attempt > 1 {
                         self.reset_progress();
                         self.log(
-                            format!("Restarting build — attempt {} of {}", attempt, max_attempts),
+                            format!("Restarting build — attempt {attempt} of {max_attempts}"),
                             LogLevel::Stage,
                         );
                     }
                 }
-                BuildEvent::Retry { attempt, max_attempts, message } => {
+                BuildEvent::Retry {
+                    attempt,
+                    max_attempts,
+                    message,
+                } => {
                     self.log(
-                        format!("Attempt {}/{} failed: {} — retrying shortly…",
-                                attempt, max_attempts, trunc(message, 60)),
+                        format!(
+                            "Attempt {}/{} failed: {} — retrying shortly…",
+                            attempt,
+                            max_attempts,
+                            trunc(message, 60)
+                        ),
                         LogLevel::Error,
                     );
                 }
-                BuildEvent::Stage { stage, name, total, total_batches } => {
+                BuildEvent::Stage {
+                    stage,
+                    name,
+                    total,
+                    total_batches,
+                } => {
                     self.stage = *stage;
                     self.stage_started = std::time::Instant::now();
                     self.stage_name = name.clone();
@@ -451,11 +522,14 @@ impl BuildScreen {
                         _ => {}
                     }
                     let title = stage_title_for(self.stage);
-                    self.log(format!("── {} ──", title), LogLevel::Stage);
+                    self.log(format!("── {title} ──"), LogLevel::Stage);
                 }
                 BuildEvent::PlanReady { key_concepts } => {
                     self.key_concepts = key_concepts.clone();
-                    self.log(format!("{} concepts identified", key_concepts.len()), LogLevel::Success);
+                    self.log(
+                        format!("{} concepts identified", key_concepts.len()),
+                        LogLevel::Success,
+                    );
                 }
                 BuildEvent::DiscoveryStarted { fetchers, active } => {
                     // `fetchers` is every fetcher that exists; `active` is the
@@ -465,20 +539,34 @@ impl BuildScreen {
                     // will ever send a fetcher_done for them. Seeding those as
                     // Waiting left them spinning for the life of the build and
                     // held the header one short forever ("10/11 fetchers done").
-                    for f in fetchers { self.fetchers.insert(f.clone(), FetcherState::Skipped); }
-                    for f in active   { self.fetchers.insert(f.clone(), FetcherState::Fetching); }
-                    self.log(format!("Starting {} source fetchers", active.len()), LogLevel::Info);
+                    for f in fetchers {
+                        self.fetchers.insert(f.clone(), FetcherState::Skipped);
+                    }
+                    for f in active {
+                        self.fetchers.insert(f.clone(), FetcherState::Fetching);
+                    }
+                    self.log(
+                        format!("Starting {} source fetchers", active.len()),
+                        LogLevel::Info,
+                    );
                 }
                 // ── the discovery loop ───────────────────────────────────
                 // Round 0 searches the plan; later rounds target the concepts
                 // furthest from their coverage target. Counters ACCUMULATE
                 // across rounds — assigning each round's totals would make a
                 // three-round build report only its last round's numbers.
-                BuildEvent::RoundStarted { round, budget, budget_usd, weakest } => {
+                BuildEvent::RoundStarted {
+                    round,
+                    budget,
+                    budget_usd,
+                    weakest,
+                } => {
                     self.round = *round;
                     if *round == 0 {
                         self.log(
-                            format!("Round 0 — searching the plan (budget {} sources, ${:.2})", budget, budget_usd),
+                            format!(
+                                "Round 0 — searching the plan (budget {budget} sources, ${budget_usd:.2})"
+                            ),
                             LogLevel::Info,
                         );
                     } else {
@@ -487,25 +575,55 @@ impl BuildScreen {
                         } else {
                             weakest.join(", ")
                         };
-                        self.log(format!("Round {} — targeting {}", round, targets), LogLevel::Info);
+                        self.log(
+                            format!("Round {round} — targeting {targets}"),
+                            LogLevel::Info,
+                        );
                     }
                 }
-                BuildEvent::FeedbackQueries { round, concepts, queries } => {
+                BuildEvent::FeedbackQueries {
+                    round,
+                    concepts,
+                    queries,
+                } => {
                     let _ = concepts; // named in the RoundStarted line above
-                    let shown: Vec<String> =
-                        queries.iter().take(3).map(|q| format!("\u{201c}{}\u{201d}", trunc(q, 48))).collect();
+                    let shown: Vec<String> = queries
+                        .iter()
+                        .take(3)
+                        .map(|q| format!("\u{201c}{}\u{201d}", trunc(q, 48)))
+                        .collect();
                     let more = queries.len().saturating_sub(shown.len());
-                    let tail = if more > 0 { format!(", +{} more", more) } else { String::new() };
+                    let tail = if more > 0 {
+                        format!(", +{more} more")
+                    } else {
+                        String::new()
+                    };
                     self.log(
-                        format!("{}New queries from the corpus: {}{}", round_prefix(*round), shown.join(", "), tail),
+                        format!(
+                            "{}New queries from the corpus: {}{}",
+                            round_prefix(*round),
+                            shown.join(", "),
+                            tail
+                        ),
                         LogLevel::Info,
                     );
                 }
-                BuildEvent::DedupDone { round, candidates, identity_merged, url_merged, seen_skipped, kept } => {
+                BuildEvent::DedupDone {
+                    round,
+                    candidates,
+                    identity_merged,
+                    url_merged,
+                    seen_skipped,
+                    kept,
+                } => {
                     let removed = identity_merged + url_merged + seen_skipped;
                     if removed == 0 {
                         self.log(
-                            format!("{}{} candidates, no duplicates", round_prefix(*round), candidates),
+                            format!(
+                                "{}{} candidates, no duplicates",
+                                round_prefix(*round),
+                                candidates
+                            ),
                             LogLevel::Info,
                         );
                     } else {
@@ -519,7 +637,13 @@ impl BuildScreen {
                         );
                     }
                 }
-                BuildEvent::CoverageReport { round, met, concepts, spent_usd, budget_usd } => {
+                BuildEvent::CoverageReport {
+                    round,
+                    met,
+                    concepts,
+                    spent_usd,
+                    budget_usd,
+                } => {
                     if *budget_usd > 0.0 {
                         self.discovery_budget = Some((*spent_usd, *budget_usd));
                     }
@@ -540,24 +664,44 @@ impl BuildScreen {
                         );
                     }
                 }
-                BuildEvent::DiscoveryDone { rounds, stop_reason, accepted, rejected, spent_usd, budget_usd } => {
+                BuildEvent::DiscoveryDone {
+                    rounds,
+                    stop_reason,
+                    accepted,
+                    rejected,
+                    spent_usd,
+                    budget_usd,
+                } => {
                     if *budget_usd > 0.0 {
                         self.discovery_budget = Some((*spent_usd, *budget_usd));
                     }
                     let spend = if *budget_usd > 0.0 {
-                        format!(" (${:.2} of a ${:.2} search budget)", spent_usd, budget_usd)
+                        format!(" (${spent_usd:.2} of a ${budget_usd:.2} search budget)")
                     } else {
                         String::new()
                     };
                     self.log(
                         format!(
                             "Search finished after {} round(s) — {}. {} kept, {} rejected{}",
-                            rounds, stop_reason_text(stop_reason), accepted, rejected, spend,
+                            rounds,
+                            stop_reason_text(stop_reason),
+                            accepted,
+                            rejected,
+                            spend,
                         ),
                         LogLevel::Success,
                     );
                 }
-                BuildEvent::FetcherDone { name, count, skipped, reason, round, status, error, attempt } => {
+                BuildEvent::FetcherDone {
+                    name,
+                    count,
+                    skipped,
+                    reason,
+                    round,
+                    status,
+                    error,
+                    attempt,
+                } => {
                     // Summed, not replaced: the same fetcher runs in several
                     // rounds and the funnel should show what it contributed in
                     // total, not what it found last.
@@ -582,28 +726,53 @@ impl BuildScreen {
                         // Not "0 sources": a channel that did not answer says
                         // nothing about the topic, and reading it as if it did
                         // is how a build lost its only primary-text channel.
-                        let why = if error.is_empty() { String::new() } else { format!(" — {}", error) };
+                        let why = if error.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" — {error}")
+                        };
                         self.log(
                             format!("{}{}{}: {}{}", round_prefix(*round), name, retry, what, why),
                             LogLevel::Error,
                         );
                     } else if *skipped {
-                        let why = if reason.is_empty() { String::new() } else { format!(" ({})", reason) };
-                        self.log(format!("{}{}: skipped{}", round_prefix(*round), name, why), LogLevel::Info);
+                        let why = if reason.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" ({reason})")
+                        };
+                        self.log(
+                            format!("{}{}: skipped{}", round_prefix(*round), name, why),
+                            LogLevel::Info,
+                        );
                     } else {
                         self.log(
-                            format!("{}{}{}: {} sources", round_prefix(*round), name, retry, count),
+                            format!(
+                                "{}{}{}: {} sources",
+                                round_prefix(*round),
+                                name,
+                                retry,
+                                count
+                            ),
                             LogLevel::Success,
                         );
                     }
                 }
-                BuildEvent::TriageDone { candidates, ranked, budget, round } => {
+                BuildEvent::TriageDone {
+                    candidates,
+                    ranked,
+                    budget,
+                    round,
+                } => {
                     let (seen, kept) = self.triage.unwrap_or((0, 0));
                     self.triage = Some((seen + candidates, kept + ranked));
                     self.log(
                         format!(
                             "{}Triage: {} candidates → {} ranked (budget {})",
-                            round_prefix(*round), candidates, ranked, budget,
+                            round_prefix(*round),
+                            candidates,
+                            ranked,
+                            budget,
                         ),
                         LogLevel::Success,
                     );
@@ -611,49 +780,83 @@ impl BuildScreen {
                 // Fills the funnel's "of N fetched" leg while the fetch is still
                 // running, so a long fetch stage is visibly moving rather than
                 // indistinguishable from a dead worker.
-                BuildEvent::FetchProgress { fetched, attempted, budget, round } => {
+                BuildEvent::FetchProgress {
+                    fetched,
+                    attempted,
+                    budget,
+                    round,
+                } => {
                     // Within a round this is a live count, so it replaces the
                     // round's own figure; `fetched_before_round` carries the
                     // earlier rounds' total so the funnel keeps summing.
-                    self.fetched = Some((self.fetched_before_round + fetched, self.fetch_budget_total.max(*budget)));
+                    self.fetched = Some((
+                        self.fetched_before_round + fetched,
+                        self.fetch_budget_total.max(*budget),
+                    ));
                     self.log(
                         format!(
                             "{}Fetching: {}/{} retrieved ({} tried)",
-                            round_prefix(*round), fetched, budget, attempted,
+                            round_prefix(*round),
+                            fetched,
+                            budget,
+                            attempted,
                         ),
                         LogLevel::Info,
                     );
                 }
-                BuildEvent::FetchDone { fetched, budget, round, content_duplicates } => {
+                BuildEvent::FetchDone {
+                    fetched,
+                    budget,
+                    round,
+                    content_duplicates,
+                } => {
                     self.fetched_before_round += fetched;
                     self.fetch_budget_total += budget;
                     self.fetched = Some((self.fetched_before_round, self.fetch_budget_total));
                     let dupes = if *content_duplicates > 0 {
-                        format!(", {} dropped as duplicate text", content_duplicates)
+                        format!(", {content_duplicates} dropped as duplicate text")
                     } else {
                         String::new()
                     };
                     self.log(
                         format!(
                             "{}Fetched {} of {} budgeted sources{}",
-                            round_prefix(*round), fetched, budget, dupes,
+                            round_prefix(*round),
+                            fetched,
+                            budget,
+                            dupes,
                         ),
                         LogLevel::Success,
                     );
                 }
-                BuildEvent::SnowballDone { added, round, backward, forward } => {
+                BuildEvent::SnowballDone {
+                    added,
+                    round,
+                    backward,
+                    forward,
+                } => {
                     self.snowball_added = Some(self.snowball_added.unwrap_or(0) + added);
                     let split = if *forward > 0 || *backward > 0 {
-                        format!(" ({} cited by them, {} citing them)", backward, forward)
+                        format!(" ({backward} cited by them, {forward} citing them)")
                     } else {
                         String::new()
                     };
                     self.log(
-                        format!("{}Snowball: +{} candidates{}", round_prefix(*round), added, split),
+                        format!(
+                            "{}Snowball: +{} candidates{}",
+                            round_prefix(*round),
+                            added,
+                            split
+                        ),
                         LogLevel::Success,
                     );
                 }
-                BuildEvent::SourceValidated { title, passed, q, r } => {
+                BuildEvent::SourceValidated {
+                    title,
+                    passed,
+                    q,
+                    r,
+                } => {
                     let short = trunc(title, 44);
                     self.validate_last = Some((short.clone(), *passed, *q, *r));
                     // q/r are the validator's 0–10 quality/relevance scores.
@@ -661,30 +864,49 @@ impl BuildScreen {
                         self.validate_passed += 1;
                         self.accepted_q_sum += q;
                         self.accepted_r_sum += r;
-                        self.log(format!("✓ {} (Q {:.1} · R {:.1})", short, q, r), LogLevel::Success);
+                        self.log(
+                            format!("✓ {short} (Q {q:.1} · R {r:.1})"),
+                            LogLevel::Success,
+                        );
                     } else {
                         self.validate_dropped += 1;
-                        self.log(format!("✗ {} (Q {:.1} · R {:.1})", short, q, r), LogLevel::Info);
+                        self.log(format!("✗ {short} (Q {q:.1} · R {r:.1})"), LogLevel::Info);
                     }
                 }
                 // A borderline verdict the stronger model re-examined. Logged
                 // only when it actually changed — an unchanged second opinion
                 // is not news to someone watching the stream go past.
-                BuildEvent::SourceReviewed { title, passed, q, r, first_q, first_r, reversed } => {
+                BuildEvent::SourceReviewed {
+                    title,
+                    passed,
+                    q,
+                    r,
+                    first_q,
+                    first_r,
+                    reversed,
+                } => {
                     if *reversed {
-                        let fq = first_q.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "—".into());
-                        let fr = first_r.map(|v| format!("{:.1}", v)).unwrap_or_else(|| "—".into());
+                        let fq = first_q.map_or_else(|| "—".into(), |v| format!("{v:.1}"));
+                        let fr = first_r.map_or_else(|| "—".into(), |v| format!("{v:.1}"));
                         self.log(
                             format!(
                                 "⟳ {} {} on review (Q {}→{:.1} · R {}→{:.1})",
                                 if *passed { "kept" } else { "dropped" },
-                                trunc(title, 40), fq, q, fr, r,
+                                trunc(title, 40),
+                                fq,
+                                q,
+                                fr,
+                                r,
                             ),
                             LogLevel::Info,
                         );
                     }
                 }
-                BuildEvent::ValidateDone { passed, dropped, round } => {
+                BuildEvent::ValidateDone {
+                    passed,
+                    dropped,
+                    round,
+                } => {
                     // Authoritative for this round, added to what earlier rounds
                     // contributed. Assigning outright would report a three-round
                     // build as if only its last round had happened.
@@ -693,7 +915,12 @@ impl BuildScreen {
                     self.validated_passed_before_round = self.validate_passed;
                     self.validated_dropped_before_round = self.validate_dropped;
                     self.log(
-                        format!("{}{} accepted, {} dropped", round_prefix(*round), passed, dropped),
+                        format!(
+                            "{}{} accepted, {} dropped",
+                            round_prefix(*round),
+                            passed,
+                            dropped
+                        ),
                         LogLevel::Success,
                     );
                 }
@@ -703,12 +930,22 @@ impl BuildScreen {
                         LogLevel::Info,
                     );
                 }
-                BuildEvent::GapfillDone { added, still_uncovered } => {
+                BuildEvent::GapfillDone {
+                    added,
+                    still_uncovered,
+                } => {
                     if still_uncovered.is_empty() {
-                        self.log(format!("Gap-fill: +{} sources, all concepts covered", added), LogLevel::Success);
+                        self.log(
+                            format!("Gap-fill: +{added} sources, all concepts covered"),
+                            LogLevel::Success,
+                        );
                     } else {
                         self.log(
-                            format!("Gap-fill: +{} sources; still uncovered: {}", added, still_uncovered.join(", ")),
+                            format!(
+                                "Gap-fill: +{} sources; still uncovered: {}",
+                                added,
+                                still_uncovered.join(", ")
+                            ),
                             LogLevel::Info,
                         );
                     }
@@ -719,7 +956,7 @@ impl BuildScreen {
                 BuildEvent::ChatReady { sources, chunks } => {
                     self.chat_ready = true;
                     self.log(
-                        format!("★ Chat-ready — {} sources, {} chunks. You can already chat while the graph builds.", sources, chunks),
+                        format!("★ Chat-ready — {sources} sources, {chunks} chunks. You can already chat while the graph builds."),
                         LogLevel::Success,
                     );
                 }
@@ -728,79 +965,124 @@ impl BuildScreen {
                     // from the running per-batch sums.
                     self.graph_total_nodes = *nodes as usize;
                     self.graph_total_edges = *edges;
-                    self.log(format!("★ Graph ready — {} concepts, {} edges", nodes, edges), LogLevel::Success);
+                    self.log(
+                        format!("★ Graph ready — {nodes} concepts, {edges} edges"),
+                        LogLevel::Success,
+                    );
                 }
                 BuildEvent::StageDegraded { stage, message } => {
-                    self.log(format!("⚠ {} stage degraded: {}", stage, trunc(message, 100)), LogLevel::Error);
+                    self.log(
+                        format!("⚠ {} stage degraded: {}", stage, trunc(message, 100)),
+                        LogLevel::Error,
+                    );
                 }
                 BuildEvent::ResolveProgress { merged } => {
                     self.graph_merged = *merged;
-                    self.log(format!("Resolving duplicates… {} merged", merged), LogLevel::Info);
+                    self.log(
+                        format!("Resolving duplicates… {merged} merged"),
+                        LogLevel::Info,
+                    );
                 }
                 BuildEvent::SourceIngested { title, chunks } => {
                     let short = trunc(title, 44);
                     self.ingest_count += 1;
                     self.ingest_chunks += chunks;
                     self.ingest_last = Some((short.clone(), *chunks));
-                    self.log(format!("{} ({} chunks)", short, chunks), LogLevel::Success);
+                    self.log(format!("{short} ({chunks} chunks)"), LogLevel::Success);
                 }
                 BuildEvent::GraphBatchDone { labels, edges } => {
                     self.graph_batches += 1;
                     self.graph_total_nodes += labels.len();
                     self.graph_total_edges += edges;
                     for label in labels {
-                        if self.graph_recent_labels.len() >= 30 { self.graph_recent_labels.pop_front(); }
+                        if self.graph_recent_labels.len() >= 30 {
+                            self.graph_recent_labels.pop_front();
+                        }
                         self.graph_recent_labels.push_back(label.clone());
                     }
-                    self.log(format!("Batch {}: {} concepts, {} edges", self.graph_batches, labels.len(), edges), LogLevel::Success);
+                    self.log(
+                        format!(
+                            "Batch {}: {} concepts, {} edges",
+                            self.graph_batches,
+                            labels.len(),
+                            edges
+                        ),
+                        LogLevel::Success,
+                    );
                 }
                 BuildEvent::EntitiesResolved { merged } => {
                     self.graph_merged = *merged;
-                    self.log(format!("Resolved: {} concepts merged", merged), LogLevel::Success);
+                    self.log(
+                        format!("Resolved: {merged} concepts merged"),
+                        LogLevel::Success,
+                    );
                 }
                 BuildEvent::PersonaReady { name } => {
                     self.persona_name = Some(name.clone());
-                    self.log(format!("Persona: {}", name), LogLevel::Success);
+                    self.log(format!("Persona: {name}"), LogLevel::Success);
                 }
-                BuildEvent::Done { source_count, chunk_count, node_count, edge_count, persona_name } => {
+                BuildEvent::Done {
+                    source_count,
+                    chunk_count,
+                    node_count,
+                    edge_count,
+                    persona_name,
+                } => {
                     self.done = true;
                     self.done_stats = Some((*source_count, *chunk_count, *node_count, *edge_count));
                     if let Some(name) = persona_name {
                         self.persona_name = Some(name.clone());
                     }
-                    let voice = self.persona_name.as_deref()
-                        .map(|n| format!("  ·  {}", n))
+                    let voice = self
+                        .persona_name
+                        .as_deref()
+                        .map(|n| format!("  ·  {n}"))
                         .unwrap_or_default();
                     self.log(
                         format!(
-                            "Done — {} sources · {} chunks · {} concepts · {} edges{}",
-                            source_count, chunk_count, node_count, edge_count, voice,
+                            "Done — {source_count} sources · {chunk_count} chunks · {node_count} concepts · {edge_count} edges{voice}",
                         ),
                         LogLevel::Success,
                     );
                     return true;
                 }
-                BuildEvent::Error { message, code, spent_usd, cap_usd } => {
+                BuildEvent::Error {
+                    message,
+                    code,
+                    spent_usd,
+                    cap_usd,
+                } => {
                     // Keep the build screen up so the error is readable. tick() only
                     // returns true on success (Done), which is what drives the
                     // "Ready to chat" navigation in the app loop.
                     let msg = if code.as_deref() == Some("spend_cap_exceeded") {
                         format!(
                             "Build stopped at its spend cap (${:.2} of ${:.2}) and was refunded",
-                            spent_usd.unwrap_or(0.0), cap_usd.unwrap_or(0.0),
+                            spent_usd.unwrap_or(0.0),
+                            cap_usd.unwrap_or(0.0),
                         )
                     } else {
                         message.clone()
                     };
                     self.error = Some(msg.clone());
-                    self.log(format!("Error: {}", msg), LogLevel::Error);
+                    self.log(format!("Error: {msg}"), LogLevel::Error);
                 }
                 BuildEvent::Cancelled { message } => {
-                    let msg = if message.is_empty() { "Build cancelled" } else { message.as_str() };
+                    let msg = if message.is_empty() {
+                        "Build cancelled"
+                    } else {
+                        message.as_str()
+                    };
                     self.error = Some(msg.to_string());
                     self.log(msg.to_string(), LogLevel::Error);
                 }
-                BuildEvent::FloorRelaxed { round, floor, relaxed_to, reaching, needed } => {
+                BuildEvent::FloorRelaxed {
+                    round,
+                    floor,
+                    relaxed_to,
+                    reaching,
+                    needed,
+                } => {
                     self.log(
                         format!(
                             "{}Only {} of {} candidates scored ≥ {} — fetching down to {} this round",
@@ -817,7 +1099,11 @@ impl BuildScreen {
 
     pub fn render(&mut self, f: &mut Frame, area: Rect, tick: u64) {
         let block = Block::default()
-            .title(format!(" ◈ Building: \"{}\"  [{}] ", self.topic, self.tier.to_uppercase()))
+            .title(format!(
+                " ◈ Building: \"{}\"  [{}] ",
+                self.topic,
+                self.tier.to_uppercase()
+            ))
             .title_style(Theme::title())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -829,7 +1115,8 @@ impl BuildScreen {
         // The stage panel is a fixed-height snapshot and the activity log
         // absorbs all surplus space — the log is the info-dense region on a
         // tall terminal, while stage panels only ever need a snapshot's worth.
-        let panel_h = self.stage_panel_height()
+        let panel_h = self
+            .stage_panel_height()
             .min(inner.height.saturating_sub(8)) // keep ≥5 log rows + header/footer
             .max(5);
         let chunks = Layout::default()
@@ -850,23 +1137,31 @@ impl BuildScreen {
 
     /// Rows (incl. borders) the current stage's snapshot panel wants.
     fn stage_panel_height(&self) -> u16 {
-        if self.error.is_some() { return 6; }
-        if self.done { return 9; }
+        if self.error.is_some() {
+            return 6;
+        }
+        if self.done {
+            return 9;
+        }
         match self.stage {
-            0 => 8,                                       // plan: concepts may wrap
-            1 => self.fetchers.len().max(4) as u16 + 5,   // discovery: fetcher board + funnel
-            2 => 9,                                       // validate
-            3 => 9,                                       // ingest
-            4 => 12,                                      // graph: labels may wrap
-            _ => 9,                                       // persona
+            0 => 8,                                     // plan: concepts may wrap
+            1 => self.fetchers.len().max(4) as u16 + 5, // discovery: fetcher board + funnel
+            2 => 9,                                     // validate
+            3 => 9,                                     // ingest
+            4 => 12,                                    // graph: labels may wrap
+            _ => 9,                                     // persona
         }
     }
 
     fn render_pipeline(&self, f: &mut Frame, area: Rect) {
         // Adaptive separator so all six stages stay on one line at 80 columns.
-        let sep = if area.width >= 96 { "  ──  " }
-                  else if area.width >= 78 { " ── " }
-                  else { " · " };
+        let sep = if area.width >= 96 {
+            "  ──  "
+        } else if area.width >= 78 {
+            " ── "
+        } else {
+            " · "
+        };
         let mut spans: Vec<Span> = Vec::new();
         for (i, (_, label)) in STAGES.iter().enumerate() {
             // STAGES is indexed by the backend's 0-based stage number.
@@ -878,8 +1173,10 @@ impl BuildScreen {
             } else {
                 ("○", Theme::dim())
             };
-            if i > 0 { spans.push(Span::styled(sep, Theme::dim())); }
-            spans.push(Span::styled(format!("{} {}", icon, label), style));
+            if i > 0 {
+                spans.push(Span::styled(sep, Theme::dim()));
+            }
+            spans.push(Span::styled(format!("{icon} {label}"), style));
             if stage_num == self.stage && !self.done && self.error.is_none() {
                 spans.push(Span::styled(
                     format!(" {}", fmt_elapsed(self.stage_started.elapsed().as_secs())),
@@ -889,11 +1186,17 @@ impl BuildScreen {
         }
         if self.chat_ready && !self.done {
             spans.push(Span::styled(sep, Theme::dim()));
-            spans.push(Span::styled("★ chat-ready", Theme::warning().add_modifier(Modifier::BOLD)));
+            spans.push(Span::styled(
+                "★ chat-ready",
+                Theme::warning().add_modifier(Modifier::BOLD),
+            ));
         }
         f.render_widget(
-            Paragraph::new(Line::from(spans))
-                .block(Block::default().borders(Borders::BOTTOM).border_style(Theme::normal_border())),
+            Paragraph::new(Line::from(spans)).block(
+                Block::default()
+                    .borders(Borders::BOTTOM)
+                    .border_style(Theme::normal_border()),
+            ),
             area,
         );
     }
@@ -947,7 +1250,9 @@ impl BuildScreen {
             lines.push(Line::from(""));
             let mut concept_spans: Vec<Span> = Vec::new();
             for (i, c) in self.key_concepts.iter().enumerate() {
-                if i > 0 { concept_spans.push(Span::styled("  ·  ", Theme::dim())); }
+                if i > 0 {
+                    concept_spans.push(Span::styled("  ·  ", Theme::dim()));
+                }
                 concept_spans.push(Span::styled(c.as_str(), Theme::accent2()));
             }
             lines.push(Line::from(concept_spans));
@@ -956,10 +1261,16 @@ impl BuildScreen {
     }
 
     fn render_discovery_content(&self, f: &mut Frame, area: Rect, tick: u64) {
-        let done_count = self.fetchers.values().filter(|s| matches!(s, FetcherState::Done(_) | FetcherState::Skipped)).count();
+        let done_count = self
+            .fetchers
+            .values()
+            .filter(|s| matches!(s, FetcherState::Done(_) | FetcherState::Skipped))
+            .count();
         let total_count = self.fetchers.len();
         let block = Block::default()
-            .title(format!(" Source Discovery  ·  {}/{} fetchers done ", done_count, total_count))
+            .title(format!(
+                " Source Discovery  ·  {done_count}/{total_count} fetchers done "
+            ))
             .title_style(Theme::dim())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -969,7 +1280,11 @@ impl BuildScreen {
 
         let split = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(2), Constraint::Min(1), Constraint::Length(1)])
+            .constraints([
+                Constraint::Length(2),
+                Constraint::Min(1),
+                Constraint::Length(1),
+            ])
             .split(inner);
 
         f.render_widget(
@@ -983,52 +1298,74 @@ impl BuildScreen {
             split[0],
         );
 
-        let items: Vec<ListItem> = self.fetchers.iter().map(|(name, state)| {
-            ListItem::new(match state {
-                FetcherState::Fetching => Line::from(vec![
-                    Span::styled(format!("{}  ", spinner::dots(tick)), Theme::accent().add_modifier(Modifier::BOLD)),
-                    Span::styled(name.as_str(), Theme::accent()),
-                ]),
-                FetcherState::Done(n) => Line::from(vec![
-                    Span::styled("✓  ", Theme::success()),
-                    Span::styled(name.as_str(), Theme::normal()),
-                    Span::styled(format!("  {} sources", n), Theme::dim()),
-                ]),
-                FetcherState::Skipped => Line::from(vec![
-                    Span::styled("–  ", Theme::dim()),
-                    Span::styled(name.as_str(), Theme::dim()),
-                    Span::styled("  skipped", Theme::dim().add_modifier(Modifier::ITALIC)),
-                ]),
+        let items: Vec<ListItem> = self
+            .fetchers
+            .iter()
+            .map(|(name, state)| {
+                ListItem::new(match state {
+                    FetcherState::Fetching => Line::from(vec![
+                        Span::styled(
+                            format!("{}  ", spinner::dots(tick)),
+                            Theme::accent().add_modifier(Modifier::BOLD),
+                        ),
+                        Span::styled(name.as_str(), Theme::accent()),
+                    ]),
+                    FetcherState::Done(n) => Line::from(vec![
+                        Span::styled("✓  ", Theme::success()),
+                        Span::styled(name.as_str(), Theme::normal()),
+                        Span::styled(format!("  {n} sources"), Theme::dim()),
+                    ]),
+                    FetcherState::Skipped => Line::from(vec![
+                        Span::styled("–  ", Theme::dim()),
+                        Span::styled(name.as_str(), Theme::dim()),
+                        Span::styled("  skipped", Theme::dim().add_modifier(Modifier::ITALIC)),
+                    ]),
+                })
             })
-        }).collect();
+            .collect();
         f.render_widget(List::new(items), split[1]);
 
         // Triage → fetch → snowball funnel — fills in as the sub-steps land.
         if let Some((candidates, ranked)) = self.triage {
             let mut funnel = vec![
                 Span::styled("Funnel:  ", Theme::dim()),
-                Span::styled(format!("{}", candidates), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{candidates}"),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" found  →  ", Theme::dim()),
-                Span::styled(format!("{}", ranked), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{ranked}"),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" ranked", Theme::dim()),
             ];
             if let Some((fetched, budget)) = self.fetched {
                 funnel.push(Span::styled("  →  ", Theme::dim()));
-                funnel.push(Span::styled(format!("{}", fetched), Theme::normal().add_modifier(Modifier::BOLD)));
-                funnel.push(Span::styled(format!(" of {} fetched", budget), Theme::dim()));
+                funnel.push(Span::styled(
+                    format!("{fetched}"),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ));
+                funnel.push(Span::styled(format!(" of {budget} fetched"), Theme::dim()));
             }
             if let Some(added) = self.snowball_added {
-                funnel.push(Span::styled(format!("  +{} snowball", added), Theme::success()));
+                funnel.push(Span::styled(
+                    format!("  +{added} snowball"),
+                    Theme::success(),
+                ));
             }
             if self.round > 0 {
-                funnel.push(Span::styled(format!("  ·  round {}", self.round), Theme::dim()));
+                funnel.push(Span::styled(
+                    format!("  ·  round {}", self.round),
+                    Theme::dim(),
+                ));
             }
             // The soft budget the search spends towards, not the build's hard
             // cap. Shown because it is what decides when discovery stops, and a
             // build that stopped for money should say so while it is happening.
             if let Some((spent, budget)) = self.discovery_budget {
                 funnel.push(Span::styled(
-                    format!("  ·  ${:.2}/${:.2} search budget", spent, budget),
+                    format!("  ·  ${spent:.2}/${budget:.2} search budget"),
                     Theme::dim(),
                 ));
             }
@@ -1045,7 +1382,11 @@ impl BuildScreen {
         let bar_line = if self.validate_total > 0 {
             // Progress through the queue, not the kept-ratio — the bar should
             // reach full exactly when the stage ends.
-            let mut spans = bar_spans(scored as f64 / self.validate_total as f64, 24, Theme::accent());
+            let mut spans = bar_spans(
+                scored as f64 / self.validate_total as f64,
+                24,
+                Theme::accent(),
+            );
             spans.push(Span::styled(
                 format!("  {}/{} scored", scored, self.validate_total),
                 Theme::dim(),
@@ -1060,7 +1401,10 @@ impl BuildScreen {
 
         let mut verdict_spans = vec![
             Span::styled("✓ ", Theme::success()),
-            Span::styled(format!("{}", self.validate_passed), Theme::success().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}", self.validate_passed),
+                Theme::success().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" accepted    ", Theme::dim()),
             Span::styled("✗ ", Theme::dim()),
             Span::styled(format!("{}", self.validate_dropped), Theme::normal()),
@@ -1078,13 +1422,17 @@ impl BuildScreen {
         }
 
         let last_line = if let Some((title, passed, q, r)) = &self.validate_last {
-            let (mark, style) = if *passed { ("✓", Theme::success()) } else { ("✗", Theme::dim()) };
+            let (mark, style) = if *passed {
+                ("✓", Theme::success())
+            } else {
+                ("✗", Theme::dim())
+            };
             Line::from(vec![
                 Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
                 Span::styled("Last scored:  ", Theme::dim()),
-                Span::styled(format!("{} ", mark), style),
+                Span::styled(format!("{mark} "), style),
                 Span::styled(title.as_str(), Theme::normal()),
-                Span::styled(format!("  (Q {:.1} · R {:.1})", q, r), Theme::dim()),
+                Span::styled(format!("  (Q {q:.1} · R {r:.1})"), Theme::dim()),
             ])
         } else {
             Line::from(vec![
@@ -1119,7 +1467,7 @@ impl BuildScreen {
             format!("{} ingested", self.ingest_count)
         };
         let block = Block::default()
-            .title(format!(" Content Ingestion  ·  {} ", progress))
+            .title(format!(" Content Ingestion  ·  {progress} "))
             .title_style(Theme::dim())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -1128,7 +1476,11 @@ impl BuildScreen {
         f.render_widget(block, area);
 
         let bar_line = if self.ingest_total > 0 {
-            let mut spans = bar_spans(self.ingest_count as f64 / self.ingest_total as f64, 24, Theme::accent());
+            let mut spans = bar_spans(
+                self.ingest_count as f64 / self.ingest_total as f64,
+                24,
+                Theme::accent(),
+            );
             spans.push(Span::styled(
                 format!("  {}/{} sources", self.ingest_count, self.ingest_total),
                 Theme::dim(),
@@ -1137,17 +1489,23 @@ impl BuildScreen {
         } else {
             Line::from(vec![
                 Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
-                Span::styled(format!("{} sources ingested…", self.ingest_count), Theme::dim()),
+                Span::styled(
+                    format!("{} sources ingested…", self.ingest_count),
+                    Theme::dim(),
+                ),
             ])
         };
 
         let mut stats_spans = vec![
-            Span::styled(format!("{}", self.ingest_chunks), Theme::normal().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}", self.ingest_chunks),
+                Theme::normal().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" chunks embedded", Theme::dim()),
         ];
         if let Some(avg) = self.ingest_chunks.checked_div(self.ingest_count) {
             stats_spans.push(Span::styled(
-                format!("    ~{} chunks/source", avg),
+                format!("    ~{avg} chunks/source"),
                 Theme::dim(),
             ));
         }
@@ -1158,7 +1516,7 @@ impl BuildScreen {
                 Span::styled("Last:  ", Theme::dim()),
                 Span::styled("✓ ", Theme::success()),
                 Span::styled(title.as_str(), Theme::normal()),
-                Span::styled(format!("  {} chunks", chunks), Theme::dim()),
+                Span::styled(format!("  {chunks} chunks"), Theme::dim()),
             ])
         } else {
             Line::from(vec![
@@ -1191,23 +1549,38 @@ impl BuildScreen {
 
         let bar_line = if self.graph_total_batches > 0 {
             let mut spans = bar_spans(
-                self.graph_batches as f64 / self.graph_total_batches as f64, 24, Theme::accent());
+                self.graph_batches as f64 / self.graph_total_batches as f64,
+                24,
+                Theme::accent(),
+            );
             spans.push(Span::styled(
-                format!("  {}/{} batches", self.graph_batches, self.graph_total_batches),
+                format!(
+                    "  {}/{} batches",
+                    self.graph_batches, self.graph_total_batches
+                ),
                 Theme::dim(),
             ));
             Line::from(spans)
         } else {
             Line::from(vec![
                 Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
-                Span::styled(format!("Building graph…  {} batches done", self.graph_batches), Theme::dim()),
+                Span::styled(
+                    format!("Building graph…  {} batches done", self.graph_batches),
+                    Theme::dim(),
+                ),
             ])
         };
 
         let mut count_spans = vec![
-            Span::styled(format!("{}", self.graph_total_nodes), Theme::normal().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}", self.graph_total_nodes),
+                Theme::normal().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" concepts  ·  ", Theme::dim()),
-            Span::styled(format!("{}", self.graph_total_edges), Theme::normal().add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{}", self.graph_total_edges),
+                Theme::normal().add_modifier(Modifier::BOLD),
+            ),
             Span::styled(" edges", Theme::dim()),
         ];
         if self.graph_merged > 0 {
@@ -1233,7 +1606,9 @@ impl BuildScreen {
             lines.push(Line::from(""));
             let mut label_spans = vec![Span::styled("Latest:  ", Theme::dim())];
             for (i, label) in self.graph_recent_labels.iter().rev().take(10).enumerate() {
-                if i > 0 { label_spans.push(Span::styled("  ·  ", Theme::dim())); }
+                if i > 0 {
+                    label_spans.push(Span::styled("  ·  ", Theme::dim()));
+                }
                 label_spans.push(Span::styled(label.as_str(), Theme::accent2()));
             }
             lines.push(Line::from(label_spans));
@@ -1262,9 +1637,15 @@ impl BuildScreen {
             Line::from(vec![
                 Span::styled("✓  ", Theme::success()),
                 Span::styled("Graph complete — ", Theme::dim()),
-                Span::styled(format!("{}", self.graph_total_nodes), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{}", self.graph_total_nodes),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" concepts  ·  ", Theme::dim()),
-                Span::styled(format!("{}", self.graph_total_edges), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{}", self.graph_total_edges),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" edges", Theme::dim()),
             ]),
             Line::from(""),
@@ -1283,7 +1664,10 @@ impl BuildScreen {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("★  ", Theme::warning()),
-                Span::styled("Chat-ready — [Esc] then Enter to talk to your expert now.", Theme::dim()),
+                Span::styled(
+                    "Chat-ready — [Esc] then Enter to talk to your expert now.",
+                    Theme::dim(),
+                ),
             ]));
         }
         f.render_widget(Paragraph::new(lines), inner);
@@ -1300,23 +1684,41 @@ impl BuildScreen {
         f.render_widget(block, area);
 
         let (sources, chunks, nodes, edges) = self.done_stats.unwrap_or((
-            self.ingest_count, self.ingest_chunks, self.graph_total_nodes as u64, self.graph_total_edges,
+            self.ingest_count,
+            self.ingest_chunks,
+            self.graph_total_nodes as u64,
+            self.graph_total_edges,
         ));
         let mut lines = vec![
             Line::from(vec![
                 Span::styled("✓  ", Theme::success().add_modifier(Modifier::BOLD)),
-                Span::styled(self.topic.as_str(), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    self.topic.as_str(),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled("  is ready to chat.", Theme::normal()),
             ]),
             Line::from(""),
             Line::from(vec![
-                Span::styled(format!("{}", sources), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{sources}"),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" sources  ·  ", Theme::dim()),
-                Span::styled(format!("{}", chunks), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{chunks}"),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" chunks  ·  ", Theme::dim()),
-                Span::styled(format!("{}", nodes), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{nodes}"),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" concepts  ·  ", Theme::dim()),
-                Span::styled(format!("{}", edges), Theme::normal().add_modifier(Modifier::BOLD)),
+                Span::styled(
+                    format!("{edges}"),
+                    Theme::normal().add_modifier(Modifier::BOLD),
+                ),
                 Span::styled(" edges", Theme::dim()),
             ]),
         ];
@@ -1353,7 +1755,8 @@ impl BuildScreen {
                     "The activity log below has the full history.  [Esc] Home",
                     Theme::dim(),
                 )),
-            ]).wrap(Wrap { trim: true }),
+            ])
+            .wrap(Wrap { trim: true }),
             inner,
         );
     }
@@ -1367,7 +1770,9 @@ impl BuildScreen {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let items: Vec<ListItem> = self.log_lines.iter()
+        let items: Vec<ListItem> = self
+            .log_lines
+            .iter()
             .rev()
             .take(inner.height as usize)
             .collect::<Vec<_>>()
@@ -1375,10 +1780,12 @@ impl BuildScreen {
             .rev()
             .map(|entry| {
                 let style = match entry.level {
-                    LogLevel::Stage   => Theme::accent().add_modifier(Modifier::BOLD | Modifier::ITALIC),
+                    LogLevel::Stage => {
+                        Theme::accent().add_modifier(Modifier::BOLD | Modifier::ITALIC)
+                    }
                     LogLevel::Success => Theme::success(),
-                    LogLevel::Error   => Theme::error(),
-                    LogLevel::Info    => Theme::dim(),
+                    LogLevel::Error => Theme::error(),
+                    LogLevel::Info => Theme::dim(),
                 };
                 ListItem::new(Line::from(vec![
                     Span::styled(
@@ -1395,21 +1802,26 @@ impl BuildScreen {
     fn render_footer(&self, f: &mut Frame, area: Rect, tick: u64) {
         let elapsed = fmt_elapsed(self.start_time.elapsed().as_secs());
         let widget = if let Some(err) = &self.error {
-            Paragraph::new(format!("✗  {}  ·  {}  ·  [Esc] Home", err, elapsed)).style(Theme::error())
+            Paragraph::new(format!("✗  {err}  ·  {elapsed}  ·  [Esc] Home")).style(Theme::error())
         } else if self.done {
-            Paragraph::new(format!("✓  Build complete!  ·  {}  ·  [Esc] Home", elapsed)).style(Theme::success())
+            Paragraph::new(format!("✓  Build complete!  ·  {elapsed}  ·  [Esc] Home"))
+                .style(Theme::success())
         } else if self.confirm_cancel {
-            Paragraph::new("Cancel this build?  ·  [x] Confirm  ·  [Esc] Keep building").style(Theme::warning())
+            Paragraph::new("Cancel this build?  ·  [x] Confirm  ·  [Esc] Keep building")
+                .style(Theme::warning())
         } else if self.cancel_sent {
             let spin = spinner::braille(tick);
-            Paragraph::new(format!("{}  Cancelling…  ·  {}", spin, elapsed)).style(Theme::warning())
+            Paragraph::new(format!("{spin}  Cancelling…  ·  {elapsed}")).style(Theme::warning())
         } else {
             let spin = spinner::braille(tick);
             // Chat-ready is already flagged in the header and stage panel.
             Paragraph::new(format!(
                 "{}  {}  ·  {}  ·  [Esc] Home (build keeps running)  ·  [x] Cancel build",
-                spin, stage_description_for(self.stage), elapsed,
-            )).style(Theme::dim())
+                spin,
+                stage_description_for(self.stage),
+                elapsed,
+            ))
+            .style(Theme::dim())
         };
         f.render_widget(widget, area);
     }
@@ -1453,7 +1865,7 @@ fn stage_description_for(stage: u8) -> &'static str {
 
 fn content_block(title: &str) -> Block<'_> {
     Block::default()
-        .title(format!(" {} ", title))
+        .title(format!(" {title} "))
         .title_style(Theme::dim())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -1462,7 +1874,11 @@ fn content_block(title: &str) -> Block<'_> {
 
 /// Filled/empty progress-bar spans, `frac` clamped to [0, 1].
 fn bar_spans(frac: f64, width: usize, fill_style: Style) -> Vec<Span<'static>> {
-    let frac = if frac.is_finite() { frac.clamp(0.0, 1.0) } else { 0.0 };
+    let frac = if frac.is_finite() {
+        frac.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
     let filled = (frac * width as f64).round() as usize;
     vec![
         Span::styled("▓".repeat(filled), fill_style),
@@ -1471,8 +1887,11 @@ fn bar_spans(frac: f64, width: usize, fill_style: Style) -> Vec<Span<'static>> {
 }
 
 fn fmt_elapsed(secs: u64) -> String {
-    if secs < 60 { format!("{}s", secs) }
-    else { format!("{}m {:02}s", secs / 60, secs % 60) }
+    if secs < 60 {
+        format!("{secs}s")
+    } else {
+        format!("{}m {:02}s", secs / 60, secs % 60)
+    }
 }
 
 /// "Round N · " for a later round, "" for round 0 and for builds from before
@@ -1481,11 +1900,14 @@ fn round_prefix(round: u64) -> String {
     if round == 0 {
         String::new()
     } else {
-        format!("Round {} \u{00b7} ", round)
+        format!("Round {round} \u{00b7} ")
     }
 }
 
 fn trunc(s: &str, max: usize) -> String {
-    if s.chars().count() <= max { s.to_string() }
-    else { format!("{}…", s.chars().take(max - 1).collect::<String>()) }
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        format!("{}…", s.chars().take(max - 1).collect::<String>())
+    }
 }

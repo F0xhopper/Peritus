@@ -36,8 +36,8 @@ export function CreditLedger({
                   key={label}
                   scope="col"
                   className={cn(
-                    'border-b border-border px-2 py-1.5 text-label tracking-[0.04em] text-fg-3 uppercase whitespace-nowrap',
-                    index >= 2 ? 'text-right' : 'text-left',
+                    'border-b border-border px-2 py-1.5 text-label tracking-[0.04em] whitespace-nowrap text-fg-3 uppercase',
+                    index >= 2 ? 'text-right' : 'text-left'
                   )}
                 >
                   {label}
@@ -53,9 +53,7 @@ export function CreditLedger({
                 </td>
                 <td className="border-b border-border-soft px-2">
                   <span className="text-fg-2">{humanise(entry.entry_type)}</span>
-                  {entry.reason && (
-                    <span className="ml-1.5 text-xs text-fg-3">{entry.reason}</span>
-                  )}
+                  {entry.reason && <span className="ml-1.5 text-xs text-fg-3">{entry.reason}</span>}
                   {entry.job_id !== null && (
                     <span className="ml-1.5 text-xs text-fg-3">job {entry.job_id}</span>
                   )}
@@ -63,7 +61,7 @@ export function CreditLedger({
                 <td
                   className={cn(
                     'border-b border-border-soft px-2 text-right font-mono',
-                    entry.delta > 0 ? 'text-ok' : entry.delta < 0 ? 'text-fg-2' : 'text-fg-3',
+                    entry.delta > 0 ? 'text-ok' : entry.delta < 0 ? 'text-fg-2' : 'text-fg-3'
                   )}
                 >
                   {entry.delta > 0 ? `+${entry.delta}` : entry.delta}
@@ -91,7 +89,7 @@ export function CreditLedger({
               <span
                 className={cn(
                   'shrink-0 font-mono text-sm',
-                  entry.delta > 0 ? 'text-ok' : 'text-fg-2',
+                  entry.delta > 0 ? 'text-ok' : 'text-fg-2'
                 )}
               >
                 {entry.delta > 0 ? `+${entry.delta}` : entry.delta}

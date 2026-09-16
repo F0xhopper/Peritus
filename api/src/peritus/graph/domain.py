@@ -37,9 +37,13 @@ class EdgeType(StrEnum):
 
 #: Relations between two propositions. These are the edges the product reports
 #: on, and the only ones the reconciliation pass produces.
-CLAIM_RELATIONS: frozenset[EdgeType] = frozenset({
-    EdgeType.CONTRADICTS, EdgeType.SUPPORTS, EdgeType.QUALIFIES,
-})
+CLAIM_RELATIONS: frozenset[EdgeType] = frozenset(
+    {
+        EdgeType.CONTRADICTS,
+        EdgeType.SUPPORTS,
+        EdgeType.QUALIFIES,
+    }
+)
 
 #: The (from, to) node types each edge type is well-formed between.
 EDGE_ENDPOINTS: dict[EdgeType, tuple[NodeType, NodeType]] = {
@@ -60,9 +64,15 @@ EDGE_REQUIRED_PROPERTY: dict[EdgeType, str] = {
 #: Node property vocabulary. The old schema declared these as enums in the tool
 #: definition and enforced nothing, so `content_type` filled up with edge type
 #: names; anything outside the set is dropped at ingest.
-CONTENT_TYPES: frozenset[str] = frozenset({
-    "definition", "theorem", "example", "argument", "counterargument",
-})
+CONTENT_TYPES: frozenset[str] = frozenset(
+    {
+        "definition",
+        "theorem",
+        "example",
+        "argument",
+        "counterargument",
+    }
+)
 
 
 def coerce_node_type(raw: object) -> NodeType | None:
@@ -80,20 +90,9 @@ def coerce_edge_type(raw: object) -> EdgeType | None:
         return None
 
 
-def edge_is_valid(
-    edge_type: EdgeType, from_type: NodeType, to_type: NodeType
-) -> bool:
+def edge_is_valid(edge_type: EdgeType, from_type: NodeType, to_type: NodeType) -> bool:
     """Whether this relation is well-formed between these two kinds of node."""
     return EDGE_ENDPOINTS[edge_type] == (from_type, to_type)
-
-
-def edge_property(edge_type: EdgeType, properties: dict | None) -> str | None:
-    """The stated point or condition for an edge, if its type requires one."""
-    key = EDGE_REQUIRED_PROPERTY.get(edge_type)
-    if key is None or not properties:
-        return None
-    value = properties.get(key)
-    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 @dataclass
