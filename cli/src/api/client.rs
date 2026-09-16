@@ -6,7 +6,10 @@ use reqwest::Client;
 use serde::de::DeserializeOwned;
 
 use crate::api::sse::{parse_sse_stream, parse_sse_stream_with_seq, SeqStream, SseStream};
-use crate::api::types::*;
+use crate::api::types::{
+    BuildEvent, BuildRequest, ChatEvent, ChatRequest, ExpertSummary, OtpRequestBody, RefreshBody,
+    Session, SourceOut, VerifyBody,
+};
 
 /// Slugify a topic the same way the server does (`experts.py::_slugify`) so the
 /// client can address the build's reconnect endpoint by slug.
@@ -78,7 +81,7 @@ impl ApiClient {
         if token.is_empty() {
             rb
         } else {
-            rb.header("Authorization", format!("Bearer {}", token))
+            rb.header("Authorization", format!("Bearer {token}"))
         }
     }
 
@@ -244,12 +247,11 @@ pub fn is_auth_rejection(err: &anyhow::Error) -> bool {
     if let Some(re) = err.downcast_ref::<reqwest::Error>() {
         return matches!(
             re.status(),
-            Some(reqwest::StatusCode::UNAUTHORIZED) | Some(reqwest::StatusCode::FORBIDDEN)
+            Some(reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN)
         );
     }
     err.downcast_ref::<ApiError>()
-        .map(|e| e.status == 401 || e.status == 403)
-        .unwrap_or(false)
+        .is_some_and(|e| e.status == 401 || e.status == 403)
 }
 
 pub fn is_unauthorized(err: &anyhow::Error) -> bool {
@@ -257,8 +259,7 @@ pub fn is_unauthorized(err: &anyhow::Error) -> bool {
         return re.status() == Some(reqwest::StatusCode::UNAUTHORIZED);
     }
     err.downcast_ref::<ApiError>()
-        .map(|e| e.status == 401)
-        .unwrap_or(false)
+        .is_some_and(|e| e.status == 401)
 }
 
 #[derive(Debug)]
@@ -325,7 +326,7 @@ async fn error_from(resp: reqwest::Response, status: reqwest::StatusCode) -> Api
                 .and_then(|r| r.get("label"))
                 .and_then(|l| l.as_str());
             Some(match remedy {
-                Some(label) => format!("{} ({})", msg, label),
+                Some(label) => format!("{msg} ({label})"),
                 None => msg.to_string(),
             })
         })

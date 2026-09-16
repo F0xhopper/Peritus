@@ -138,11 +138,11 @@ impl ChatScreen {
             (KeyCode::Char('w'), CTRL) | (KeyCode::Backspace, ALT) => self.input.delete_word_back(),
             (KeyCode::Char('a'), CTRL) => self.input.home(),
             (KeyCode::Char('e'), CTRL) => self.input.end(),
-            (KeyCode::Left, CTRL) | (KeyCode::Left, ALT) | (KeyCode::Char('b'), ALT) => {
-                self.input.word_left()
+            (KeyCode::Left, CTRL | ALT) | (KeyCode::Char('b'), ALT) => {
+                self.input.word_left();
             }
-            (KeyCode::Right, CTRL) | (KeyCode::Right, ALT) | (KeyCode::Char('f'), ALT) => {
-                self.input.word_right()
+            (KeyCode::Right, CTRL | ALT) | (KeyCode::Char('f'), ALT) => {
+                self.input.word_right();
             }
             (KeyCode::Left, _) => self.input.left(),
             (KeyCode::Right, _) => self.input.right(),
@@ -166,8 +166,8 @@ impl ChatScreen {
 
             // Every printable char — j, k, q, n, d, etc. — goes to the input buffer.
             // Other Ctrl-chords are deliberately ignored rather than inserted.
-            (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
-                self.input.insert(c)
+            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+                self.input.insert(c);
             }
 
             _ => {}
@@ -351,7 +351,7 @@ impl ChatScreen {
                     // Preserve any text streamed before the error rather than dropping it.
                     let partial = self.current_stream.take().unwrap_or_default();
                     let content = if partial.trim().is_empty() {
-                        format!("Error: {}", message)
+                        format!("Error: {message}")
                     } else {
                         format!("{partial}\n\n_[interrupted: {message}]_")
                     };
@@ -446,14 +446,11 @@ impl ChatScreen {
                     let nums = msg
                         .dangling
                         .iter()
-                        .map(|n| format!("[{}]", n))
+                        .map(|n| format!("[{n}]"))
                         .collect::<Vec<_>>()
                         .join(" ");
                     lines.push(Line::from(Span::styled(
-                        format!(
-                            "⚠ {} resolve to no source — treat those claims with care",
-                            nums
-                        ),
+                        format!("⚠ {nums} resolve to no source — treat those claims with care"),
                         Theme::warning().add_modifier(Modifier::ITALIC),
                     )));
                 }
@@ -474,7 +471,7 @@ impl ChatScreen {
                     .unwrap_or_default();
                 lines.push(Line::from(vec![
                     Span::styled(spinner::dots(tick), Theme::accent()),
-                    Span::styled(format!(" {}", label), Theme::dim()),
+                    Span::styled(format!(" {label}"), Theme::dim()),
                     Span::styled(elapsed, Theme::dim()),
                 ]));
             } else {

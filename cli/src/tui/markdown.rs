@@ -87,7 +87,7 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             Event::End(TagEnd::Link) => {
                 if let Some(url) = link_dest.take() {
                     if !url.is_empty() && !url.starts_with('#') {
-                        spans.push(Span::styled(format!(" ({})", url), Theme::dim()));
+                        spans.push(Span::styled(format!(" ({url})"), Theme::dim()));
                     }
                 }
             }
@@ -153,7 +153,7 @@ pub fn render(md: &str) -> Vec<Line<'static>> {
             }
             Event::Start(Tag::Item) => {
                 let indent = "  ".repeat(list_depth.saturating_sub(1));
-                spans.push(Span::styled(format!("{}• ", indent), Theme::accent()));
+                spans.push(Span::styled(format!("{indent}• "), Theme::accent()));
             }
             Event::End(TagEnd::Item) => {
                 if !spans.is_empty() {
@@ -230,7 +230,7 @@ fn render_table(lines: &mut Vec<Line<'static>>, rows: &[Vec<String>]) {
         return;
     }
 
-    let col_count = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    let col_count = rows.iter().map(std::vec::Vec::len).max().unwrap_or(0);
     if col_count == 0 {
         return;
     }

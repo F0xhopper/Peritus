@@ -132,7 +132,7 @@ impl App {
                     .list_experts()
                     .await
                     .map_err(|e| (is_unauthorized(&e), e.to_string())),
-                Err(e) => Err((is_unauthorized(&e), format!("Delete failed: {}", e))),
+                Err(e) => Err((is_unauthorized(&e), format!("Delete failed: {e}"))),
             };
             let _ = tx.send(result);
         });
@@ -141,11 +141,7 @@ impl App {
     /// Open the build screen for `expert`: reuse the live screen if it's the same
     /// build, otherwise attach to the server-side build (survives TUI restarts).
     fn open_build_for(&mut self, topic: String, tier: String) {
-        let same = self
-            .build
-            .as_ref()
-            .map(|b| b.topic() == topic)
-            .unwrap_or(false);
+        let same = self.build.as_ref().is_some_and(|b| b.topic() == topic);
         if !same {
             if self.build.is_some() {
                 self.set_status("Another build is on screen — it keeps running server-side");
@@ -189,7 +185,10 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
         terminal.draw(|f| {
             match app.screen {
                 Screen::Home => {
-                    let build_info = app.build.as_ref().map(|b| b.card_info());
+                    let build_info = app
+                        .build
+                        .as_ref()
+                        .map(super::screens::build::BuildScreen::card_info);
                     app.home.render(f, f.area(), tick, build_info.as_ref());
                 }
                 Screen::Build => {
@@ -220,7 +219,7 @@ pub async fn run_app(terminal: &mut DefaultTerminal, app: &mut App) -> Result<()
                         1,
                     );
                     f.render_widget(
-                        Paragraph::new(format!(" {} ", msg)).style(Theme::warning()),
+                        Paragraph::new(format!(" {msg} ")).style(Theme::warning()),
                         toast,
                     );
                 }
@@ -350,7 +349,7 @@ async fn handle_action(app: &mut App, action: AppAction) {
                 match action {
                     AppAction::Down => app.home.sources_scroll_down(),
                     AppAction::Up => app.home.sources_scroll_up(),
-                    AppAction::Back | AppAction::Char('s') | AppAction::Char('q') => {
+                    AppAction::Back | AppAction::Char('s' | 'q') => {
                         app.home.close_sources();
                     }
                     AppAction::Quit => app.should_quit = true,
@@ -363,7 +362,7 @@ async fn handle_action(app: &mut App, action: AppAction) {
             if app.home.confirm_delete {
                 match action {
                     // Capital D (Shift+d) confirms; lowercase d also works for ergonomics.
-                    AppAction::DeleteExpert | AppAction::Char('D') | AppAction::Char('d') => {
+                    AppAction::DeleteExpert | AppAction::Char('D' | 'd') => {
                         app.home.confirm_delete = false;
                         if let Some(expert) = app.home.selected_expert() {
                             let slug = expert.name.clone();
@@ -371,8 +370,7 @@ async fn handle_action(app: &mut App, action: AppAction) {
                             if app
                                 .build
                                 .as_ref()
-                                .map(|b| b.topic() == expert.topic)
-                                .unwrap_or(false)
+                                .is_some_and(|b| b.topic() == expert.topic)
                             {
                                 if let Some(b) = &app.build {
                                     b.cancel();
@@ -441,8 +439,7 @@ async fn handle_action(app: &mut App, action: AppAction) {
                             let resume = app
                                 .chat
                                 .as_ref()
-                                .map(|c| c.expert_slug() == expert.name)
-                                .unwrap_or(false);
+                                .is_some_and(|c| c.expert_slug() == expert.name);
                             if !resume {
                                 app.chat = Some(ChatScreen::new(expert.clone(), app.api.clone()));
                             }
@@ -535,11 +532,7 @@ async fn handle_action(app: &mut App, action: AppAction) {
                     // A finished (failed/cancelled) build is cleared on the way out so
                     // Home doesn't keep a dead card; a running build is left alone and
                     // keeps streaming in the background (re-enter with [b]).
-                    let errored = app
-                        .build
-                        .as_ref()
-                        .map(|b| b.error.is_some())
-                        .unwrap_or(false);
+                    let errored = app.build.as_ref().is_some_and(|b| b.error.is_some());
                     if errored {
                         if let Some(b) = &app.build {
                             b.cancel();
@@ -797,7 +790,7 @@ fn render_help_overlay(f: &mut ratatui::Frame) {
 
     let key = |k: &'static str, d: &'static str| {
         Line::from(vec![
-            Span::styled(format!("  {:<13}", k), Theme::accent()),
+            Span::styled(format!("  {k:<13}"), Theme::accent()),
             Span::styled(d, Theme::normal()),
         ])
     };

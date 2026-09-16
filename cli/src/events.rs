@@ -45,12 +45,8 @@ pub fn key_to_action(key: crossterm::event::KeyEvent, in_text_input: bool) -> Op
             (KeyCode::Char('k'), CTRL) => Some(AppAction::KillToEnd),
             (KeyCode::Char('a'), CTRL) => Some(AppAction::Home),
             (KeyCode::Char('e'), CTRL) => Some(AppAction::End),
-            (KeyCode::Left, CTRL) | (KeyCode::Left, ALT) | (KeyCode::Char('b'), ALT) => {
-                Some(AppAction::WordLeft)
-            }
-            (KeyCode::Right, CTRL) | (KeyCode::Right, ALT) | (KeyCode::Char('f'), ALT) => {
-                Some(AppAction::WordRight)
-            }
+            (KeyCode::Left, CTRL | ALT) | (KeyCode::Char('b'), ALT) => Some(AppAction::WordLeft),
+            (KeyCode::Right, CTRL | ALT) | (KeyCode::Char('f'), ALT) => Some(AppAction::WordRight),
             (KeyCode::Backspace, ALT) => Some(AppAction::CtrlW),
             (KeyCode::Left, _) => Some(AppAction::CursorLeft),
             (KeyCode::Right, _) => Some(AppAction::CursorRight),
@@ -61,7 +57,7 @@ pub fn key_to_action(key: crossterm::event::KeyEvent, in_text_input: bool) -> Op
             (KeyCode::Home, _) => Some(AppAction::Home),
             (KeyCode::End, _) => Some(AppAction::End),
             (KeyCode::Tab, _) => Some(AppAction::Tab),
-            (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
+            (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
                 Some(AppAction::Char(c))
             }
             _ => None,
@@ -87,9 +83,7 @@ pub fn key_to_action(key: crossterm::event::KeyEvent, in_text_input: bool) -> Op
         (KeyCode::Home, _) => Some(AppAction::Home),
         (KeyCode::End, _) => Some(AppAction::End),
         (KeyCode::Tab, _) => Some(AppAction::Tab),
-        (KeyCode::Char(c), KeyModifiers::NONE) | (KeyCode::Char(c), KeyModifiers::SHIFT) => {
-            Some(AppAction::Char(c))
-        }
+        (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => Some(AppAction::Char(c)),
         _ => None,
     }
 }

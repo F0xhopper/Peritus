@@ -313,14 +313,10 @@ impl HomeScreen {
 
         // Footer hints / new-expert input
         let hint_area = Rect::new(footer_area.x, footer_area.y + 1, footer_area.width, 1);
-        let selected_status = self
-            .selected_expert()
-            .map(|e| e.status.as_str())
-            .unwrap_or("");
+        let selected_status = self.selected_expert().map_or("", |e| e.status.as_str());
         let selected_chattable = self
             .selected_expert()
-            .map(|e| e.can_chat())
-            .unwrap_or(false);
+            .is_some_and(crate::api::types::ExpertSummary::can_chat);
 
         let (footer_text, hint_style) = if self.input_active {
             (String::new(), Theme::dim())
@@ -330,7 +326,7 @@ impl HomeScreen {
                 .and_then(|e| e.persona_name.as_deref().or(Some(e.name.as_str())))
                 .unwrap_or("this expert");
             (
-                format!("Delete \"{}\"?  [D] Confirm  [Esc] Cancel", name),
+                format!("Delete \"{name}\"?  [D] Confirm  [Esc] Cancel"),
                 Theme::error(),
             )
         } else if (selected_status == "building" || selected_status == "queued")
@@ -388,7 +384,7 @@ impl HomeScreen {
 
         let title = match (self.sources_loading, self.sources.len()) {
             (true, _) => " Sources · loading… ".to_string(),
-            (false, n) => format!(" Sources · {} ", n),
+            (false, n) => format!(" Sources · {n} "),
         };
         f.render_widget(
             Block::default()
@@ -445,7 +441,7 @@ impl HomeScreen {
                 // Quality is what the validator scored it; absent for uploads,
                 // which bypass validation.
                 match src.quality_score {
-                    Some(q) => spans.push(Span::styled(format!("{:>4.1} ", q), Theme::normal())),
+                    Some(q) => spans.push(Span::styled(format!("{q:>4.1} "), Theme::normal())),
                     None => spans.push(Span::styled("   · ", Theme::dim())),
                 }
                 spans.push(Span::styled(
@@ -585,7 +581,7 @@ fn render_expert_card(
         let name_style = Theme::normal().add_modifier(Modifier::BOLD);
         let content_w = text_w as usize;
         let tier_label = expert.tier.to_uppercase();
-        let right_block = format!("{}  {}", tier_label, status_label);
+        let right_block = format!("{tier_label}  {status_label}");
         let name_chars = display_name.chars().count();
         let right_chars = right_block.chars().count();
         let gap = content_w.saturating_sub(name_chars + right_chars);
@@ -647,28 +643,27 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
     // when the truth is "this expert was never built". Worse, the card then
     // lists the planned key concepts directly underneath, so it contradicts
     // itself on the same screen.
-    let stats_line = match unbuilt_reason(expert) {
-        Some(reason) => Line::from(Span::styled(
+    let stats_line = if let Some(reason) = unbuilt_reason(expert) {
+        Line::from(Span::styled(
             reason,
             Theme::dim().add_modifier(Modifier::ITALIC),
-        )),
-        None => {
-            let mut stats = vec![
-                Span::styled(fmt_count(expert.node_count), Theme::normal()),
-                // "concepts" here is the extracted graph, not the planned
-                // syllabus listed below — hence "graph concepts".
-                Span::styled(" graph concepts", Theme::dim()),
-                Span::styled("  ·  ", Theme::dim()),
-                Span::styled(fmt_count(expert.source_count), Theme::normal()),
-                Span::styled(" sources", Theme::dim()),
-            ];
-            if let Some(q) = expert.avg_quality {
-                stats.push(Span::styled("  ·  ", Theme::dim()));
-                stats.push(Span::styled(format!("Q {:.1}", q), Theme::normal()));
-                stats.push(Span::styled(" avg", Theme::dim()));
-            }
-            Line::from(stats)
+        ))
+    } else {
+        let mut stats = vec![
+            Span::styled(fmt_count(expert.node_count), Theme::normal()),
+            // "concepts" here is the extracted graph, not the planned
+            // syllabus listed below — hence "graph concepts".
+            Span::styled(" graph concepts", Theme::dim()),
+            Span::styled("  ·  ", Theme::dim()),
+            Span::styled(fmt_count(expert.source_count), Theme::normal()),
+            Span::styled(" sources", Theme::dim()),
+        ];
+        if let Some(q) = expert.avg_quality {
+            stats.push(Span::styled("  ·  ", Theme::dim()));
+            stats.push(Span::styled(format!("Q {q:.1}"), Theme::normal()));
+            stats.push(Span::styled(" avg", Theme::dim()));
         }
+        Line::from(stats)
     };
     f.render_widget(Paragraph::new(stats_line), chunks[1]);
     f.render_widget(Paragraph::new(Span::styled(sep, Theme::dim())), chunks[2]);
@@ -761,7 +756,7 @@ fn render_building_card_body(
         (content_w as usize).saturating_sub(2 + label_trunc.chars().count() + 1 + indicator.len());
     f.render_widget(
         Paragraph::new(Line::from(vec![
-            Span::styled(format!("{}  ", spin), Theme::accent()),
+            Span::styled(format!("{spin}  "), Theme::accent()),
             Span::styled(label_trunc, Theme::accent().add_modifier(Modifier::BOLD)),
             Span::styled(" ".repeat(pad), Theme::normal()),
             Span::styled(indicator, Theme::dim()),
@@ -796,7 +791,7 @@ fn render_building_card_body(
         } else {
             ("○", Theme::dim())
         };
-        spans.push(Span::styled(format!("{} {}", icon, label), style));
+        spans.push(Span::styled(format!("{icon} {label}"), style));
     }
     f.render_widget(Paragraph::new(Line::from(spans)), chunks[4]);
 }
@@ -837,7 +832,7 @@ fn render_confirm_popup(f: &mut Frame, area: Rect, name: &str) {
             Line::from(vec![
                 Span::raw("Delete "),
                 Span::styled(
-                    format!("\"{}\"", name),
+                    format!("\"{name}\""),
                     Theme::error().add_modifier(Modifier::BOLD),
                 ),
                 Span::raw("?"),
@@ -895,7 +890,7 @@ fn render_tier_popup(f: &mut Frame, area: Rect, topic: &str, selected: usize) {
     f.render_widget(Clear, popup);
     f.render_widget(
         Block::default()
-            .title(format!(" Select tier for \"{}\" ", topic))
+            .title(format!(" Select tier for \"{topic}\" "))
             .title_style(Theme::title())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -929,7 +924,7 @@ fn render_tier_popup(f: &mut Frame, area: Rect, topic: &str, selected: usize) {
 
         f.render_widget(
             Paragraph::new(vec![
-                Line::from(Span::styled(format!("{} {}", icon, label), name_style)),
+                Line::from(Span::styled(format!("{icon} {label}"), name_style)),
                 Line::from(Span::styled(*desc, desc_style)),
             ]),
             col,

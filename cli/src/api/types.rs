@@ -72,7 +72,7 @@ pub struct ChatRequest {
 }
 
 /// One source in an expert's corpus. Mirrors `SourceOut` in
-/// api/src/peritus/api/schemas/sources.py. As with ExpertSummary, the whole
+/// api/src/peritus/api/schemas/sources.py. As with `ExpertSummary`, the whole
 /// payload is deserialized even though the overlay renders only part of it.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
@@ -511,7 +511,7 @@ mod tests {
                 assert_eq!(slug, "spaced-repetition-and-memory-retention");
                 assert_eq!(tier, "lite");
             }
-            other => panic!("wrong variant: {:?}", other),
+            other => panic!("wrong variant: {other:?}"),
         }
     }
 
@@ -523,7 +523,7 @@ mod tests {
             BuildEvent::ChatReady { sources, chunks } => {
                 assert_eq!((sources, chunks), (18, 576));
             }
-            other => panic!("wrong variant: {:?}", other),
+            other => panic!("wrong variant: {other:?}"),
         }
     }
 
@@ -540,7 +540,7 @@ mod tests {
                 assert_eq!(code.as_deref(), Some("spend_cap_exceeded"));
                 assert!(spent_usd.unwrap() > 1.0 && cap_usd.unwrap() == 1.0);
             }
-            other => panic!("wrong variant: {:?}", other),
+            other => panic!("wrong variant: {other:?}"),
         }
     }
 
@@ -624,7 +624,7 @@ mod tests {
                     "every key concept reached its coverage target"
                 );
             }
-            other => panic!("expected DiscoveryDone, got {:?}", other),
+            other => panic!("expected DiscoveryDone, got {other:?}"),
         }
     }
 
@@ -663,7 +663,7 @@ mod tests {
             "primary_source_definition":"Aquinas's own writings."}"#;
         match serde_json::from_str::<BuildEvent>(plan).unwrap() {
             BuildEvent::PlanReady { key_concepts } => assert_eq!(key_concepts, vec!["natural law"]),
-            other => panic!("expected PlanReady, got {:?}", other),
+            other => panic!("expected PlanReady, got {other:?}"),
         }
         let suggested =
             r#"{"type":"primary_texts_suggested","round":1,"concepts":["x"],"texts":[]}"#;
@@ -690,7 +690,7 @@ mod tests {
                 assert!(error.contains("Gutendex"));
                 assert_eq!((attempt, count), (0, 0));
             }
-            other => panic!("expected FetcherDone, got {:?}", other),
+            other => panic!("expected FetcherDone, got {other:?}"),
         }
         let old = r#"{"type":"fetcher_done","name":"exa","count":12,"skipped":false,"reason":""}"#;
         assert!(matches!(
@@ -730,7 +730,7 @@ mod tests {
                 assert_eq!(q, 7.0);
                 assert!(reversed && passed);
             }
-            other => panic!("expected SourceReviewed, got {:?}", other),
+            other => panic!("expected SourceReviewed, got {other:?}"),
         }
     }
 

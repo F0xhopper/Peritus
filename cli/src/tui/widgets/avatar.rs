@@ -100,7 +100,7 @@ fn initials(label: &str) -> String {
 
     let mut words: Vec<&str> = label
         .split(|c: char| c.is_whitespace() || c == '-' || c == '_')
-        .filter(|w| w.chars().any(|c| c.is_alphanumeric()))
+        .filter(|w| w.chars().any(char::is_alphanumeric))
         .collect();
 
     if let Some(first) = words.first() {
@@ -114,7 +114,7 @@ fn initials(label: &str) -> String {
         .iter()
         .take(2)
         .filter_map(|w| w.chars().find(|c| c.is_alphanumeric()))
-        .flat_map(|c| c.to_uppercase())
+        .flat_map(char::to_uppercase)
         .collect();
 
     if letters.is_empty() {
@@ -129,9 +129,9 @@ fn initials(label: &str) -> String {
 fn scale(color: Color, factor: f32) -> Color {
     match color {
         Color::Rgb(r, g, b) => Color::Rgb(
-            (r as f32 * factor) as u8,
-            (g as f32 * factor) as u8,
-            (b as f32 * factor) as u8,
+            (f32::from(r) * factor) as u8,
+            (f32::from(g) * factor) as u8,
+            (f32::from(b) * factor) as u8,
         ),
         other => other,
     }

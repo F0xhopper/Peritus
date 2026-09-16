@@ -65,7 +65,7 @@ pub struct BuildScreen {
     /// Armed by the first [x]; the second [x] actually cancels.
     pub confirm_cancel: bool,
     cancel_sent: bool,
-    /// Written by the cancel task on failure, drained in tick() so a rejected
+    /// Written by the cancel task on failure, drained in `tick()` so a rejected
     /// cancel un-latches instead of showing "Cancelling…" forever.
     cancel_failed: Arc<std::sync::Mutex<Option<String>>>,
     start_time: std::time::Instant,
@@ -189,7 +189,7 @@ impl BuildScreen {
                         if empty_reconnects > MAX_EMPTY_RECONNECTS {
                             let _ = tx
                                 .send(BuildEvent::Error {
-                                    message: format!("Lost connection to build: {}", e),
+                                    message: format!("Lost connection to build: {e}"),
                                     code: None,
                                     spent_usd: None,
                                     cap_usd: None,
@@ -198,8 +198,8 @@ impl BuildScreen {
                             break 'outer;
                         }
                         tokio::select! {
-                            _ = cancel_clone.notified() => break 'outer,
-                            _ = tokio::time::sleep(BACKOFF) => continue 'outer,
+                            () = cancel_clone.notified() => break 'outer,
+                            () = tokio::time::sleep(BACKOFF) => continue 'outer,
                         }
                     }
                 };
@@ -208,7 +208,7 @@ impl BuildScreen {
                 let mut terminal = false;
                 loop {
                     tokio::select! {
-                        _ = cancel_clone.notified() => break 'outer,
+                        () = cancel_clone.notified() => break 'outer,
                         item = stream.next() => match item {
                             Some(Ok(se)) => {
                                 got_event = true;
@@ -250,8 +250,8 @@ impl BuildScreen {
                 }
 
                 tokio::select! {
-                    _ = cancel_clone.notified() => break 'outer,
-                    _ = tokio::time::sleep(BACKOFF) => {}
+                    () = cancel_clone.notified() => break 'outer,
+                    () = tokio::time::sleep(BACKOFF) => {}
                 }
             }
         });
@@ -370,7 +370,7 @@ impl BuildScreen {
                 self.graph_total_nodes, self.graph_total_edges
             ),
             5 => match &self.persona_name {
-                Some(name) => format!("Persona: {}", name),
+                Some(name) => format!("Persona: {name}"),
                 None => "Creating persona…".to_string(),
             },
             _ => "Finalising…".to_string(),
@@ -439,7 +439,7 @@ impl BuildScreen {
         let cancel_err = self.cancel_failed.lock().ok().and_then(|mut g| g.take());
         if let Some(e) = cancel_err {
             self.cancel_sent = false;
-            self.log(format!("Cancel failed: {}", e), LogLevel::Error);
+            self.log(format!("Cancel failed: {e}"), LogLevel::Error);
         }
         loop {
             let event = match self.rx.try_recv() {
@@ -466,7 +466,7 @@ impl BuildScreen {
                     self.slug = slug.clone();
                     if !tier.is_empty() && self.tier == "auto" {
                         self.tier = tier.clone();
-                        self.log(format!("Tier resolved: {}", tier), LogLevel::Info);
+                        self.log(format!("Tier resolved: {tier}"), LogLevel::Info);
                     }
                 }
                 BuildEvent::ExecutionMode { mode, batched } => {
@@ -486,7 +486,7 @@ impl BuildScreen {
                     if *attempt > 1 {
                         self.reset_progress();
                         self.log(
-                            format!("Restarting build — attempt {} of {}", attempt, max_attempts),
+                            format!("Restarting build — attempt {attempt} of {max_attempts}"),
                             LogLevel::Stage,
                         );
                     }
@@ -522,7 +522,7 @@ impl BuildScreen {
                         _ => {}
                     }
                     let title = stage_title_for(self.stage);
-                    self.log(format!("── {} ──", title), LogLevel::Stage);
+                    self.log(format!("── {title} ──"), LogLevel::Stage);
                 }
                 BuildEvent::PlanReady { key_concepts } => {
                     self.key_concepts = key_concepts.clone();
@@ -565,8 +565,7 @@ impl BuildScreen {
                     if *round == 0 {
                         self.log(
                             format!(
-                                "Round 0 — searching the plan (budget {} sources, ${:.2})",
-                                budget, budget_usd
+                                "Round 0 — searching the plan (budget {budget} sources, ${budget_usd:.2})"
                             ),
                             LogLevel::Info,
                         );
@@ -577,7 +576,7 @@ impl BuildScreen {
                             weakest.join(", ")
                         };
                         self.log(
-                            format!("Round {} — targeting {}", round, targets),
+                            format!("Round {round} — targeting {targets}"),
                             LogLevel::Info,
                         );
                     }
@@ -595,7 +594,7 @@ impl BuildScreen {
                         .collect();
                     let more = queries.len().saturating_sub(shown.len());
                     let tail = if more > 0 {
-                        format!(", +{} more", more)
+                        format!(", +{more} more")
                     } else {
                         String::new()
                     };
@@ -677,7 +676,7 @@ impl BuildScreen {
                         self.discovery_budget = Some((*spent_usd, *budget_usd));
                     }
                     let spend = if *budget_usd > 0.0 {
-                        format!(" (${:.2} of a ${:.2} search budget)", spent_usd, budget_usd)
+                        format!(" (${spent_usd:.2} of a ${budget_usd:.2} search budget)")
                     } else {
                         String::new()
                     };
@@ -730,7 +729,7 @@ impl BuildScreen {
                         let why = if error.is_empty() {
                             String::new()
                         } else {
-                            format!(" — {}", error)
+                            format!(" — {error}")
                         };
                         self.log(
                             format!("{}{}{}: {}{}", round_prefix(*round), name, retry, what, why),
@@ -740,7 +739,7 @@ impl BuildScreen {
                         let why = if reason.is_empty() {
                             String::new()
                         } else {
-                            format!(" ({})", reason)
+                            format!(" ({reason})")
                         };
                         self.log(
                             format!("{}{}: skipped{}", round_prefix(*round), name, why),
@@ -815,7 +814,7 @@ impl BuildScreen {
                     self.fetch_budget_total += budget;
                     self.fetched = Some((self.fetched_before_round, self.fetch_budget_total));
                     let dupes = if *content_duplicates > 0 {
-                        format!(", {} dropped as duplicate text", content_duplicates)
+                        format!(", {content_duplicates} dropped as duplicate text")
                     } else {
                         String::new()
                     };
@@ -838,7 +837,7 @@ impl BuildScreen {
                 } => {
                     self.snowball_added = Some(self.snowball_added.unwrap_or(0) + added);
                     let split = if *forward > 0 || *backward > 0 {
-                        format!(" ({} cited by them, {} citing them)", backward, forward)
+                        format!(" ({backward} cited by them, {forward} citing them)")
                     } else {
                         String::new()
                     };
@@ -866,15 +865,12 @@ impl BuildScreen {
                         self.accepted_q_sum += q;
                         self.accepted_r_sum += r;
                         self.log(
-                            format!("✓ {} (Q {:.1} · R {:.1})", short, q, r),
+                            format!("✓ {short} (Q {q:.1} · R {r:.1})"),
                             LogLevel::Success,
                         );
                     } else {
                         self.validate_dropped += 1;
-                        self.log(
-                            format!("✗ {} (Q {:.1} · R {:.1})", short, q, r),
-                            LogLevel::Info,
-                        );
+                        self.log(format!("✗ {short} (Q {q:.1} · R {r:.1})"), LogLevel::Info);
                     }
                 }
                 // A borderline verdict the stronger model re-examined. Logged
@@ -890,12 +886,8 @@ impl BuildScreen {
                     reversed,
                 } => {
                     if *reversed {
-                        let fq = first_q
-                            .map(|v| format!("{:.1}", v))
-                            .unwrap_or_else(|| "—".into());
-                        let fr = first_r
-                            .map(|v| format!("{:.1}", v))
-                            .unwrap_or_else(|| "—".into());
+                        let fq = first_q.map_or_else(|| "—".into(), |v| format!("{v:.1}"));
+                        let fr = first_r.map_or_else(|| "—".into(), |v| format!("{v:.1}"));
                         self.log(
                             format!(
                                 "⟳ {} {} on review (Q {}→{:.1} · R {}→{:.1})",
@@ -944,7 +936,7 @@ impl BuildScreen {
                 } => {
                     if still_uncovered.is_empty() {
                         self.log(
-                            format!("Gap-fill: +{} sources, all concepts covered", added),
+                            format!("Gap-fill: +{added} sources, all concepts covered"),
                             LogLevel::Success,
                         );
                     } else {
@@ -964,7 +956,7 @@ impl BuildScreen {
                 BuildEvent::ChatReady { sources, chunks } => {
                     self.chat_ready = true;
                     self.log(
-                        format!("★ Chat-ready — {} sources, {} chunks. You can already chat while the graph builds.", sources, chunks),
+                        format!("★ Chat-ready — {sources} sources, {chunks} chunks. You can already chat while the graph builds."),
                         LogLevel::Success,
                     );
                 }
@@ -974,7 +966,7 @@ impl BuildScreen {
                     self.graph_total_nodes = *nodes as usize;
                     self.graph_total_edges = *edges;
                     self.log(
-                        format!("★ Graph ready — {} concepts, {} edges", nodes, edges),
+                        format!("★ Graph ready — {nodes} concepts, {edges} edges"),
                         LogLevel::Success,
                     );
                 }
@@ -987,7 +979,7 @@ impl BuildScreen {
                 BuildEvent::ResolveProgress { merged } => {
                     self.graph_merged = *merged;
                     self.log(
-                        format!("Resolving duplicates… {} merged", merged),
+                        format!("Resolving duplicates… {merged} merged"),
                         LogLevel::Info,
                     );
                 }
@@ -996,7 +988,7 @@ impl BuildScreen {
                     self.ingest_count += 1;
                     self.ingest_chunks += chunks;
                     self.ingest_last = Some((short.clone(), *chunks));
-                    self.log(format!("{} ({} chunks)", short, chunks), LogLevel::Success);
+                    self.log(format!("{short} ({chunks} chunks)"), LogLevel::Success);
                 }
                 BuildEvent::GraphBatchDone { labels, edges } => {
                     self.graph_batches += 1;
@@ -1021,13 +1013,13 @@ impl BuildScreen {
                 BuildEvent::EntitiesResolved { merged } => {
                     self.graph_merged = *merged;
                     self.log(
-                        format!("Resolved: {} concepts merged", merged),
+                        format!("Resolved: {merged} concepts merged"),
                         LogLevel::Success,
                     );
                 }
                 BuildEvent::PersonaReady { name } => {
                     self.persona_name = Some(name.clone());
-                    self.log(format!("Persona: {}", name), LogLevel::Success);
+                    self.log(format!("Persona: {name}"), LogLevel::Success);
                 }
                 BuildEvent::Done {
                     source_count,
@@ -1044,12 +1036,11 @@ impl BuildScreen {
                     let voice = self
                         .persona_name
                         .as_deref()
-                        .map(|n| format!("  ·  {}", n))
+                        .map(|n| format!("  ·  {n}"))
                         .unwrap_or_default();
                     self.log(
                         format!(
-                            "Done — {} sources · {} chunks · {} concepts · {} edges{}",
-                            source_count, chunk_count, node_count, edge_count, voice,
+                            "Done — {source_count} sources · {chunk_count} chunks · {node_count} concepts · {edge_count} edges{voice}",
                         ),
                         LogLevel::Success,
                     );
@@ -1074,7 +1065,7 @@ impl BuildScreen {
                         message.clone()
                     };
                     self.error = Some(msg.clone());
-                    self.log(format!("Error: {}", msg), LogLevel::Error);
+                    self.log(format!("Error: {msg}"), LogLevel::Error);
                 }
                 BuildEvent::Cancelled { message } => {
                     let msg = if message.is_empty() {
@@ -1185,7 +1176,7 @@ impl BuildScreen {
             if i > 0 {
                 spans.push(Span::styled(sep, Theme::dim()));
             }
-            spans.push(Span::styled(format!("{} {}", icon, label), style));
+            spans.push(Span::styled(format!("{icon} {label}"), style));
             if stage_num == self.stage && !self.done && self.error.is_none() {
                 spans.push(Span::styled(
                     format!(" {}", fmt_elapsed(self.stage_started.elapsed().as_secs())),
@@ -1278,8 +1269,7 @@ impl BuildScreen {
         let total_count = self.fetchers.len();
         let block = Block::default()
             .title(format!(
-                " Source Discovery  ·  {}/{} fetchers done ",
-                done_count, total_count
+                " Source Discovery  ·  {done_count}/{total_count} fetchers done "
             ))
             .title_style(Theme::dim())
             .borders(Borders::ALL)
@@ -1323,7 +1313,7 @@ impl BuildScreen {
                     FetcherState::Done(n) => Line::from(vec![
                         Span::styled("✓  ", Theme::success()),
                         Span::styled(name.as_str(), Theme::normal()),
-                        Span::styled(format!("  {} sources", n), Theme::dim()),
+                        Span::styled(format!("  {n} sources"), Theme::dim()),
                     ]),
                     FetcherState::Skipped => Line::from(vec![
                         Span::styled("–  ", Theme::dim()),
@@ -1340,12 +1330,12 @@ impl BuildScreen {
             let mut funnel = vec![
                 Span::styled("Funnel:  ", Theme::dim()),
                 Span::styled(
-                    format!("{}", candidates),
+                    format!("{candidates}"),
                     Theme::normal().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" found  →  ", Theme::dim()),
                 Span::styled(
-                    format!("{}", ranked),
+                    format!("{ranked}"),
                     Theme::normal().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" ranked", Theme::dim()),
@@ -1353,17 +1343,14 @@ impl BuildScreen {
             if let Some((fetched, budget)) = self.fetched {
                 funnel.push(Span::styled("  →  ", Theme::dim()));
                 funnel.push(Span::styled(
-                    format!("{}", fetched),
+                    format!("{fetched}"),
                     Theme::normal().add_modifier(Modifier::BOLD),
                 ));
-                funnel.push(Span::styled(
-                    format!(" of {} fetched", budget),
-                    Theme::dim(),
-                ));
+                funnel.push(Span::styled(format!(" of {budget} fetched"), Theme::dim()));
             }
             if let Some(added) = self.snowball_added {
                 funnel.push(Span::styled(
-                    format!("  +{} snowball", added),
+                    format!("  +{added} snowball"),
                     Theme::success(),
                 ));
             }
@@ -1378,7 +1365,7 @@ impl BuildScreen {
             // build that stopped for money should say so while it is happening.
             if let Some((spent, budget)) = self.discovery_budget {
                 funnel.push(Span::styled(
-                    format!("  ·  ${:.2}/${:.2} search budget", spent, budget),
+                    format!("  ·  ${spent:.2}/${budget:.2} search budget"),
                     Theme::dim(),
                 ));
             }
@@ -1443,9 +1430,9 @@ impl BuildScreen {
             Line::from(vec![
                 Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
                 Span::styled("Last scored:  ", Theme::dim()),
-                Span::styled(format!("{} ", mark), style),
+                Span::styled(format!("{mark} "), style),
                 Span::styled(title.as_str(), Theme::normal()),
-                Span::styled(format!("  (Q {:.1} · R {:.1})", q, r), Theme::dim()),
+                Span::styled(format!("  (Q {q:.1} · R {r:.1})"), Theme::dim()),
             ])
         } else {
             Line::from(vec![
@@ -1480,7 +1467,7 @@ impl BuildScreen {
             format!("{} ingested", self.ingest_count)
         };
         let block = Block::default()
-            .title(format!(" Content Ingestion  ·  {} ", progress))
+            .title(format!(" Content Ingestion  ·  {progress} "))
             .title_style(Theme::dim())
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
@@ -1518,7 +1505,7 @@ impl BuildScreen {
         ];
         if let Some(avg) = self.ingest_chunks.checked_div(self.ingest_count) {
             stats_spans.push(Span::styled(
-                format!("    ~{} chunks/source", avg),
+                format!("    ~{avg} chunks/source"),
                 Theme::dim(),
             ));
         }
@@ -1529,7 +1516,7 @@ impl BuildScreen {
                 Span::styled("Last:  ", Theme::dim()),
                 Span::styled("✓ ", Theme::success()),
                 Span::styled(title.as_str(), Theme::normal()),
-                Span::styled(format!("  {} chunks", chunks), Theme::dim()),
+                Span::styled(format!("  {chunks} chunks"), Theme::dim()),
             ])
         } else {
             Line::from(vec![
@@ -1714,22 +1701,22 @@ impl BuildScreen {
             Line::from(""),
             Line::from(vec![
                 Span::styled(
-                    format!("{}", sources),
+                    format!("{sources}"),
                     Theme::normal().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" sources  ·  ", Theme::dim()),
                 Span::styled(
-                    format!("{}", chunks),
+                    format!("{chunks}"),
                     Theme::normal().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" chunks  ·  ", Theme::dim()),
                 Span::styled(
-                    format!("{}", nodes),
+                    format!("{nodes}"),
                     Theme::normal().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" concepts  ·  ", Theme::dim()),
                 Span::styled(
-                    format!("{}", edges),
+                    format!("{edges}"),
                     Theme::normal().add_modifier(Modifier::BOLD),
                 ),
                 Span::styled(" edges", Theme::dim()),
@@ -1815,17 +1802,16 @@ impl BuildScreen {
     fn render_footer(&self, f: &mut Frame, area: Rect, tick: u64) {
         let elapsed = fmt_elapsed(self.start_time.elapsed().as_secs());
         let widget = if let Some(err) = &self.error {
-            Paragraph::new(format!("✗  {}  ·  {}  ·  [Esc] Home", err, elapsed))
-                .style(Theme::error())
+            Paragraph::new(format!("✗  {err}  ·  {elapsed}  ·  [Esc] Home")).style(Theme::error())
         } else if self.done {
-            Paragraph::new(format!("✓  Build complete!  ·  {}  ·  [Esc] Home", elapsed))
+            Paragraph::new(format!("✓  Build complete!  ·  {elapsed}  ·  [Esc] Home"))
                 .style(Theme::success())
         } else if self.confirm_cancel {
             Paragraph::new("Cancel this build?  ·  [x] Confirm  ·  [Esc] Keep building")
                 .style(Theme::warning())
         } else if self.cancel_sent {
             let spin = spinner::braille(tick);
-            Paragraph::new(format!("{}  Cancelling…  ·  {}", spin, elapsed)).style(Theme::warning())
+            Paragraph::new(format!("{spin}  Cancelling…  ·  {elapsed}")).style(Theme::warning())
         } else {
             let spin = spinner::braille(tick);
             // Chat-ready is already flagged in the header and stage panel.
@@ -1879,7 +1865,7 @@ fn stage_description_for(stage: u8) -> &'static str {
 
 fn content_block(title: &str) -> Block<'_> {
     Block::default()
-        .title(format!(" {} ", title))
+        .title(format!(" {title} "))
         .title_style(Theme::dim())
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -1902,7 +1888,7 @@ fn bar_spans(frac: f64, width: usize, fill_style: Style) -> Vec<Span<'static>> {
 
 fn fmt_elapsed(secs: u64) -> String {
     if secs < 60 {
-        format!("{}s", secs)
+        format!("{secs}s")
     } else {
         format!("{}m {:02}s", secs / 60, secs % 60)
     }
@@ -1914,7 +1900,7 @@ fn round_prefix(round: u64) -> String {
     if round == 0 {
         String::new()
     } else {
-        format!("Round {} \u{00b7} ", round)
+        format!("Round {round} \u{00b7} ")
     }
 }
 
