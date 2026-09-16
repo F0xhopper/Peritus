@@ -1,3 +1,6 @@
+-- HISTORICAL. `api_keys` is the pre-Supabase shared-key auth table, referenced by nothing
+-- in `src/`. 032 drops it.
+
 CREATE TABLE IF NOT EXISTS api_keys (
     id          SERIAL PRIMARY KEY,
     key_hash    TEXT NOT NULL UNIQUE,

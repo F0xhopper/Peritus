@@ -1,5 +1,11 @@
 -- Migration 001: initial schema
 -- Run with: python migrations/apply.py
+--
+-- HISTORICAL. `books` and `chunks` predate experts: the corpus has lived in
+-- `sources` and `source_chunks` since 007, and nothing in `src/` has referenced
+-- either of these since. 032 drops them. The file stays because `apply.py` is
+-- filename-keyed and because 003's `ALTER TABLE books` would be unreadable
+-- without it.
 
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
