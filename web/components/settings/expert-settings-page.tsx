@@ -3,7 +3,6 @@
 import { RotateCcw } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { toast } from 'sonner'
 
 import { Avatar } from '@/components/identity/avatar'
 import { AvatarPicker } from '@/components/identity/avatar-picker'
@@ -18,6 +17,8 @@ import { Notice } from '@/components/ui/notice'
 import { useStartBuild } from '@/hooks/use-start-build'
 import { displayName } from '@/lib/persona'
 import type { ExpertTier, ExpertWithCatalog, ShareState, TierPrice } from '@/lib/api/types'
+import { useApiAction } from '@/hooks/use-api-action'
+import { apiVoid } from '@/lib/api/client'
 
 /**
  * Managing one expert: re-skin, share, rebuild, delete. Owner only — the route
@@ -51,28 +52,25 @@ export function ExpertSettingsPage({
   const router = useRouter()
   const [tier, setTier] = useState<TierChoice>(expert.tier)
   const [confirming, setConfirming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const { start, submitting, denial, error } = useStartBuild()
 
-  const remove = async () => {
-    setDeleting(true)
-    try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(expert.name)}`, {
-        method: 'DELETE',
-      })
-      if (!res.ok) throw new Error()
-      toast.success(`Deleted ${displayName(expert)}`)
-      router.push('/experts')
-      // The rail, the sidebar and the recent-chats list are the `(app)` layout's
-      // own data, and a push reuses the cached layout — so without this the
-      // expert just deleted stays in the rail until a hard reload.
-      router.refresh()
-    } catch {
-      toast.error('Could not delete that expert.')
-    } finally {
-      setDeleting(false)
+  // `useApiAction` refreshes after a success, which is what the rail, the
+  // sidebar and the recent-chats list need: they are the `(app)` layout's own
+  // data and a push reuses the cached layout, so without it the expert just
+  // deleted stays in the rail until a hard reload.
+  const { run: remove, pending: deleting } = useApiAction(
+    () =>
+      apiVoid(
+        `/api/experts/${encodeURIComponent(expert.name)}`,
+        { method: 'DELETE' },
+        'Could not delete that expert.'
+      ),
+    {
+      success: `Deleted ${displayName(expert)}`,
+      error: 'Could not delete that expert.',
+      onSuccess: () => router.push('/experts'),
     }
-  }
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

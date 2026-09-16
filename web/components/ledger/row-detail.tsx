@@ -11,6 +11,8 @@ import { cn } from '@/lib/cn'
 import { describeDiscovery, describeTextRead, sourceProvider } from '@/lib/source-kind'
 import { formatNumber, formatScore, hostOf, humanise } from '@/lib/format'
 import type { LedgerSource } from '@/lib/api/types'
+import { useApiAction } from '@/hooks/use-api-action'
+import { apiVoid } from '@/lib/api/client'
 
 /**
  * One source's full record.
@@ -42,22 +44,25 @@ export function RowDetail({
   onDeleted?: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
   const isDuplicate = source.drop_reason?.startsWith('duplicate of') ?? false
 
-  const remove = async () => {
-    setDeleting(true)
-    try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/sources/${source.id}`, {
-        method: 'DELETE',
-      })
-      if (!res.ok) throw new Error()
-      setConfirming(false)
-      onDeleted?.()
-    } finally {
-      setDeleting(false)
+  const { run: remove, pending: deleting } = useApiAction(
+    () =>
+      apiVoid(
+        `/api/experts/${encodeURIComponent(slug)}/sources/${source.id}`,
+        { method: 'DELETE' },
+        'Could not remove that source.'
+      ),
+    {
+      error: 'Could not remove that source.',
+      onSuccess: () => {
+        setConfirming(false)
+        onDeleted?.()
+      },
+      // The caller re-reads the ledger through `onDeleted`.
+      refresh: false,
     }
-  }
+  )
 
   return (
     <div className="space-y-4 text-sm">

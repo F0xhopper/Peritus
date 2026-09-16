@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { callApi } from '@/lib/api/server'
-import { ACCESS_COOKIE, REFRESH_COOKIE, accessCookieMaxAge, isProduction } from '@/lib/auth/cookies'
+import { ACCESS_COOKIE, REFRESH_COOKIE, sessionCookies } from '@/lib/auth/cookies'
 import type { Session } from '@/lib/api/types'
 
 /**
@@ -83,19 +83,10 @@ export async function proxy(request: NextRequest) {
       })(),
     },
   })
-  const shared = { httpOnly: true, secure: isProduction(), sameSite: 'lax' as const, path: '/' }
-  response.cookies.set({
-    ...shared,
-    name: ACCESS_COOKIE,
-    value: session.access_token,
-    maxAge: accessCookieMaxAge(session.expires_in),
-  })
-  response.cookies.set({
-    ...shared,
-    name: REFRESH_COOKIE,
-    value: session.refresh_token,
-    maxAge: 60 * 60 * 24 * 30,
-  })
+  // One definition of the cookie shape, in `lib/auth/cookies`. It was written
+  // out here as well, and in `lib/api/proxy.ts`, and three copies of
+  // httpOnly/secure/sameSite/path is three places for one of them to drift.
+  for (const cookie of sessionCookies(session)) response.cookies.set(cookie)
   return response
 }
 

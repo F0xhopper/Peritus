@@ -11,6 +11,7 @@ import { FieldError, Input, Label } from '@/components/ui/input'
 import { Notice } from '@/components/ui/notice'
 import { GoogleMark } from '@/components/auth/google-mark'
 import { cn } from '@/lib/cn'
+import { ClientApiError, apiVoid, messageFor } from '@/lib/api/client'
 
 /**
  * The sign-in card.
@@ -57,38 +58,31 @@ export function LoginCard({
     setNotice(null)
     setRetryAfter(null)
     try {
-      const res = await fetch('/api/auth/otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email }),
-      })
-
-      if (res.ok) {
-        router.push(
-          `/login/verify?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`
-        )
-        return
-      }
-
-      if (res.status === 429) {
-        const seconds = Number(res.headers.get('retry-after'))
-        setRetryAfter(Number.isFinite(seconds) && seconds > 0 ? seconds : null)
+      // `apiVoid`: the API answers 204, so there is no body to decode.
+      await apiVoid(
+        '/api/auth/otp',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email }),
+        },
+        'Could not send a code. Try again.'
+      )
+      router.push(
+        `/login/verify?email=${encodeURIComponent(email)}&next=${encodeURIComponent(next)}`
+      )
+    } catch (error) {
+      if (error instanceof ClientApiError && error.status === 429) {
+        // The API's own Retry-After, so the countdown matches the limiter
+        // rather than guessing at it.
+        setRetryAfter(error.retryAfter)
         setNotice('Too many attempts. Wait a moment and try again.')
         return
       }
-
-      const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-      const detail = typeof body?.detail === 'string' ? body.detail : null
-      // The API returns this when signups are disabled, which is the
-      // invite-only case and not the user's mistake.
-      setNotice(
-        detail ??
-          (res.status === 503
-            ? 'Sign-in is not configured on this server.'
-            : 'Could not send a code. Try again.')
-      )
-    } catch {
-      setNotice('Could not reach Peritus. Check your connection.')
+      // A 503 here is "sign-in is not configured on this server", and the
+      // invite-only refusal is a sentence the API writes — both arrive as the
+      // error's message, which is why this does not second-guess it.
+      setNotice(messageFor(error, 'Could not send a code. Try again.'))
     }
   })
 

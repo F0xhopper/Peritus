@@ -6,6 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { STAGE_LABEL } from '@/lib/build/reducer'
 import { formatNumber, formatPercent, formatUsd, humanise, plural } from '@/lib/format'
 import type { BuildUsage } from '@/lib/api/types'
+import { ClientApiError, apiJson } from '@/lib/api/client'
 
 /** What a person paid, in the currency they paid in. */
 export interface BuildCredits {
@@ -59,18 +60,19 @@ export function CostPanel({
 
     const read = async () => {
       try {
-        const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/build/usage`, {
-          cache: 'no-store',
-        })
+        const next = await apiJson<BuildUsage>(
+          `/api/experts/${encodeURIComponent(slug)}/build/usage`,
+          { cache: 'no-store' }
+        )
         if (cancelled) return
-        if (res.status === 404) {
-          setState('absent')
-        } else if (res.ok) {
-          setUsage((await res.json()) as BuildUsage)
-          setState('ready')
-        }
-      } catch {
-        /* a failed poll is not worth an error state — the next one may work */
+        setUsage(next)
+        setState('ready')
+      } catch (error) {
+        if (cancelled) return
+        // 404 is an answer, not a failure: this expert has no build job yet.
+        // Anything else is a failed poll, and the next one may work — an error
+        // state over a transient blip would be worse than showing nothing.
+        if (error instanceof ClientApiError && error.status === 404) setState('absent')
       }
       // One more read after the build ends, then stop: the totals are final.
       if (!cancelled && !terminal) timer = setTimeout(read, POLL_MS)

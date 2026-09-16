@@ -1,9 +1,9 @@
 'use client'
 
 import { useRouter } from 'next/navigation'
-import { useCallback, useState } from 'react'
-import { toast } from 'sonner'
 
+import { useApiAction } from '@/hooks/use-api-action'
+import { apiSend } from '@/lib/api/client'
 import type { ConversationSummary } from '@/lib/api/types'
 
 /**
@@ -16,27 +16,23 @@ import type { ConversationSummary } from '@/lib/api/types'
  */
 export function useStartChat(slug: string) {
   const router = useRouter()
-  const [starting, setStarting] = useState(false)
 
-  const start = useCallback(async () => {
-    setStarting(true)
-    try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(slug)}/conversations`, {
-        method: 'POST',
-      })
-      if (res.status === 409) {
-        toast.error('This expert cannot answer yet.')
-        return
-      }
-      if (!res.ok) throw new Error()
-      const conversation = (await res.json()) as ConversationSummary
-      router.push(`/chats/${conversation.id}`)
-    } catch {
-      toast.error('Could not start that chat.')
-    } finally {
-      setStarting(false)
+  const { run, pending } = useApiAction(
+    () =>
+      apiSend<ConversationSummary>(
+        `/api/experts/${encodeURIComponent(slug)}/conversations`,
+        'POST',
+        undefined,
+        'Could not start that chat.'
+      ),
+    {
+      error: 'Could not start that chat.',
+      // The navigation is the feedback; a toast on top of it is noise.
+      onSuccess: (conversation) => router.push(`/chats/${conversation.id}`),
+      // Landing in the new chat re-renders the layout anyway.
+      refresh: false,
     }
-  }, [router, slug])
+  )
 
-  return { start, starting }
+  return { start: run, starting: pending }
 }

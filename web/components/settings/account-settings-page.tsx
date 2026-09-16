@@ -12,6 +12,7 @@ import { Segmented } from '@/components/ui/segmented'
 import { cn } from '@/lib/cn'
 import { formatNumber, humanise } from '@/lib/format'
 import type { CreditState, LedgerEntry, Me } from '@/lib/api/types'
+import { apiVoid } from '@/lib/api/client'
 
 /**
  * The account page.
@@ -49,9 +50,10 @@ export function AccountSettingsPage({
   const signOut = async () => {
     setSigningOut(true)
     try {
-      await fetch('/api/auth/logout', { method: 'POST' })
+      await apiVoid('/api/auth/logout', { method: 'POST' })
     } catch {
-      /* the cookies are cleared on the response either way */
+      // Deliberately ignored: the cookies are cleared on the response either
+      // way, and the reload below is what actually ends the session locally.
     }
     // A full navigation on purpose, which is why the rule is disabled rather
     // than obeyed: `router.push` keeps the React tree and its caches alive, so

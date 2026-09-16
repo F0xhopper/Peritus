@@ -23,6 +23,7 @@ import { cn } from '@/lib/cn'
 import { chatTitle, plural } from '@/lib/format'
 import { displayName } from '@/lib/persona'
 import type { ConversationSummary, ExpertSummary } from '@/lib/api/types'
+import { apiVoid } from '@/lib/api/client'
 
 /**
  * Every conversation, grouped by expert.
@@ -85,8 +86,7 @@ export function ChatsListPage({
         if (undone) return
         void (async () => {
           try {
-            const res = await fetch(`/api/conversations/${conversation.id}`, { method: 'DELETE' })
-            if (!res.ok) throw new Error()
+            await apiVoid(`/api/conversations/${conversation.id}`, { method: 'DELETE' })
             router.refresh()
           } catch {
             // Put the row back: nothing was deleted.

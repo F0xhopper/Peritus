@@ -22,6 +22,8 @@ import { cn } from '@/lib/cn'
 
 import { STAGE_LABEL } from '@/lib/build/reducer'
 import type { BuildStatus, ExpertWithCatalog, StageName } from '@/lib/api/types'
+import { useApiAction } from '@/hooks/use-api-action'
+import { ClientApiError, apiSend } from '@/lib/api/client'
 
 /**
  * The live build page.
@@ -49,7 +51,6 @@ export function BuildView({
   const { openContext } = useShell()
   const router = useRouter()
   const [confirmingCancel, setConfirmingCancel] = useState(false)
-  const [cancelling, setCancelling] = useState(false)
   const { start: startChat, starting: startingChat } = useStartChat(expert.name)
   // A viewer can watch the log. Cancelling, rebuilding and the cost of the build
   // are the owner's — the API refuses all three to anyone else.
@@ -86,32 +87,33 @@ export function BuildView({
             }
       : null)
 
-  const cancel = async () => {
-    setCancelling(true)
-    try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(expert.name)}/build/cancel`, {
-        method: 'POST',
-      })
-      if (res.status === 409) {
-        toast.info('That build has already finished.')
-      } else if (!res.ok) {
-        throw new Error()
-      } else {
-        const body = (await res.json()) as { credits_refunded?: number }
-        toast.success(
-          body.credits_refunded
-            ? `Build cancelled — ${body.credits_refunded} credits refunded.`
-            : 'Build cancelled.',
-        )
-      }
-      setConfirmingCancel(false)
-      router.refresh()
-    } catch {
-      toast.error('Could not cancel that build.')
-    } finally {
-      setCancelling(false)
+  const { run: cancel, pending: cancelling } = useApiAction(
+    () =>
+      apiSend<{ credits_refunded?: number }>(
+        `/api/experts/${encodeURIComponent(expert.name)}/build/cancel`,
+        'POST',
+        undefined,
+        'Could not cancel that build.'
+      ),
+    {
+      success: (body) =>
+        body.credits_refunded
+          ? `Build cancelled — ${body.credits_refunded} credits refunded.`
+          : 'Build cancelled.',
+      error: 'Could not cancel that build.',
+      onSuccess: () => setConfirmingCancel(false),
+      onError: (message, err) => {
+        // 409 is not a failure: the build finished while the dialog was open.
+        if (err instanceof ClientApiError && err.status === 409) {
+          toast.info('That build has already finished.')
+          setConfirmingCancel(false)
+          router.refresh()
+          return
+        }
+        toast.error(message)
+      },
     }
-  }
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

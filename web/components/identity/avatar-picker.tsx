@@ -12,6 +12,7 @@ import { Dialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/cn'
 import { AVATAR_STYLES, randomSeed, resolveRecipe, type AvatarRecipe } from '@/lib/avatar'
 import type { ExpertSummary } from '@/lib/api/types'
+import { apiSend, apiVoid, messageFor } from '@/lib/api/client'
 
 /**
  * Change an expert's avatar.
@@ -68,26 +69,18 @@ export function AvatarPicker({
   const save = async (next: AvatarRecipe | null) => {
     setSaving(true)
     try {
-      const res = await fetch(`/api/experts/${encodeURIComponent(expert.name)}/avatar`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          avatar: next
-            ? // The monogram needs no seed of its own — it reads the initials
-              // from the persona name.
-              { style: next.style, seed: next.seed, hue: null }
-            : null,
-        }),
+      await apiSend(`/api/experts/${encodeURIComponent(expert.name)}/avatar`, 'PUT', {
+        avatar: next
+          ? // The monogram needs no seed of its own — it reads the initials
+            // from the persona name.
+            { style: next.style, seed: next.seed, hue: null }
+          : null,
       })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-        throw new Error(typeof body?.detail === 'string' ? body.detail : 'Save failed')
-      }
       toast.success(next ? 'Avatar updated' : 'Avatar reset to the generated default')
       setOpen(false)
       router.refresh()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Could not save that avatar.')
+      toast.error(messageFor(error, 'Could not save that avatar.'))
     } finally {
       setSaving(false)
     }
@@ -102,16 +95,15 @@ export function AvatarPicker({
   ) => {
     setPictureBusy(kind)
     try {
-      const res = await fetch(path, { method })
-      if (!res.ok) {
-        const body = (await res.json().catch(() => null)) as { detail?: unknown } | null
-        throw new Error(typeof body?.detail === 'string' ? body.detail : 'That did not work.')
-      }
+      // The API answers 422 with a real sentence when no free, non-mark,
+      // non-living-person image exists for this subject, and that sentence is
+      // the answer — so `messageFor` shows it rather than "that did not work".
+      await apiVoid(path, { method }, 'That did not work.')
       toast.success(success)
       setOpen(false)
       router.refresh()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'That did not work.')
+      toast.error(messageFor(error, 'That did not work.'))
     } finally {
       setPictureBusy(null)
     }

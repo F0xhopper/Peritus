@@ -4,7 +4,7 @@ import { cookies } from 'next/headers'
 
 import { ApiError, NotAuthenticatedError } from '@/lib/api/errors'
 import { callApi, throwForStatus, type CallInit } from '@/lib/api/server'
-import { ACCESS_COOKIE, REFRESH_COOKIE, accessCookieMaxAge, isProduction } from '@/lib/auth/cookies'
+import { ACCESS_COOKIE, REFRESH_COOKIE, sessionCookies } from '@/lib/auth/cookies'
 import type { Session } from '@/lib/api/types'
 
 /**
@@ -37,19 +37,8 @@ async function readCookie(name: string): Promise<string | undefined> {
 async function writeSessionCookies(session: Session): Promise<boolean> {
   try {
     const jar = await cookies()
-    const shared = { httpOnly: true, secure: isProduction(), sameSite: 'lax' as const, path: '/' }
-    jar.set({
-      ...shared,
-      name: ACCESS_COOKIE,
-      value: session.access_token,
-      maxAge: accessCookieMaxAge(session.expires_in),
-    })
-    jar.set({
-      ...shared,
-      name: REFRESH_COOKIE,
-      value: session.refresh_token,
-      maxAge: 60 * 60 * 24 * 30,
-    })
+    // The shape comes from `lib/auth/cookies`, the one place that decides it.
+    for (const cookie of sessionCookies(session)) jar.set(cookie)
     return true
   } catch {
     // Server-component render: read-only cookie store. Not an error.
@@ -67,7 +56,14 @@ async function clearSessionCookies(): Promise<void> {
   }
 }
 
-/** Exchange the refresh cookie for a new session. Exported for `proxy.ts`. */
+/**
+ * Exchange the refresh cookie for a new session.
+ *
+ * Exported for the tests, **not** for `proxy.ts` — which is where the old
+ * comment here said it went. It cannot: this module is `server-only` and
+ * `proxy.ts` runs at the edge, which is why that file makes the same call
+ * itself. The two paths share `callApi` and the cookie shape, not this.
+ */
 export async function refreshSession(refreshToken: string): Promise<Session> {
   const res = await callApi('/auth/refresh', {
     method: 'POST',

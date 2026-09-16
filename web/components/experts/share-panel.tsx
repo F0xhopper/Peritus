@@ -12,6 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { sharePath } from '@/lib/access'
 import { plural } from '@/lib/format'
 import type { ShareState } from '@/lib/api/types'
+import { apiJson, apiVoid, messageFor } from '@/lib/api/client'
 
 /**
  * An expert's share link: "anyone with the link can read and ask".
@@ -52,11 +53,7 @@ export function SharePanel({
   // effect that starts it.
   const load = useCallback(
     () =>
-      fetch(endpoint)
-        .then((res) => {
-          if (!res.ok) throw new Error()
-          return res.json() as Promise<ShareState>
-        })
+      apiJson<ShareState>(endpoint)
         .then(setState)
         .catch(() => setLoadFailed(true)),
     [endpoint]
@@ -69,13 +66,19 @@ export function SharePanel({
   }, [initial, load])
 
   const act = async (kind: 'enable' | 'reset' | 'disable') => {
+    const fallback =
+      kind === 'enable'
+        ? 'Could not create a link.'
+        : kind === 'reset'
+          ? 'Could not reset the link.'
+          : 'Could not turn sharing off.'
     setBusy(kind)
     try {
-      const res = await fetch(kind === 'reset' ? `${endpoint}/reset` : endpoint, {
-        method: kind === 'enable' ? 'PUT' : kind === 'reset' ? 'POST' : 'DELETE',
-      })
-      if (!res.ok) throw new Error()
+      const path = kind === 'reset' ? `${endpoint}/reset` : endpoint
+      const method = kind === 'enable' ? 'PUT' : kind === 'reset' ? 'POST' : 'DELETE'
       if (kind === 'disable') {
+        // 204: there is no state to read back, so it is applied locally.
+        await apiVoid(path, { method }, fallback)
         setState((current) =>
           current
             ? { ...current, enabled: false, token: null, created_at: null, viewer_count: 0 }
@@ -83,20 +86,14 @@ export function SharePanel({
         )
         toast.success('Sharing is off. The link no longer works.')
       } else {
-        setState((await res.json()) as ShareState)
+        setState(await apiJson<ShareState>(path, { method }, fallback))
         toast.success(
           kind === 'reset' ? 'New link created. The old one no longer works.' : 'Link created'
         )
       }
       setConfirming(null)
-    } catch {
-      toast.error(
-        kind === 'enable'
-          ? 'Could not create a link.'
-          : kind === 'reset'
-            ? 'Could not reset the link.'
-            : 'Could not turn sharing off.'
-      )
+    } catch (error) {
+      toast.error(messageFor(error, fallback))
     } finally {
       setBusy(null)
     }

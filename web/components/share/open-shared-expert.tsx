@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import type { ShareAccept } from '@/lib/api/types'
+import { ClientApiError, apiSend, messageFor } from '@/lib/api/client'
 
 /**
  * Open a shared expert: record that this person holds the link, then go to it.
@@ -23,23 +24,27 @@ export function OpenSharedExpert({ token }: { token: string }) {
   const open = async () => {
     setOpening(true)
     try {
-      const res = await fetch(`/api/share/${encodeURIComponent(token)}/accept`, { method: 'POST' })
-      if (res.status === 401) {
-        router.push(`/login?next=${encodeURIComponent(`/share/${token}`)}`)
-        return
-      }
-      if (res.status === 404) {
-        router.refresh()
-        return
-      }
-      if (!res.ok) throw new Error()
-      const { slug } = (await res.json()) as ShareAccept
+      const { slug } = await apiSend<ShareAccept>(
+        `/api/share/${encodeURIComponent(token)}/accept`,
+        'POST'
+      )
       router.push(`/experts/${encodeURIComponent(slug)}`)
       // The rail and the sidebar are the app layout's data; without this a
       // cached layout would not list the expert just added.
       router.refresh()
-    } catch {
-      toast.error('Could not open that expert. Try again.')
+    } catch (error) {
+      // 401: not signed in, so sign in and come back here.
+      if (error instanceof ClientApiError && error.status === 401) {
+        router.push(`/login?next=${encodeURIComponent(`/share/${token}`)}`)
+        return
+      }
+      // 404: the link was turned off between this page rendering and the click,
+      // so re-render it into its "not active" state.
+      if (error instanceof ClientApiError && error.status === 404) {
+        router.refresh()
+        return
+      }
+      toast.error(messageFor(error, 'Could not open that expert. Try again.'))
       setOpening(false)
     }
   }

@@ -18,6 +18,8 @@ import { takePendingQuestion, useChatStream } from '@/hooks/use-chat-stream'
 import { cn } from '@/lib/cn'
 import { chatTitle } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
+import { useApiAction } from '@/hooks/use-api-action'
+import { apiSend, apiVoid, messageFor } from '@/lib/api/client'
 import type {
   Citation,
   ConversationDetail,
@@ -166,31 +168,24 @@ export function ChatView({
     setTitle(trimmed)
     setRenaming(false)
     try {
-      const res = await fetch(`/api/conversations/${conversation.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title: trimmed }),
-      })
-      if (!res.ok) throw new Error()
+      await apiSend(`/api/conversations/${conversation.id}`, 'PATCH', { title: trimmed })
       router.refresh()
-    } catch {
+    } catch (error) {
       setTitle(previous)
-      toast.error('Could not rename that chat.')
+      toast.error(messageFor(error, 'Could not rename that chat.'))
     }
   }
 
-  const remove = async () => {
-    try {
-      const res = await fetch(`/api/conversations/${conversation.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error()
-      toast.success('Chat deleted')
-      router.push(unavailable ? '/chats' : `/experts/${expert.name}`)
-      // The sidebar's chat list belongs to the layout, not this page.
-      router.refresh()
-    } catch {
-      toast.error('Could not delete that chat.')
+  // The refresh is not optional: the sidebar's chat list belongs to the layout,
+  // and a push reuses it.
+  const { run: remove } = useApiAction(
+    () => apiVoid(`/api/conversations/${conversation.id}`, { method: 'DELETE' }),
+    {
+      success: 'Chat deleted',
+      error: 'Could not delete that chat.',
+      onSuccess: () => router.push(unavailable ? '/chats' : `/experts/${expert.name}`),
     }
-  }
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

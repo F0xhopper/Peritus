@@ -8,6 +8,7 @@ import { FieldError, Input, Label } from '@/components/ui/input'
 import { Notice } from '@/components/ui/notice'
 import { formatNumber } from '@/lib/format'
 import type { GrantCreditsResult, Me } from '@/lib/api/types'
+import { apiSend, messageFor } from '@/lib/api/client'
 
 /**
  * The operator page: grant or claw back credits by hand.
@@ -38,30 +39,25 @@ export function AdminPage({ me }: { me: Me }) {
     setResult(null)
     setError(null)
     try {
-      const res = await fetch('/api/admin/credits/grant', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const body = await apiSend<GrantCreditsResult>(
+        '/api/admin/credits/grant',
+        'POST',
+        {
           owner: owner.trim(),
           amount: parsed,
           reason: reason.trim() || undefined,
           plan: plan.trim() || undefined,
-        }),
-      })
-      const body = (await res.json().catch(() => null)) as
-        (GrantCreditsResult & { detail?: unknown }) | null
-      if (!res.ok) {
-        setError(
-          typeof body?.detail === 'string' ? body.detail : `The grant failed (${res.status}).`
-        )
-        return
-      }
-      setResult(body as GrantCreditsResult)
+        },
+        'The grant failed.'
+      )
+      setResult(body)
       setAmount('')
       setReason('')
       setPlan('')
-    } catch {
-      setError('Could not reach Peritus.')
+    } catch (err) {
+      // An inline row, not a toast: the operator has to be able to read the
+      // reason while they fix the form.
+      setError(messageFor(err, 'The grant failed.'))
     } finally {
       setBusy(false)
     }
