@@ -40,11 +40,14 @@ export function BuildLog({
   rows,
   live,
   reconnecting,
+  ended = false,
   className,
 }: {
   rows: LogRow[]
   live: boolean
   reconnecting: boolean
+  /** The job has finished, one way or another. Changes what "empty" means. */
+  ended?: boolean
   className?: string
 }) {
   const isTabletUp = useIsTabletUp()
@@ -140,7 +143,14 @@ export function BuildLog({
         className="anchor-none h-full overflow-y-auto overscroll-contain pan-y rounded-card bg-panel font-mono text-xs"
       >
         {items.length === 0 ? (
-          <p className="p-3 text-fg-3">Waiting for Peritus to start this build…</p>
+          <p className="p-3 text-fg-3">
+            {/* A finished build with no rows is not a build about to start. The
+                page said "Build finished" and "Waiting for Peritus to start
+                this build…" on the same screen. */}
+            {ended
+              ? 'No log was kept for this build.'
+              : 'Waiting for Peritus to start this build…'}
+          </p>
         ) : (
           <div style={{ height: virtualizer.getTotalSize() }} className="relative w-full">
             {virtualizer.getVirtualItems().map((virtualRow) => {

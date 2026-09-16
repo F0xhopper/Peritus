@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from 'react'
 
+import { SIDEBAR_COOKIE, SIDEBAR_COOKIE_ATTRS } from '@/lib/shell-cookie'
+
 /**
  * The shell's open/closed state, shared between the top bar (which has the menu
  * and search buttons) and the layout (which renders the drawer, the context
@@ -41,6 +43,17 @@ export interface ShellState {
   setPaletteOpen: (open: boolean) => void
 
   /**
+   * The expert sidebar, folded away at `lg` and up (`⌘\`).
+   *
+   * Kept in a **cookie**, not `localStorage`: the layout is server-rendered and
+   * a preference the server cannot read would paint an expanded column for one
+   * frame on every load for anyone who collapsed it — and this shell decides
+   * layout in CSS at first paint, never in JavaScript afterwards.
+   */
+  sidebarCollapsed: boolean
+  toggleSidebar: () => void
+
+  /**
    * The expert the open chat belongs to, published by the chat page.
    *
    * A `/chats/[id]` URL does not name its expert, and the layout's recents are
@@ -53,12 +66,32 @@ export interface ShellState {
 
 const ShellContext = createContext<ShellState | null>(null)
 
-export function ShellProvider({ children }: { children: React.ReactNode }) {
+export function ShellProvider({
+  children,
+  sidebarCollapsed: initialCollapsed = false,
+}: {
+  children: React.ReactNode
+  /** Read from the cookie by the layout, so the first paint is already right. */
+  sidebarCollapsed?: boolean
+}) {
   const [navOpen, setNavOpen] = useState(false)
   const [contextOpen, setContextOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialCollapsed)
   const [chatExpert, setChatExpert] = useState<ShellState['chatExpert']>(null)
   const navTriggerRef = useRef<HTMLButtonElement | null>(null)
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed
+      try {
+        document.cookie = `${SIDEBAR_COOKIE}=${next ? 'collapsed' : 'open'};${SIDEBAR_COOKIE_ATTRS}`
+      } catch {
+        // Cookies blocked: the choice still applies for this session.
+      }
+      return next
+    })
+  }, [])
 
   const value = useMemo<ShellState>(
     () => ({
@@ -74,10 +107,12 @@ export function ShellProvider({ children }: { children: React.ReactNode }) {
       paletteOpen,
       openPalette: () => setPaletteOpen(true),
       setPaletteOpen,
+      sidebarCollapsed,
+      toggleSidebar,
       chatExpert,
       setChatExpert,
     }),
-    [navOpen, contextOpen, paletteOpen, chatExpert]
+    [navOpen, contextOpen, paletteOpen, sidebarCollapsed, toggleSidebar, chatExpert]
   )
 
   return <ShellContext.Provider value={value}>{children}</ShellContext.Provider>

@@ -1,5 +1,6 @@
 'use client'
 
+import { ArrowRight } from 'lucide-react'
 import Link from 'next/link'
 
 import { Section } from '@/components/experts/overview/section'
@@ -9,9 +10,13 @@ import type { ExpertWithCatalog } from '@/lib/api/types'
 /**
  * What the corpus covers.
  *
- * **Every key concept links to the sources that cover it.** The concepts are
- * what the search set out to find; a list of words with nothing behind them
- * would be a claim rather than evidence.
+ * **Every key concept is a row, and every row opens the sources that cover it.**
+ * Real concepts run to 40–120 characters — "Historical development and legacy
+ * (medieval scholastic logic, Łukasiewicz's modern reconstruction…)" — so joined
+ * by middots into an underlined paragraph they were five to seven lines in which
+ * a concept that wrapped was indistinguishable from the next one. As rows they
+ * can be counted, scanned and aimed at; two columns from `sm`, where the
+ * shortest concepts would otherwise leave half a line of air each.
  */
 export function OverviewCoverage({ expert }: { expert: ExpertWithCatalog }) {
   return (
@@ -24,19 +29,22 @@ export function OverviewCoverage({ expert }: { expert: ExpertWithCatalog }) {
 
       {expert.key_concepts.length > 0 && (
         <Section title="Key concepts">
-          <p className="leading-relaxed">
-            {expert.key_concepts.map((concept, index) => (
-              <span key={concept}>
-                {index > 0 && <span className="text-fg-3"> · </span>}
+          <ul className="grid grid-cols-1 gap-x-3 sm:grid-cols-2">
+            {expert.key_concepts.map((concept) => (
+              <li key={concept}>
                 <Link
                   href={`/experts/${expert.name}/sources?concept=${encodeURIComponent(concept)}`}
-                  className="text-fg underline decoration-fg-4 underline-offset-2 hover:decoration-fg-2"
+                  className="group flex items-start gap-2 rounded-row px-2 py-1.5 text-sm transition-colors duration-(--dur-1) hover:bg-panel"
                 >
-                  {concept}
+                  <span className="min-w-0 flex-1 text-fg-2 group-hover:text-fg">{concept}</span>
+                  <ArrowRight
+                    aria-hidden="true"
+                    className="mt-0.5 size-3.5 shrink-0 text-fg-4 transition-colors duration-(--dur-1) group-hover:text-fg-2"
+                  />
                 </Link>
-              </span>
+              </li>
             ))}
-          </p>
+          </ul>
         </Section>
       )}
 

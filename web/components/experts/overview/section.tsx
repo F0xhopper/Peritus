@@ -6,11 +6,19 @@
  * rows, and prose sections under a heading. Neither knows about an expert.
  */
 
-/** One `label · value` row. Stacks label-over-value below 480px. */
+/**
+ * One `label · value` row.
+ *
+ * Two columns at every width, including 360px. It used to stack
+ * label-over-value below 480px "rather than squeeze two columns into 360px" —
+ * but every label here is eight characters or fewer, and the stack turned six
+ * properties into twelve lines that took most of a phone's first screen before
+ * anything a reader came for. The value wraps instead.
+ */
 export function Property({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="contents">
-      <dt className="text-fg-3 min-[480px]:text-right">{label}</dt>
+      <dt className="text-right text-fg-3">{label}</dt>
       <dd className="min-w-0">{children}</dd>
     </div>
   )

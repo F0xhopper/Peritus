@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import { useTheme } from 'next-themes'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import { Avatar } from '@/components/identity/avatar'
 import { Sheet } from '@/components/shell/sheet'
@@ -42,10 +42,16 @@ interface Item {
   label: string
   hint?: string
   icon?: React.ReactNode
+  /** A key that reaches this row without opening the palette at all. */
+  shortcut?: string
   run: () => void
   /** Everything searched, lowercased once at build time. */
   haystack: string
 }
+
+const noopSubscribe = () => () => {}
+const isMac = () => /Mac|iPhone|iPad/.test(navigator.platform)
+const isMacServer = () => false
 
 export function CommandPalette({
   experts,
@@ -54,26 +60,52 @@ export function CommandPalette({
   experts: ExpertSummary[]
   conversations: ConversationSummary[]
 }) {
-  const { paletteOpen, setPaletteOpen } = useShell()
+  const { paletteOpen, setPaletteOpen, toggleSidebar } = useShell()
   const router = useRouter()
   const { setTheme } = useTheme()
   const isTabletUp = useIsTabletUp()
   const [queryText, setQueryText] = useState('')
+  // ⌘ or Ctrl, decided by the browser rather than guessed on the server. The
+  // subscribe function is module-level: a new one on every render makes React
+  // tear down and re-establish the subscription after every commit.
+  const mac = useSyncExternalStore(noopSubscribe, isMac, isMacServer)
   const [cursor, setCursor] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  // ⌘K / Ctrl+K anywhere. Not bound when a text field has focus and the user is
-  // holding no modifier, so typing "k" in the composer never opens it.
+  /**
+   * The shell's global keys, all of them modifier-held so nothing here can fire
+   * while someone is typing a question:
+   *
+   * - **⌘K** the palette.
+   * - **⌘1–9** the first nine experts. The rail is avatars with no text, so
+   *   without these the only keyboard route to an expert is through this
+   *   palette.
+   * - **⌘\** folds the sidebar away.
+   */
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
+      if (!event.metaKey && !event.ctrlKey) return
+      const key = event.key.toLowerCase()
+      if (key === 'k') {
         event.preventDefault()
         setPaletteOpen(true)
+        return
+      }
+      if (key === '\\') {
+        event.preventDefault()
+        toggleSidebar()
+        return
+      }
+      if (/^[1-9]$/.test(key) && !event.shiftKey && !event.altKey) {
+        const expert = experts[Number(key) - 1]
+        if (!expert) return
+        event.preventDefault()
+        router.push(`/experts/${expert.name}`)
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [setPaletteOpen])
+  }, [setPaletteOpen, toggleSidebar, experts, router])
 
   const close = () => {
     setPaletteOpen(false)
@@ -87,11 +119,13 @@ export function CommandPalette({
       router.push(href)
     }
 
-    const expertItems: Item[] = experts.map((expert) => ({
+    const expertItems: Item[] = experts.map((expert, index) => ({
       id: `expert:${expert.id}`,
       section: 'Experts',
       label: displayName(expert),
       hint: subtitle(expert) ?? undefined,
+      // The first nine have a direct key; the palette is where anyone finds out.
+      shortcut: index < 9 ? `${mac ? '⌘' : 'Ctrl '}${index + 1}` : undefined,
       icon: (
         <span>
           <Avatar expert={expert} size={16} />
@@ -307,6 +341,14 @@ export function CommandPalette({
                       <span className="hidden max-w-48 shrink-0 truncate text-xs text-fg-3 sm:inline">
                         {item.hint}
                       </span>
+                    )}
+                    {item.shortcut && (
+                      <kbd
+                        aria-hidden
+                        className="hidden shrink-0 font-sans text-xs text-fg-3 pointer-fine:inline"
+                      >
+                        {item.shortcut}
+                      </kbd>
                     )}
                   </button>
                 )

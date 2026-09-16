@@ -3,6 +3,7 @@
 import { useId, useRef } from 'react'
 
 import { cn } from '@/lib/cn'
+import { DEPTH } from '@/lib/build/copy'
 import type { ExpertTier, TierPrice } from '@/lib/api/types'
 
 /**
@@ -20,27 +21,6 @@ import type { ExpertTier, TierPrice } from '@/lib/api/types'
  */
 
 export type TierChoice = ExpertTier | null
-
-/**
- * What each depth means to the person choosing it. Only what is actually fixed
- * per tier (`ExpertConfig` in the API): the relative size of the search, how
- * many rounds it runs, and how many passages an answer can cite. The absolute
- * source count depends on the topic's plan, so it is not promised here.
- */
-const DEPTH: Record<ExpertTier, { label: string; blurb: string }> = {
-  lite: {
-    label: 'Lite',
-    blurb: 'Quickest. About half the sources of Standard; answers cite up to 8 passages.',
-  },
-  standard: {
-    label: 'Standard',
-    blurb: 'Balanced. Two rounds of searching; answers cite up to 15 passages.',
-  },
-  pro: {
-    label: 'Pro',
-    blurb: 'Deepest and slowest. About twice the sources, three rounds; answers cite up to 25.',
-  },
-}
 
 export function TierPicker({
   tiers,

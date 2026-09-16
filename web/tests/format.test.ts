@@ -8,6 +8,7 @@ import {
   formatDateTime,
   formatElapsed,
   formatNumber,
+  formatInt,
   formatPercent,
   formatUsd,
   hostOf,
@@ -228,5 +229,24 @@ describe('the readiness gate', () => {
 describe('formatElapsed over a day', () => {
   it('switches to days, so a stalled counter does not read as 117 hours', () => {
     expect(formatElapsed(117 * 3600 + 54 * 60)).toBe('4d 21h')
+  })
+})
+
+describe('formatInt', () => {
+  /**
+   * Written out rather than delegated to `toLocaleString`: `Intl` is not stable
+   * across engines, and a number rendered on the server has to match the one the
+   * browser hydrates over.
+   */
+  it('groups thousands', () => {
+    expect(formatInt(0)).toBe('0')
+    expect(formatInt(999)).toBe('999')
+    expect(formatInt(1000)).toBe('1,000')
+    expect(formatInt(1125)).toBe('1,125')
+    expect(formatInt(1234567)).toBe('1,234,567')
+  })
+
+  it('keeps a negative sign outside the grouping', () => {
+    expect(formatInt(-1234)).toBe('-1,234')
   })
 })

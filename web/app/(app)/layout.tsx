@@ -1,3 +1,4 @@
+import { cookies } from 'next/headers'
 import { ViewTransition } from 'react'
 
 import { CommandPalette } from '@/components/shell/command-palette'
@@ -7,8 +8,10 @@ import { NavDrawer } from '@/components/shell/nav-drawer'
 import { Rail } from '@/components/shell/rail'
 import { ContextSlotProvider, ShellProvider } from '@/components/shell/shell-context'
 import { ShellBody } from '@/components/shell/shell-body'
+import { ShellGrid } from '@/components/shell/shell-grid'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { getBilling, getConversations, getExperts, getMe } from '@/lib/api/data'
+import { SIDEBAR_COOKIE } from '@/lib/shell-cookie'
 
 /**
  * The app shell.
@@ -39,6 +42,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // when the session is dead, and firing all four at a dead session would race
   // four redirects against each other.
   const experts = await getExperts()
+  // The sidebar's collapse preference, so the very first HTML has the right
+  // number of columns in it.
+  const collapsed = (await cookies()).get(SIDEBAR_COOKIE)?.value === 'collapsed'
   const [conversations, credits, me] = await Promise.all([
     getConversations(20),
     // Billing is not load-bearing for the shell. If it fails, the credit rows
@@ -48,14 +54,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ])
 
   return (
-    <ShellProvider>
+    <ShellProvider sidebarCollapsed={collapsed}>
       <ContextSlotProvider>
         <TooltipProvider>
           {/* Sets `data-shell="app"` on <body>, which is what stops the window
               scrolling while the app is mounted. */}
           <ShellBody />
 
-          <div className="grid h-dvh grid-cols-1 overflow-hidden md:grid-cols-[56px_minmax(0,1fr)] lg:grid-cols-[56px_260px_minmax(0,1fr)] xl:grid-cols-[56px_260px_minmax(0,1fr)_auto]">
+          <ShellGrid>
             {/* Rail and sidebar are one navigation region on one surface, with
                 no rule between them and none against the content. Depth is the
                 surface step (`--panel` beside `--bg`), which is the design's
@@ -74,6 +80,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               conversations={conversations}
               credits={credits}
               showSearch
+              collapsible
               className="scroll-col hidden lg:flex"
             />
 
@@ -86,7 +93,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             </main>
 
             <ContextPanel />
-          </div>
+          </ShellGrid>
 
           <NavDrawer experts={experts} conversations={conversations} credits={credits} me={me} />
           <CommandPalette experts={experts} conversations={conversations} />
