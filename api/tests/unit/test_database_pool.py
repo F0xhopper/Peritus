@@ -74,9 +74,20 @@ async def test_vector_codecs_are_registered_once_per_connection():
         await database._init_connection(conn)
 
     register.assert_awaited_once_with(conn)
+
+
+async def test_connection_init_runs_no_ddl():
+    """This callback runs for every connection the pool opens, so it is a
+    runtime path that only ever needs to read. It used to issue two
+    `CREATE EXTENSION` statements there; the migrations do that, and
+    `migrations/apply.py` is the release command, so both exist before the
+    first connection."""
+    conn = AsyncMock()
+    with patch("pgvector.asyncpg.register_vector", AsyncMock()):
+        await database._init_connection(conn)
+
     executed = [call.args[0] for call in conn.execute.await_args_list]
-    assert any("CREATE EXTENSION IF NOT EXISTS vector" in sql for sql in executed)
-    assert any("CREATE EXTENSION IF NOT EXISTS pg_trgm" in sql for sql in executed)
+    assert not any("CREATE EXTENSION" in sql.upper() for sql in executed)
 
 
 async def test_search_no_longer_registers_codecs_per_query():

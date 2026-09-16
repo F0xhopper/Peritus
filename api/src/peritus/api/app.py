@@ -21,6 +21,7 @@ from peritus.api.routes import (
 from peritus.core.config import settings
 from peritus.core.logging import get_logger, setup_logging
 from peritus.infrastructure.database import close_pool, get_pool, init_pool
+from peritus.infrastructure.supabase_auth import close_client as close_supabase_client
 
 logger = get_logger(__name__)
 
@@ -85,6 +86,7 @@ async def lifespan(app: FastAPI):
             worker.request_stop()
             with suppress(asyncio.CancelledError):
                 await worker_task
+        await close_supabase_client()
         await close_pool()
 
 

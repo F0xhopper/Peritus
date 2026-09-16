@@ -53,8 +53,12 @@ async def init_pool() -> None:
 
 
 async def _init_connection(conn: asyncpg.Connection) -> None:
-    await conn.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    await conn.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    # No CREATE EXTENSION here. This callback runs for *every* connection the
+    # pool opens, so it put two privileged DDL statements on a runtime path that
+    # only ever needs to read. The migrations create both extensions, and
+    # `migrations/apply.py` is the release command, so they are present before
+    # the first connection is made.
+    #
     # Install the vector/halfvec/sparsevec codecs for the lifetime of this
     # connection. Every query that passes or reads an embedding depends on it.
     from pgvector.asyncpg import register_vector  # type: ignore

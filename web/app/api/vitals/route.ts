@@ -11,7 +11,20 @@ import { NextResponse } from 'next/server'
  * Deliberately not origin-guarded. `navigator.sendBeacon` fires during page
  * unload, when a 403 would be invisible and the measurement simply lost — and
  * the worst a forged beacon achieves is a wrong number in a log.
+ *
+ * Which is why `name` and `path` are clamped and stripped before they are
+ * logged: unguarded means anyone can post them, and a string that reaches a log
+ * unfiltered can carry newlines to forge extra log lines, or ANSI escapes to
+ * rewrite a terminal reading them.
  */
+
+/** At most 120 printable characters, no control characters, no line breaks. */
+function forLog(value: unknown, fallback = '-'): string {
+  if (typeof value !== 'string' || value.length === 0) return fallback
+  const clean = value.replace(/[\u0000-\u001f\u007f-\u009f]/g, '')
+  return clean.slice(0, 120) || fallback
+}
+
 export async function POST(request: Request) {
   try {
     const metric = (await request.json()) as {
@@ -23,10 +36,10 @@ export async function POST(request: Request) {
     if (typeof metric.name === 'string' && typeof metric.value === 'number') {
       console.info(
         '[vitals] %s=%s rating=%s path=%s',
-        metric.name,
+        forLog(metric.name),
         metric.value.toFixed(metric.name === 'CLS' ? 4 : 0),
-        metric.rating ?? '-',
-        metric.path ?? '-'
+        forLog(metric.rating),
+        forLog(metric.path)
       )
     }
   } catch {
