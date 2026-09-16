@@ -3,9 +3,12 @@
 import { ExternalLink, MessageSquare, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
+import Link from 'next/link'
+
 import { DateText } from '@/components/ui/relative-time'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
+import { describeDifficulty, describeTextRead, sourceKind, sourceProvider } from '@/lib/source-kind'
 import { formatNumber, hostOf, humanise } from '@/lib/format'
 import type { LedgerSource } from '@/lib/api/types'
 import { useApiAction } from '@/hooks/use-api-action'
@@ -17,16 +20,26 @@ import { apiVoid } from '@/lib/api/client'
  * Everything the card list leaves out lives here — the identifiers, the key
  * claims and the concepts it covers — because none of them is something anyone
  * scans a list for.
+ *
+ * **One vocabulary with the table and the chat's passage panel.** This panel
+ * used to say "Type: Openalex" (the fetcher's key) beside "Content: Paper"
+ * while the table said "Kind: Paper" and the chat said "Type: Exa" — three
+ * names for one fact. *Kind* is what it is; *Found via* is where it came from;
+ * and the numbers that meant nothing without their scale (Difficulty 5, 48,210
+ * characters) are words now, or gone.
  */
 export function RowDetail({
   source,
   slug,
   onAsk,
+  asking = false,
   onDeleted,
 }: {
   source: LedgerSource
   slug: string
   onAsk?: (title: string) => void
+  /** True while the chat that question will be asked in is being created. */
+  asking?: boolean
   /** Present only for the owner. Without it there is no Remove button. */
   onDeleted?: () => void
 }) {
@@ -58,14 +71,26 @@ export function RowDetail({
       </div>
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-        <Field label="Type">{humanise(source.source_type)}</Field>
-        {source.content_type && <Field label="Content">{humanise(source.content_type)}</Field>}
-        {source.source_tier && <Field label="Tier">{humanise(source.source_tier)}</Field>}
-        {source.difficulty !== null && <Field label="Difficulty">{source.difficulty}</Field>}
-        <Field label="Passages">{formatNumber(source.passage_count)}</Field>
-        {source.text_chars !== null && (
-          <Field label="Characters">{formatNumber(source.text_chars)}</Field>
+        <Field label="Kind">{sourceKind(source.source_type)}</Field>
+        <Field label="Found via">{sourceProvider(source.source_type)}</Field>
+        {source.source_tier && <Field label="Tier">{humanise(source.source_tier)} source</Field>}
+        {source.difficulty !== null && (
+          <Field label="Level" hint={`${source.difficulty} of 5`}>
+            {describeDifficulty(source.difficulty)}
+          </Field>
         )}
+        {/* Whether a paper's one passage came from its abstract or its full
+            text is the fact that decides how far to trust a citation from it. */}
+        {source.full_text_method && (
+          <Field label="Read">
+            {source.full_text_method === 'abstract' ? (
+              <span className="text-warn">Abstract only</span>
+            ) : (
+              describeTextRead(source.full_text_method)
+            )}
+          </Field>
+        )}
+        <Field label="Passages">{formatNumber(source.passage_count)}</Field>
         <Field label="Added">
           <DateText iso={source.created_at} />
         </Field>
@@ -78,7 +103,12 @@ export function RowDetail({
             {source.covered_concepts.map((concept, index) => (
               <span key={concept}>
                 {index > 0 && <span className="text-fg-4"> · </span>}
-                <span className="text-fg">{concept}</span>
+                <Link
+                  href={`/experts/${slug}/sources?concept=${encodeURIComponent(concept)}`}
+                  className="text-fg underline decoration-fg-4 underline-offset-2 hover:decoration-fg-2"
+                >
+                  {concept}
+                </Link>
               </span>
             ))}
           </p>
@@ -143,7 +173,7 @@ export function RowDetail({
           </a>
         )}
         {onAsk && (
-          <Button variant="outline" size="sm" onClick={() => onAsk(source.title)}>
+          <Button variant="outline" size="sm" loading={asking} onClick={() => onAsk(source.title)}>
             <MessageSquare className="size-3" />
             Ask about this
           </Button>
@@ -184,11 +214,22 @@ export function RowDetail({
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  /** The raw value behind a word — "Expert" carries "5 of 5" on its title. */
+  hint?: string
+  children: React.ReactNode
+}) {
   return (
     <div className="min-w-0">
       <dt className="text-fg-3">{label}</dt>
-      <dd className="truncate text-fg-2">{children}</dd>
+      <dd title={hint} className="truncate text-fg-2">
+        {children}
+      </dd>
     </div>
   )
 }

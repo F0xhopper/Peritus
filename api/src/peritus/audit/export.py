@@ -71,6 +71,25 @@ RIS_TYPES: dict[str, str] = {
 }
 RIS_DEFAULT_TYPE = "ELEC"
 
+# The BibTeX entry type per source type. Same judgement as `RIS_TYPES`: a
+# preprint is `@misc` with an `archivePrefix`, grey literature is `@techreport`,
+# and anything web-shaped is `@online` — the entry type is what decides how a
+# bibliography style prints the reference.
+BIBTEX_TYPES = {
+    "openalex": "article",
+    "pubmed": "article",
+    "arxiv": "misc",
+    "pdf": "techreport",
+    "gutenberg": "book",
+    "youtube": "online",
+    "wikipedia": "online",
+    "web": "online",
+    "exa": "online",
+    "reddit": "online",
+    "thought_leader": "online",
+}
+BIBTEX_DEFAULT_TYPE = "online"
+
 # RIS is a line-oriented format with CRLF terminators; importers are stricter
 # about this than the spec suggests.
 _RIS_EOL = "\r\n"
@@ -268,6 +287,63 @@ def sources_to_ris(rows: list[dict[str, Any]]) -> str:
     if not rows:
         return ""
     return _RIS_EOL.join(source_to_ris(row) for row in rows) + _RIS_EOL
+
+
+def _bibtex_value(value: Any) -> str:
+    """A BibTeX field value: braces balanced, backslashes and braces escaped.
+
+    Titles come from arbitrary web pages, so an unescaped ``{`` or ``\\`` would
+    produce a .bib file that fails to compile — the export's whole purpose is a
+    file someone can run LaTeX over without editing it first.
+    """
+    # One pass, not three replacements: escaping the backslash first would then
+    # escape the braces of the `\textbackslash{}` it had just written.
+    escapes = {"\\": r"\textbackslash{}", "{": r"\{", "}": r"\}"}
+    text = "".join(escapes.get(ch, ch) for ch in _flatten(value))
+    return " ".join(text.split())
+
+
+def source_to_bibtex(row: dict[str, Any]) -> str:
+    """One BibTeX entry, keyed ``peritus<id>`` so a citation key is stable."""
+    entry = BIBTEX_TYPES.get(str(row.get("source_type") or ""), BIBTEX_DEFAULT_TYPE)
+    fields: list[tuple[str, str]] = [("title", _bibtex_value(row.get("title")))]
+
+    author = _flatten(row.get("author"))
+    if author:
+        # BibTeX joins authors with " and "; the fetchers give them comma-joined.
+        fields.append(
+            ("author", " and ".join(_bibtex_value(a) for a in author.split(",") if a.strip()))
+        )
+
+    created = row.get("created_at")
+    if isinstance(created, (datetime, date)):
+        fields.append(("year", str(created.year)))
+
+    for key, value in (
+        ("doi", _flatten(row.get("doi"))),
+        ("url", _flatten(row.get("url"))),
+        ("eprint", _flatten(row.get("arxiv_id"))),
+    ):
+        if value:
+            fields.append((key, _bibtex_value(value)))
+    if _flatten(row.get("arxiv_id")):
+        fields.append(("archivePrefix", "arXiv"))
+
+    concepts = decode_json_field(row.get("covered_concepts"), [])
+    if isinstance(concepts, list) and any(concepts):
+        fields.append(("keywords", _bibtex_value(", ".join(str(c) for c in concepts if c))))
+
+    fields.append(("note", _bibtex_value(_ris_note(row))))
+
+    body = ",\n".join(f"  {key} = {{{value}}}" for key, value in fields)
+    return f"@{entry}{{peritus{row.get('id')},\n{body}\n}}"
+
+
+def sources_to_bibtex(rows: list[dict[str, Any]]) -> str:
+    """The ledger as BibTeX, for a bibliography built in LaTeX."""
+    if not rows:
+        return ""
+    return "\n\n".join(source_to_bibtex(row) for row in rows) + "\n"
 
 
 def export_filename(slug: str, decision: str, extension: str) -> str:

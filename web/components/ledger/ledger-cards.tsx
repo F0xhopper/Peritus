@@ -1,5 +1,7 @@
 'use client'
 
+import { ChevronRight } from 'lucide-react'
+
 import { cn } from '@/lib/cn'
 import { sourceKind } from '@/lib/source-kind'
 import { hostOf } from '@/lib/format'
@@ -29,6 +31,7 @@ export function LedgerCards({
           <button
             type="button"
             onClick={() => onSelect(source)}
+            aria-label={`${source.title} — open details`}
             className={cn(
               // Surface, not border — depth comes from the panel step, and the
               // selected card is the one that gains a ring.
@@ -37,7 +40,11 @@ export function LedgerCards({
               selectedId === source.id ? 'ring-1 ring-fg-3 ring-inset' : 'hover:bg-raised'
             )}
           >
-            <span className="block text-sm text-fg-2">{source.title}</span>
+            <span className="flex items-start gap-2">
+              <span className="min-w-0 flex-1 text-sm text-fg-2">{source.title}</span>
+              {/* The card opens a record; the chevron is what says so. */}
+              <ChevronRight aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-fg-4" />
+            </span>
 
             <p className="mt-1 text-xs text-fg-3">
               {sourceKind(source.source_type)}

@@ -97,8 +97,10 @@ async def test_grounded_cited_context_without_a_graph():
 
     assert [p.index for p in passages] == [1, 2]
     assert [p.source_id for p in passages] == [10, 20]
-    assert "[1] Discourses — Arxiv" in block
-    assert "[2] Enchiridion — Arxiv" in block
+    # The label is the title alone; the fetcher and the screening score are not
+    # things a reader (or the model) is told about a passage.
+    assert "[1] Discourses" in block
+    assert "[2] Enchiridion" in block
     assert "Virtue is the sole good." in block
     # Nothing graph-shaped leaks into the prompt while the graph is missing.
     assert "About:" not in block

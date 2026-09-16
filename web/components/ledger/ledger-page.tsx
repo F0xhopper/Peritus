@@ -1,10 +1,9 @@
 'use client'
 
-import { Download, Plus, Table as TableIcon } from 'lucide-react'
+import { Download, Plus, Table as TableIcon, X } from 'lucide-react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useEffect, useMemo, useState, useTransition } from 'react'
 
-import { stashAskDraft } from '@/components/chat/new-chat-composer'
 import { AddSourceDialog } from '@/components/ledger/add-source-dialog'
 import { canManage } from '@/lib/access'
 import { LedgerCards } from '@/components/ledger/ledger-cards'
@@ -16,10 +15,13 @@ import { TopBar } from '@/components/shell/top-bar'
 import { Button, buttonStyles } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { MenuContent, MenuItem, MenuLabel, MenuRoot, MenuTrigger } from '@/components/ui/menu'
+import { Input } from '@/components/ui/input'
 import { Notice } from '@/components/ui/notice'
 import { Select } from '@/components/ui/select'
 import { useBuildEvents } from '@/hooks/use-build-events'
+import { useStartChat } from '@/hooks/use-start-chat'
 import { cn } from '@/lib/cn'
+import { hostOf } from '@/lib/format'
 
 import type { CorpusReport, ExpertWithCatalog, LedgerSource, SourceSort } from '@/lib/api/types'
 
@@ -60,6 +62,11 @@ export function LedgerPage({
 
   const [localSelection, setLocalSelection] = useState<LedgerSource | null>(null)
   const [adding, setAdding] = useState(false)
+  // Client-side over the loaded page, like the sidebar's chat filter. A Pro
+  // build keeps up to sixty sources and the only way to find one was to read
+  // the list.
+  const [filter, setFilter] = useState('')
+  const { start: startChat, starting: startingChat } = useStartChat(expert.name)
   // A viewer reads the list but cannot add to it or remove from it.
   const owner = canManage(expert)
   const [ingestJob, setIngestJob] = useState<number | null>(null)
@@ -83,14 +90,19 @@ export function LedgerPage({
   })
 
   // `?concept=` narrows client-side: the API filters and sorts, but has no
-  // concept filter, and the page is already bounded at 500 rows.
+  // concept filter, and the page is already bounded at 500 rows. The text
+  // filter runs after it, over title, author and host — the three things
+  // somebody looking for one source actually remembers.
   const rows = useMemo(() => {
-    if (!conceptFilter) return report.sources
-    const needle = conceptFilter.toLowerCase()
-    return report.sources.filter((source) =>
-      source.covered_concepts.some((concept) => concept.toLowerCase() === needle)
-    )
-  }, [report.sources, conceptFilter])
+    const concept = conceptFilter?.toLowerCase()
+    const needle = filter.trim().toLowerCase()
+    return report.sources.filter((source) => {
+      if (concept && !source.covered_concepts.some((c) => c.toLowerCase() === concept)) return false
+      if (!needle) return true
+      const host = source.url ? (hostOf(source.url) ?? '') : ''
+      return `${source.title} ${source.author ?? ''} ${host}`.toLowerCase().includes(needle)
+    })
+  }, [report.sources, conceptFilter, filter])
 
   // A row deep-linked from a citation (`?source=<id>`) shows its detail on
   // arrival. Derived rather than copied into state by an effect: a click sets
@@ -161,15 +173,26 @@ export function LedgerPage({
                 >
                   RIS — for Zotero, Covidence, EndNote
                 </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a file download, not a page
+                    window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=bibtex&decision=accepted`
+                  }}
+                >
+                  BibTeX — for LaTeX
+                </MenuItem>
               </MenuLabel>
             </MenuContent>
           </MenuRoot>
         }
         overflow={
           <>
-            {owner && <MenuItem onClick={() => setAdding(true)}>Add a source</MenuItem>}
+            {/* Not *Add a source*: it is a button in the toolbar below, and a
+                menu is for what is not already on screen. */}
             <MenuItem onClick={() => router.push(`/experts/${expert.name}`)}>Overview</MenuItem>
-            <MenuItem onClick={() => router.push(`/experts/${expert.name}/graph`)}>Graph</MenuItem>
+            <MenuItem onClick={() => router.push(`/experts/${expert.name}/graph`)}>
+              Concepts
+            </MenuItem>
           </>
         }
       />
@@ -183,36 +206,58 @@ export function LedgerPage({
           )}
 
           {conceptFilter && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-fg-3">Covering</span>
-              <span className="rounded-chip bg-expert-soft px-2 py-0.5 text-xs text-expert">
-                {conceptFilter}
+            // The count is the filtered one. It used to read "16 sources" over
+            // a table of six, because the toolbar's number came from the report
+            // page while the filtering happened here.
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span className="text-fg-3">
+                {rows.length} of {total} {total === 1 ? 'source' : 'sources'} cover
               </span>
-              <button
-                type="button"
-                onClick={() => navigate({ concept: null })}
-                className="text-xs text-fg-3 underline-offset-2 hover:text-fg-2 hover:underline"
-              >
-                clear
-              </button>
+              <span className="inline-flex items-center gap-1 rounded-chip bg-expert-soft py-0.5 pr-1 pl-2 text-xs text-expert">
+                {conceptFilter}
+                <button
+                  type="button"
+                  onClick={() => navigate({ concept: null })}
+                  aria-label="Show every source"
+                  className="grid size-4 place-items-center rounded-chip transition-colors duration-(--dur-1) hover:bg-expert/20"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* From twenty rows, where reading the list stops being a way to
+                find one. The sidebar uses the same threshold for chats. */}
+            {report.sources.length >= 20 && (
+              <Input
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder="Filter sources"
+                aria-label="Filter sources"
+                className="w-full text-xs sm:w-56"
+              />
+            )}
+
             {/* A native select below `lg`, where a sortable header row has no
-                room; the headers themselves sort at `lg` and up. */}
+                room; the headers themselves sort at `lg` and up. The options
+                say "Sort:" because the closed select shows only its value —
+                "Title" alone read as a filter or a column name. */}
             <Select
               aria-label="Sort by"
               value={sort}
               onChange={(event) => navigate({ sort: event.target.value, page: null })}
               className="lg:hidden"
             >
-              <option value="title">Title</option>
-              <option value="type">Type</option>
-              <option value="added">Added</option>
+              <option value="title">Sort: Title</option>
+              <option value="type">Sort: Kind</option>
+              <option value="added">Sort: Added</option>
             </Select>
 
             {owner && (
+              // The word is visible from 360px — a bare `+` said nothing about
+              // what it added — while the accessible name stays the full one.
               <Button
                 variant="secondary"
                 size="action"
@@ -220,11 +265,13 @@ export function LedgerPage({
                 onClick={() => setAdding(true)}
               >
                 <Plus className="size-3.5" />
-                <span className="hidden sm:inline">Add a source</span>
+                Add
+                <span className="hidden sm:inline">&nbsp;a source</span>
               </Button>
             )}
 
             <p className="ml-auto text-xs text-fg-3">
+              {filter.trim() && `${rows.length} of `}
               {total} {total === 1 ? 'source' : 'sources'}
             </p>
           </div>
@@ -296,10 +343,8 @@ export function LedgerPage({
           <RowDetail
             source={selected}
             slug={expert.name}
-            onAsk={(title) => {
-              stashAskDraft(expert.name, `What does “${title}” say?`)
-              router.push(`/experts/${expert.name}#ask`)
-            }}
+            asking={startingChat}
+            onAsk={(title) => void startChat(`What does “${title}” say?`)}
             onDeleted={
               owner
                 ? () => {

@@ -1,4 +1,4 @@
-"""CSV and RIS export of the screening ledger.
+"""CSV, RIS and BibTeX export of the screening ledger.
 
 The export is how a grey-literature source Peritus found reaches Covidence,
 Zotero or EndNote, so the properties that matter are: rejected sources travel
@@ -13,7 +13,9 @@ from datetime import UTC, datetime
 from peritus.audit.export import (
     CSV_COLUMNS,
     export_filename,
+    source_to_bibtex,
     source_to_ris,
+    sources_to_bibtex,
     sources_to_csv,
     sources_to_ris,
 )
@@ -198,3 +200,45 @@ def test_export_filename_is_safe_and_descriptive():
     assert name.startswith("peritus-stoic")
     assert "rejected" in name
     assert name.endswith(".ris")
+
+
+# ── BibTeX ──────────────────────────────────────────────────────────────────
+
+
+def test_bibtex_entry_type_follows_the_shape_of_the_source():
+    assert source_to_bibtex(_accepted(source_type="openalex")).startswith("@article{")
+    assert source_to_bibtex(_accepted(source_type="arxiv")).startswith("@misc{")
+    assert source_to_bibtex(_accepted(source_type="pdf")).startswith("@techreport{")
+    assert source_to_bibtex(_accepted(source_type="gutenberg")).startswith("@book{")
+    # Anything web-shaped, and anything new, is online rather than nothing.
+    assert source_to_bibtex(_accepted(source_type="some_new_fetcher")).startswith("@online{")
+
+
+def test_bibtex_authors_are_joined_the_way_bibtex_expects():
+    entry = source_to_bibtex(_accepted())
+    assert "author = {A. Reviewer and B. Second}" in entry
+
+
+def test_bibtex_escapes_what_would_otherwise_break_the_file():
+    # Titles come from arbitrary web pages. An unescaped brace is a .bib file
+    # that will not compile, which defeats the point of exporting one.
+    entry = source_to_bibtex(_accepted(title="A {curly} title with a \\ backslash"))
+    assert "{curly}" not in entry
+    assert r"\{curly\}" in entry
+    assert r"\textbackslash{}" in entry
+
+
+def test_bibtex_key_is_stable_and_carries_the_decision():
+    entry = source_to_bibtex(_accepted(id=41))
+    assert entry.startswith("@techreport{peritus41,")
+    assert "Peritus screening decision: accepted" in entry
+
+
+def test_bibtex_of_nothing_is_empty_not_malformed():
+    assert sources_to_bibtex([]) == ""
+
+
+def test_bibtex_document_separates_its_entries():
+    out = sources_to_bibtex([_accepted(id=1), _accepted(id=2)])
+    assert out.count("@techreport{") == 2
+    assert "}\n\n@techreport{peritus2" in out

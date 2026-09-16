@@ -12,15 +12,20 @@ import { Transcript } from '@/components/chat/transcript'
 import { ContextSlot } from '@/components/shell/context-panel'
 import { useShell } from '@/components/shell/shell-context'
 import { TopBar } from '@/components/shell/top-bar'
+import { Button } from '@/components/ui/button'
+import { Dialog } from '@/components/ui/dialog'
 import { MenuItem } from '@/components/ui/menu'
 import { Notice } from '@/components/ui/notice'
 import { takePendingQuestion, useChatStream } from '@/hooks/use-chat-stream'
+import { auditsByMessageId } from '@/lib/chat-audits'
 import { cn } from '@/lib/cn'
 import { chatTitle } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
 import { useApiAction } from '@/hooks/use-api-action'
 import { apiSend, apiVoid, messageFor } from '@/lib/api/client'
 import type {
+  AnswerAuditsPage,
+  ChatRetrievalAuditEvent,
   Citation,
   ConversationDetail,
   ConversationSummary,
@@ -58,11 +63,18 @@ export function ChatView({
   const { openContext, setChatExpert } = useShell()
   const chat = useChatStream(conversation.id)
   const [selected, setSelected] = useState<Citation | null>(null)
+  // Every citation in the answer the open one came from, so the panel can name
+  // the other numbers that rest on the same source.
+  const [selectedAnswer, setSelectedAnswer] = useState<Citation[]>([])
   // The accepted half of the ledger, fetched the first time a citation is
   // opened, so the panel can show the source's type, scores and links rather
   // than only the citation's one-line label.
   const [ledger, setLedger] = useState<Map<number, LedgerSource> | null>(null)
   const ledgerRequested = useRef(false)
+  // The stored retrieval trails for the answers already in this transcript.
+  const [storedAudits, setStoredAudits] = useState<Map<number, ChatRetrievalAuditEvent>>(
+    () => new Map()
+  )
   const serverTitle = chatTitle(conversation.title)
   const [title, setTitle] = useState(serverTitle)
   // Follow the server's title when a refetch brings a new one — the first
@@ -74,6 +86,7 @@ export function ChatView({
     setTitle(serverTitle)
   }
   const [renaming, setRenaming] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [draft, setDraft] = useState<{ text: string; id: number } | null>(null)
   const handed = useRef(false)
 
@@ -123,6 +136,31 @@ export function ChatView({
   // The handoff from the expert page's composer. `sessionStorage`, consumed
   // exactly once — the ref guards against Strict Mode's double effect firing
   // the question twice.
+  /**
+   * The stored retrieval trails, once per visit.
+   *
+   * Fetched rather than streamed: the live `retrieval_audit` event only exists
+   * for the turn you watched, so before this every answer lost its trail on
+   * reload. One GET, best-effort — a failure means the action is simply absent,
+   * which is what it was before.
+   */
+  useEffect(() => {
+    if (!conversation.messages.some((message) => message.role === 'assistant')) return
+    const controller = new AbortController()
+    void fetch(
+      `/api/experts/${encodeURIComponent(expert.name)}/answer-audits?conversation_id=${conversation.id}&limit=50`,
+      { signal: controller.signal }
+    )
+      .then((response) => (response.ok ? (response.json() as Promise<AnswerAuditsPage>) : null))
+      .then((page) => {
+        if (page) setStoredAudits(auditsByMessageId(conversation.messages, page.audits ?? []))
+      })
+      .catch(() => {
+        /* no trail is the status quo ante, and not worth a toast */
+      })
+    return () => controller.abort()
+  }, [conversation.id, conversation.messages, expert.name])
+
   useEffect(() => {
     if (handed.current || !chattable) return
     const pending = takePendingQuestion(conversation.id)
@@ -133,8 +171,9 @@ export function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversation.id, chattable])
 
-  const selectCitation = (citation: Citation) => {
+  const selectCitation = (citation: Citation, all: Citation[] = []) => {
     setSelected(citation)
+    setSelectedAnswer(all)
     if (citation.source_id !== null && !ledgerRequested.current) {
       ledgerRequested.current = true
       void fetch(
@@ -178,12 +217,15 @@ export function ChatView({
 
   // The refresh is not optional: the sidebar's chat list belongs to the layout,
   // and a push reuses it.
-  const { run: remove } = useApiAction(
+  const { run: remove, pending: deleting } = useApiAction(
     () => apiVoid(`/api/conversations/${conversation.id}`, { method: 'DELETE' }),
     {
       success: 'Chat deleted',
       error: 'Could not delete that chat.',
-      onSuccess: () => router.push(unavailable ? '/chats' : `/experts/${expert.name}`),
+      onSuccess: () => {
+        setConfirmingDelete(false)
+        router.push(unavailable ? '/chats' : `/experts/${expert.name}`)
+      },
     }
   )
 
@@ -240,7 +282,10 @@ export function ChatView({
                 </MenuItem>
               </>
             )}
-            <MenuItem tone="danger" onClick={() => void remove()}>
+            {/* Behind a confirm, like every other delete in the product. It
+                used to fire on the click: a whole conversation gone from a
+                menu item, with no dialog and no undo. */}
+            <MenuItem tone="danger" onClick={() => setConfirmingDelete(true)}>
               Delete chat
             </MenuItem>
           </>
@@ -273,6 +318,9 @@ export function ChatView({
         streaming={chat.streaming}
         audit={chat.audit}
         hasContradiction={chat.hasContradiction}
+        intro={{ bio: expert.persona_bio, concepts: expert.key_concepts }}
+        storedAudits={storedAudits}
+        onStarter={(question) => setDraft({ text: question, id: Date.now() })}
         onSelectCitation={selectCitation}
         selectedCitation={selected?.n ?? null}
         onRegenerate={ask}
@@ -308,14 +356,35 @@ export function ChatView({
             'Waiting for the answer in flight to finish.'
           )
         }
-        placeholder={
-          subtitle(expert)
-            ? `Ask ${displayName(expert)} about ${subtitle(expert)}…`
-            : `Ask ${displayName(expert)}…`
-        }
+        // The long form only when it fits one line on a phone: "Ask Dr. Marta
+        // Belen about Varroa mite control in temperate beekeeping…" wrapped at
+        // 393px, so the empty composer was two lines tall before a word was
+        // typed. Measured in characters rather than by a media query, so the
+        // server and the browser render the same string.
+        placeholder={placeholderFor(expert)}
         autoFocus={conversation.messages.length === 0}
         draft={draft}
       />
+
+      <Dialog
+        open={confirmingDelete}
+        onOpenChange={setConfirmingDelete}
+        title="Delete this chat?"
+        description="Every question and answer in it goes. The expert and its sources are untouched."
+        disablePointerDismissal
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setConfirmingDelete(false)}>
+              Keep it
+            </Button>
+            <Button variant="danger" loading={deleting} onClick={() => void remove()} minWidth={92}>
+              Delete
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-fg-3">{title}</p>
+      </Dialog>
 
       {selected && (
         <ContextSlot title="Cited passage" open onClose={() => setSelected(null)}>
@@ -323,6 +392,12 @@ export function ChatView({
             citation={selected}
             source={selected.source_id !== null ? (ledger?.get(selected.source_id) ?? null) : null}
             slug={expert.name}
+            siblings={selectedAnswer.filter(
+              (other) =>
+                other.n !== selected.n &&
+                other.source_id !== null &&
+                other.source_id === selected.source_id
+            )}
             onAsk={(title) => {
               setDraft({ text: `What else does “${title}” say about this?`, id: Date.now() })
               // Below `xl` the panel covers the composer; close it so the
@@ -338,4 +413,13 @@ export function ChatView({
       <span className={cn('sr-only')}>{siblings.length} chats with this expert</span>
     </div>
   )
+}
+
+const PLACEHOLDER_CHARS = 48
+
+function placeholderFor(expert: ExpertWithCatalog): string {
+  const name = displayName(expert)
+  const topic = subtitle(expert)
+  const long = topic ? `Ask ${name} about ${topic}…` : ''
+  return long && long.length <= PLACEHOLDER_CHARS ? long : `Ask ${name}…`
 }

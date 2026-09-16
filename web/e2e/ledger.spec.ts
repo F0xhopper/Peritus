@@ -84,6 +84,9 @@ test('the export menu offers CSV and RIS, and the download works', async ({ page
   // RIS is the operationally important one: Zotero, Covidence, EndNote.
   await expect(ris).toContainText('Zotero')
 
+  // And BibTeX, for a bibliography built in LaTeX.
+  await expect(page.getByRole('menuitem', { name: /BibTeX/ })).toBeVisible()
+
   const download = page.waitForEvent('download')
   await ris.click()
   const file = await download

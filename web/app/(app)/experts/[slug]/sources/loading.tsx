@@ -11,7 +11,9 @@ export default function Loading() {
             <Skeleton className="h-8 w-32 rounded-row" />
             <Skeleton className="ml-auto hidden h-3 w-20 sm:block" />
           </div>
-          <div className="overflow-hidden rounded-card border border-border bg-panel">
+          {/* No border: the real table is a borderless `bg-panel`, and the
+              swap used to flash a rule away. */}
+          <div className="overflow-hidden rounded-card bg-panel">
             <div className="flex h-9 items-center gap-6 border-b border-border px-2">
               {['w-16', 'w-10', 'w-14'].map((width, i) => (
                 <Skeleton key={i} className={`h-2.5 ${width} ${i === 0 ? 'mr-auto' : ''}`} />

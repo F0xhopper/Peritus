@@ -8,6 +8,7 @@ from peritus.sources.identifiers import (
     normalise_pmcid,
     normalise_pmid,
 )
+from peritus.sources.titles import clean_title
 
 
 class SourceType(StrEnum):
@@ -160,6 +161,12 @@ class SourceCandidate:
     # full-text resolver and snowballing key on.
     identifiers: Identifiers = field(default_factory=Identifiers)
 
+    def __post_init__(self) -> None:
+        # Here rather than in each of eleven fetchers: a title reaches dedup,
+        # triage, the stored row, the citation on an answer and the exported
+        # bibliography, and every one of those wants the same string.
+        self.title = clean_title(self.title)
+
 
 @dataclass
 class RawSource:
@@ -170,6 +177,9 @@ class RawSource:
     text: str
     metadata: dict = field(default_factory=dict)
     identifiers: Identifiers = field(default_factory=Identifiers)
+
+    def __post_init__(self) -> None:
+        self.title = clean_title(self.title)
 
 
 # How deeply a source treats a key concept (docs/plans/syllabus.md, 4.A), graded

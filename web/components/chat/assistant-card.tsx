@@ -47,7 +47,9 @@ export function AssistantCard({
   interrupted?: boolean
   audit?: ChatRetrievalAuditEvent | null
   hasContradiction?: boolean
-  onSelectCitation: (citation: Citation) => void
+  /** The second argument is every citation in *this* answer, so the panel can
+   *  say "also cited as [2]" when one source supports two sentences. */
+  onSelectCitation: (citation: Citation, all: Citation[]) => void
   selectedCitation: number | null
   onRegenerate?: () => void
   className?: string
@@ -70,7 +72,15 @@ export function AssistantCard({
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(content)
+      // With the references. Copying an answer used to put `[1]` and `[2]` on
+      // the clipboard and nothing that said what they were, which is the one
+      // thing that makes a cited answer worth pasting anywhere.
+      const references = numbered
+        .map((citation) => `[${citation.display ?? citation.n}] ${citation.label}`)
+        .join('\n')
+      await navigator.clipboard.writeText(
+        references ? `${content}\n\nSources\n${references}` : content
+      )
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
@@ -93,13 +103,13 @@ export function AssistantCard({
         <Avatar expert={expert} size={20} />
         <span className="min-w-0 truncate text-sm font-medium text-fg">{displayName(expert)}</span>
         {hasContradiction && (
-          <Explained
-            label="Disputed"
-            tone="warn"
-            explanation="Sources this expert read were judged to disagree about something in this answer. Open the citations to see which says what."
-          />
+          <Explained label="Disputed" tone="warn" explanation={disputeExplanation(numbered)} />
         )}
-        {(interrupted || cutShort) && (
+        {/* The cut-short chip is dropped when the sentence below the answer
+            says the same thing and carries the link that acts on it — it was
+            stated three times over: chip, sentence, and the footer's icon. An
+            interrupted answer has no sentence, so it keeps its chip. */}
+        {(interrupted || (cutShort && !onRegenerate)) && (
           <Explained
             label={interrupted ? 'Interrupted' : 'Cut short'}
             tone="muted"
@@ -119,7 +129,7 @@ export function AssistantCard({
             source={block}
             citations={numbered}
             dangling={dangling}
-            onSelect={onSelectCitation}
+            onSelect={(citation) => onSelectCitation(citation, numbered)}
             selected={selectedCitation}
           />
         ))}
@@ -132,7 +142,7 @@ export function AssistantCard({
                 source={closeOpenMarkdown(trailing)}
                 citations={numbered}
                 dangling={dangling}
-                onSelect={onSelectCitation}
+                onSelect={(citation) => onSelectCitation(citation, numbered)}
                 selected={selectedCitation}
               />
             </div>
@@ -158,7 +168,10 @@ export function AssistantCard({
       )}
 
       {citations.length > 0 && (
-        <details className="group mt-3">
+        // Open by default for three or fewer. This list is the only place on
+        // the page where the sources are named in words rather than as a
+        // number, and it was closed on every answer.
+        <details className="group mt-3" open={citations.length <= 3}>
           <summary className="cursor-pointer list-none text-xs text-fg-3 transition-colors duration-(--dur-1) hover:text-fg-2">
             {/* Passages, because that is what each [n] opens — several can come
                 from one source. */}
@@ -166,7 +179,7 @@ export function AssistantCard({
           </summary>
           <CitationList
             citations={numbered}
-            onSelect={onSelectCitation}
+            onSelect={(citation) => onSelectCitation(citation, numbered)}
             selected={selectedCitation}
             className="mt-2"
           />
@@ -438,4 +451,23 @@ export function endsMidSentence(content: string): boolean {
   // Drop trailing citation markers and emphasis, then look at the final character.
   const tail = last.replace(/(\s*\[\d{1,3}\])+\s*$/, '').replace(/[*_`)\]"'’”]+$/, '')
   return /[\p{L}\p{N},;:—–-]$/u.test(tail)
+}
+
+/**
+ * What the *Disputed* chip says.
+ *
+ * It used to read "Open the citations to see which says what" — an instruction
+ * to go and check every chip. The API now marks which passages are on a side,
+ * so the chip can name them, and quote the disagreement when the reconciler
+ * stated one.
+ */
+function disputeExplanation(citations: Citation[]): string {
+  const disputed = citations.filter((citation) => citation.disputed)
+  if (disputed.length === 0) {
+    return 'Sources this expert read were judged to disagree about something in this answer.'
+  }
+  const numbers = disputed.map((citation) => `[${citation.display ?? citation.n}]`).join(' and ')
+  const point = disputed.find((citation) => citation.dispute_points?.[0])?.dispute_points?.[0]
+  const where = `Sources this expert read disagree here: ${numbers}.`
+  return point ? `${where} What is disputed: ${point}` : where
 }

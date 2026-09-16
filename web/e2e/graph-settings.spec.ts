@@ -276,7 +276,11 @@ test('the chats list groups by expert and undoes a delete', async ({ page }, tes
   const row = content(page).getByRole('link', { name: /How effective is drone brood removal/ })
   await expect(row).toBeVisible()
 
-  await page.getByRole('button', { name: /Actions for How effective/ }).click()
+  // Scoped for the same reason the row is: the sidebar's copy of this chat has
+  // its own row menu with the same name.
+  await content(page)
+    .getByRole('button', { name: /Actions for How effective/ })
+    .click()
   await page.getByRole('menuitem', { name: 'Delete' }).click()
 
   // Optimistic, with a real undo rather than a confirm in front of something

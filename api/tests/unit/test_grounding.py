@@ -3,6 +3,7 @@ parsing, and citation resolution. These are the invariants the product rests on.
 
 from peritus.chat.grounding import (
     ANSWER_FORMAT,
+    CITATION_TEXT_CHARS,
     GROUNDING_CONTRACT,
     build_grounded_context,
     build_system_prompt,
@@ -71,10 +72,35 @@ def test_used_citations_preserve_numbers_and_order():
     _, passages = build_grounded_context([_enriched(1), _enriched(2), _enriched(3)], 10)
     out = used_citations(passages, cited={3, 1})
     assert [c["n"] for c in out] == [1, 3]
-    assert all({"n", "label", "source_id"} <= set(c) for c in out)
+    assert all({"n", "label", "source_id", "text"} <= set(c) for c in out)
 
     labels = used_citation_labels(passages, cited={2})
     assert labels == [passages[1].citation]
+
+
+def test_a_citation_carries_the_passage_not_only_its_title():
+    # The client quotes this. Without it, "Cited passage" showed the source's
+    # title where the sentence should be.
+    e = _enriched(1, text="The mite feeds on fat body tissue.")
+    _, passages = build_grounded_context([e], max_passages=5)
+    (citation,) = used_citations(passages, cited={1})
+    assert citation["text"] == "The mite feeds on fat body tissue."
+    assert citation["label"] == "Source 1"
+
+
+def test_a_long_passage_is_trimmed_on_a_word_boundary():
+    e = _enriched(1, text=("word " * 400).strip())
+    _, passages = build_grounded_context([e], max_passages=5)
+    (citation,) = used_citations(passages, cited={1})
+    assert len(citation["text"]) <= CITATION_TEXT_CHARS + 1
+    assert citation["text"].endswith("…")
+    assert not citation["text"].endswith(" …")
+
+
+def test_a_short_passage_is_not_ellipsised():
+    _, passages = build_grounded_context([_enriched(1, text="Short.")], max_passages=5)
+    (citation,) = used_citations(passages, cited={1})
+    assert citation["text"] == "Short."
 
 
 def test_system_prompt_puts_contract_before_persona():
@@ -105,7 +131,7 @@ def test_passage_opens_with_its_contextual_note():
     )
     block, passages = build_grounded_context([e], max_passages=5)
     assert block.startswith(
-        "[1] Source 1 — Web · Q:8.0\n"
+        "[1] Source 1\n"
         "(Where this passage sits: From a 2019 PNAS study of Varroa feeding; "
         "the section reporting its main finding.)\n"
         "The mite feeds on fat body tissue."
@@ -117,4 +143,4 @@ def test_passage_opens_with_its_contextual_note():
 
 def test_passage_without_a_note_has_no_note_line():
     block, _ = build_grounded_context([_enriched(1, text="Plain.")], max_passages=5)
-    assert block == "[1] Source 1 — Web · Q:8.0\nPlain."
+    assert block == "[1] Source 1\nPlain."

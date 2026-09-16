@@ -135,6 +135,10 @@ async def stream_expert_answer(
         "type": "sources",
         "citations": sources,
         "has_contradiction": ctx.has_contradiction,
+        # Which of the cited passages are on one side of a disagreement. The
+        # reader was told the corpus disputed something and left to open every
+        # citation to find out which; the retriever knew all along.
+        "disputed_citations": [c["n"] for c in sources if c.get("disputed")],
         "dangling_citations": sorted(dangling),
     }
 

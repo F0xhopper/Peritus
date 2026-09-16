@@ -23,8 +23,17 @@ class SearchResult:
 
     @property
     def citation(self) -> str:
-        q = f" · Q:{self.source_ref.quality_score:.1f}" if self.source_ref.quality_score else ""
-        return f"{self.source_ref.title} — {self.source_ref.source_type.title()}{q}"
+        """How a passage is labelled — the source's title, and nothing else.
+
+        It used to read ``Langstroth on the Hive — Exa · Q:8.5``: the fetcher
+        that found the source and the screening score it was given. That string
+        is the model's label for the passage, the SSE citation, the text in the
+        reader's citation popover and the ``aria-label`` a screen reader speaks
+        on every marker — so a vendor name and an internal score were being read
+        aloud beside every sentence of every answer. The score is still on the
+        source row for anyone querying the record; it is not a caption.
+        """
+        return self.source_ref.title
 
 
 @dataclass

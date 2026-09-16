@@ -97,18 +97,28 @@ export async function seed() {
         role: 'assistant',
         content:
           'Drone brood removal reduces mite load substantially on its own, but the evidence does not support it as a sole control in high-pressure years [1].\n\nA randomised trial measured a 43% reduction relative to untreated controls over one season [1]. A five-year cohort found that mechanical control alone did not prevent viral amplification when mite pressure was high [3].',
+        // The label is the source's title; `text` is the passage itself, which
+        // is what the panel quotes.
         citations: [
           {
             n: 1,
-            label:
-              'Drone brood removal as mechanical control: a randomised trial — removal reduced mite load by 43% relative to untreated controls over one season.',
+            label: 'Drone brood removal as mechanical control: a randomised trial',
+            text: 'Removal reduced mite load by 43% relative to untreated controls over one season, with no effect on colony weight at the end of the season.',
             source_id: 812,
+            disputed: true,
+            dispute_points: [
+              'Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years.',
+            ],
           },
           {
             n: 3,
-            label:
-              'Varroa destructor and honeybee viral loads: a five-year cohort — mechanical control alone did not prevent viral amplification in high-pressure years.',
+            label: 'Varroa destructor and honeybee viral loads: a five-year cohort',
+            text: 'Mechanical control alone did not prevent viral amplification in high-pressure years; DWV titres rose in five of the eight study apiaries.',
             source_id: 804,
+            disputed: true,
+            dispute_points: [
+              'Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years.',
+            ],
           },
         ],
         has_contradiction: true,

@@ -60,11 +60,13 @@ class ExportFormat(StrEnum):
 
     ``ris`` is the one that matters operationally: it is what Covidence, Zotero
     and EndNote import, so it is how a grey-literature source Peritus found
-    reaches the review the user is actually running.
+    reaches the review the user is actually running. ``bibtex`` is the same
+    ledger for anyone whose bibliography is a ``.bib`` file.
     """
 
     CSV = "csv"
     RIS = "ris"
+    BIBTEX = "bibtex"
 
 
 # Paging limits. Corpus reports run to tens of sources today, but the endpoint

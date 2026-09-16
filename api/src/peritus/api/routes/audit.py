@@ -31,6 +31,7 @@ from peritus.api.schemas.audit import (
 )
 from peritus.audit.export import (
     export_filename,
+    sources_to_bibtex,
     sources_to_csv,
     sources_to_ris,
 )
@@ -85,7 +86,7 @@ async def corpus_report_export(
     format: ExportFormat = ExportFormat.CSV,
     decision: SourceDecision = SourceDecision.ALL,
 ) -> Response:
-    """Download the screening ledger as CSV or RIS.
+    """Download the screening ledger as CSV, RIS or BibTeX.
 
     RIS carries the sources into Covidence, Zotero and EndNote, which is what
     makes a grey-literature find usable in the review the reviewer is actually
@@ -110,6 +111,10 @@ async def corpus_report_export(
         body = sources_to_ris(rows)
         media_type = "application/x-research-info-systems"
         extension = "ris"
+    elif format is ExportFormat.BIBTEX:
+        body = sources_to_bibtex(rows)
+        media_type = "application/x-bibtex"
+        extension = "bib"
     else:
         body = sources_to_csv(rows)
         media_type = "text/csv"
