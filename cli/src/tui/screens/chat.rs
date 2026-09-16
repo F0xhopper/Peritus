@@ -302,7 +302,7 @@ impl ChatScreen {
         }));
     }
 
-    pub async fn tick(&mut self) {
+    pub fn tick(&mut self) {
         let events: Vec<ChatEvent> = match &mut self.rx {
             Some(rx) => {
                 let mut b = Vec::new();

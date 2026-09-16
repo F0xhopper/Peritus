@@ -433,7 +433,7 @@ impl BuildScreen {
         self.chat_ready = false;
     }
 
-    pub async fn tick(&mut self) -> bool {
+    pub fn tick(&mut self) -> bool {
         // A rejected cancel (e.g. the build already finished — 409) must
         // un-latch, or the footer shows "Cancelling…" forever.
         let cancel_err = self.cancel_failed.lock().ok().and_then(|mut g| g.take());

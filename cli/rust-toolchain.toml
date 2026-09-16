@@ -1,5 +1,11 @@
-# CI uses dtolnay/rust-toolchain@stable; pin the same here so a local build,
-# `cargo fmt` and clippy all agree with the gate.
+# CI uses dtolnay/rust-toolchain@stable, and this asks for the same channel so a
+# local build, `cargo fmt` and clippy use the same toolchain as the gate.
+#
+# `stable` is a moving target, not a pin: it selects whatever stable you last
+# installed. A local toolchain two releases behind CI's passes `just lint-cli`
+# and still fails the gate, because each clippy release adds lints — which is
+# exactly how `unused_async_trait_impl` (new in 1.98) reached main green.
+# Run `rustup update stable` before trusting a local clippy run.
 [toolchain]
 channel = "stable"
 components = ["rustfmt", "clippy"]

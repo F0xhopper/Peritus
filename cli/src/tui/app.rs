@@ -737,7 +737,7 @@ async fn tick_screens(app: &mut App) {
 
     // Tick the build stream; capture done state before dropping the borrow.
     let build_done = if let Some(build) = &mut app.build {
-        build.tick().await
+        build.tick()
     } else {
         false
     };
@@ -769,7 +769,7 @@ async fn tick_screens(app: &mut App) {
     }
 
     if let Some(chat) = &mut app.chat {
-        chat.tick().await;
+        chat.tick();
     }
 }
 
