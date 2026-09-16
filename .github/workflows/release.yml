@@ -9,9 +9,17 @@ permissions:
   contents: write
 
 jobs:
+  # A tag push used to build and publish binaries with no gate at all, so a tag
+  # on a red commit shipped. CI is the same workflow every pull request runs.
+  ci:
+    name: CI
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build ${{ matrix.target }}
+    needs: ci
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
         include:
@@ -22,7 +30,7 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -45,7 +53,7 @@ jobs:
           tar -czf "$archive" -C "target/${{ matrix.target }}/release" peritus
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: peritus-${{ matrix.target }}
           path: cli/${{ env.ARCHIVE }}
@@ -54,8 +62,9 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v7
         with:
           path: dist
           merge-multiple: true

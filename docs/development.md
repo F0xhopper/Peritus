@@ -141,14 +141,23 @@ nothing reaches production without passing it.
 
 | Job | What |
 |---|---|
-| `api` | ruff, mypy, migrations, pytest against a real `pgvector/pgvector:pg17` service, and a CLI smoke check |
+| `api` | ruff, `ruff format --check`, mypy, `pip-audit` on the production lock, migrations, pytest against a real `pgvector/pgvector:pg17` service with a 67% coverage floor, and a CLI smoke check |
 | `api-image` | Builds the production Dockerfile and runs it the way Fly does: migrations twice (the second must be a no-op), `/health` and `/ready`, and the worker's SIGTERM drain (must exit 0) |
-| `web` | eslint, `tsc --noEmit`, vitest, `next build` |
+| `web` | eslint, `prettier --check`, `tsc --noEmit`, `npm audit --audit-level=high`, vitest, `next build` |
 | `web-e2e` | Playwright across seven device profiles |
 | `web-lighthouse` | LCP < 2.5s, CLS < 0.1, TBT < 200ms, on public and authenticated pages |
-| `cli` | `cargo check --locked` |
+| `cli` | `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo audit` |
 
-`just check` runs everything except the DB tests.
+Every job has a `timeout-minutes`, and a pull request touching only `docs/**` or
+`**/*.md` runs none of them — a push to `main` still runs the full suite, because
+that is the gate production depends on.
+
+`just check` runs everything except the DB tests and the audits; `just audit`
+runs those three separately, since they fail on the world changing rather than on
+this repository changing.
+
+The coverage floor is a ratchet. Raise it when coverage rises; never lower it to
+make a red run green.
 
 ## Conventions that matter
 

@@ -69,7 +69,15 @@ format:
     cd web && npx prettier --write .
     cd cli && cargo fmt
 
-# Every check CI runs, except the DB-backed tests (see `test-db`).
+# The dependency audits CI runs, for all three ecosystems. Separate from
+# `check` because they hit the network and fail on the world changing rather
+# than on this repository changing.
+audit:
+    cd api && uv export --frozen --no-dev --no-hashes --no-emit-project -o /tmp/peritus-audit.txt && uvx pip-audit -r /tmp/peritus-audit.txt
+    cd web && npm audit --audit-level=high
+    cd cli && cargo audit
+
+# Every check CI runs, except the DB-backed tests (see `test-db`) and the audits.
 check: lint test lint-web build-web lint-cli
 
 # ── CLI ──────────────────────────────────────────────────────────────────────

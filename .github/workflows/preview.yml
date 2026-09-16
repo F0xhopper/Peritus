@@ -28,6 +28,7 @@ jobs:
     # Pull requests from forks get no secrets; skip rather than fail.
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment:
       name: preview-web
       url: ${{ steps.deploy.outputs.url }}
