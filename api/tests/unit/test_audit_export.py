@@ -69,6 +69,7 @@ def _read_csv(text: str) -> list[dict[str, str]]:
 
 # ── CSV ──
 
+
 def test_csv_carries_both_decisions_with_provenance():
     rows = _read_csv(sources_to_csv([_accepted(), _rejected()]))
     assert [r["decision"] for r in rows] == ["accepted", "rejected"]
@@ -111,9 +112,7 @@ def test_csv_flattens_newlines_out_of_values():
 def test_csv_handles_legacy_rows_with_no_provenance():
     """Sources predating migrations 009/012 export as blanks, not as 'plan'."""
     rows = _read_csv(
-        sources_to_csv(
-            [_accepted(discovered_via=None, validator_model=None, rubric_version=None)]
-        )
+        sources_to_csv([_accepted(discovered_via=None, validator_model=None, rubric_version=None)])
     )
     assert rows[0]["discovered_via"] == ""
     assert rows[0]["discovery_method"] == "unknown"
@@ -122,11 +121,12 @@ def test_csv_handles_legacy_rows_with_no_provenance():
 
 # ── RIS ──
 
+
 def test_ris_record_is_well_formed():
     record = source_to_ris(_accepted())
     lines = record.split("\r\n")
-    assert lines[0] == "TY  - RPRT"          # pdf → report, the grey-lit shape
-    assert lines[-1] == "ER  -"              # mandatory terminator
+    assert lines[0] == "TY  - RPRT"  # pdf → report, the grey-lit shape
+    assert lines[-1] == "ER  -"  # mandatory terminator
     assert "TI  - Grey literature in evidence synthesis" in lines
     assert "UR  - https://example.org/report.pdf" in lines
     assert "PY  - 2026" in lines
@@ -145,9 +145,7 @@ def test_ris_keywords_carry_the_covered_concepts():
 
 
 def test_ris_note_carries_the_screening_record():
-    note = next(
-        line for line in source_to_ris(_rejected()).split("\r\n") if line.startswith("N1")
-    )
+    note = next(line for line in source_to_ris(_rejected()).split("\r\n") if line.startswith("N1"))
     assert "Peritus screening decision: rejected" in note
     assert "Exclusion reason: thin content, no methodology" in note
     assert "Rubric version: v3-concepts-q5r6" in note
@@ -157,9 +155,7 @@ def test_ris_note_carries_the_screening_record():
 
 
 def test_ris_note_names_the_concept_a_gapfill_search_was_run_for():
-    note = next(
-        line for line in source_to_ris(_accepted()).split("\r\n") if line.startswith("N1")
-    )
+    note = next(line for line in source_to_ris(_accepted()).split("\r\n") if line.startswith("N1"))
     assert "Gap-filled for concept: publication bias" in note
 
 

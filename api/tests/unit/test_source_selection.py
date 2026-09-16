@@ -85,7 +85,9 @@ from peritus.sources.triage import (
 # ── helpers ──────────────────────────────────────────────────────────────────
 
 
-def _candidate(title: str, url: str = "", st: SourceType = SourceType.WEB, **meta) -> SourceCandidate:
+def _candidate(
+    title: str, url: str = "", st: SourceType = SourceType.WEB, **meta
+) -> SourceCandidate:
     return SourceCandidate(
         source_type=st,
         url=url or f"https://x.test/{title.replace(' ', '-')}",
@@ -238,7 +240,9 @@ async def test_an_unscored_must_have_is_still_fetched():
 @pytest.mark.asyncio
 async def test_a_must_have_fragment_is_marked_partial_not_found():
     """One question of the Summa satisfied "Summa Theologiae" on job 53."""
-    stub, _ = _scripted_triage({"SUMMA THEOLOGIAE: The natural law (Prima Secundae Partis, Q. 94)": 6})
+    stub, _ = _scripted_triage(
+        {"SUMMA THEOLOGIAE: The natural law (Prima Secundae Partis, Q. 94)": 6}
+    )
     fragment = _candidate(
         "SUMMA THEOLOGIAE: The natural law (Prima Secundae Partis, Q. 94)",
         "https://www.newadvent.org/summa/2094.htm",
@@ -338,7 +342,10 @@ async def test_every_ranked_candidate_gets_an_outcome():
         ranked, budget=10, caps={SourceType.EXA: 1}, floor=6.0, outcomes=outcomes
     )
     assert [outcomes[id(t.candidate)][1] for t in ranked] == [
-        OUTCOME_FETCHED, OUTCOME_FAILED, OUTCOME_FETCHED, OUTCOME_CAPPED,
+        OUTCOME_FETCHED,
+        OUTCOME_FAILED,
+        OUTCOME_FETCHED,
+        OUTCOME_CAPPED,
     ]
 
 
@@ -400,7 +407,9 @@ async def test_search_outcomes_distinguish_empty_ok_and_raised():
     assert (await _safe_search("wikipedia", _SearchStub(), "q", 5)).status == STATUS_EMPTY
     ok = await _safe_search("wikipedia", _SearchStub(results=[_candidate("x")]), "q", 5)
     assert ok.status == STATUS_OK
-    raised = await _safe_search("pdf", _SearchStub(raise_=RuntimeError("HTTP 429 Too Many Requests")), "q", 5)
+    raised = await _safe_search(
+        "pdf", _SearchStub(raise_=RuntimeError("HTTP 429 Too Many Requests")), "q", 5
+    )
     assert raised.status == STATUS_RATE_LIMITED
     boom = await _safe_search("pdf", _SearchStub(raise_=ValueError("bad json")), "q", 5)
     assert boom.status == STATUS_ERROR
@@ -430,9 +439,19 @@ def test_extent_classification(title, url, extent):
     ("title", "wanted", "author", "expected"),
     [
         ("The Cambridge Companion To The Summa Theologiae", "Summa Theologiae", "", False),
-        ("Elements of moral theology, based on the Summa Theologiae", "Summa Theologiae", "", False),
+        (
+            "Elements of moral theology, based on the Summa Theologiae",
+            "Summa Theologiae",
+            "",
+            False,
+        ),
         ("Summa Theologica, Part I-II (Pars Prima Secundae)", "Summa Theologiae", "", True),
-        ("St. Thomas Aquinas The Summa Contra Gentiles", "Summa Contra Gentiles", "Thomas Aquinas", True),
+        (
+            "St. Thomas Aquinas The Summa Contra Gentiles",
+            "Summa Contra Gentiles",
+            "Thomas Aquinas",
+            True,
+        ),
         ("Concerning being and essence = (De ente et essentia)", "De Ente et Essentia", "", True),
         ("The Meditations of Marcus Aurelius", "Meditations", "", True),
         ("A blog post about breakfast", "Meditations", "", False),
@@ -447,8 +466,12 @@ def test_a_title_about_a_work_is_not_the_work(title, wanted, author, expected):
 def test_ocr_noise_is_not_prose():
     from peritus.sources.canonical import looks_like_prose
 
-    assert looks_like_prose("The natural law is nothing else than the rational creature's participation. " * 200)
-    assert not looks_like_prose('c    %  X^>    AkA^y    UA    flli*  n^.\'  0J"r    tyw^  I  /u"f ' * 300)
+    assert looks_like_prose(
+        "The natural law is nothing else than the rational creature's participation. " * 200
+    )
+    assert not looks_like_prose(
+        'c    %  X^>    AkA^y    UA    flli*  n^.\'  0J"r    tyw^  I  /u"f ' * 300
+    )
 
 
 def test_an_archive_volume_is_partial_whatever_its_title():
@@ -507,7 +530,9 @@ async def test_the_resolver_stops_at_the_first_whole_hit():
     assert tried == [ROUTE_GUTENBERG, ROUTE_ARCHIVE]
     assert resolution.whole
     priority = [c.title for c in resolution.candidates if c.metadata.get("fetch_priority")]
-    assert priority == ["The Summa Theologica"], "only the best hit — the whole one — jumps the queue"
+    assert priority == ["The Summa Theologica"], (
+        "only the best hit — the whole one — jumps the queue"
+    )
     assert {c.metadata["discovered_via"] for c in resolution.candidates} == {"canonical"}
 
 
@@ -538,8 +563,10 @@ async def test_a_failed_route_is_recorded_and_the_next_one_tried():
 
 @pytest.mark.asyncio
 async def test_a_non_public_domain_book_skips_the_public_domain_routes():
-    with patch.object(canonical_module, "_exa_primary_route", lambda w, e: _async([])), \
-         patch.object(canonical_module, "_exa_open_route", lambda w, e: _async([])):
+    with (
+        patch.object(canonical_module, "_exa_primary_route", lambda w, e: _async([])),
+        patch.object(canonical_module, "_exa_open_route", lambda w, e: _async([])),
+    ):
         [resolution] = await resolve_works(
             [MustHaveWork("Aquinas", kind="book", open_text=True)], exa_search=object()
         )
@@ -558,8 +585,14 @@ def test_must_have_outcomes_are_judged_on_the_accepted_corpus():
     ]
     passed = [
         ("https://a", {"must_have_title": "Summa Theologiae", "must_have_extent": EXTENT_PARTIAL}),
-        ("https://b", {"must_have_title": "Summa Contra Gentiles", "must_have_extent": EXTENT_WHOLE}),
-        ("https://c", {"must_have_title": "Summa Contra Gentiles", "must_have_extent": EXTENT_PARTIAL}),
+        (
+            "https://b",
+            {"must_have_title": "Summa Contra Gentiles", "must_have_extent": EXTENT_WHOLE},
+        ),
+        (
+            "https://c",
+            {"must_have_title": "Summa Contra Gentiles", "must_have_extent": EXTENT_PARTIAL},
+        ),
     ]
     outcomes = {o["title"]: o for o in must_have_outcomes(works, [], passed)}
     assert outcomes["Summa Theologiae"]["status"] == FOUND_PARTIAL
@@ -586,10 +619,16 @@ def test_substance_of_a_source():
 # ── 4.A/4.B: composition caps ────────────────────────────────────────────────
 
 
-def _vs(title: str, tier: str = "secondary", substance: str = SUBSTANCE_FULL, q=8.0, r=8.0, abstract=900):
+def _vs(
+    title: str, tier: str = "secondary", substance: str = SUBSTANCE_FULL, q=8.0, r=8.0, abstract=900
+):
     return ValidatedSource(
         raw=RawSource(
-            SourceType.OPENALEX, f"https://x.test/{title}", title, None, "x" * 2000,
+            SourceType.OPENALEX,
+            f"https://x.test/{title}",
+            title,
+            None,
+            "x" * 2000,
             metadata={"abstract": "a" * abstract},
         ),
         quality_score=q,
@@ -605,11 +644,14 @@ def _vs(title: str, tier: str = "secondary", substance: str = SUBSTANCE_FULL, q=
 
 def test_abstract_stubs_are_dropped_but_shares_are_not_capped_by_default():
     """Primary texts must be present; overviews and abstracts beside them are fine."""
-    passed = [_vs(f"full{i}") for i in range(4)] + [
-        _vs(f"abstract{i}", substance=SUBSTANCE_ABSTRACT) for i in range(4)
-    ] + [_vs(f"overview{i}", tier="tertiary") for i in range(4)] + [
-        _vs("blurb", substance=SUBSTANCE_ABSTRACT, abstract=300),
-    ]
+    passed = (
+        [_vs(f"full{i}") for i in range(4)]
+        + [_vs(f"abstract{i}", substance=SUBSTANCE_ABSTRACT) for i in range(4)]
+        + [_vs(f"overview{i}", tier="tertiary") for i in range(4)]
+        + [
+            _vs("blurb", substance=SUBSTANCE_ABSTRACT, abstract=300),
+        ]
+    )
     kept, dropped = apply_composition_caps(passed)
     assert [(d.raw.title, d.drop_reason) for d in dropped] == [("blurb", DROP_ABSTRACT_TOO_SHORT)]
     assert len(kept) == 12
@@ -618,18 +660,22 @@ def test_abstract_stubs_are_dropped_but_shares_are_not_capped_by_default():
 def test_share_caps_still_work_when_switched_on(monkeypatch):
     monkeypatch.setattr(settings, "COMPOSITION_ABSTRACT_SHARE_CAP", 0.15)
     monkeypatch.setattr(settings, "COMPOSITION_TERTIARY_SHARE_CAP", 0.25)
-    passed = [_vs(f"full{i}") for i in range(14)] + [
-        _vs("stub-best", substance=SUBSTANCE_ABSTRACT, q=9, r=9),
-        _vs("stub-mid", substance=SUBSTANCE_ABSTRACT, q=8, r=8),
-        _vs("stub-worst", substance=SUBSTANCE_ABSTRACT, q=6, r=6),
-    ] + [
-        _vs("wikipedia", tier="tertiary", r=9),
-        _vs("studyguides", tier="tertiary", r=7),
-        _vs("guide2", tier="tertiary", r=7),
-        _vs("guide3", tier="tertiary", r=6.5),
-        _vs("guide4", tier="tertiary", r=6.2),
-        _vs("listicle", tier="tertiary", r=6),
-    ]
+    passed = (
+        [_vs(f"full{i}") for i in range(14)]
+        + [
+            _vs("stub-best", substance=SUBSTANCE_ABSTRACT, q=9, r=9),
+            _vs("stub-mid", substance=SUBSTANCE_ABSTRACT, q=8, r=8),
+            _vs("stub-worst", substance=SUBSTANCE_ABSTRACT, q=6, r=6),
+        ]
+        + [
+            _vs("wikipedia", tier="tertiary", r=9),
+            _vs("studyguides", tier="tertiary", r=7),
+            _vs("guide2", tier="tertiary", r=7),
+            _vs("guide3", tier="tertiary", r=6.5),
+            _vs("guide4", tier="tertiary", r=6.2),
+            _vs("listicle", tier="tertiary", r=6),
+        ]
+    )
     _, dropped = apply_composition_caps(passed)
     reasons = {d.raw.title: d.drop_reason for d in dropped}
     # 23 accepted → 3 abstract-only and 5 tertiary allowed.
@@ -650,13 +696,15 @@ def test_corpus_composition_reports_the_numbers_the_plan_is_judged_by():
     ]
     passed[0].covered_concepts = ["natural law", "metaphysics"]
     dropped = [
-        DroppedSource(_raw(5000), 0.0, 0.0, "below threshold"),     # judged junk
+        DroppedSource(_raw(5000), 0.0, 0.0, "below threshold"),  # judged junk
         DroppedSource(_raw(5000), 0.0, 0.0, "duplicate of https://y"),  # not a verdict
-        DroppedSource(_raw(5000), 0.0, 0.0, "validation error"),    # not a verdict
+        DroppedSource(_raw(5000), 0.0, 0.0, "validation error"),  # not a verdict
         DroppedSource(_raw(5000), 7.0, 5.0, "below threshold"),
     ]
     corpus = corpus_composition(
-        passed, dropped, ["natural law", "metaphysics", "epistemology"],
+        passed,
+        dropped,
+        ["natural law", "metaphysics", "epistemology"],
         must_have=[{"title": "Summa", "status": FOUND_WHOLE}],
     )
     assert corpus["primary_share"] == 0.25
@@ -695,7 +743,10 @@ def test_openalex_puts_readable_works_first_keeping_relevance_order():
         _candidate("pmc paper", st=SourceType.OPENALEX, pmcid="PMC1"),
     ]
     assert [c.title for c in prefer_readable(records)] == [
-        "oa paper", "pmc paper", "catalogue record", "another record",
+        "oa paper",
+        "pmc paper",
+        "catalogue record",
+        "another record",
     ]
 
 
@@ -711,8 +762,12 @@ def test_a_must_have_mark_survives_an_identity_merge():
     plain = _candidate("Summa", "https://a.test/summa", st=SourceType.OPENALEX)
     plain.identifiers = Identifiers.build(doi="10.1234/summa")
     marked = _candidate(
-        "Summa", "https://b.test/summa", st=SourceType.EXA,
-        fetch_priority=True, must_have_title="Summa", must_have_extent=EXTENT_WHOLE,
+        "Summa",
+        "https://b.test/summa",
+        st=SourceType.EXA,
+        fetch_priority=True,
+        must_have_title="Summa",
+        must_have_extent=EXTENT_WHOLE,
     )
     marked.identifiers = Identifiers.build(doi="10.1234/summa")
     [kept], _ = deduplicate_candidates([plain, marked])

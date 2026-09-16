@@ -59,8 +59,8 @@ CSV_COLUMNS: tuple[str, ...] = (
 RIS_TYPES: dict[str, str] = {
     "openalex": "JOUR",  # peer-reviewed scholarship, whatever the discipline
     "pubmed": "JOUR",
-    "arxiv": "UNPB",   # unpublished work — preprint
-    "pdf": "RPRT",     # report — the usual grey-literature shape
+    "arxiv": "UNPB",  # unpublished work — preprint
+    "pdf": "RPRT",  # report — the usual grey-literature shape
     "gutenberg": "BOOK",
     "youtube": "VIDEO",
     "wikipedia": "ELEC",
@@ -202,8 +202,7 @@ def _ris_note(row: dict[str, Any]) -> str:
     parts.append(
         (
             "Note",
-            "Automated first-pass screening; not a substitute for independent "
-            "human review.",
+            "Automated first-pass screening; not a substitute for independent human review.",
         )
     )
     return " | ".join(

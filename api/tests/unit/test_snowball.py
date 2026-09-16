@@ -22,7 +22,11 @@ from peritus.sources.snowball import (
 def _seed(url: str, **ids) -> ValidatedSource:
     return ValidatedSource(
         raw=RawSource(
-            SourceType.OPENALEX, url, "Seed", None, "text",
+            SourceType.OPENALEX,
+            url,
+            "Seed",
+            None,
+            "text",
             identifiers=Identifiers.build(**ids),
         ),
         quality_score=8.0,
@@ -104,20 +108,24 @@ def _stub_http(by_edge: dict[str, dict[str, list[dict]]]):
 def test_seeds_come_only_from_sources_semantic_scholar_can_resolve():
     """A junk paper's references never enter, because only *accepted* sources
     are passed in — and one with no identifier at all cannot be looked up."""
-    seeds = seed_ids([
-        _seed("https://a.test", arxiv_id="2001.01234"),
-        _seed("https://b.test", doi="10.1234/x"),
-        _seed("https://c.test", pmid="99"),
-        _seed("https://d.test"),  # no identifiers — not resolvable
-    ])
+    seeds = seed_ids(
+        [
+            _seed("https://a.test", arxiv_id="2001.01234"),
+            _seed("https://b.test", doi="10.1234/x"),
+            _seed("https://c.test", pmid="99"),
+            _seed("https://d.test"),  # no identifiers — not resolvable
+        ]
+    )
     assert [key for key, _ in seeds] == ["arXiv:2001.01234", "DOI:10.1234/x", "PMID:99"]
 
 
 def test_seeds_are_deduplicated_so_one_work_is_not_expanded_twice():
-    seeds = seed_ids([
-        _seed("https://a.test", doi="10.1234/x"),
-        _seed("https://b.test", doi="10.1234/x"),
-    ])
+    seeds = seed_ids(
+        [
+            _seed("https://a.test", doi="10.1234/x"),
+            _seed("https://b.test", doi="10.1234/x"),
+        ]
+    )
     assert len(seeds) == 1
 
 
@@ -139,13 +147,15 @@ async def test_a_paper_two_seeds_agree_on_outranks_a_more_cited_one():
         _seed("https://a.test", doi="10.1234/a"),
         _seed("https://b.test", doi="10.1234/b"),
     ]
-    with _stub_http({
-        "references": {
-            "DOI:10.1234/a": [shared, single, *_tail("a")],
-            "DOI:10.1234/b": [shared, *_tail("b")],
-        },
-        "citations": {},
-    }):
+    with _stub_http(
+        {
+            "references": {
+                "DOI:10.1234/a": [shared, single, *_tail("a")],
+                "DOI:10.1234/b": [shared, *_tail("b")],
+            },
+            "citations": {},
+        }
+    ):
         candidates = await snowball(seeds, max_candidates=5)
 
     assert candidates[0].title == "Agreed upon"
@@ -158,13 +168,13 @@ async def test_the_percentile_floor_travels_across_fields():
     seed's own reference list is what "endorsed" means, whatever the numbers."""
     top = _paper("Top of a low-count list", 4, "10.1111/top")
     tail = [_paper(f"Tail {i}", 1, f"10.1111/t{i}") for i in range(9)]
-    with _stub_http({
-        "references": {"DOI:10.1234/a": [top, *tail]},
-        "citations": {},
-    }):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=10
-        )
+    with _stub_http(
+        {
+            "references": {"DOI:10.1234/a": [top, *tail]},
+            "citations": {},
+        }
+    ):
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=10)
 
     titles = [c.title for c in candidates]
     assert "Top of a low-count list" in titles, "4 citations would fail a flat floor of 50"
@@ -175,13 +185,13 @@ async def test_the_percentile_floor_travels_across_fields():
 async def test_forward_citations_are_found_and_tagged():
     """Backward citation finds a seed's ancestors; forward citation finds the
     work that superseded it, which the planner cannot know about."""
-    with _stub_http({
-        "references": {"DOI:10.1234/a": [_paper("Ancestor", 900, "10.1111/anc"), *_tail("b")]},
-        "citations": {"DOI:10.1234/a": [_paper("Successor", 900, "10.2222/suc"), *_tail("f")]},
-    }):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=10
-        )
+    with _stub_http(
+        {
+            "references": {"DOI:10.1234/a": [_paper("Ancestor", 900, "10.1111/anc"), *_tail("b")]},
+            "citations": {"DOI:10.1234/a": [_paper("Successor", 900, "10.2222/suc"), *_tail("f")]},
+        }
+    ):
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=10)
 
     tagged = {c.title: c.metadata["discovered_via"] for c in candidates}
     assert tagged["Ancestor"] == DISCOVERED_BACKWARD
@@ -193,13 +203,13 @@ async def test_candidates_enter_triage_rather_than_bypassing_it():
     """Snowball results are ranked against the same brief as everything else —
     which is also the only way to compare their acceptance rate with the plan
     fetchers'."""
-    with _stub_http({
-        "references": {"DOI:10.1234/a": [_paper("A reference", 900, "10.1111/r"), *_tail("b")]},
-        "citations": {},
-    }):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=10
-        )
+    with _stub_http(
+        {
+            "references": {"DOI:10.1234/a": [_paper("A reference", 900, "10.1111/r"), *_tail("b")]},
+            "citations": {},
+        }
+    ):
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=10)
 
     candidate = candidates[0]
     assert candidate.url == "https://doi.org/10.1111/r", "DOI resolver earns triage's prior"
@@ -214,13 +224,13 @@ async def test_candidates_enter_triage_rather_than_bypassing_it():
 @pytest.mark.asyncio
 async def test_a_seed_is_never_proposed_back_to_itself():
     self_ref = _paper("The seed itself", 900, "10.1234/a")
-    with _stub_http({
-        "references": {"DOI:10.1234/a": [self_ref, *_tail("b")]},
-        "citations": {},
-    }):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=10
-        )
+    with _stub_http(
+        {
+            "references": {"DOI:10.1234/a": [self_ref, *_tail("b")]},
+            "citations": {},
+        }
+    ):
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=10)
     assert candidates == []
 
 
@@ -229,16 +239,18 @@ async def test_the_seen_set_excludes_work_an_earlier_round_already_considered():
     seen = SeenSet()
     seen.identity_keys.add("doi:10.1111/known")
 
-    with _stub_http({
-        "references": {
-            "DOI:10.1234/a": [
-                _paper("Already seen", 900, "10.1111/known"),
-                _paper("New", 901, "10.1111/new"),
-                *_tail("b"),
-            ]
-        },
-        "citations": {},
-    }):
+    with _stub_http(
+        {
+            "references": {
+                "DOI:10.1234/a": [
+                    _paper("Already seen", 900, "10.1111/known"),
+                    _paper("New", 901, "10.1111/new"),
+                    *_tail("b"),
+                ]
+            },
+            "citations": {},
+        }
+    ):
         candidates = await snowball(
             [_seed("https://a.test", doi="10.1234/a")], seen, max_candidates=10
         )
@@ -249,9 +261,7 @@ async def test_the_seen_set_excludes_work_an_earlier_round_already_considered():
 async def test_the_per_round_cap_is_respected():
     papers = [_paper(f"P{i}", 900 - i, f"10.1111/p{i}") for i in range(20)]
     with _stub_http({"references": {"DOI:10.1234/a": papers}, "citations": {}}):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=3
-        )
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=3)
     assert len(candidates) == 3
 
 
@@ -274,13 +284,15 @@ async def test_a_co_cited_work_is_marked_to_be_fetched_ahead_of_everything():
         _seed("https://a.test", doi="10.1234/a"),
         _seed("https://b.test", doi="10.1234/b"),
     ]
-    with _stub_http({
-        "references": {
-            "DOI:10.1234/a": [shared, lone, *_tail("a")],
-            "DOI:10.1234/b": [shared, *_tail("b")],
-        },
-        "citations": {},
-    }):
+    with _stub_http(
+        {
+            "references": {
+                "DOI:10.1234/a": [shared, lone, *_tail("a")],
+                "DOI:10.1234/b": [shared, *_tail("b")],
+            },
+            "citations": {},
+        }
+    ):
         candidates = await snowball(seeds, max_candidates=5)
 
     by_title = {c.title: c for c in candidates}
@@ -301,13 +313,13 @@ async def test_a_work_with_no_route_to_its_text_is_not_proposed():
     actually be read."""
     no_text = _paper("Metaphors We Live By", 9000, "10.1111/book", abstract="")
     readable = _paper("A paper with an abstract", 900, "10.1111/paper")
-    with _stub_http({
-        "references": {"DOI:10.1234/a": [no_text, readable, *_tail("b")]},
-        "citations": {},
-    }):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=10
-        )
+    with _stub_http(
+        {
+            "references": {"DOI:10.1234/a": [no_text, readable, *_tail("b")]},
+            "citations": {},
+        }
+    ):
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=10)
 
     titles = [c.title for c in candidates]
     assert "A paper with an abstract" in titles
@@ -319,36 +331,43 @@ async def test_an_open_access_pdf_makes_an_abstractless_work_fetchable():
     """No abstract is not the same as no text. A PDF, an arXiv id or a PMCID is
     a route to the full document, and dropping those would throw away the best
     thing snowballing finds."""
-    with _stub_http({
-        "references": {
-            "DOI:10.1234/a": [
-                _paper("Has a PDF", 900, "10.1111/pdf", abstract="",
-                       openAccessPdf={"url": "https://x.test/p.pdf"}),
-                *_tail("b"),
-            ]
-        },
-        "citations": {},
-    }):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=10
-        )
+    with _stub_http(
+        {
+            "references": {
+                "DOI:10.1234/a": [
+                    _paper(
+                        "Has a PDF",
+                        900,
+                        "10.1111/pdf",
+                        abstract="",
+                        openAccessPdf={"url": "https://x.test/p.pdf"},
+                    ),
+                    *_tail("b"),
+                ]
+            },
+            "citations": {},
+        }
+    ):
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=10)
     assert [c.title for c in candidates] == ["Has a PDF"]
     assert candidates[0].metadata["oa_pdf_url"] == "https://x.test/p.pdf"
 
 
 @pytest.mark.asyncio
 async def test_an_arxiv_id_alone_is_a_route_to_full_text():
-    with _stub_http({
-        "references": {
-            "DOI:10.1234/a": [
-                {**_paper("Preprint", 900, "10.1111/pre", abstract=""),
-                 "externalIds": {"DOI": "10.1111/pre", "ArXiv": "2001.01234"}},
-                *_tail("b"),
-            ]
-        },
-        "citations": {},
-    }):
-        candidates = await snowball(
-            [_seed("https://a.test", doi="10.1234/a")], max_candidates=10
-        )
+    with _stub_http(
+        {
+            "references": {
+                "DOI:10.1234/a": [
+                    {
+                        **_paper("Preprint", 900, "10.1111/pre", abstract=""),
+                        "externalIds": {"DOI": "10.1111/pre", "ArXiv": "2001.01234"},
+                    },
+                    *_tail("b"),
+                ]
+            },
+            "citations": {},
+        }
+    ):
+        candidates = await snowball([_seed("https://a.test", doi="10.1234/a")], max_candidates=10)
     assert [c.title for c in candidates] == ["Preprint"]

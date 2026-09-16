@@ -21,18 +21,28 @@ from peritus.search.domain import SearchResponse, SearchResult, SourceRef
 
 def _expert() -> Expert:
     return Expert(
-        id=1, name="thomism", topic="Thomism", status=ExpertStatus.READY,
-        tier=ExpertTier.STANDARD, config=ExpertConfig.from_tier(ExpertTier.STANDARD),
-        created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        id=1,
+        name="thomism",
+        topic="Thomism",
+        status=ExpertStatus.READY,
+        tier=ExpertTier.STANDARD,
+        config=ExpertConfig.from_tier(ExpertTier.STANDARD),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 
 def _hit(chunk_id: int, score: float) -> SearchResult:
     return SearchResult(
-        chunk_id=chunk_id, expert_id=1, source_id=chunk_id, text=f"passage {chunk_id}",
-        context_text=None, score=score,
-        source_ref=SourceRef(source_id=chunk_id, title=f"S{chunk_id}", source_type="web",
-                             quality_score=7.0),
+        chunk_id=chunk_id,
+        expert_id=1,
+        source_id=chunk_id,
+        text=f"passage {chunk_id}",
+        context_text=None,
+        score=score,
+        source_ref=SourceRef(
+            source_id=chunk_id, title=f"S{chunk_id}", source_type="web", quality_score=7.0
+        ),
     )
 
 
@@ -121,13 +131,17 @@ async def test_a_follow_up_is_searched_and_reranked_as_the_question_it_stands_fo
 
 
 def test_floor_keeps_the_best_ranked_when_too_few_clear_it():
-    enriched = [EnrichedResult(result=_hit(c, s)) for c, s in [(1, 0.5), (2, 0.1), (3, 0.09), (4, 0.01)]]
+    enriched = [
+        EnrichedResult(result=_hit(c, s)) for c, s in [(1, 0.5), (2, 0.1), (3, 0.09), (4, 0.01)]
+    ]
     kept = apply_relevance_floor(enriched, [True] * 4, floor=0.15, min_keep=3)
     assert [e.result.chunk_id for e in kept] == [1, 2, 3]
 
 
 def test_floor_counts_unique_chunks_toward_the_minimum():
-    enriched = [EnrichedResult(result=_hit(c, s)) for c, s in [(1, 0.5), (1, 0.4), (2, 0.1), (3, 0.05)]]
+    enriched = [
+        EnrichedResult(result=_hit(c, s)) for c, s in [(1, 0.5), (1, 0.4), (2, 0.1), (3, 0.05)]
+    ]
     kept = apply_relevance_floor(enriched, [True] * 4, floor=0.15, min_keep=2)
     assert [e.result.chunk_id for e in kept] == [1, 1, 2]
 
@@ -147,11 +161,14 @@ def test_conversation_block_is_the_last_exchange_trimmed():
 
 
 def test_plan_parses_fallbacks_and_standalone_question():
-    plan = QueryPlan.from_tool_input({
-        "subqueries": ["a b c"],
-        "fallback_queries": ["x", " ", "y", "z"],
-        "standalone_question": "  What is X?  ",
-    }, "what is it?")
+    plan = QueryPlan.from_tool_input(
+        {
+            "subqueries": ["a b c"],
+            "fallback_queries": ["x", " ", "y", "z"],
+            "standalone_question": "  What is X?  ",
+        },
+        "what is it?",
+    )
     assert plan.fallback_queries == ["x", "y"]
     assert plan.standalone_question == "What is X?"
     assert QueryPlan.from_tool_input({"subqueries": ["a"]}, "q").standalone_question is None
@@ -162,8 +179,12 @@ async def test_audit_matches_steps_to_passages_by_chunk_not_position():
     ctx = await agent.gather_context(_expert(), "What is the end of man?")
 
     payload = build_audit_payload(
-        trail=ctx.trail, passages=ctx.passages, cited={2}, answer_text="…[2]",
-        has_contradiction=False, graph_ready=True,
+        trail=ctx.trail,
+        passages=ctx.passages,
+        cited={2},
+        answer_text="…[2]",
+        has_contradiction=False,
+        graph_ready=True,
     )
     by_chunk = {d["chunk_id"]: d for d in payload["dispositions"]}
     # Chunk 2 ranked second but the floor kept it out, so passage [2] is chunk 3.

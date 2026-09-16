@@ -50,7 +50,7 @@ class Label:
     """One human decision about one source."""
 
     url: str
-    decision: str                       # "keep" | "drop"
+    decision: str  # "keep" | "drop"
     reason: str = ""
     labeller: str = "human"
     covered_concepts: list[str] = field(default_factory=list)
@@ -129,8 +129,7 @@ class ScreeningReport:
             f"  golden set      {self.golden_file}",
             f"  rubric          {self.rubric_version}",
             f"  validator       {self.validator_model}",
-            "  second opinion  "
-            + (f"on ({self.review_model})" if self.second_opinion else "off"),
+            "  second opinion  " + (f"on ({self.review_model})" if self.second_opinion else "off"),
             f"  scored          {self.scored} of {self.labelled} labelled",
         ]
         if self.missing_from_capture:
@@ -182,9 +181,7 @@ def load_capture(path: Path) -> list[RawSource]:
             if not line:
                 continue
             try:
-                sources[_norm(json.loads(line).get("url", ""))] = record_to_source(
-                    json.loads(line)
-                )
+                sources[_norm(json.loads(line).get("url", ""))] = record_to_source(json.loads(line))
             except Exception as exc:
                 logger.warning("%s:%d unreadable capture line: %s", path, line_no, exc)
     return list(sources.values())
@@ -260,7 +257,8 @@ async def run(golden_path: Path, capture_path: Path) -> ScreeningReport:
         kappa=cohen_kappa(predicted, actual),
         mean_concept_jaccard=(
             round(sum(o.concept_agreement for o in outcomes) / len(outcomes), 4)
-            if outcomes else 0.0
+            if outcomes
+            else 0.0
         ),
         by_source_type=_split(outcomes, lambda o: o.source_type),
         by_discovered_via=_split(outcomes, lambda o: o.discovered_via.split(":")[0]),

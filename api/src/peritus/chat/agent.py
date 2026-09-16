@@ -33,7 +33,11 @@ logger = get_logger(__name__)
 
 ASKER_LEVELS: tuple[str, ...] = ("novice", "informed", "expert")
 QUESTION_TYPES: tuple[str, ...] = (
-    "orientation", "specific_fact", "comparison", "how_to", "open_ended",
+    "orientation",
+    "specific_fact",
+    "comparison",
+    "how_to",
+    "open_ended",
 )
 
 # What each classification means for the answer. Deterministic rather than asked
@@ -74,21 +78,14 @@ _TYPE_GUIDANCE: dict[str, str] = {
         "they want to do something. Give the practice or the steps, in order, "
         "concretely enough to act on"
     ),
-    "open_ended": (
-        "answer directly first, then develop only what genuinely serves the "
-        "question"
-    ),
+    "open_ended": ("answer directly first, then develop only what genuinely serves the question"),
 }
 
-_DEFAULT_DIRECTIVE = (
-    "Answer the question directly and concretely, organised by the subject."
-)
+_DEFAULT_DIRECTIVE = "Answer the question directly and concretely, organised by the subject."
 
 _PLAN_TOOL: dict[str, Any] = {
     "name": "create_plan",
-    "description": (
-        "Plan the answer: how to search for evidence, and who is asking for what."
-    ),
+    "description": ("Plan the answer: how to search for evidence, and who is asking for what."),
     "input_schema": {
         "type": "object",
         "properties": {
@@ -207,7 +204,8 @@ class QueryPlan:
         qtype = data.get("question_type")
         directive = data.get("answer_directive")
         fallbacks = [
-            f.strip() for f in data.get("fallback_queries") or []
+            f.strip()
+            for f in data.get("fallback_queries") or []
             if isinstance(f, str) and f.strip()
         ]
         standalone = data.get("standalone_question")
@@ -215,9 +213,7 @@ class QueryPlan:
         return cls(
             fallback_queries=fallbacks[:2],
             standalone_question=(
-                standalone.strip()
-                if isinstance(standalone, str) and standalone.strip()
-                else None
+                standalone.strip() if isinstance(standalone, str) and standalone.strip() else None
             ),
             subqueries=subqueries or [question],
             asker_level=level if level in ASKER_LEVELS else "informed",
@@ -256,9 +252,9 @@ class RetrievalStep:
     source_title: str
     source_type: str
     quality_score: float | None
-    rank: int          # 1-based, in the order retrieval produced it
-    score: float       # fused RRF score, or the reranker's score when reranking ran
-    via: str           # "primary" | "coverage_followup" (the fallback-query pass)
+    rank: int  # 1-based, in the order retrieval produced it
+    score: float  # fused RRF score, or the reranker's score when reranking ran
+    via: str  # "primary" | "coverage_followup" (the fallback-query pass)
 
 
 @dataclass
@@ -286,6 +282,7 @@ class RetrievalTrail:
 @dataclass
 class RetrievedContext:
     """Everything the composition step needs, produced by the retrieval pipeline."""
+
     context_block: str
     passages: list[Passage]
     has_contradiction: bool
@@ -330,7 +327,9 @@ def _contradiction_block(points: list[str]) -> str:
     the same rule the note restates: name the dispute, never the bibliography.
     """
     stated = "\n".join(f"  • {p}" for p in points[:3])
-    return f"{_CONTRADICTION_NOTE}\n\nWhat is disputed:\n{stated}" if stated else _CONTRADICTION_NOTE
+    return (
+        f"{_CONTRADICTION_NOTE}\n\nWhat is disputed:\n{stated}" if stated else _CONTRADICTION_NOTE
+    )
 
 
 def build_user_message(
@@ -353,8 +352,7 @@ def build_user_message(
     """
     plan = plan or QueryPlan.fallback(question)
     contradiction = (
-        f"{_contradiction_block(contradiction_points or [])}\n\n"
-        if has_contradiction else ""
+        f"{_contradiction_block(contradiction_points or [])}\n\n" if has_contradiction else ""
     )
     return {
         "role": "user",
@@ -375,8 +373,14 @@ def build_user_message(
 # Models that think adaptively — and, for Sonnet 5 and later, by default when
 # the request says nothing. Everything else takes the plain request.
 _ADAPTIVE_THINKING_PREFIXES = (
-    "claude-sonnet-5", "claude-opus-5", "claude-fable", "claude-mythos",
-    "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-sonnet-4-6",
+    "claude-sonnet-5",
+    "claude-opus-5",
+    "claude-fable",
+    "claude-mythos",
+    "claude-opus-4-8",
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
 )
 
 
@@ -414,11 +418,13 @@ def build_cached_system(persona_style: str | None, topic: str) -> list[TextBlock
     prompt cache at ~0.1× input price once it clears the model's minimum
     cacheable prefix.
     """
-    return [{
-        "type": "text",
-        "text": build_system_prompt(persona_style, topic),
-        "cache_control": {"type": "ephemeral"},
-    }]
+    return [
+        {
+            "type": "text",
+            "text": build_system_prompt(persona_style, topic),
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
 
 
 def _trim_start(history_len: int) -> int:
@@ -463,7 +469,7 @@ def build_composition_messages(
     final message, which sits after the last breakpoint, so nothing here varies
     a cached prefix.
     """
-    trimmed = list(history[_trim_start(len(history)):])
+    trimmed = list(history[_trim_start(len(history)) :])
     while trimmed and trimmed[0].get("role") != "user":
         trimmed.pop(0)
 
@@ -474,14 +480,16 @@ def build_composition_messages(
         last = messages[-1]
         content = last.get("content")
         if isinstance(content, str) and content.strip():
-            last["content"] = [{
-                "type": "text",
-                "text": content,
-                "cache_control": {"type": "ephemeral"},
-            }]
-    messages.append(build_user_message(
-        question, context_block, plan, has_contradiction, contradiction_points
-    ))
+            last["content"] = [
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+    messages.append(
+        build_user_message(question, context_block, plan, has_contradiction, contradiction_points)
+    )
     return messages
 
 
@@ -609,8 +617,7 @@ def _message_text(content: Any) -> str:
         return content
     if isinstance(content, list):
         return " ".join(
-            b.get("text", "") for b in content
-            if isinstance(b, dict) and b.get("type") == "text"
+            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
         )
     return ""
 
@@ -711,20 +718,25 @@ class ChatAgent:
             context_cap=cfg.max_context_passages,
         )
         shown = {p.chunk_id for p in indexed}
-        yield ("context", RetrievedContext(
-            context_block=context_block,
-            passages=indexed,
-            # What the prompt carries, so only the passages it carries count.
-            has_contradiction=any(
-                e.has_contradiction for e in in_context if e.result.chunk_id in shown
+        yield (
+            "context",
+            RetrievedContext(
+                context_block=context_block,
+                passages=indexed,
+                # What the prompt carries, so only the passages it carries count.
+                has_contradiction=any(
+                    e.has_contradiction for e in in_context if e.result.chunk_id in shown
+                ),
+                contradiction_points=_dedupe(
+                    p
+                    for e in in_context
+                    if e.result.chunk_id in shown
+                    for p in e.contradiction_points
+                ),
+                trail=trail,
+                plan=plan,
             ),
-            contradiction_points=_dedupe(
-                p for e in in_context if e.result.chunk_id in shown
-                for p in e.contradiction_points
-            ),
-            trail=trail,
-            plan=plan,
-        ))
+        )
 
     async def gather_context(
         self, expert: Expert, question: str, history: list[dict] | None = None
@@ -747,7 +759,11 @@ class ChatAgent:
 
         client = get_anthropic_client()
         messages = build_composition_messages(
-            history, question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+            history,
+            question,
+            ctx.context_block,
+            ctx.plan,
+            ctx.has_contradiction,
             ctx.contradiction_points,
         )
         resp = await client.messages.create(  # type: ignore[call-overload]
@@ -794,7 +810,8 @@ class ChatAgent:
             conversation = _conversation_block(history)
             content = (
                 f"Conversation so far:\n{conversation}\n\nQuestion: {question}"
-                if conversation else f"Question: {question}"
+                if conversation
+                else f"Question: {question}"
             )
 
             client = get_anthropic_client()

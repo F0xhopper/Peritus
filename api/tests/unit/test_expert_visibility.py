@@ -32,6 +32,7 @@ OTHER = "22222222-2222-2222-2222-222222222222"
 
 # ── clause shape (no DB) ────────────────────────────────────────────────────
 
+
 def test_ownership_clause_never_matches_on_visibility():
     """The ownership clause is shared with conversations; widening it would leak
     every user's chat history on a public expert."""
@@ -67,6 +68,7 @@ def test_readable_clause_is_a_strict_superset_of_ownership():
 
 
 # ── ownership predicate (no DB) ─────────────────────────────────────────────
+
 
 def _expert(owner_id, visibility=ExpertVisibility.PRIVATE) -> Expert:
     return Expert(
@@ -184,7 +186,9 @@ async def test_unlisted_is_no_longer_a_visibility(db_pool):
             await conn.execute(
                 "UPDATE experts SET visibility = 'unlisted' WHERE id = $1", expert.id
             )
-    assert await ExpertRepository(db_pool).get_for_user("quiet", OTHER, include_unowned=False) is None
+    assert (
+        await ExpertRepository(db_pool).get_for_user("quiet", OTHER, include_unowned=False) is None
+    )
 
 
 @pytest.mark.asyncio
@@ -246,7 +250,7 @@ async def test_unpublish_keeps_curation_but_hides_the_expert(db_pool):
 
     reloaded = await repo.get_by_id(expert.id)
     assert reloaded.catalog.visibility is ExpertVisibility.PRIVATE
-    assert reloaded.catalog.blurb == "A good one"      # re-publishing is one command
+    assert reloaded.catalog.blurb == "A good one"  # re-publishing is one command
     assert reloaded.catalog.published_at is None
     assert await repo.list_catalog() == []
 

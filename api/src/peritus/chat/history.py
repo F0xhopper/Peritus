@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Turn:
-    role: str   # "user" or "assistant"
+    role: str  # "user" or "assistant"
     content: str
 
 

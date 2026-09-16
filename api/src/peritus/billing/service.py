@@ -110,9 +110,7 @@ class EntitlementService:
             )
         return state
 
-    async def hold_for_job(
-        self, owner_id: str, job_id: int, tier: ExpertTier
-    ) -> None:
+    async def hold_for_job(self, owner_id: str, job_id: int, tier: ExpertTier) -> None:
         """Take the credit hold for an enqueued job. Raises if it cannot be paid.
 
         Idempotent per job: a hold already recorded for this job id is accepted
@@ -134,19 +132,18 @@ class EntitlementService:
             )
         logger.info(
             "Held %d credit(s) for job %d (owner=%s, tier=%s)",
-            required, job_id, owner_id, tier.value,
+            required,
+            job_id,
+            owner_id,
+            tier.value,
         )
 
-    async def cap_for_build(
-        self, owner_id: str, tier: ExpertTier
-    ) -> float:
+    async def cap_for_build(self, owner_id: str, tier: ExpertTier) -> float:
         """The per-build spend ceiling that applies to this owner at this tier."""
         account = await self._repo.get_account(owner_id)
         plan = get_plan(account.get("plan") if account else None)
         override = account.get("spend_cap_override_usd") if account else None
-        return spend_cap_usd(
-            tier, plan, float(override) if override is not None else None
-        )
+        return spend_cap_usd(tier, plan, float(override) if override is not None else None)
 
     async def record_job_cap(self, job_id: int, cap_usd: float | None) -> None:
         """Snapshot the cap onto the job so a later price change can't re-judge it."""
@@ -194,12 +191,20 @@ class EntitlementService:
         """
         await self.ensure_account(owner_id, email)
         balance = await self._repo.grant(
-            owner_id, amount, reason=reason, source=source, actor=actor,
+            owner_id,
+            amount,
+            reason=reason,
+            source=source,
+            actor=actor,
             external_ref=external_ref,
         )
         logger.info(
             "Granted %d credit(s) to %s by %s (%s) — balance now %d",
-            amount, owner_id, actor or "unknown", reason or "no reason given", balance,
+            amount,
+            owner_id,
+            actor or "unknown",
+            reason or "no reason given",
+            balance,
         )
         return balance
 

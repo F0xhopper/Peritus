@@ -206,9 +206,7 @@ class Settings:
     # (docs/plans/corpus-quality.md, phase 7) calls for measuring agreement with
     # and without it on the screening golden set before flipping the default,
     # and turning it on is a one-line change once those numbers exist.
-    VALIDATE_SECOND_OPINION: bool = (
-        os.getenv("VALIDATE_SECOND_OPINION", "false").lower() == "true"
-    )
+    VALIDATE_SECOND_OPINION: bool = os.getenv("VALIDATE_SECOND_OPINION", "false").lower() == "true"
     # Empty = use CLAUDE_MODEL. Named separately so the reviewer can be pinned
     # while chat's model moves, since the rubric version is tied to the pair.
     VALIDATE_REVIEW_MODEL: str = os.getenv("VALIDATE_REVIEW_MODEL", "")

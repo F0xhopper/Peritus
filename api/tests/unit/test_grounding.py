@@ -25,8 +25,10 @@ def _enriched(chunk_id: int, text: str = "some passage text") -> EnrichedResult:
         context_text=None,
         score=0.5,
         source_ref=SourceRef(
-            source_id=chunk_id * 10, title=f"Source {chunk_id}",
-            source_type="web", quality_score=8.0,
+            source_id=chunk_id * 10,
+            title=f"Source {chunk_id}",
+            source_type="web",
+            quality_score=8.0,
         ),
     )
     return EnrichedResult(result=result)
@@ -55,9 +57,7 @@ def test_parse_cited_indices_ignores_out_of_range():
 def test_parse_citations_reports_out_of_range_markers_separately():
     """Dropping an invented citation from the list is not enough — the caller has
     to know it was there, because the marker is still sitting in the prose."""
-    cited, dangling = parse_citations(
-        "Claim [1]. Another [2][7]. Bogus [999].", num_passages=3
-    )
+    cited, dangling = parse_citations("Claim [1]. Another [2][7]. Bogus [999].", num_passages=3)
     assert cited == {1, 2}
     assert dangling == {7, 999}
 
@@ -111,7 +111,9 @@ def test_system_prompt_asks_for_markdown_after_the_contract_and_before_the_perso
 
 def test_passage_opens_with_its_contextual_note():
     e = _enriched(1, text="The mite feeds on fat body tissue.")
-    e.result.context_text = "From a 2019 PNAS study of Varroa feeding;\n the section reporting its main finding."
+    e.result.context_text = (
+        "From a 2019 PNAS study of Varroa feeding;\n the section reporting its main finding."
+    )
     block, passages = build_grounded_context([e], max_passages=5)
     assert block.startswith(
         "[1] Source 1 — Web · Q:8.0\n"

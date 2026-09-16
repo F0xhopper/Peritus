@@ -125,9 +125,7 @@ async def leave_shared_expert(slug: str, user: AuthUser = Depends(require_user))
     is a different, destructive action with its own route.
     """
     pool = get_pool()
-    expert = await ExpertRepository(pool).get_for_user(
-        slug, user.id, include_unowned=user.is_admin
-    )
+    expert = await ExpertRepository(pool).get_for_user(slug, user.id, include_unowned=user.is_admin)
     if not expert:
         raise HTTPException(status_code=404, detail="Expert not found")
     if expert.is_owned_by(user.id, include_unowned=user.is_admin):

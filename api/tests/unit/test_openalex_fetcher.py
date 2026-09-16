@@ -23,11 +23,19 @@ from peritus.sources.fetchers.openalex import (
 )
 from peritus.sources.fulltext import METHOD_LANDING, FullText
 
-_WORDS = ["the", "ottoman", "land", "code", "reshaped", "provincial", "property", "relations", "and", "taxation"]
-LONG_INVERTED = {
-    word: list(range(i, MIN_ABSTRACT, len(_WORDS)))
-    for i, word in enumerate(_WORDS)
-}
+_WORDS = [
+    "the",
+    "ottoman",
+    "land",
+    "code",
+    "reshaped",
+    "provincial",
+    "property",
+    "relations",
+    "and",
+    "taxation",
+]
+LONG_INVERTED = {word: list(range(i, MIN_ABSTRACT, len(_WORDS))) for i, word in enumerate(_WORDS)}
 assert len(_reconstruct_abstract(LONG_INVERTED)) >= MIN_ABSTRACT
 
 
@@ -62,6 +70,7 @@ def _work(**overrides) -> dict:
 
 # ── stub transport ────────────────────────────────────────────────────────────
 
+
 class _StubResponse:
     def __init__(self, *, json_data=None, status_code=200):
         self._json = json_data
@@ -70,7 +79,9 @@ class _StubResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             raise httpx.HTTPStatusError(
-                "error", request=httpx.Request("GET", "https://x.test"), response=None  # type: ignore[arg-type]
+                "error",
+                request=httpx.Request("GET", "https://x.test"),
+                response=None,  # type: ignore[arg-type]
             )
 
     def json(self):
@@ -107,6 +118,7 @@ def _patch_http(client: _StubClient):
 
 # ── abstract reconstruction ───────────────────────────────────────────────────
 
+
 def test_reconstruct_abstract_orders_words_by_position():
     inverted = {"beta": [1], "alpha": [0], "alpha,": [2]}
     assert _reconstruct_abstract(inverted) == "alpha beta alpha,"
@@ -119,6 +131,7 @@ def test_reconstruct_abstract_handles_missing_and_malformed():
 
 
 # ── candidate mapping ─────────────────────────────────────────────────────────
+
 
 def test_to_candidate_maps_work_fields():
     candidate = _to_candidate(_work())
@@ -157,10 +170,15 @@ def test_bare_doi_and_authors_helpers():
 
 # ── search ────────────────────────────────────────────────────────────────────
 
+
 async def test_search_maps_results_and_filters_thin_ones():
-    client = _StubClient(_StubResponse(json_data={
-        "results": [_work(), _work(display_name="", id="https://openalex.org/W2")],
-    }))
+    client = _StubClient(
+        _StubResponse(
+            json_data={
+                "results": [_work(), _work(display_name="", id="https://openalex.org/W2")],
+            }
+        )
+    )
     with _patch_http(client):
         candidates = await OpenAlexFetcher().search("ottoman land tenure")
 
@@ -179,6 +197,7 @@ async def test_search_returns_empty_on_error():
 
 # ── fetch ─────────────────────────────────────────────────────────────────────
 
+
 async def test_fetch_falls_back_to_abstract_when_no_full_text():
     candidate = _to_candidate(_work(best_oa_location=None))
     assert candidate is not None
@@ -194,9 +213,11 @@ async def test_fetch_falls_back_to_abstract_when_no_full_text():
 
 
 async def test_fetch_uses_landing_page_text_when_long_enough():
-    candidate = _to_candidate(_work(
-        best_oa_location={"pdf_url": None, "landing_page_url": "https://example.org/paper"},
-    ))
+    candidate = _to_candidate(
+        _work(
+            best_oa_location={"pdf_url": None, "landing_page_url": "https://example.org/paper"},
+        )
+    )
     assert candidate is not None
     long_text = "A full scholarly argument. " * 200
     assert len(long_text) >= MIN_FULL_TEXT
@@ -213,7 +234,9 @@ async def test_fetch_uses_landing_page_text_when_long_enough():
     assert source.metadata["full_text_method"] == METHOD_LANDING
     assert long_text[:50] in source.text
     # The abstract is prepended ahead of the body.
-    assert source.text.index(candidate.metadata["abstract"][:40]) < source.text.index(long_text[:40])
+    assert source.text.index(candidate.metadata["abstract"][:40]) < source.text.index(
+        long_text[:40]
+    )
 
 
 async def test_fetch_returns_none_for_stub_abstract():
@@ -230,6 +253,7 @@ async def test_fetch_returns_none_for_stub_abstract():
 
 
 # ── DOI lookup (snowballing) ──────────────────────────────────────────────────
+
 
 async def test_fetch_by_doi_resolves_to_candidate():
     client = _StubClient(_StubResponse(json_data=_work()))

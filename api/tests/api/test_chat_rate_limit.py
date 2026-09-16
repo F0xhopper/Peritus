@@ -27,19 +27,33 @@ CONV_ID = "11111111-1111-1111-1111-111111111111"
 
 def _expert() -> Expert:
     return Expert(
-        id=1, name="stoicism", topic="stoicism", status=ExpertStatus.READY,
-        tier=ExpertTier.STANDARD, config=ExpertConfig.from_tier(ExpertTier.STANDARD),
-        owner_id=ADMIN_ID, created_at=datetime.now(UTC), updated_at=datetime.now(UTC),
+        id=1,
+        name="stoicism",
+        topic="stoicism",
+        status=ExpertStatus.READY,
+        tier=ExpertTier.STANDARD,
+        config=ExpertConfig.from_tier(ExpertTier.STANDARD),
+        owner_id=ADMIN_ID,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 
 def _conversation() -> Conversation:
     now = datetime.now(UTC)
     return Conversation(
-        id=CONV_ID, expert_id=1, owner_id=ADMIN_ID, title=None, message_count=0,
-        streaming_started_at=None, created_at=now, last_message_at=now,
-        expert_slug="stoicism", expert_topic="stoicism",
-        expert_persona_name="Marcus", expert_status="ready",
+        id=CONV_ID,
+        expert_id=1,
+        owner_id=ADMIN_ID,
+        title=None,
+        message_count=0,
+        streaming_started_at=None,
+        created_at=now,
+        last_message_at=now,
+        expert_slug="stoicism",
+        expert_topic="stoicism",
+        expert_persona_name="Marcus",
+        expert_status="ready",
     )
 
 
@@ -84,10 +98,12 @@ def stateless_backend():
     async def _stream(*_args, **_kwargs):
         yield {"type": "done"}
 
-    with patch("peritus.api.routes.chat.get_pool", return_value=MagicMock()), \
-         patch("peritus.api.routes.chat.ExpertRepository", return_value=repo), \
-         patch("peritus.api.routes.chat.get_readiness", new=_readiness), \
-         patch("peritus.chat.streaming.stream_expert_answer", new=_stream):
+    with (
+        patch("peritus.api.routes.chat.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.chat.ExpertRepository", return_value=repo),
+        patch("peritus.api.routes.chat.get_readiness", new=_readiness),
+        patch("peritus.chat.streaming.stream_expert_answer", new=_stream),
+    ):
         yield repo
 
 
@@ -123,9 +139,7 @@ async def test_throttling_happens_before_any_lookup(client, tight_limit, statele
     stateless_backend.get_for_user.assert_not_called()
 
 
-async def test_another_account_is_unaffected(
-    client, tight_limit, stateless_backend, current_user
-):
+async def test_another_account_is_unaffected(client, tight_limit, stateless_backend, current_user):
     await _post_chat(client)
     assert (await _post_chat(client)).status_code == 429
 
@@ -152,11 +166,13 @@ def stateful_backend():
     async def _stream(*_args, **_kwargs):
         yield {"type": "done"}
 
-    with patch("peritus.api.routes.conversations.get_pool", return_value=MagicMock()), \
-         patch("peritus.api.routes.conversations.ConversationRepository", return_value=convs), \
-         patch("peritus.api.routes.conversations.ExpertRepository", return_value=experts), \
-         patch("peritus.api.routes.conversations.get_readiness", new=_readiness), \
-         patch("peritus.chat.streaming.stream_expert_answer", new=_stream):
+    with (
+        patch("peritus.api.routes.conversations.get_pool", return_value=MagicMock()),
+        patch("peritus.api.routes.conversations.ConversationRepository", return_value=convs),
+        patch("peritus.api.routes.conversations.ExpertRepository", return_value=experts),
+        patch("peritus.api.routes.conversations.get_readiness", new=_readiness),
+        patch("peritus.chat.streaming.stream_expert_answer", new=_stream),
+    ):
         yield convs
 
 
@@ -179,9 +195,7 @@ async def test_the_two_surfaces_share_one_budget(
     assert (await _post_message(client)).status_code == 429
 
 
-async def test_a_throttled_message_does_not_claim_the_stream(
-    client, tight_limit, stateful_backend
-):
+async def test_a_throttled_message_does_not_claim_the_stream(client, tight_limit, stateful_backend):
     """A rejected request must leave no state behind — a claim taken and never
     released locks the conversation out of answers until it goes stale."""
     await _post_message(client)

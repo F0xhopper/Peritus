@@ -86,6 +86,7 @@ ENDPOINTS = [
 
 # ── owner scoping ──
 
+
 @pytest.mark.parametrize("path", [*ENDPOINTS, "/experts/stoicism/corpus-report/export"])
 @pytest.mark.asyncio
 async def test_unreadable_expert_404s_everywhere(client, path):
@@ -99,6 +100,7 @@ async def test_unreadable_expert_404s_everywhere(client, path):
 
 # ── corpus report ──
 
+
 @pytest.mark.asyncio
 async def test_corpus_report_defaults_to_the_whole_ledger(client):
     service = AsyncMock()
@@ -109,7 +111,7 @@ async def test_corpus_report_defaults_to_the_whole_ledger(client):
 
     assert resp.status_code == 200
     kwargs = service.corpus_report.await_args.kwargs
-    assert kwargs["decision"] == "all"       # rejected sources included by default
+    assert kwargs["decision"] == "all"  # rejected sources included by default
     assert kwargs["sort"] == "decision"
     assert kwargs["limit"] == 100
     assert kwargs["offset"] == 0
@@ -162,6 +164,7 @@ def test_declared_sorts_match_the_implemented_sql():
 
 # ── export ──
 
+
 def _export_row(passed: bool) -> dict:
     return {
         "id": 1 if passed else 2,
@@ -188,9 +191,7 @@ def _export_row(passed: bool) -> dict:
 @pytest.mark.asyncio
 async def test_csv_export_includes_rejected_rows_and_downloads(client):
     service = AsyncMock()
-    service.export_rows = AsyncMock(
-        return_value=([_export_row(True), _export_row(False)], False)
-    )
+    service.export_rows = AsyncMock(return_value=([_export_row(True), _export_row(False)], False))
     p1, p2, p3, p4 = _patched(service)
     with p1, p2, p3, p4:
         resp = await client.get("/experts/stoicism/corpus-report/export?format=csv")
@@ -234,6 +235,7 @@ async def test_truncated_export_fails_rather_than_returning_a_partial_ledger(cli
 
 # ── contradictions: "not computed" is not "none found" ──
 
+
 @pytest.mark.asyncio
 async def test_contradictions_are_not_computed_before_the_graph_exists(client):
     """The service must be told the readiness, and the real service returns a
@@ -250,7 +252,7 @@ async def test_contradictions_are_not_computed_before_the_graph_exists(client):
     assert body["computed"] is False
     assert body["readiness"] == "chat_ready"
     assert body["contradictions"] == []
-    assert body["summary"]["contradictions"] is None      # not 0
+    assert body["summary"]["contradictions"] is None  # not 0
     assert "not looked for" in body["unavailable_reason"]
 
 
@@ -273,8 +275,15 @@ async def test_contradictions_pass_readiness_and_paging_to_the_service(client):
 
 
 @pytest.mark.parametrize(
-    "query", ["limit=0", "limit=1000", "passages_per_side=0", "passages_per_side=50",
-              "excerpt_chars=1", "excerpt_chars=100000"]
+    "query",
+    [
+        "limit=0",
+        "limit=1000",
+        "passages_per_side=0",
+        "passages_per_side=50",
+        "excerpt_chars=1",
+        "excerpt_chars=100000",
+    ],
 )
 @pytest.mark.asyncio
 async def test_contradictions_bound_their_payload_parameters(client, query):
@@ -285,6 +294,7 @@ async def test_contradictions_bound_their_payload_parameters(client, query):
 
 
 # ── screening flow and coverage ──
+
 
 @pytest.mark.asyncio
 async def test_screening_flow_is_served(client):
@@ -309,6 +319,7 @@ async def test_coverage_is_served(client):
 
 
 # ── answer audits ──
+
 
 @pytest.mark.asyncio
 async def test_answer_audits_list_accepts_a_conversation_filter(client):

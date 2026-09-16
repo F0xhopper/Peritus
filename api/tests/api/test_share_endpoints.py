@@ -71,9 +71,7 @@ def _patched(experts: AsyncMock, shares: AsyncMock | None = None):
     return (
         patch("peritus.api.routes.sharing.get_pool", return_value=MagicMock()),
         patch("peritus.api.routes.sharing.ExpertRepository", return_value=experts),
-        patch(
-            "peritus.api.routes.sharing.ShareRepository", return_value=shares or AsyncMock()
-        ),
+        patch("peritus.api.routes.sharing.ShareRepository", return_value=shares or AsyncMock()),
     )
 
 
@@ -113,8 +111,11 @@ async def test_share_state_when_off_has_no_token():
         resp = await _call(_app(OWNER), "GET", "/experts/thomism/share")
 
     assert resp.json() == {
-        "enabled": False, "token": None, "created_at": None,
-        "viewer_count": 0, "uploaded_source_count": 0,
+        "enabled": False,
+        "token": None,
+        "created_at": None,
+        "viewer_count": 0,
+        "uploaded_source_count": 0,
     }
 
 

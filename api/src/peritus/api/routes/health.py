@@ -40,9 +40,7 @@ async def ready():
                 await conn.fetchval("SELECT 1")
     except TimeoutError as exc:
         logger.warning("Readiness probe timed out acquiring a database connection")
-        raise HTTPException(
-            status_code=503, detail="Database connection pool exhausted"
-        ) from exc
+        raise HTTPException(status_code=503, detail="Database connection pool exhausted") from exc
     except Exception as exc:
         logger.warning("Readiness probe failed: %s", exc)
         raise HTTPException(status_code=503, detail="Database not ready") from exc

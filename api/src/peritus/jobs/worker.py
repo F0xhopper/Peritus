@@ -72,24 +72,36 @@ def _log_environment_banner() -> None:
     s = settings
     logger.info(
         "Worker environment: db=%s pool=%d-%d acquire_timeout=%.0fs cmd_timeout=%.0fs",
-        _redact_host(s.DATABASE_URL), s.DB_POOL_MIN_SIZE, s.DB_POOL_MAX_SIZE,
-        s.DB_ACQUIRE_TIMEOUT, s.DB_COMMAND_TIMEOUT,
+        _redact_host(s.DATABASE_URL),
+        s.DB_POOL_MIN_SIZE,
+        s.DB_POOL_MAX_SIZE,
+        s.DB_ACQUIRE_TIMEOUT,
+        s.DB_COMMAND_TIMEOUT,
     )
     logger.info(
         "Worker environment: heartbeat=%.0fs stale_timeout=%.0fs poll=%.0fs "
         "max_attempts=%d fetch_timeout=%.0fs",
-        s.WORKER_HEARTBEAT_INTERVAL, s.WORKER_STALE_TIMEOUT, s.WORKER_POLL_INTERVAL,
-        s.WORKER_MAX_ATTEMPTS, s.SOURCE_FETCH_TIMEOUT,
+        s.WORKER_HEARTBEAT_INTERVAL,
+        s.WORKER_STALE_TIMEOUT,
+        s.WORKER_POLL_INTERVAL,
+        s.WORKER_MAX_ATTEMPTS,
+        s.SOURCE_FETCH_TIMEOUT,
     )
     logger.info(
         "Worker environment: plan_model=%s fast_model=%s anthropic_timeout=%.0fs "
         "retries=%d batch_enabled=%s",
-        s.PLAN_MODEL, s.FAST_MODEL, s.ANTHROPIC_TIMEOUT, s.ANTHROPIC_MAX_RETRIES,
+        s.PLAN_MODEL,
+        s.FAST_MODEL,
+        s.ANTHROPIC_TIMEOUT,
+        s.ANTHROPIC_MAX_RETRIES,
         s.ANTHROPIC_BATCH_ENABLED,
     )
     keys = {
-        "anthropic": s.ANTHROPIC_API_KEY, "openai": s.OPENAI_API_KEY,
-        "exa": s.EXA_API_KEY, "mistral": s.MISTRAL_API_KEY, "cohere": s.COHERE_API_KEY,
+        "anthropic": s.ANTHROPIC_API_KEY,
+        "openai": s.OPENAI_API_KEY,
+        "exa": s.EXA_API_KEY,
+        "mistral": s.MISTRAL_API_KEY,
+        "cohere": s.COHERE_API_KEY,
     }
     logger.info(
         "Worker environment: api keys set=[%s] MISSING=[%s]",
@@ -202,7 +214,9 @@ class BuildWorker:
         else:
             logger.warning(
                 "Build worker poll still failing (attempt %d) — retrying in %.0fs: %r",
-                consecutive_failures, delay, exc,
+                consecutive_failures,
+                delay,
+                exc,
             )
         with suppress(TimeoutError):
             await asyncio.wait_for(self._stop.wait(), timeout=delay)
@@ -243,7 +257,9 @@ class BuildWorker:
             if n:
                 logger.warning(
                     "Reaped %d stale build job(s) (stale_timeout=%.0fs, protected=%s)",
-                    n, settings.WORKER_STALE_TIMEOUT, sorted(protected) or "none",
+                    n,
+                    settings.WORKER_STALE_TIMEOUT,
+                    sorted(protected) or "none",
                 )
             else:
                 # Proof of life for the reaper itself. Its silence is otherwise
@@ -251,7 +267,8 @@ class BuildWorker:
                 # stuck at 'running' looks identical either way.
                 logger.debug(
                     "Reaper ran: nothing stale (stale_timeout=%.0fs, protected=%s)",
-                    settings.WORKER_STALE_TIMEOUT, sorted(protected) or "none",
+                    settings.WORKER_STALE_TIMEOUT,
+                    sorted(protected) or "none",
                 )
         except Exception as exc:  # never let reaping kill the loop
             # %r, not %s: the likeliest failure here is now a bounded-acquire
@@ -293,7 +310,9 @@ class BuildWorker:
         except Exception as exc:
             logger.warning(
                 "Heartbeat for job %d failed, retrying in %.0fs: %r",
-                job_id, settings.WORKER_HEARTBEAT_INTERVAL, exc,
+                job_id,
+                settings.WORKER_HEARTBEAT_INTERVAL,
+                exc,
             )
             return True
 
@@ -352,12 +371,16 @@ class BuildWorker:
             await expert_repo.update_status(expert.id, ExpertStatus.BUILDING)
             if resume_from is None:
                 await expert_repo.reset_build_state(expert.id)
-            await self._jobs.append_event(job.id, "build_started", {
-                "type": "build_started",
-                "attempt": job.attempts,
-                "max_attempts": job.max_attempts,
-                **({"resumed_from": resume_from.value} if resume_from else {}),
-            })
+            await self._jobs.append_event(
+                job.id,
+                "build_started",
+                {
+                    "type": "build_started",
+                    "attempt": job.attempts,
+                    "max_attempts": job.max_attempts,
+                    **({"resumed_from": resume_from.value} if resume_from else {}),
+                },
+            )
 
             async def on_event(event: dict[str, Any]) -> None:
                 # Stage attribution for spend piggybacks on the progress events
@@ -389,16 +412,20 @@ class BuildWorker:
                 raise  # worker shutdown — propagate so _drain requeues it
 
             await expert_repo.update_status(expert.id, ExpertStatus.READY)
-            await self._jobs.append_event(job.id, "done", {
-                "type": "done",
-                "expert_id": result.expert_id,
-                "source_count": result.source_count,
-                "chunk_count": result.chunk_count,
-                "node_count": result.node_count,
-                "edge_count": result.edge_count,
-                "persona_name": result.persona_name,
-                "avg_quality": result.avg_quality,
-            })
+            await self._jobs.append_event(
+                job.id,
+                "done",
+                {
+                    "type": "done",
+                    "expert_id": result.expert_id,
+                    "source_count": result.source_count,
+                    "chunk_count": result.chunk_count,
+                    "node_count": result.node_count,
+                    "edge_count": result.edge_count,
+                    "persona_name": result.persona_name,
+                    "avg_quality": result.avg_quality,
+                },
+            )
             await self._jobs.mark_succeeded(job.id, self.worker_id)
             # The build produced a usable expert, so the hold stands. Record what
             # it actually cost against the ledger entry for reporting.
@@ -407,7 +434,9 @@ class BuildWorker:
                     await self._entitlements.settle_job(job.id, meter.spent_usd)
             logger.info(
                 "Job %d succeeded (expert=%d, cost=$%.4f)",
-                job.id, job.expert_id, meter.spent_usd if meter else 0.0,
+                job.id,
+                job.expert_id,
+                meter.spent_usd if meter else 0.0,
             )
 
         except SpendCapExceeded as exc:
@@ -454,9 +483,7 @@ class BuildWorker:
         """
         upload_id = (job.payload or {}).get("upload_id")
         if not isinstance(upload_id, int):
-            await self._jobs.mark_failed(
-                job.id, self.worker_id, "Ingest job has no upload_id"
-            )
+            await self._jobs.mark_failed(job.id, self.worker_id, "Ingest job has no upload_id")
             return
 
         cancelled = False
@@ -474,12 +501,16 @@ class BuildWorker:
 
         hb_task = asyncio.create_task(heartbeat_loop())
         try:
-            await self._jobs.append_event(job.id, "build_started", {
-                "type": "build_started",
-                "kind": "ingest_source",
-                "attempt": job.attempts,
-                "max_attempts": job.max_attempts,
-            })
+            await self._jobs.append_event(
+                job.id,
+                "build_started",
+                {
+                    "type": "build_started",
+                    "kind": "ingest_source",
+                    "attempt": job.attempts,
+                    "max_attempts": job.max_attempts,
+                },
+            )
 
             async def on_event(event: dict[str, Any]) -> None:
                 await self._jobs.append_event(job.id, event["type"], event)
@@ -498,13 +529,20 @@ class BuildWorker:
             await self._jobs.mark_succeeded(job.id, self.worker_id)
             logger.info(
                 "Ingest job %d succeeded (expert=%d, upload=%d)",
-                job.id, job.expert_id, upload_id,
+                job.id,
+                job.expert_id,
+                upload_id,
             )
 
         except _JobCancelled:
-            await self._jobs.append_event(job.id, "cancelled", {
-                "type": "cancelled", "message": "Upload cancelled",
-            })
+            await self._jobs.append_event(
+                job.id,
+                "cancelled",
+                {
+                    "type": "cancelled",
+                    "message": "Upload cancelled",
+                },
+            )
             logger.info("Ingest job %d cancelled", job.id)
         except asyncio.CancelledError:
             await self._jobs.release_for_shutdown(job.id, self.worker_id)
@@ -514,9 +552,14 @@ class BuildWorker:
             # A document we genuinely cannot read. Retrying will not change that,
             # so fail it now with the message written for the person who
             # uploaded it rather than burning the retry budget.
-            await self._jobs.append_event(job.id, "error", {
-                "type": "error", "message": str(exc),
-            })
+            await self._jobs.append_event(
+                job.id,
+                "error",
+                {
+                    "type": "error",
+                    "message": str(exc),
+                },
+            )
             await self._jobs.mark_failed(job.id, self.worker_id, str(exc))
             logger.info("Ingest job %d rejected: %s", job.id, exc)
         except Exception as exc:
@@ -539,13 +582,22 @@ class BuildWorker:
             backoff = settings.WORKER_BACKOFF_BASE * (2 ** (job.attempts - 1))
             logger.warning(
                 "Ingest job %d attempt %d/%d failed (%s) — retrying in %.0fs",
-                job.id, job.attempts, job.max_attempts, message, backoff,
+                job.id,
+                job.attempts,
+                job.max_attempts,
+                message,
+                backoff,
             )
             await self._jobs.requeue(job.id, self.worker_id, message, backoff)
             return
-        await self._jobs.append_event(job.id, "error", {
-            "type": "error", "message": message,
-        })
+        await self._jobs.append_event(
+            job.id,
+            "error",
+            {
+                "type": "error",
+                "message": message,
+            },
+        )
         await self._jobs.mark_failed(job.id, self.worker_id, message)
 
     async def _start_meter(self, job: BuildJob, expert) -> "BuildMeter | None":
@@ -584,13 +636,16 @@ class BuildWorker:
         logger.info("Job %d cancelled", job.id)
         # Best-effort — the expert row may already be deleted (cancel via DELETE).
         with suppress(Exception):
-            await self._jobs.append_event(job.id, "cancelled", {
-                "type": "cancelled", "message": "Build cancelled",
-            })
-        with suppress(Exception):
-            await expert_repo.update_status(
-                job.expert_id, ExpertStatus.FAILED, "Build cancelled"
+            await self._jobs.append_event(
+                job.id,
+                "cancelled",
+                {
+                    "type": "cancelled",
+                    "message": "Build cancelled",
+                },
             )
+        with suppress(Exception):
+            await expert_repo.update_status(job.expert_id, ExpertStatus.FAILED, "Build cancelled")
         # A cancelled build leaves nothing usable behind, so it is not charged.
         with suppress(Exception):
             await self._entitlements.refund_job(job.id, "Build cancelled")
@@ -629,13 +684,17 @@ class BuildWorker:
             with suppress(Exception):
                 await expert_repo.update_status(job.expert_id, ExpertStatus.FAILED, message)
         with suppress(Exception):
-            await self._jobs.append_event(job.id, "error", {
-                "type": "error",
-                "message": message,
-                "code": "spend_cap_exceeded",
-                "spent_usd": round(exc.spent_usd, 4),
-                "cap_usd": exc.cap_usd,
-            })
+            await self._jobs.append_event(
+                job.id,
+                "error",
+                {
+                    "type": "error",
+                    "message": message,
+                    "code": "spend_cap_exceeded",
+                    "spent_usd": round(exc.spent_usd, 4),
+                    "cap_usd": exc.cap_usd,
+                },
+            )
         await self._jobs.mark_failed(job.id, self.worker_id, message)
         with suppress(Exception):
             await self._entitlements.refund_job(job.id, "Build exceeded its spend cap")
@@ -649,12 +708,22 @@ class BuildWorker:
             backoff = settings.WORKER_BACKOFF_BASE * (2 ** (job.attempts - 1))
             logger.warning(
                 "Job %d attempt %d/%d failed: %s — retrying in %.0fs",
-                job.id, job.attempts, job.max_attempts, message, backoff,
+                job.id,
+                job.attempts,
+                job.max_attempts,
+                message,
+                backoff,
             )
-            await self._jobs.append_event(job.id, "retry", {
-                "type": "retry", "attempt": job.attempts,
-                "max_attempts": job.max_attempts, "message": message,
-            })
+            await self._jobs.append_event(
+                job.id,
+                "retry",
+                {
+                    "type": "retry",
+                    "attempt": job.attempts,
+                    "max_attempts": job.max_attempts,
+                    "message": message,
+                },
+            )
             await expert_repo.update_status(job.expert_id, ExpertStatus.QUEUED)
             await self._jobs.requeue(job.id, self.worker_id, message, backoff)
         else:
@@ -665,7 +734,12 @@ class BuildWorker:
             with suppress(Exception):
                 await self._entitlements.refund_job(job.id, f"Build failed: {message[:200]}")
             await expert_repo.update_status(job.expert_id, ExpertStatus.FAILED, message)
-            await self._jobs.append_event(job.id, "error", {
-                "type": "error", "message": message,
-            })
+            await self._jobs.append_event(
+                job.id,
+                "error",
+                {
+                    "type": "error",
+                    "message": message,
+                },
+            )
             await self._jobs.mark_failed(job.id, self.worker_id, message)

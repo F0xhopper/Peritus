@@ -28,7 +28,9 @@ async def test_the_catalogue_resolves_books_with_no_gutendex_call():
     gutendex = AsyncMock(return_value=([], False))
     with (
         patch.object(module, "_identify_books", AsyncMock(return_value=_BOOKS[:1])),
-        patch.object(module, "load_catalogue", AsyncMock(return_value=GutenbergCatalogue.from_csv_text(_CSV))),
+        patch.object(
+            module, "load_catalogue", AsyncMock(return_value=GutenbergCatalogue.from_csv_text(_CSV))
+        ),
         patch.object(module, "_search_gutendex", gutendex),
     ):
         [candidate] = await module.GutenbergFetcher().search("stoicism")
@@ -42,11 +44,15 @@ async def test_a_gutendex_timeout_costs_its_own_book_not_the_ones_already_resolv
     async def _gutendex(client, query, limit):
         if query == "Epictetus":
             return [], True  # timed out
-        return [{"id": 45109, "title": "Letters from a Stoic", "authors": [{"name": "Seneca"}]}], False
+        return [
+            {"id": 45109, "title": "Letters from a Stoic", "authors": [{"name": "Seneca"}]}
+        ], False
 
     with (
         patch.object(module, "_identify_books", AsyncMock(return_value=_BOOKS)),
-        patch.object(module, "load_catalogue", AsyncMock(return_value=GutenbergCatalogue.from_csv_text(_CSV))),
+        patch.object(
+            module, "load_catalogue", AsyncMock(return_value=GutenbergCatalogue.from_csv_text(_CSV))
+        ),
         patch.object(module, "_search_gutendex", _gutendex),
     ):
         candidates = await module.GutenbergFetcher().search("stoicism")

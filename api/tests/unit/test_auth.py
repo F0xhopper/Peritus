@@ -100,6 +100,7 @@ async def test_require_user_rejects_missing_bearer_when_enabled(hs256_env):
 
 # ── Owner-visibility scoping (pure) ──────────────────────────────────────────
 
+
 def test_visibility_clause_admin_includes_unowned():
     clause, params = repo._visibility_clause("uid-a", include_unowned=True, alias="e", idx=1)
     assert "e.owner_id = $1::uuid" in clause
@@ -115,6 +116,7 @@ def test_visibility_clause_user_own_only():
 
 
 # ── Email validation (schemas) ───────────────────────────────────────────────
+
 
 def test_otp_request_normalises_and_validates_email():
     from peritus.api.schemas.auth import OtpRequest
@@ -134,6 +136,7 @@ def test_otp_request_rejects_bad_email(bad):
 
 # ── Rate limiter (pure, sliding window) ──────────────────────────────────────
 
+
 def test_sliding_window_limiter_blocks_over_limit():
     from peritus.api.ratelimit import SlidingWindowLimiter
 
@@ -146,6 +149,7 @@ def test_sliding_window_limiter_blocks_over_limit():
 
 
 # ── Production fail-closed guard ─────────────────────────────────────────────
+
 
 def test_is_production_flag(monkeypatch):
     monkeypatch.setattr(settings, "PERITUS_ENV", "production", raising=False)

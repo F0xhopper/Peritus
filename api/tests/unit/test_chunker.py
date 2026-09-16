@@ -83,28 +83,32 @@ _PROSE = (
 
 
 def test_clean_text_drops_table_of_contents_lines():
-    toc = "\n".join([
-        "1. In what the office of a wise man consists ... 1",
-        "50. That God has proper knowledge of all things ... 80",
-        "67. Against those who say that the possible intellect is the imagination ... 281",
-    ])
+    toc = "\n".join(
+        [
+            "1. In what the office of a wise man consists ... 1",
+            "50. That God has proper knowledge of all things ... 80",
+            "67. Against those who say that the possible intellect is the imagination ... 281",
+        ]
+    )
     cleaned, stats = clean_text(f"{toc}\n\n{_PROSE}")
     assert cleaned == _PROSE
     assert stats.dropped_share > 0.2
 
 
 def test_clean_text_drops_reference_entries():
-    refs = "\n".join([
-        "22. Johnson RM, Evans JD, Robinson GE, Berenbaum MR (2009) Changes in transcript "
-        "abundance relating to colony collapse disorder in honey bees.",
-        "6. Blackburn, Simon. 1998. Realism and Truth: Wittgenstein, Wright, Rorty, and "
-        "Minimalism. Mind 107: 157–81. [Google Scholar] [CrossRef]",
-        "30. Lucas, J. R., The Phenomenon of Law in Hacker, P. M. S. and Raz, J., eds, "
-        "Law, Morality, and Society (Clarendon Press, 1977)",
-        "17. Id at 153.",
-        "19. Ibid., p. 11. Cf. C.G., 1, 22.",
-        "https://doi.org/10.1371/journal.pone.0000000",
-    ])
+    refs = "\n".join(
+        [
+            "22. Johnson RM, Evans JD, Robinson GE, Berenbaum MR (2009) Changes in transcript "
+            "abundance relating to colony collapse disorder in honey bees.",
+            "6. Blackburn, Simon. 1998. Realism and Truth: Wittgenstein, Wright, Rorty, and "
+            "Minimalism. Mind 107: 157–81. [Google Scholar] [CrossRef]",
+            "30. Lucas, J. R., The Phenomenon of Law in Hacker, P. M. S. and Raz, J., eds, "
+            "Law, Morality, and Society (Clarendon Press, 1977)",
+            "17. Id at 153.",
+            "19. Ibid., p. 11. Cf. C.G., 1, 22.",
+            "https://doi.org/10.1371/journal.pone.0000000",
+        ]
+    )
     cleaned, _ = clean_text(f"{_PROSE}\n\n{refs}")
     assert cleaned == _PROSE
 
@@ -146,8 +150,7 @@ def test_clean_text_keeps_a_long_paragraph_that_happens_to_end_like_a_toc_line()
 def test_numbered_list_items_are_not_sections():
     """A numbered line used to open a section — and a chunk — of its own."""
     items = "\n\n".join(
-        f"{i}. Possession and privation are opposed as a state and its absence"
-        for i in range(1, 7)
+        f"{i}. Possession and privation are opposed as a state and its absence" for i in range(1, 7)
     )
     chunks = chunk_text(f"{_PROSE}\n\n{items}", "Aristotle's Logic")
     assert len(chunks) == 1

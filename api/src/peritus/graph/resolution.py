@@ -78,7 +78,7 @@ def _normalise(text: str) -> str:
     text = " ".join(text.split())
     for article in _ARTICLES:
         if text.startswith(article) and len(text) > len(article):
-            text = text[len(article):]
+            text = text[len(article) :]
             break
     words = text.split(" ")
     words[-1] = _singular(words[-1])

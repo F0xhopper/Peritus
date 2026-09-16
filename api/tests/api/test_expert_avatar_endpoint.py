@@ -66,9 +66,7 @@ async def test_sets_an_avatar_and_returns_the_updated_expert(client):
         patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
         patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
     ):
-        resp = await client.put(
-            "/experts/stoic-philosophy/avatar", json={"avatar": chosen}
-        )
+        resp = await client.put("/experts/stoic-philosophy/avatar", json={"avatar": chosen})
 
     assert resp.status_code == 200
     assert resp.json()["avatar"] == chosen

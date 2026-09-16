@@ -94,9 +94,7 @@ async def test_catalog_is_readable_without_a_token(app):
         repo.list_catalog = AsyncMock(return_value=[_make_expert()])
         MockRepo.return_value = repo
 
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as anon:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as anon:
             resp = await anon.get("/catalog")
 
     assert resp.status_code == 200
@@ -217,9 +215,7 @@ async def test_publish_sets_visibility_and_echoes_catalog_meta(client):
 @pytest.mark.asyncio
 async def test_over_long_blurb_is_rejected_before_the_db(client):
     with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
-        resp = await client.patch(
-            "/experts/stoicism/catalog", json={"blurb": "x" * 500}
-        )
+        resp = await client.patch("/experts/stoicism/catalog", json={"blurb": "x" * 500})
     assert resp.status_code == 422
 
 
@@ -265,12 +261,8 @@ async def test_admin_grant_requires_admin(app):
         patch("peritus.api.routes.experts.EntitlementService") as MockService,
     ):
         MockService.return_value = AsyncMock()
-        async with AsyncClient(
-            transport=ASGITransport(app=app), base_url="http://test"
-        ) as c:
-            resp = await c.post(
-                "/admin/credits/grant", json={"owner": "a@b.com", "amount": 10}
-            )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.post("/admin/credits/grant", json={"owner": "a@b.com", "amount": 10})
 
     # 404, not 403 — a non-admin should not learn the endpoint exists.
     assert resp.status_code == 404

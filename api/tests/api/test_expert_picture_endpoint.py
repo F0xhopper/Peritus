@@ -301,9 +301,7 @@ async def test_refresh_returns_the_updated_expert(client):
     service = AsyncMock()
     service.refresh_picture = AsyncMock(return_value=_expert(_picture()))
     a, b, c = _patched(experts, pictures)
-    with a, b, c, patch(
-        "peritus.api.routes.experts.ExpertService", return_value=service
-    ):
+    with a, b, c, patch("peritus.api.routes.experts.ExpertService", return_value=service):
         resp = await client.post("/experts/stoic-philosophy/picture/refresh")
 
     assert resp.status_code == 200
@@ -313,16 +311,14 @@ async def test_refresh_returns_the_updated_expert(client):
 
 @pytest.mark.asyncio
 async def test_a_search_that_finds_nothing_is_a_422_that_says_why(client):
-    """"No free image of this subject exists" is an answer, not a server error."""
+    """ "No free image of this subject exists" is an answer, not a server error."""
     from peritus.experts.picture import PictureSkipped
 
     experts, pictures = _repos(_expert())
     service = AsyncMock()
     service.refresh_picture = AsyncMock(side_effect=PictureSkipped("no_candidate"))
     a, b, c = _patched(experts, pictures)
-    with a, b, c, patch(
-        "peritus.api.routes.experts.ExpertService", return_value=service
-    ):
+    with a, b, c, patch("peritus.api.routes.experts.ExpertService", return_value=service):
         resp = await client.post("/experts/stoic-philosophy/picture/refresh")
 
     assert resp.status_code == 422
@@ -339,8 +335,12 @@ async def test_refresh_is_throttled_because_each_call_fans_out_to_wikimedia(clie
     service.refresh_picture = AsyncMock(return_value=_expert(_picture()))
     a, b, c = _patched(experts, pictures)
     limiter = SlidingWindowLimiter(limit=2, window=60.0)
-    with a, b, c, patch.object(routes, "_picture_refresh_limiter", limiter), patch(
-        "peritus.api.routes.experts.ExpertService", return_value=service
+    with (
+        a,
+        b,
+        c,
+        patch.object(routes, "_picture_refresh_limiter", limiter),
+        patch("peritus.api.routes.experts.ExpertService", return_value=service),
     ):
         first = await client.post("/experts/stoic-philosophy/picture/refresh")
         second = await client.post("/experts/stoic-philosophy/picture/refresh")

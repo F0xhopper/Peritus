@@ -193,11 +193,17 @@ class BuildMeter:
             self.total_cost_usd += bucket.cost_usd
             self.total_input_tokens += bucket.input_tokens
             self.total_output_tokens += bucket.output_tokens
-            if self.cap_usd is not None and self.total_cost_usd >= self.cap_usd and not self.over_cap:
+            if (
+                self.cap_usd is not None
+                and self.total_cost_usd >= self.cap_usd
+                and not self.over_cap
+            ):
                 self.over_cap = True
                 logger.warning(
                     "Build job %s hit its spend cap: $%.4f of $%.2f",
-                    self.job_id, self.total_cost_usd, self.cap_usd,
+                    self.job_id,
+                    self.total_cost_usd,
+                    self.cap_usd,
                 )
 
     # ── draining ────────────────────────────────────────────────────────────

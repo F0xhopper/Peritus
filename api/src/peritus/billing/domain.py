@@ -32,10 +32,10 @@ from peritus.experts.domain import ExpertTier, tier_economics
 
 
 class LedgerEntryType(StrEnum):
-    GRANT  = "grant"    # (+) issuance: admin grant, signup, plan renewal
-    HOLD   = "hold"     # (-) reservation taken at build enqueue
-    REFUND = "refund"   # (+) hold returned; build produced nothing usable
-    ADJUST = "adjust"   # (±) manual correction
+    GRANT = "grant"  # (+) issuance: admin grant, signup, plan renewal
+    HOLD = "hold"  # (-) reservation taken at build enqueue
+    REFUND = "refund"  # (+) hold returned; build produced nothing usable
+    ADJUST = "adjust"  # (±) manual correction
 
 
 class CreditSource(StrEnum):
@@ -46,10 +46,10 @@ class CreditSource(StrEnum):
     nothing else in this module changes.
     """
 
-    MANUAL = "manual"   # issued by hand (CLI / admin endpoint)
-    SIGNUP = "signup"   # automatic grant on account provisioning
-    PLAN   = "plan"     # plan renewal / entitlement top-up
-    SYSTEM = "system"   # refunds and corrections made by the system
+    MANUAL = "manual"  # issued by hand (CLI / admin endpoint)
+    SIGNUP = "signup"  # automatic grant on account provisioning
+    PLAN = "plan"  # plan renewal / entitlement top-up
+    SYSTEM = "system"  # refunds and corrections made by the system
 
 
 @dataclass(frozen=True)
@@ -78,8 +78,7 @@ FREE = Plan(
     included_credits=settings.FREE_SIGNUP_CREDITS,
     allowed_tiers=(ExpertTier.LITE,),
     description=(
-        "Unlimited chat over the public catalog. One Lite build to try building "
-        "your own corpus."
+        "Unlimited chat over the public catalog. One Lite build to try building your own corpus."
     ),
 )
 
@@ -179,9 +178,9 @@ class CreditState:
     owner_id: str
     plan: Plan
     balance: int
-    granted: int      # lifetime credits in
-    consumed: int     # lifetime credits out (net of refunds)
-    held: int         # credits currently reserved by in-flight builds
+    granted: int  # lifetime credits in
+    consumed: int  # lifetime credits out (net of refunds)
+    held: int  # credits currently reserved by in-flight builds
     spend_cap_override_usd: float | None = None
     created_at: datetime | None = None
 
@@ -283,8 +282,6 @@ class SpendCapExceeded(Exception):
     """
 
     def __init__(self, spent_usd: float, cap_usd: float) -> None:
-        super().__init__(
-            f"Build exceeded its spend cap: ${spent_usd:.2f} of ${cap_usd:.2f}."
-        )
+        super().__init__(f"Build exceeded its spend cap: ${spent_usd:.2f} of ${cap_usd:.2f}.")
         self.spent_usd = spent_usd
         self.cap_usd = cap_usd

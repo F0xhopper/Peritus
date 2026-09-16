@@ -46,10 +46,10 @@ def test_keys_are_independent(clock):
 
 def test_window_slides_rather_than_resetting(clock):
     limiter = SlidingWindowLimiter(limit=2, window=60)
-    limiter.check("k")          # t=1000
+    limiter.check("k")  # t=1000
     clock(30)
-    limiter.check("k")          # t=1030
-    clock(31)                   # t=1061 — only the first hit has aged out
+    limiter.check("k")  # t=1030
+    clock(31)  # t=1061 — only the first hit has aged out
     assert limiter.check("k") is True
     # …and the budget is genuinely spent again, not reset by the expiry.
     assert limiter.check("k") is False

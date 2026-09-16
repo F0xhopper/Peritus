@@ -195,7 +195,15 @@ _BATCH_TOOL: dict[str, Any] = {
                         },
                         "content_type": {
                             "type": "string",
-                            "enum": ["textbook", "paper", "tutorial", "reference", "opinion", "transcript", "other"],
+                            "enum": [
+                                "textbook",
+                                "paper",
+                                "tutorial",
+                                "reference",
+                                "opinion",
+                                "transcript",
+                                "other",
+                            ],
                         },
                         "source_tier": {
                             "type": "string",
@@ -239,9 +247,14 @@ _BATCH_TOOL: dict[str, Any] = {
                         },
                     },
                     "required": [
-                        "quality_score", "relevance_score", "content_type",
-                        "source_tier", "difficulty", "key_claims",
-                        "covered_concepts", "drop_reason",
+                        "quality_score",
+                        "relevance_score",
+                        "content_type",
+                        "source_tier",
+                        "difficulty",
+                        "key_claims",
+                        "covered_concepts",
+                        "drop_reason",
                     ],
                 },
             }
@@ -251,9 +264,14 @@ _BATCH_TOOL: dict[str, Any] = {
 }
 
 _ERROR_VALIDATION: dict[str, Any] = {
-    "quality_score": 0.0, "relevance_score": 0.0,
-    "content_type": "other", "source_tier": None, "difficulty": 1,
-    "key_claims": [], "covered_concepts": [], "drop_reason": "validation error",
+    "quality_score": 0.0,
+    "relevance_score": 0.0,
+    "content_type": "other",
+    "source_tier": None,
+    "difficulty": 1,
+    "key_claims": [],
+    "covered_concepts": [],
+    "drop_reason": "validation error",
 }
 
 
@@ -368,8 +386,7 @@ async def validate_sources(
 ) -> tuple[list[ValidatedSource], list[DroppedSource]]:
     key_concepts = key_concepts or []
     batches = [
-        sources[i: i + _VALIDATE_BATCH_SIZE]
-        for i in range(0, len(sources), _VALIDATE_BATCH_SIZE)
+        sources[i : i + _VALIDATE_BATCH_SIZE] for i in range(0, len(sources), _VALIDATE_BATCH_SIZE)
     ]
 
     # Pairs per batch index — batches complete out of order on the live path,
@@ -389,7 +406,9 @@ async def validate_sources(
                 "Validation batch %d/%d: no response after retries — its %d source(s) "
                 "go to the single-source review path rather than being dropped. This "
                 "is NOT a judgement about the sources; see the Claude call errors above.",
-                i + 1, len(batches), len(batch),
+                i + 1,
+                len(batches),
+                len(batch),
             )
             raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
         else:
@@ -400,7 +419,11 @@ async def validate_sources(
                 logger.warning(
                     "Validation batch %d/%d: response unparseable (%s: %s) — its %d "
                     "source(s) go to the single-source review path",
-                    i + 1, len(batches), type(exc).__name__, exc, len(batch),
+                    i + 1,
+                    len(batches),
+                    type(exc).__name__,
+                    exc,
+                    len(batch),
                     exc_info=True,
                 )
                 raw_validations = [dict(_ERROR_VALIDATION) for _ in batch]
@@ -411,20 +434,25 @@ async def validate_sources(
         batch_pairs[i] = list(zip(batch, raw_validations, strict=True))
         if on_result:
             for source, raw in batch_pairs[i]:
-                await on_result({
-                    "title": source.title,
-                    "source_type": source.source_type.value,
-                    "q": raw["quality_score"],
-                    "r": raw["relevance_score"],
-                    "passed": not raw["drop"],
-                    "drop_reason": raw.get("drop_reason"),
-                })
+                await on_result(
+                    {
+                        "title": source.title,
+                        "source_type": source.source_type.value,
+                        "q": raw["quality_score"],
+                        "r": raw["relevance_score"],
+                        "passed": not raw["drop"],
+                        "drop_reason": raw.get("drop_reason"),
+                    }
+                )
 
     # One Claude call per batch — routed through the Message Batches API
     # (half price) when enabled, else concurrent live calls. Results are parsed
     # (and per-source progress emitted) as each batch lands, not after the set.
     await gather_claude_calls(
-        [_validate_params(topic, b, key_concepts, primary_definition=primary_definition) for b in batches],
+        [
+            _validate_params(topic, b, key_concepts, primary_definition=primary_definition)
+            for b in batches
+        ],
         live_concurrency=settings.VALIDATE_CONCURRENCY,
         description="validate",
         on_result=_on_batch_result,
@@ -440,34 +468,38 @@ async def validate_sources(
     for source, result in all_pairs:
         first = result.get("first_pass") or {}
         if result["drop"]:
-            dropped.append(DroppedSource(
-                raw=source,
-                quality_score=result["quality_score"],
-                relevance_score=result["relevance_score"],
-                drop_reason=result["drop_reason"] or "below threshold",
-                validator_model=result.get("model"),
-                review_model=result.get("review_model"),
-                first_pass_quality=first.get("quality_score"),
-                first_pass_relevance=first.get("relevance_score"),
-            ))
+            dropped.append(
+                DroppedSource(
+                    raw=source,
+                    quality_score=result["quality_score"],
+                    relevance_score=result["relevance_score"],
+                    drop_reason=result["drop_reason"] or "below threshold",
+                    validator_model=result.get("model"),
+                    review_model=result.get("review_model"),
+                    first_pass_quality=first.get("quality_score"),
+                    first_pass_relevance=first.get("relevance_score"),
+                )
+            )
         else:
             depths = _match_concepts(result.get("covered_concepts", []), key_concepts)
-            passed.append(ValidatedSource(
-                raw=source,
-                quality_score=result["quality_score"],
-                relevance_score=result["relevance_score"],
-                content_type=result["content_type"],
-                difficulty=result["difficulty"],
-                key_claims=result["key_claims"],
-                covered_concepts=covered_names(depths),
-                concept_depths=depths,
-                source_tier=_normalise_tier(result.get("source_tier")),
-                validator_model=result.get("model"),
-                review_model=result.get("review_model"),
-                first_pass_quality=first.get("quality_score"),
-                first_pass_relevance=first.get("relevance_score"),
-                substance=substance_of(source),
-            ))
+            passed.append(
+                ValidatedSource(
+                    raw=source,
+                    quality_score=result["quality_score"],
+                    relevance_score=result["relevance_score"],
+                    content_type=result["content_type"],
+                    difficulty=result["difficulty"],
+                    key_claims=result["key_claims"],
+                    covered_concepts=covered_names(depths),
+                    concept_depths=depths,
+                    source_tier=_normalise_tier(result.get("source_tier")),
+                    validator_model=result.get("model"),
+                    review_model=result.get("review_model"),
+                    first_pass_quality=first.get("quality_score"),
+                    first_pass_relevance=first.get("relevance_score"),
+                    substance=substance_of(source),
+                )
+            )
 
     unjudged = sum(1 for d in dropped if d.drop_reason == "validation error")
     if not passed and unjudged:
@@ -479,14 +511,24 @@ async def validate_sources(
             "(%d/%d batches errored, and the review pass could not rescue them). This "
             "is a provider/infrastructure failure, not a verdict on the corpus — the "
             "sources were fetched fine.",
-            topic, unjudged, len(all_pairs), len(errored_batches), len(batches),
+            topic,
+            unjudged,
+            len(all_pairs),
+            len(errored_batches),
+            len(batches),
         )
     else:
         logger.info(
             "Validation for %r: %d passed, %d dropped (%d never judged, %d/%d batches "
             "errored, %d reviewed on %s)",
-            topic, len(passed), len(dropped), unjudged, len(errored_batches),
-            len(batches), reviewed, review_model(),
+            topic,
+            len(passed),
+            len(dropped),
+            unjudged,
+            len(errored_batches),
+            len(batches),
+            reviewed,
+            review_model(),
         )
     return passed, dropped
 
@@ -514,7 +556,9 @@ async def _second_opinion(
     model = review_model()
     logger.info(
         "Second opinion on %d/%d borderline source(s) using %s",
-        len(candidates), len(pairs), model,
+        len(candidates),
+        len(pairs),
+        model,
     )
 
     reviewed = 0
@@ -530,7 +574,9 @@ async def _second_opinion(
             logger.warning(
                 "Second-opinion response unparseable for %r (%s: %s) — keeping the "
                 "first pass's verdict",
-                source.title, type(exc).__name__, exc,
+                source.title,
+                type(exc).__name__,
+                exc,
             )
             return
         results[index] = _finalise(raw, model)
@@ -554,7 +600,8 @@ async def _second_opinion(
         was_error = first.get("drop_reason") == "validation error"
         verdict["review_model"] = model
         verdict["first_pass"] = (
-            None if was_error
+            None
+            if was_error
             else {
                 "quality_score": first["quality_score"],
                 "relevance_score": first["relevance_score"],
@@ -566,23 +613,28 @@ async def _second_opinion(
         if reversed_:
             logger.info(
                 "Second opinion reversed %r: q %.1f→%.1f, r %.1f→%.1f (%s → %s)",
-                source.title, first["quality_score"], verdict["quality_score"],
-                first["relevance_score"], verdict["relevance_score"],
+                source.title,
+                first["quality_score"],
+                verdict["quality_score"],
+                first["relevance_score"],
+                verdict["relevance_score"],
                 "drop" if first["drop"] else "keep",
                 "drop" if verdict["drop"] else "keep",
             )
         if on_reviewed:
-            await on_reviewed({
-                "title": source.title,
-                "source_type": source.source_type.value,
-                "first_q": None if was_error else first["quality_score"],
-                "first_r": None if was_error else first["relevance_score"],
-                "q": verdict["quality_score"],
-                "r": verdict["relevance_score"],
-                "passed": not verdict["drop"],
-                "reversed": reversed_,
-                "review_model": model,
-            })
+            await on_reviewed(
+                {
+                    "title": source.title,
+                    "source_type": source.source_type.value,
+                    "first_q": None if was_error else first["quality_score"],
+                    "first_r": None if was_error else first["relevance_score"],
+                    "q": verdict["quality_score"],
+                    "r": verdict["relevance_score"],
+                    "passed": not verdict["drop"],
+                    "reversed": reversed_,
+                    "review_model": model,
+                }
+            )
     return reviewed
 
 
@@ -614,24 +666,21 @@ def _validate_params(
     """Request params for one validation call (consumed by gather_claude_calls)."""
     preview = build_review_preview if review else build_preview
     sources_block = "\n\n".join(
-        f"<source_{i}>\n"
-        f"{_source_context(s)}"
-        f"{preview(s)}\n"
-        f"</source_{i}>"
+        f"<source_{i}>\n{_source_context(s)}{preview(s)}\n</source_{i}>"
         for i, s in enumerate(batch)
     )
     concepts_block = (
-        "Key concepts the corpus must cover:\n"
-        + "\n".join(f"- {c}" for c in key_concepts)
-        + "\n\n"
-        if key_concepts else ""
+        "Key concepts the corpus must cover:\n" + "\n".join(f"- {c}" for c in key_concepts) + "\n\n"
+        if key_concepts
+        else ""
     )
     definition_block = (
         "For this topic, a PRIMARY source is: "
         f"{primary_definition.strip()}\n"
         "Classify source_tier by that definition. A study, commentary or overview "
         "of such a source is secondary or tertiary, however closely it quotes it.\n\n"
-        if primary_definition and primary_definition.strip() else ""
+        if primary_definition and primary_definition.strip()
+        else ""
     )
     return {
         "model": review_model() if review else settings.FAST_MODEL,
@@ -639,27 +688,34 @@ def _validate_params(
         "system": _REVIEW_SYSTEM if review else _SYSTEM,
         "tools": [_BATCH_TOOL],
         "tool_choice": {"type": "tool", "name": "validate_sources"},
-        "messages": [{
-            "role": "user",
-            "content": (
-                f"Topic: {topic}\n\n"
-                f"{definition_block}"
-                f"{concepts_block}"
-                f"{sources_block}\n\n"
-                + (
-                    "Give your considered verdict on this source."
-                    if review
-                    else f"Validate all {len(batch)} sources above."
-                )
-            ),
-        }],
+        "messages": [
+            {
+                "role": "user",
+                "content": (
+                    f"Topic: {topic}\n\n"
+                    f"{definition_block}"
+                    f"{concepts_block}"
+                    f"{sources_block}\n\n"
+                    + (
+                        "Give your considered verdict on this source."
+                        if review
+                        else f"Validate all {len(batch)} sources above."
+                    )
+                ),
+            }
+        ],
     }
 
 
 _MISSING_VALIDATION: dict[str, Any] = {
-    "quality_score": 0.0, "relevance_score": 0.0,
-    "content_type": "other", "source_tier": None, "difficulty": 1,
-    "key_claims": [], "covered_concepts": [], "drop_reason": "missing validation",
+    "quality_score": 0.0,
+    "relevance_score": 0.0,
+    "content_type": "other",
+    "source_tier": None,
+    "difficulty": 1,
+    "key_claims": [],
+    "covered_concepts": [],
+    "drop_reason": "missing validation",
 }
 
 
@@ -686,7 +742,8 @@ def _parse_validate_response(resp: Any, batch_len: int) -> list[dict]:
         else:
             logger.warning(
                 "Validation entry was %s, not an object: %r — treating it as missing",
-                type(entry).__name__, str(entry)[:120],
+                type(entry).__name__,
+                str(entry)[:120],
             )
             validations.append(dict(_MISSING_VALIDATION))
     while len(validations) < batch_len:

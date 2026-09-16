@@ -59,10 +59,7 @@ async def assess_faithfulness(
     if not answer_text.strip() or not passages or not settings.ANTHROPIC_API_KEY:
         return None
     try:
-        passage_block = "\n\n".join(
-            f"[{p.index}] {p.citation}\n{p.text}"
-            for p in passages
-        )
+        passage_block = "\n\n".join(f"[{p.index}] {p.citation}\n{p.text}" for p in passages)
         client = get_anthropic_client()
         resp = await client.messages.create(  # type: ignore[call-overload]
             model=settings.FAST_MODEL,
@@ -70,14 +67,16 @@ async def assess_faithfulness(
             system=_SYSTEM,
             tools=[_TOOL],
             tool_choice={"type": "tool", "name": "report_faithfulness"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Question: {question}\n\n"
-                    f"Answer to audit:\n{answer_text}\n\n"
-                    f"Passages:\n\n{passage_block}"
-                ),
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Question: {question}\n\n"
+                        f"Answer to audit:\n{answer_text}\n\n"
+                        f"Passages:\n\n{passage_block}"
+                    ),
+                }
+            ],
         )
         block = next(
             (b for b in resp.content if getattr(b, "type", None) == "tool_use"),

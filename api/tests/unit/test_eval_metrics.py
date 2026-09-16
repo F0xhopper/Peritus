@@ -207,7 +207,7 @@ def test_precision_and_recall_name_the_two_different_errors():
     """
     #        kept:  ✓    ✗     ✓     ✗
     predicted = [True, True, False, False]
-    actual    = [True, False, True, False]
+    actual = [True, False, True, False]
     result = screening_precision_recall(predicted, actual)
 
     assert result["precision"] == 0.5, "one of the two it kept should not have been"

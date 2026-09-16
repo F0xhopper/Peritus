@@ -55,9 +55,7 @@ async def extract(upload: PendingUpload) -> RawSource:
             "web page, the site may require sign-in."
         )
     if len(text) > _MAX_CHARS:
-        logger.info(
-            "Upload %d truncated from %d to %d chars", upload.id, len(text), _MAX_CHARS
-        )
+        logger.info("Upload %d truncated from %d to %d chars", upload.id, len(text), _MAX_CHARS)
         text = text[:_MAX_CHARS]
 
     return RawSource(
@@ -84,8 +82,7 @@ async def _extract_pdf(upload: PendingUpload) -> str:
     except Exception as exc:
         logger.warning("PDF extraction failed for upload %d: %s", upload.id, exc)
         raise IngestionError(
-            "Could not read this PDF. It may be encrypted, corrupt, or larger "
-            "than the 20 MB limit."
+            "Could not read this PDF. It may be encrypted, corrupt, or larger than the 20 MB limit."
         ) from exc
 
 
@@ -108,8 +105,7 @@ async def _extract_url(upload: PendingUpload) -> str:
     raw = await WebFetcher().fetch(candidate)
     if raw is None:
         raise IngestionError(
-            "Could not fetch that page. It may be unreachable, or it may block "
-            "automated readers."
+            "Could not fetch that page. It may be unreachable, or it may block automated readers."
         )
     return raw.text
 

@@ -55,6 +55,7 @@ _DOC_HEAD_CHARS = 800  # always-included framing so the model knows what the sou
 @dataclass
 class ContextJob:
     """One source's chunks awaiting contextualisation."""
+
     chunks: list[TextChunk]
     source_title: str
     source_text: str
@@ -103,7 +104,7 @@ def _job_params(job: ContextJob) -> list[tuple[dict[str, Any], int]]:
 
     params: list[tuple[dict[str, Any], int]] = []
     for start in range(0, len(job.chunks), _CONTEXT_BATCH_SIZE):
-        batch = job.chunks[start: start + _CONTEXT_BATCH_SIZE]
+        batch = job.chunks[start : start + _CONTEXT_BATCH_SIZE]
         surrounding = _window_for(start, batch)
         prompt = (
             f"<source_title>{job.source_title}</source_title>\n"
@@ -111,17 +112,19 @@ def _job_params(job: ContextJob) -> list[tuple[dict[str, Any], int]]:
             + "\n\n".join(f"<chunk_{i}>\n{c.text}\n</chunk_{i}>" for i, c in enumerate(batch))
             + f"\n\n{_INSTRUCTION}"
         )
-        params.append((
-            {
-                "model": settings.FAST_MODEL,
-                "max_tokens": 150 * len(batch),
-                "system": _SYSTEM,
-                "tools": [_BATCH_TOOL],
-                "tool_choice": {"type": "tool", "name": "contextualize_chunks"},
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            len(batch),
-        ))
+        params.append(
+            (
+                {
+                    "model": settings.FAST_MODEL,
+                    "max_tokens": 150 * len(batch),
+                    "system": _SYSTEM,
+                    "tools": [_BATCH_TOOL],
+                    "tool_choice": {"type": "tool", "name": "contextualize_chunks"},
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                len(batch),
+            )
+        )
     return params
 
 
@@ -177,14 +180,15 @@ async def contextualize_sources(jobs: list[ContextJob]) -> list[list[str]]:
     cursor = 0
     for job, n_batches in zip(jobs, job_batch_counts, strict=True):
         contexts = [
-            ctx
-            for batch_ctxs in flat_contexts[cursor: cursor + n_batches]
-            for ctx in batch_ctxs
+            ctx for batch_ctxs in flat_contexts[cursor : cursor + n_batches] for ctx in batch_ctxs
         ]
         cursor += n_batches
         filled = sum(1 for c in contexts if c)
         logger.info(
-            "Contextualised %d/%d chunks for %r", filled, len(job.chunks), job.source_title,
+            "Contextualised %d/%d chunks for %r",
+            filled,
+            len(job.chunks),
+            job.source_title,
         )
         results.append(contexts)
     return results

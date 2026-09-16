@@ -38,17 +38,17 @@ def _p(input_: str, output: str) -> ModelPrice:
 # "claude-haiku-4-5-20251001" matches "claude-haiku-4-5". Longest prefix wins,
 # so a more specific entry always beats a more general one.
 _ANTHROPIC_PRICES: dict[str, ModelPrice] = {
-    "claude-fable-5":    _p("10.00", "50.00"),
-    "claude-mythos-5":   _p("10.00", "50.00"),
-    "claude-opus-5":     _p("5.00", "25.00"),
-    "claude-opus-4-8":   _p("5.00", "25.00"),
-    "claude-opus-4-7":   _p("5.00", "25.00"),
-    "claude-opus-4-6":   _p("5.00", "25.00"),
-    "claude-opus-4-5":   _p("5.00", "25.00"),
-    "claude-sonnet-5":   _p("3.00", "15.00"),
+    "claude-fable-5": _p("10.00", "50.00"),
+    "claude-mythos-5": _p("10.00", "50.00"),
+    "claude-opus-5": _p("5.00", "25.00"),
+    "claude-opus-4-8": _p("5.00", "25.00"),
+    "claude-opus-4-7": _p("5.00", "25.00"),
+    "claude-opus-4-6": _p("5.00", "25.00"),
+    "claude-opus-4-5": _p("5.00", "25.00"),
+    "claude-sonnet-5": _p("3.00", "15.00"),
     "claude-sonnet-4-6": _p("3.00", "15.00"),
     "claude-sonnet-4-5": _p("3.00", "15.00"),
-    "claude-haiku-4-5":  _p("1.00", "5.00"),
+    "claude-haiku-4-5": _p("1.00", "5.00"),
 }
 
 # OpenAI embedding models bill input tokens only.
@@ -201,7 +201,9 @@ def estimated_ocr_pages(text_chars: int) -> int:
     """Pages a document of this length is likely to have been OCR'd from."""
     if text_chars <= 0:
         return 0
-    return int((Decimal(text_chars) / CHARS_PER_OCR_PAGE).to_integral_value(rounding="ROUND_CEILING"))
+    return int(
+        (Decimal(text_chars) / CHARS_PER_OCR_PAGE).to_integral_value(rounding="ROUND_CEILING")
+    )
 
 
 def estimated_ingest_cost_usd(
@@ -247,9 +249,7 @@ def estimated_ingest_cost_usd(
     graph_limit = core_settings.GRAPH_MAX_CHUNKS_PER_SOURCE
     graph_chunks = int(chunks) if graph_limit <= 0 else min(int(chunks), graph_limit)
     graph_chars = min(text_chars, graph_chunks * chunk_size)
-    graph_batches = Decimal(
-        max(1, -(-graph_chunks // max(1, core_settings.GRAPH_BATCH_SIZE)))
-    )
+    graph_batches = Decimal(max(1, -(-graph_chunks // max(1, core_settings.GRAPH_BATCH_SIZE))))
     total += graph_batches * message_cost_usd(
         core_settings.GRAPH_MODEL,
         input_tokens=int(_tokens(graph_chars) / graph_batches),

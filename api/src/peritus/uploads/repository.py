@@ -36,8 +36,10 @@ class UploadRepository:
         text_content: str | None = None,
     ) -> PendingUpload:
         byte_size = (
-            len(content) if content is not None
-            else len(text_content.encode()) if text_content is not None
+            len(content)
+            if content is not None
+            else len(text_content.encode())
+            if text_content is not None
             else None
         )
         async with self._pool.acquire() as conn:
@@ -49,16 +51,23 @@ class UploadRepository:
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
                 RETURNING *
                 """,
-                expert_id, owner_id, str(kind), title, author, filename, url,
-                media_type, byte_size, content, text_content,
+                expert_id,
+                owner_id,
+                str(kind),
+                title,
+                author,
+                filename,
+                url,
+                media_type,
+                byte_size,
+                content,
+                text_content,
             )
         return _row_to_upload(row)
 
     async def get(self, upload_id: int) -> PendingUpload | None:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow(
-                "SELECT * FROM source_uploads WHERE id = $1", upload_id
-            )
+            row = await conn.fetchrow("SELECT * FROM source_uploads WHERE id = $1", upload_id)
         return _row_to_upload(row) if row else None
 
     async def clear_payload(self, upload_id: int) -> None:
@@ -116,10 +125,18 @@ class UploadRepository:
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,true,$9::jsonb,$10,$11,$12)
                 RETURNING id
                 """,
-                expert_id, source_type, url, title, author,
-                content_type, difficulty, json.dumps(key_claims),
+                expert_id,
+                source_type,
+                url,
+                title,
+                author,
+                content_type,
+                difficulty,
+                json.dumps(key_claims),
                 json.dumps(covered_concepts),
-                DISCOVERED_VIA_UPLOAD, UPLOAD_SOURCE_TIER, uploaded_by,
+                DISCOVERED_VIA_UPLOAD,
+                UPLOAD_SOURCE_TIER,
+                uploaded_by,
             )
         return row["id"]
 
@@ -158,7 +175,8 @@ class UploadRepository:
         async with self._pool.acquire() as conn, conn.transaction():
             result = await conn.execute(
                 "DELETE FROM sources WHERE id = $1 AND expert_id = $2",
-                source_id, expert_id,
+                source_id,
+                expert_id,
             )
             if result.endswith(" 0"):
                 return False

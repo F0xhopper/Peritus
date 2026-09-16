@@ -79,7 +79,11 @@ async def stream_expert_answer(
     # at ~0.1× input price. The plan and what the corpus disputes shape only
     # the final (uncached) message — see `build_composition_messages`.
     messages = build_composition_messages(
-        history, question, ctx.context_block, ctx.plan, ctx.has_contradiction,
+        history,
+        question,
+        ctx.context_block,
+        ctx.plan,
+        ctx.has_contradiction,
         ctx.contradiction_points,
     )
     client = get_anthropic_client()
@@ -122,7 +126,10 @@ async def stream_expert_answer(
         # the rate is a direct, otherwise-uncollected measure of grounding quality.
         logger.warning(
             "Answer cited %d passage(s) that do not exist (expert=%d, passages=%d): %s",
-            len(dangling), expert.id, len(ctx.passages), sorted(dangling),
+            len(dangling),
+            expert.id,
+            len(ctx.passages),
+            sorted(dangling),
         )
     yield {
         "type": "sources",

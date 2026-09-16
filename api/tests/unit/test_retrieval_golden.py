@@ -23,7 +23,10 @@ def test_same_passage_survives_rechunking():
 def test_score_reports_recall_mrr_and_source_recall():
     items = [_item(), _item(url="https://example.org/other"), _item(url=None)]
     retrieved = [
-        [("unrelated text about bees and mites in winter colonies", None), (_GOLD, "https://example.org/st")],
+        [
+            ("unrelated text about bees and mites in winter colonies", None),
+            (_GOLD, "https://example.org/st"),
+        ],
         [("unrelated text about bees and mites in winter colonies", "https://example.org/other")],
         [],
     ]

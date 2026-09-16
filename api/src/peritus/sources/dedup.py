@@ -41,11 +41,29 @@ logger = get_logger(__name__)
 
 # Query parameters that never change what a page *is*. Stripping them turns the
 # same article shared through three campaigns into one URL.
-_TRACKING_PARAMS = frozenset({
-    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
-    "utm_id", "gclid", "fbclid", "mc_cid", "mc_eid", "ref", "ref_src",
-    "source", "amp", "_ga", "igshid", "spm", "at_medium", "at_campaign",
-})
+_TRACKING_PARAMS = frozenset(
+    {
+        "utm_source",
+        "utm_medium",
+        "utm_campaign",
+        "utm_term",
+        "utm_content",
+        "utm_id",
+        "gclid",
+        "fbclid",
+        "mc_cid",
+        "mc_eid",
+        "ref",
+        "ref_src",
+        "source",
+        "amp",
+        "_ga",
+        "igshid",
+        "spm",
+        "at_medium",
+        "at_campaign",
+    }
+)
 
 # Fetch-preference order when several records turn out to be one work. The
 # winner is the one whose fetcher yields the best full text, because that is the
@@ -102,6 +120,7 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 
 # ── URL normalisation ────────────────────────────────────────────────────────
 
+
 def normalise_url(url: str) -> str:
     """A URL reduced to what identifies the document, for equality only.
 
@@ -134,14 +153,12 @@ def normalise_url(url: str) -> str:
 
 # ── content fingerprinting ───────────────────────────────────────────────────
 
+
 def _shingles(text: str) -> list[str]:
     words = _WORD_RE.findall(text.lower())
     if len(words) < _SHINGLE_SIZE:
         return [" ".join(words)] if words else []
-    return [
-        " ".join(words[i: i + _SHINGLE_SIZE])
-        for i in range(len(words) - _SHINGLE_SIZE + 1)
-    ]
+    return [" ".join(words[i : i + _SHINGLE_SIZE]) for i in range(len(words) - _SHINGLE_SIZE + 1)]
 
 
 def simhash(text: str) -> int | None:
@@ -180,6 +197,7 @@ def hamming(a: int, b: int) -> int:
 
 
 # ── the set of everything a build has already considered ─────────────────────
+
 
 @dataclass
 class SeenSet:
@@ -222,16 +240,14 @@ class SeenSet:
         fingerprint = simhash(text)
         if fingerprint is None:
             return False
-        return any(
-            hamming(fingerprint, seen) <= SIMHASH_MAX_DISTANCE
-            for seen in self.fingerprints
-        )
+        return any(hamming(fingerprint, seen) <= SIMHASH_MAX_DISTANCE for seen in self.fingerprints)
 
     def __len__(self) -> int:
         return len(self.urls) + len(self.identity_keys)
 
 
 # ── the passes ───────────────────────────────────────────────────────────────
+
 
 @dataclass
 class DedupReport:
@@ -444,7 +460,8 @@ def deduplicate_sources_by_content(
     if duplicates:
         logger.info(
             "Content fingerprinting removed %d near-duplicate source(s) of %d",
-            len(duplicates), len(sources),
+            len(duplicates),
+            len(sources),
         )
     return kept, duplicates
 

@@ -41,12 +41,12 @@ from typing import Any
 # it falls back to the monogram rather than rendering nothing.
 AVATAR_STYLES: frozenset[str] = frozenset(
     {
-        "sigil",      # monogram on a tinted rounded square (the default look)
-        "shapes",     # overlapping geometric shapes
-        "glass",      # soft translucent blobs
-        "rings",      # concentric arcs
+        "sigil",  # monogram on a tinted rounded square (the default look)
+        "shapes",  # overlapping geometric shapes
+        "glass",  # soft translucent blobs
+        "rings",  # concentric arcs
         "identicon",  # symmetric tile grid
-        "icons",      # a single line mark
+        "icons",  # a single line mark
         # Renders the found picture (migration 027) rather than a generated
         # drawing, so an owner who pinned a drawing can choose the picture
         # again. A `picture` recipe on an expert that has no picture row

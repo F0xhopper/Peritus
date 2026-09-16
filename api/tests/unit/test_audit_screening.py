@@ -20,7 +20,10 @@ T0 = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 def _ev(seq: int, type_: str, payload: dict | None = None, offset: int = 0) -> BuildEventRow:
     body = {"type": type_, **(payload or {})}
     return BuildEventRow(
-        seq=seq, job_id=1, type=type_, payload=body,
+        seq=seq,
+        job_id=1,
+        type=type_,
+        payload=body,
         created_at=T0 + timedelta(seconds=offset),
     )
 
@@ -31,12 +34,24 @@ def _full_build() -> list[BuildEventRow]:
         _ev(1, "build_started", {"attempt": 1, "max_attempts": 3}, 0),
         _ev(2, "stage", {"stage": 0, "name": "plan"}, 0),
         _ev(3, "stage", {"stage": 1, "name": "discover"}, 10),
-        _ev(4, "discovery_started", {"fetchers": ["wikipedia", "arxiv", "reddit"],
-                                     "active": ["wikipedia", "arxiv"]}, 10),
-        _ev(5, "fetcher_done", {"name": "wikipedia", "count": 18, "skipped": False,
-                                "reason": "", "queries": 3}, 20),
-        _ev(6, "fetcher_done", {"name": "arxiv", "count": 12, "skipped": False,
-                                "reason": "", "queries": 2}, 20),
+        _ev(
+            4,
+            "discovery_started",
+            {"fetchers": ["wikipedia", "arxiv", "reddit"], "active": ["wikipedia", "arxiv"]},
+            10,
+        ),
+        _ev(
+            5,
+            "fetcher_done",
+            {"name": "wikipedia", "count": 18, "skipped": False, "reason": "", "queries": 3},
+            20,
+        ),
+        _ev(
+            6,
+            "fetcher_done",
+            {"name": "arxiv", "count": 12, "skipped": False, "reason": "", "queries": 2},
+            20,
+        ),
         # 30 identified, 28 after cross-fetcher URL de-duplication.
         _ev(7, "triage_done", {"candidates": 28, "ranked": 16, "budget": 10}, 30),
         _ev(8, "fetch_done", {"fetched": 10, "budget": 10}, 60),
@@ -47,6 +62,7 @@ def _full_build() -> list[BuildEventRow]:
 
 
 # ── retries must not double-count ──
+
 
 def test_latest_attempt_trims_to_the_final_build_started():
     events = [
@@ -81,6 +97,7 @@ def test_retried_build_reports_only_the_surviving_attempt():
 
 # ── the counts the log does support ──
 
+
 def test_funnel_counts_match_the_log():
     funnel = derive_discovery_funnel(_full_build())
     assert funnel is not None
@@ -98,8 +115,18 @@ def test_funnel_counts_match_the_log():
 
 def test_fetchers_are_reported_with_their_query_counts_and_skips():
     events = _full_build() + [
-        _ev(12, "fetcher_done", {"name": "pdf", "count": 0, "skipped": True,
-                                 "reason": "no MISTRAL_API_KEY", "queries": 2}, 20),
+        _ev(
+            12,
+            "fetcher_done",
+            {
+                "name": "pdf",
+                "count": 0,
+                "skipped": True,
+                "reason": "no MISTRAL_API_KEY",
+                "queries": 2,
+            },
+            20,
+        ),
     ]
     funnel = derive_discovery_funnel(events)
     assert funnel is not None
@@ -158,6 +185,7 @@ def test_stage_timings_are_derived_from_consecutive_stage_marks():
 
 
 # ── the counts the log does not support ──
+
 
 def test_no_events_yields_no_funnel_rather_than_zeros():
     """An expert with no retained log has an unknown funnel, not an empty one."""

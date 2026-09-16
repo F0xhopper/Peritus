@@ -119,10 +119,12 @@ async def test_missing_halfvec_is_warned_about_loudly(caplog):
     """The whole failure mode is silent — no index, correct results, slow."""
     import logging
 
-    with caplog.at_level(logging.WARNING, logger="peritus.infrastructure.database"), \
-         patch.object(
-             database.asyncpg, "create_pool", AsyncMock(return_value=_fake_pool(halfvec=False))
-         ):
+    with (
+        caplog.at_level(logging.WARNING, logger="peritus.infrastructure.database"),
+        patch.object(
+            database.asyncpg, "create_pool", AsyncMock(return_value=_fake_pool(halfvec=False))
+        ),
+    ):
         await database.init_pool()
 
     assert any("exact scan" in r.getMessage() for r in caplog.records)

@@ -38,6 +38,7 @@ def _hit(chunk_id: int, text: str, title: str) -> SearchResult:
 
 # ── readiness state machine ──────────────────────────────────────────────────
 
+
 def test_pending_cannot_chat():
     assert Readiness.PENDING.can_chat is False
     assert Readiness.PENDING.graph_expanded is False
@@ -54,6 +55,7 @@ def test_graph_ready_is_fully_capable():
 
 
 # ── the structural claim ─────────────────────────────────────────────────────
+
 
 def test_hybrid_search_sql_touches_no_graph_tables():
     """Semantic ⊕ keyword ⊕ RRF reads source_chunks and sources, nothing else."""
@@ -108,20 +110,37 @@ async def test_graph_upgrade_is_transparent_to_the_same_call():
     """Same retrieval call, graph now present: passages gain concepts + relations."""
     retriever = GraphRetriever(MagicMock())
     retriever._repo.get_nodes_for_chunks = AsyncMock(
-        return_value=[{
-            "id": 7, "label": "Virtue is the sole good", "node_type": "claim",
-            "description": "The sole good", "chunk_ids": [1],
-        }]
+        return_value=[
+            {
+                "id": 7,
+                "label": "Virtue is the sole good",
+                "node_type": "claim",
+                "description": "The sole good",
+                "chunk_ids": [1],
+            }
+        ]
     )
     retriever._repo.get_neighbours = AsyncMock(
         return_value=(
             [
-                {"id": 7, "label": "Virtue is the sole good", "node_type": "claim",
-                 "description": "The sole good"},
-                {"id": 8, "label": "Externals can be good", "node_type": "claim",
-                 "description": "Health and wealth are goods"},
-                {"id": 9, "label": "Virtue", "node_type": "concept",
-                 "description": "Excellence of character"},
+                {
+                    "id": 7,
+                    "label": "Virtue is the sole good",
+                    "node_type": "claim",
+                    "description": "The sole good",
+                },
+                {
+                    "id": 8,
+                    "label": "Externals can be good",
+                    "node_type": "claim",
+                    "description": "Health and wealth are goods",
+                },
+                {
+                    "id": 9,
+                    "label": "Virtue",
+                    "node_type": "concept",
+                    "description": "Excellence of character",
+                },
             ],
             [
                 {

@@ -21,9 +21,7 @@ class WebFetcher:
         return [_to_candidate(hit) for hit in hits]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        async with httpx.AsyncClient(
-            timeout=20, follow_redirects=True, headers=_HEADERS
-        ) as client:
+        async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HEADERS) as client:
             try:
                 text, title = await _fetch_page(client, candidate.url)
             except Exception as exc:
@@ -79,11 +77,13 @@ def _parse_ddg(html: str, limit: int) -> list[dict]:
             continue
         title_a = result.select_one("a.result__a")
         snippet_el = result.select_one(".result__snippet")
-        hits.append({
-            "url": href,
-            "title": title_a.get_text(strip=True) if title_a else "",
-            "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
-        })
+        hits.append(
+            {
+                "url": href,
+                "title": title_a.get_text(strip=True) if title_a else "",
+                "snippet": snippet_el.get_text(strip=True) if snippet_el else "",
+            }
+        )
         if len(hits) >= limit:
             break
     return hits
@@ -133,8 +133,6 @@ async def _fetch_page(
 
 async def fetch_page_text(url: str, max_chars: int = DEFAULT_MAX_CHARS) -> str:
     """Page text for a URL, with its own client. Raises on transport failure."""
-    async with httpx.AsyncClient(
-        timeout=20, follow_redirects=True, headers=_HEADERS
-    ) as client:
+    async with httpx.AsyncClient(timeout=20, follow_redirects=True, headers=_HEADERS) as client:
         text, _title = await _fetch_page(client, url, max_chars)
     return text

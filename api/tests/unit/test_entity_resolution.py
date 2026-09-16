@@ -10,8 +10,7 @@ from peritus.graph.resolution import (
 
 
 def _concept(node_id, label, chunks=1, node_type="concept"):
-    return {"id": node_id, "label": label, "node_type": node_type,
-            "chunk_ids": list(range(chunks))}
+    return {"id": node_id, "label": label, "node_type": node_type, "chunk_ids": list(range(chunks))}
 
 
 def test_canonical_label_flattens_inflection_articles_and_punctuation():
@@ -32,7 +31,8 @@ def test_acronym_parentheticals_become_aliases_either_way_round():
     assert canonical_label("Summa (first part)")[1] is None
     # Nor is a bracketed qualifier that does not abbreviate the label.
     assert canonical_label("Vision Domain Evaluation (CIFAR10)") == (
-        "vision domain evaluation (cifar10)".replace("(", "").replace(")", ""), None
+        "vision domain evaluation (cifar10)".replace("(", "").replace(")", ""),
+        None,
     )
     assert canonical_label("Long non-coding RNAs (lncRNAs)") == ("long non coding rna", "lncrna")
 
@@ -48,7 +48,9 @@ def test_the_varroa_and_dwv_families_merge():
         _concept(7, "DWV (Deformed Wing Virus)", 3),
         _concept(8, "DWV", 2),
     ]
-    plan = {keep["id"]: sorted(d["id"] for d in drops) for keep, drops in canonical_merge_plan(nodes)}
+    plan = {
+        keep["id"]: sorted(d["id"] for d in drops) for keep, drops in canonical_merge_plan(nodes)
+    }
     # The best-evidenced spelling survives.
     assert plan == {2: [3], 4: [5], 6: [7, 8]}
 
@@ -63,6 +65,8 @@ def test_claims_are_never_canonicalised():
 
 def test_pair_threshold_is_lower_for_a_shared_head_noun_and_absent_across_types():
     mite = _concept(1, "Varroa mite")
-    assert pair_threshold(mite, _concept(2, "Varroa destructor mites")) == RESOLVE_THRESHOLD_SAME_HEAD
+    assert (
+        pair_threshold(mite, _concept(2, "Varroa destructor mites")) == RESOLVE_THRESHOLD_SAME_HEAD
+    )
     assert pair_threshold(mite, _concept(3, "Varroa destructor")) == RESOLVE_THRESHOLD
     assert pair_threshold(mite, _concept(4, "Varroa mite", node_type="claim")) is None

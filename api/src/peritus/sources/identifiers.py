@@ -32,9 +32,7 @@ _DOI_TRAILING = ".,;:)]}>\"'"
 _ARXIV_NEW = r"\d{4}\.\d{4,5}"
 _ARXIV_OLD = r"[a-z-]+(?:\.[A-Z]{2})?/\d{7}"
 _ARXIV_ID_RE = re.compile(rf"^(?:arxiv:)?({_ARXIV_NEW}|{_ARXIV_OLD})(v\d+)?$", re.IGNORECASE)
-_ARXIV_URL_RE = re.compile(
-    rf"/(?:abs|pdf|html)/({_ARXIV_NEW}|{_ARXIV_OLD})(v\d+)?", re.IGNORECASE
-)
+_ARXIV_URL_RE = re.compile(rf"/(?:abs|pdf|html)/({_ARXIV_NEW}|{_ARXIV_OLD})(v\d+)?", re.IGNORECASE)
 
 _PMCID_RE = re.compile(r"^PMC\d+$", re.IGNORECASE)
 _DIGITS_RE = re.compile(r"^\d+$")

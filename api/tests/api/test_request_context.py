@@ -111,9 +111,9 @@ async def test_context_does_not_leak_between_requests(client):
 
 
 async def test_concurrent_requests_get_distinct_ids(client):
-    responses = await asyncio.gather(*[
-        client.get("/ok", headers={REQUEST_ID_HEADER: f"req-{i}"}) for i in range(8)
-    ])
+    responses = await asyncio.gather(
+        *[client.get("/ok", headers={REQUEST_ID_HEADER: f"req-{i}"}) for i in range(8)]
+    )
     assert [r.json()["request_id"] for r in responses] == [f"req-{i}" for i in range(8)]
 
 
@@ -198,10 +198,17 @@ async def test_sse_streams_incrementally(app):
         return StreamingResponse(body(), media_type="text/event-stream")
 
     scope = {
-        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
-        "method": "GET", "path": "/stream", "raw_path": b"/stream",
-        "query_string": b"", "root_path": "", "scheme": "http",
-        "headers": [(b"host", b"test")], "client": ("127.0.0.1", 1234),
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "path": "/stream",
+        "raw_path": b"/stream",
+        "query_string": b"",
+        "root_path": "",
+        "scheme": "http",
+        "headers": [(b"host", b"test")],
+        "client": ("127.0.0.1", 1234),
         "server": ("test", 80),
     }
     sent: list[dict] = []
@@ -314,9 +321,7 @@ def health_app():
 
 @pytest.fixture
 async def health_client(health_app):
-    async with AsyncClient(
-        transport=ASGITransport(app=health_app), base_url="http://test"
-    ) as c:
+    async with AsyncClient(transport=ASGITransport(app=health_app), base_url="http://test") as c:
         yield c
 
 
@@ -344,8 +349,10 @@ async def test_liveness_touches_nothing(health_client):
 async def test_readiness_reports_the_vector_index_state(health_client):
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value=1)
-    with patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)), \
-         patch("peritus.api.routes.health.halfvec_supported", return_value=True):
+    with (
+        patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)),
+        patch("peritus.api.routes.health.halfvec_supported", return_value=True),
+    ):
         resp = await health_client.get("/ready")
 
     assert resp.status_code == 200
@@ -355,8 +362,10 @@ async def test_readiness_reports_the_vector_index_state(health_client):
 async def test_readiness_flags_a_missing_vector_index(health_client):
     conn = AsyncMock()
     conn.fetchval = AsyncMock(return_value=1)
-    with patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)), \
-         patch("peritus.api.routes.health.halfvec_supported", return_value=False):
+    with (
+        patch("peritus.api.routes.health.get_pool", return_value=_pool_that(conn=conn)),
+        patch("peritus.api.routes.health.halfvec_supported", return_value=False),
+    ):
         resp = await health_client.get("/ready")
 
     assert resp.json()["vector_index"] == "none"

@@ -65,13 +65,15 @@ def login_command(
 
     data = resp.json()
     user = data.get("user", {}) or {}
-    save(Session(
-        access_token=data["access_token"],
-        refresh_token=data["refresh_token"],
-        expires_at=int(data.get("expires_at") or 0),
-        user_id=user.get("id", ""),
-        email=user.get("email") or email,
-    ))
+    save(
+        Session(
+            access_token=data["access_token"],
+            refresh_token=data["refresh_token"],
+            expires_at=int(data.get("expires_at") or 0),
+            user_id=user.get("id", ""),
+            email=user.get("email") or email,
+        )
+    )
     console.print(f"[bold green]Signed in as {user.get('email') or email}.[/bold green]")
 
 

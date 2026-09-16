@@ -109,6 +109,7 @@ def _patched(mock_convs=None, mock_experts=None):
 
 # ── title truncation ──
 
+
 def test_title_short_question_verbatim():
     assert _title_from_question("What is virtue?") == "What is virtue?"
 
@@ -129,6 +130,7 @@ def test_title_truncates_at_word_boundary_with_ellipsis():
 
 
 # ── create ──
+
 
 @pytest.mark.asyncio
 async def test_create_conversation(client):
@@ -174,6 +176,7 @@ async def test_create_conversation_not_ready_409(client, readiness):
 
 # ── ownership 404s (repo scoping returns nothing → route must 404, not 403) ──
 
+
 @pytest.mark.asyncio
 async def test_get_conversation_not_visible_404(client):
     mock_convs = AsyncMock()
@@ -216,6 +219,7 @@ async def test_send_message_not_visible_404(client):
 
 # ── rename / delete happy paths ──
 
+
 @pytest.mark.asyncio
 async def test_rename_conversation(client):
     mock_convs = AsyncMock()
@@ -254,6 +258,7 @@ async def test_delete_conversation_204(client):
 
 
 # ── lists ──
+
 
 @pytest.mark.asyncio
 async def test_recents_list(client):
@@ -300,13 +305,16 @@ async def test_expert_conversations_list(client):
 
 # ── the message stream ──
 
+
 def _fake_stream(events):
     """An async generator factory matching stream_expert_answer's signature."""
+
     async def gen(pool, expert, question, history, conversation_id=None):
         for ev in events:
             if isinstance(ev, Exception):
                 raise ev
             yield ev
+
     return gen
 
 
@@ -337,9 +345,7 @@ async def test_send_message_streams_and_persists(client):
     mock_convs, mock_experts = _stream_mocks(_make_conversation())
 
     p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3, patch(
-        "peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)
-    ):
+    with p1, p2, p3, patch("peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)):
         resp = await client.post(
             f"/conversations/{CONV_ID}/messages", json={"question": "What is virtue?"}
         )
@@ -407,9 +413,7 @@ async def test_send_message_error_persists_partial_interrupted(client):
     mock_convs, mock_experts = _stream_mocks(_make_conversation())
 
     p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3, patch(
-        "peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)
-    ):
+    with p1, p2, p3, patch("peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)):
         resp = await client.post(
             f"/conversations/{CONV_ID}/messages", json={"question": "What is virtue?"}
         )

@@ -148,9 +148,7 @@ async def corpus_report_export(
 
 
 @router.get("/{slug}/screening-flow")
-async def screening_flow(
-    slug: str, user: AuthUser = Depends(require_user)
-) -> dict[str, Any]:
+async def screening_flow(slug: str, user: AuthUser = Depends(require_user)) -> dict[str, Any]:
     """Counts through the funnel: identified → screened → retrieved → assessed → included.
 
     Pre-validation counts come from the build event log and are absent for
@@ -174,9 +172,7 @@ async def contradictions(
     slug: str,
     limit: int = Query(CONTRADICTIONS_PAGE_DEFAULT, ge=1, le=CONTRADICTIONS_PAGE_MAX),
     offset: int = Query(0, ge=0),
-    passages_per_side: int = Query(
-        DEFAULT_PASSAGES_PER_SIDE, ge=1, le=MAX_PASSAGES_PER_SIDE
-    ),
+    passages_per_side: int = Query(DEFAULT_PASSAGES_PER_SIDE, ge=1, le=MAX_PASSAGES_PER_SIDE),
     excerpt_chars: int = Query(DEFAULT_EXCERPT_CHARS, ge=100, le=MAX_EXCERPT_CHARS),
     user: AuthUser = Depends(require_user),
 ) -> dict[str, Any]:

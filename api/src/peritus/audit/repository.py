@@ -140,7 +140,10 @@ class AuditRepository:
                 ORDER BY {order}
                 LIMIT $3 OFFSET $4
                 """,
-                expert_id, passed, limit, offset,
+                expert_id,
+                passed,
+                limit,
+                offset,
             )
         return [dict(r) for r in rows]
 
@@ -330,7 +333,8 @@ class AuditRepository:
                 ORDER BY n DESC, reason
                 LIMIT $2
                 """,
-                expert_id, limit,
+                expert_id,
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -366,7 +370,9 @@ class AuditRepository:
                 FROM sources
                 WHERE expert_id = $1 AND NOT passed
                 """,
-                expert_id, quality_threshold, relevance_threshold,
+                expert_id,
+                quality_threshold,
+                relevance_threshold,
             )
         return dict(row) if row else {}
 
@@ -418,7 +424,9 @@ class AuditRepository:
                 ORDER BY s.passed DESC, s.quality_score DESC NULLS LAST, s.id
                 LIMIT $3
                 """,
-                expert_id, passed, limit,
+                expert_id,
+                passed,
+                limit,
             )
         return [dict(r) for r in rows]
 
@@ -482,7 +490,8 @@ class AuditRepository:
                 GROUP BY round, fetch_outcome, triage_status
                 ORDER BY round, fetch_outcome, triage_status
                 """,
-                expert_id, latest["job_id"],
+                expert_id,
+                latest["job_id"],
             )
         return {
             "job_id": latest["job_id"],
@@ -493,7 +502,8 @@ class AuditRepository:
                     "triage_status": r["triage_status"],
                     "count": r["n"],
                     "mean_triage_score": round(float(r["mean_score"]), 2)
-                    if r["mean_score"] is not None else None,
+                    if r["mean_score"] is not None
+                    else None,
                 }
                 for r in rows
             ],
@@ -507,9 +517,7 @@ class AuditRepository:
         stopped, and what coverage it reached.
         """
         async with self._pool.acquire() as conn:
-            raw = await conn.fetchval(
-                "SELECT build_summary FROM experts WHERE id = $1", expert_id
-            )
+            raw = await conn.fetchval("SELECT build_summary FROM experts WHERE id = $1", expert_id)
         if isinstance(raw, str):
             try:
                 raw = json.loads(raw)
@@ -546,7 +554,8 @@ class AuditRepository:
                 SELECT count(*)::int FROM sources
                 WHERE expert_id = $1 AND ($2::boolean IS NULL OR passed = $2::boolean)
                 """,
-                expert_id, passed,
+                expert_id,
+                passed,
             )
         return int(n or 0)
 
@@ -684,7 +693,9 @@ class AuditRepository:
                 ORDER BY e.evidence DESC, e.id
                 LIMIT $2 OFFSET $3
                 """,
-                expert_id, limit, offset,
+                expert_id,
+                limit,
+                offset,
             )
         return [dict(r) for r in rows]
 
@@ -714,7 +725,8 @@ class AuditRepository:
                 ORDER BY degree DESC, n.id
                 LIMIT $2
                 """,
-                expert_id, node_limit,
+                expert_id,
+                node_limit,
             )
             node_ids = [r["id"] for r in nodes]
             edges = (
@@ -726,7 +738,8 @@ class AuditRepository:
                       AND from_node_id = ANY($2::int[])
                       AND to_node_id = ANY($2::int[])
                     """,
-                    expert_id, node_ids,
+                    expert_id,
+                    node_ids,
                 )
                 if node_ids
                 else []
@@ -757,7 +770,8 @@ class AuditRepository:
                 JOIN sources s ON s.id = sc.source_id
                 WHERE sc.id = ANY($1::int[])
                 """,
-                chunk_ids, excerpt_chars,
+                chunk_ids,
+                excerpt_chars,
             )
         return {r["chunk_id"]: dict(r) for r in rows}
 
@@ -795,7 +809,8 @@ class AuditRepository:
                 WHERE job_id = $1 AND type = ANY($2::text[])
                 ORDER BY seq
                 """,
-                job_id, list(FUNNEL_EVENT_TYPES),
+                job_id,
+                list(FUNNEL_EVENT_TYPES),
             )
         return [dict(r) for r in rows]
 
@@ -895,7 +910,11 @@ class AuditRepository:
                 ORDER BY created_at DESC, id
                 LIMIT $3 OFFSET $4
                 """,
-                expert_id, conversation_id, limit, offset, *scope.params(),
+                expert_id,
+                conversation_id,
+                limit,
+                offset,
+                *scope.params(),
             )
         return [dict(r) for r in rows]
 
@@ -910,7 +929,9 @@ class AuditRepository:
                   AND ($2::uuid IS NULL OR a.conversation_id = $2::uuid)
                   AND {_AUDIT_SCOPE_SQL.format(caller="$3", unowned="$4", owns="$5")}
                 """,
-                expert_id, conversation_id, *scope.params(),
+                expert_id,
+                conversation_id,
+                *scope.params(),
             )
         return int(n or 0)
 
@@ -931,7 +952,9 @@ class AuditRepository:
                 WHERE a.expert_id = $1 AND a.id = $2::uuid
                   AND {_AUDIT_SCOPE_SQL.format(caller="$3", unowned="$4", owns="$5")}
                 """,
-                expert_id, audit_id, *scope.params(),
+                expert_id,
+                audit_id,
+                *scope.params(),
             )
         return dict(row) if row else None
 

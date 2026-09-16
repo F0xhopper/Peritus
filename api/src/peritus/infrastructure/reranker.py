@@ -161,14 +161,14 @@ async def _score_one_window(
             ),
             tools=[_TOOL],
             tool_choice={"type": "tool", "name": "rank_passages"},
-            messages=[{
-                "role": "user",
-                "content": f"Query: {query}\n\nPassages:\n\n{passages}",
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Query: {query}\n\nPassages:\n\n{passages}",
+                }
+            ],
         )
-        block = next(
-            (b for b in resp.content if getattr(b, "type", None) == "tool_use"), None
-        )
+        block = next((b for b in resp.content if getattr(b, "type", None) == "tool_use"), None)
         if block is None:
             return []
         out: list[tuple[int, float]] = []

@@ -214,7 +214,10 @@ async def gather_claude_calls(
     except Exception as exc:
         logger.warning(
             "Message batch %r failed outright (%s: %s) — falling back to live calls",
-            description, type(exc).__name__, exc, exc_info=True,
+            description,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
         )
         return await _run_live(
             params_list, live_concurrency, on_result=on_result, description=description
@@ -227,7 +230,9 @@ async def gather_claude_calls(
     if missing:
         logger.warning(
             "Message batch %r: %d/%d items unfinished — retrying them live",
-            description, len(missing), len(params_list),
+            description,
+            len(missing),
+            len(params_list),
         )
         retried = await _run_live(
             [params_list[i] for i in missing],
@@ -271,7 +276,10 @@ async def _run_live(
     model = str(params_list[0].get("model", "?")) if params_list else "?"
     logger.info(
         "Live Claude calls: %d request(s) for %r (model=%s, concurrency=%d)",
-        len(params_list), description, model, max(1, concurrency),
+        len(params_list),
+        description,
+        model,
+        max(1, concurrency),
     )
     started = time.monotonic()
 
@@ -284,7 +292,10 @@ async def _run_live(
                     if attempt:
                         logger.info(
                             "Live Claude call %r[%d] succeeded on attempt %d/%d",
-                            description, index, attempt + 1, _LIVE_ATTEMPTS,
+                            description,
+                            index,
+                            attempt + 1,
+                            _LIVE_ATTEMPTS,
                         )
                     break
                 except Exception as exc:
@@ -296,9 +307,10 @@ async def _run_live(
                         if status is not None:
                             status.terminal = exc
                         logger.error(
-                            "Live Claude call %r[%d]: terminal provider error, not "
-                            "retrying — %s",
-                            description, index, provider_error_message(exc),
+                            "Live Claude call %r[%d]: terminal provider error, not retrying — %s",
+                            description,
+                            index,
+                            provider_error_message(exc),
                         )
                         break
                     # Every attempt, not just the last. A call that succeeds on
@@ -307,13 +319,17 @@ async def _run_live(
                     last = attempt == _LIVE_ATTEMPTS - 1
                     logger.warning(
                         "Live Claude call %r[%d] attempt %d/%d failed: %s: %s%s",
-                        description, index, attempt + 1, _LIVE_ATTEMPTS,
-                        type(exc).__name__, exc,
-                        "" if last else f" — retrying in {2 ** attempt}s",
+                        description,
+                        index,
+                        attempt + 1,
+                        _LIVE_ATTEMPTS,
+                        type(exc).__name__,
+                        exc,
+                        "" if last else f" — retrying in {2**attempt}s",
                         exc_info=last,  # full traceback once, on the giving-up attempt
                     )
                     if not last:
-                        await asyncio.sleep(2 ** attempt)
+                        await asyncio.sleep(2**attempt)
         if on_result:
             await _report(on_result, index, msg)
         return msg
@@ -330,7 +346,10 @@ async def _run_live(
         logger.error(
             "Live Claude calls %r: ALL %d call(s) failed (%.1fs, model=%s) — %s. "
             "Downstream stage failures are provider errors, not bad input",
-            description, len(results), elapsed, model,
+            description,
+            len(results),
+            elapsed,
+            model,
             f"terminal provider error, not retried: {provider_error_message(terminal)}"
             if terminal is not None
             else f"each retried {_LIVE_ATTEMPTS}x",
@@ -338,12 +357,18 @@ async def _run_live(
     elif failed:
         logger.warning(
             "Live Claude calls %r: %d/%d failed after retries (%.1fs)",
-            description, failed, len(results), elapsed,
+            description,
+            failed,
+            len(results),
+            elapsed,
         )
     else:
         logger.info(
             "Live Claude calls %r: %d/%d succeeded (%.1fs)",
-            description, len(results), len(results), elapsed,
+            description,
+            len(results),
+            len(results),
+            elapsed,
         )
     return results
 
@@ -368,7 +393,9 @@ async def _run_batch(
     )
     logger.info(
         "Submitted message batch %s (%r, %d requests)",
-        batch.id, description, len(params_list),
+        batch.id,
+        description,
+        len(params_list),
     )
 
     deadline = time.monotonic() + settings.ANTHROPIC_BATCH_TIMEOUT
@@ -380,7 +407,8 @@ async def _run_batch(
         if time.monotonic() > deadline:
             logger.warning(
                 "Message batch %s (%r) exceeded ANTHROPIC_BATCH_TIMEOUT — cancelling",
-                batch.id, description,
+                batch.id,
+                description,
             )
             await client.messages.batches.cancel(batch.id)
             batch = await _await_ended(client, batch.id)
@@ -403,7 +431,10 @@ async def _run_batch(
             # of those to the word "errored".
             logger.warning(
                 "Batch item %s in %s (%r): %s — %s",
-                entry.custom_id, batch.id, description, entry.result.type,
+                entry.custom_id,
+                batch.id,
+                description,
+                entry.result.type,
                 getattr(entry.result, "error", None) or "no error detail",
             )
 
@@ -412,12 +443,17 @@ async def _run_batch(
         logger.error(
             "Message batch %s (%r): ALL %d item(s) failed — downstream stage "
             "failures are provider errors, not bad input",
-            batch.id, description, len(params_list),
+            batch.id,
+            description,
+            len(params_list),
         )
     else:
         logger.info(
             "Message batch %s (%r) finished: %d/%d succeeded",
-            batch.id, description, done, len(params_list),
+            batch.id,
+            description,
+            done,
+            len(params_list),
         )
     return results
 

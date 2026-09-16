@@ -46,12 +46,12 @@ class Identifiers:
     compare equal.
     """
 
-    doi: str | None = None          # bare, lowercased, no https://doi.org/
-    arxiv_id: str | None = None     # bare, version stripped
+    doi: str | None = None  # bare, lowercased, no https://doi.org/
+    arxiv_id: str | None = None  # bare, version stripped
     pmid: str | None = None
     pmcid: str | None = None
     openalex_id: str | None = None  # W…
-    s2_id: str | None = None        # Semantic Scholar paperId
+    s2_id: str | None = None  # Semantic Scholar paperId
 
     @classmethod
     def build(
@@ -93,19 +93,12 @@ class Identifiers:
         but not the canonical key of the second. Matching on any shared key is
         what actually merges them.
         """
-        return {
-            f"{name}:{value}"
-            for name in _KEY_ORDER
-            if (value := getattr(self, name))
-        }
+        return {f"{name}:{value}" for name in _KEY_ORDER if (value := getattr(self, name))}
 
     def merge(self, other: "Identifiers") -> "Identifiers":
         """Union of two records' identifiers; this record's values win on conflict."""
         return Identifiers(
-            **{
-                name: getattr(self, name) or getattr(other, name)
-                for name in _KEY_ORDER
-            }
+            **{name: getattr(self, name) or getattr(other, name) for name in _KEY_ORDER}
         )
 
     def is_empty(self) -> bool:
@@ -113,11 +106,7 @@ class Identifiers:
 
     def to_dict(self) -> dict[str, str]:
         """JSON-ready, dropping the absent schemes rather than writing nulls."""
-        return {
-            name: value
-            for name in _KEY_ORDER
-            if (value := getattr(self, name))
-        }
+        return {name: value for name in _KEY_ORDER if (value := getattr(self, name))}
 
     @classmethod
     def from_metadata(cls, metadata: dict | None) -> "Identifiers":

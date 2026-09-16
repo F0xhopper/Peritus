@@ -76,7 +76,9 @@ class ExpertService:
         )
         logger.info(
             "Regenerated persona for expert %d (%r): %s",
-            expert.id, expert.name, persona["name"],
+            expert.id,
+            expert.name,
+            persona["name"],
         )
         return await self.get(expert.id)
 
@@ -127,7 +129,10 @@ class ExpertService:
         await ExpertPictureRepository(self._pool).upsert(expert.id, found, chosen_by="build")
         logger.info(
             "Refreshed picture for expert %d (%r): %s (%s)",
-            expert.id, expert.name, found.page_title, found.license,
+            expert.id,
+            expert.name,
+            found.page_title,
+            found.license,
         )
         return await self.get(expert.id)
 

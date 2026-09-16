@@ -81,11 +81,16 @@ async def _run_build(builder: ExpertBuilder, expert: Expert, readiness_log: list
         events.append({"type": "_readiness", "readiness": readiness})
 
     with (
-        patch("peritus.experts.builder._plan_research", AsyncMock(return_value={
-            "fetcher_plans": {},
-            "key_concepts": ["virtue"],
-            "must_have_works": [],
-        })),
+        patch(
+            "peritus.experts.builder._plan_research",
+            AsyncMock(
+                return_value={
+                    "fetcher_plans": {},
+                    "key_concepts": ["virtue"],
+                    "must_have_works": [],
+                }
+            ),
+        ),
         patch("peritus.experts.builder._route_must_have_works"),
         patch("peritus.experts.builder.validate_sources", AsyncMock(return_value=(passed, []))),
         patch(
@@ -97,9 +102,16 @@ async def _run_build(builder: ExpertBuilder, expert: Expert, readiness_log: list
             AsyncMock(return_value=[{"nodes": [], "edges": []}]),
         ),
         patch("peritus.experts.builder._resolve_entities", AsyncMock(return_value=0)),
-        patch("peritus.experts.builder._generate_persona", AsyncMock(return_value={
-            "name": "Dr. Aurelia Vance", "bio": "b", "style": "s",
-        })),
+        patch(
+            "peritus.experts.builder._generate_persona",
+            AsyncMock(
+                return_value={
+                    "name": "Dr. Aurelia Vance",
+                    "bio": "b",
+                    "style": "s",
+                }
+            ),
+        ),
         patch("peritus.experts.builder.set_readiness", _record),
     ):
         result = await builder.build(expert, on_event=on_event)
@@ -119,8 +131,7 @@ async def test_chat_ready_is_published_before_graph_extraction():
     types = _types(events)
     chat_ready = types.index("chat_ready")
     graph_stage = next(
-        i for i, e in enumerate(events)
-        if e["type"] == "stage" and e.get("name") == "graph"
+        i for i, e in enumerate(events) if e["type"] == "stage" and e.get("name") == "graph"
     )
     graph_ready = types.index("graph_ready")
 
@@ -133,8 +144,8 @@ async def test_readiness_transitions_in_order():
     readiness_log: list[Readiness] = []
     await _run_build(ExpertBuilder(MagicMock()), _expert(), readiness_log)
     assert readiness_log == [
-        Readiness.PENDING,      # rebuild has just wiped the old corpus
-        Readiness.CHAT_READY,   # chunks embedded — answerable
+        Readiness.PENDING,  # rebuild has just wiped the old corpus
+        Readiness.CHAT_READY,  # chunks embedded — answerable
         Readiness.GRAPH_READY,  # graph extracted + resolved
     ]
 
@@ -162,6 +173,7 @@ async def test_chat_ready_event_reports_no_graph_expansion():
 
 
 # ── execution policy end to end ──────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_first_build_announces_interactive_execution(monkeypatch):

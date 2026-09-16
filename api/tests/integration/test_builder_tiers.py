@@ -27,6 +27,7 @@ def _make_expert(tier: ExpertTier) -> Expert:
 
 # ── builder multiplier tests ──────────────────────────────────────────────────
 
+
 def test_lite_builder_multiplier():
     pool = MagicMock()
     builder = ExpertBuilder(pool)
@@ -63,6 +64,7 @@ def test_pro_builder_multiplier():
 
 
 # ── chat pipeline propagation tests ──────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_lite_chat_pipeline_top_k():

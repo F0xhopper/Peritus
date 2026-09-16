@@ -40,8 +40,8 @@ def test_tier_defaults_are_correct():
 
 def test_monotonicity():
     lite = ExpertConfig.from_tier(ExpertTier.LITE)
-    std  = ExpertConfig.from_tier(ExpertTier.STANDARD)
-    pro  = ExpertConfig.from_tier(ExpertTier.PRO)
+    std = ExpertConfig.from_tier(ExpertTier.STANDARD)
+    pro = ExpertConfig.from_tier(ExpertTier.PRO)
 
     for field in dataclasses.fields(ExpertConfig):
         l_val = getattr(lite, field.name)
@@ -68,10 +68,24 @@ def test_empty_config_fallback():
     class _FakeRow:
         def keys(self):
             return [
-                "id", "name", "topic", "status", "tier", "config",
-                "persona_name", "persona_bio", "persona_style",
-                "source_count", "chunk_count", "node_count", "edge_count",
-                "avg_quality", "key_concepts", "error", "created_at", "updated_at",
+                "id",
+                "name",
+                "topic",
+                "status",
+                "tier",
+                "config",
+                "persona_name",
+                "persona_bio",
+                "persona_style",
+                "source_count",
+                "chunk_count",
+                "node_count",
+                "edge_count",
+                "avg_quality",
+                "key_concepts",
+                "error",
+                "created_at",
+                "updated_at",
             ]
 
         def __getitem__(self, key):
@@ -82,7 +96,7 @@ def test_empty_config_fallback():
                 "topic": "test topic",
                 "status": "ready",
                 "tier": "standard",
-                "config": {},          # empty — should fall back to STANDARD defaults
+                "config": {},  # empty — should fall back to STANDARD defaults
                 "persona_name": None,
                 "persona_bio": None,
                 "persona_style": None,

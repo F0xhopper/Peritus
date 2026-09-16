@@ -97,7 +97,8 @@ def iterative_scan_sql(*, local: bool) -> str:
         # validate against the allowlist rather than trusting the environment.
         logger.warning(
             "HNSW_ITERATIVE_SCAN=%r is not one of %s — using relaxed_order",
-            settings.HNSW_ITERATIVE_SCAN, ", ".join(sorted(_ITERATIVE_SCAN_MODES)),
+            settings.HNSW_ITERATIVE_SCAN,
+            ", ".join(sorted(_ITERATIVE_SCAN_MODES)),
         )
         mode = "relaxed_order"
     return f"SET {'LOCAL ' if local else ''}hnsw.iterative_scan = {mode}"
@@ -118,7 +119,9 @@ async def _probe_vector_capabilities(pool: asyncpg.Pool) -> None:
     try:
         async with pool.acquire() as conn:
             _halfvec_supported = bool(
-                await conn.fetchval("SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'halfvec')")
+                await conn.fetchval(
+                    "SELECT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'halfvec')"
+                )
             )
     except Exception as exc:
         _halfvec_supported = False

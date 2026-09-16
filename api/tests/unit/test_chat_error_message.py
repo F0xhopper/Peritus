@@ -28,9 +28,7 @@ def _status_error(status: int, message: str) -> APIStatusError:
 
 
 def test_a_provider_refusal_quotes_the_provider():
-    error = _status_error(
-        400, "Your credit balance is too low to access the Anthropic API."
-    )
+    error = _status_error(400, "Your credit balance is too low to access the Anthropic API.")
     text = answer_error_message(error)
     assert "Anthropic API rejected the request" in text
     assert "credit balance is too low" in text

@@ -22,6 +22,7 @@ class YoutubeFetcher:
 
         try:
             from exa_py import Exa  # type: ignore
+
             client = Exa(api_key=settings.EXA_API_KEY)
             results = await asyncio.to_thread(
                 client.search_and_contents,
@@ -45,14 +46,16 @@ class YoutubeFetcher:
                 continue
             title = r.title or url
             description = (getattr(r, "text", None) or "").strip()
-            candidates.append(SourceCandidate(
-                source_type=SourceType.YOUTUBE,
-                url=f"https://www.youtube.com/watch?v={vid_id}",
-                title=title,
-                author=None,
-                snippet=f"{title}\n{description}" if description else title,
-                metadata={"video_id": vid_id},
-            ))
+            candidates.append(
+                SourceCandidate(
+                    source_type=SourceType.YOUTUBE,
+                    url=f"https://www.youtube.com/watch?v={vid_id}",
+                    title=title,
+                    author=None,
+                    snippet=f"{title}\n{description}" if description else title,
+                    metadata={"video_id": vid_id},
+                )
+            )
         return candidates
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:

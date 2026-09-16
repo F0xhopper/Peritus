@@ -130,9 +130,7 @@ class GutenbergCatalogue:
             )
         return cls(books)
 
-    def resolve(
-        self, title: str, author: str | None = None, limit: int = 3
-    ) -> list[CatalogueBook]:
+    def resolve(self, title: str, author: str | None = None, limit: int = 3) -> list[CatalogueBook]:
         """Books whose title matches ``title``, best first.
 
         A token of the wanted title that the catalogue has never seen is widened
@@ -162,13 +160,10 @@ class GutenbergCatalogue:
                 hits[position] += 1
 
         needed = max(1, round(len(wanted_tokens) * 0.6))
+        matches = [self._books[position] for position, count in hits.items() if count >= needed]
         matches = [
-            self._books[position]
-            for position, count in hits.items()
-            if count >= needed
-        ]
-        matches = [
-            book for book in matches
+            book
+            for book in matches
             if title_matches(title, book.title.splitlines()[0])
             or hits_fraction(wanted_tokens, book.title) >= 0.6
         ]
@@ -256,7 +251,8 @@ async def load_catalogue() -> GutenbergCatalogue | None:
             _failed_at = time.monotonic()
             logger.warning(
                 "Gutenberg catalogue unavailable (%s: %s) — falling back to Gutendex",
-                type(exc).__name__, exc,
+                type(exc).__name__,
+                exc,
             )
             return _catalogue
         if not len(loaded):
@@ -286,9 +282,12 @@ def _is_fresh(path: Path) -> bool:
 async def _download(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     partial = path.with_suffix(".csv.part")
-    async with httpx.AsyncClient(
-        timeout=_DOWNLOAD_TIMEOUT, headers=_HEADERS, follow_redirects=True
-    ) as client, client.stream("GET", CATALOGUE_URL) as resp:
+    async with (
+        httpx.AsyncClient(
+            timeout=_DOWNLOAD_TIMEOUT, headers=_HEADERS, follow_redirects=True
+        ) as client,
+        client.stream("GET", CATALOGUE_URL) as resp,
+    ):
         resp.raise_for_status()
         with partial.open("wb") as handle:
             async for chunk in resp.aiter_bytes():

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class Citation(BaseModel):
     """One cited passage, numbered to match the inline ``[n]`` markers — the
     exact shape the SSE ``sources`` event emits and JSONB stores."""
+
     n: int
     label: str
     source_id: int | None = None

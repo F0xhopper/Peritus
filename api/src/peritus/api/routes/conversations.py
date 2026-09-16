@@ -136,9 +136,7 @@ async def list_recent_conversations(
 
 
 @router.get("/conversations/{conversation_id}", response_model=ConversationDetail)
-async def get_conversation(
-    conversation_id: uuid.UUID, user: AuthUser = Depends(require_user)
-):
+async def get_conversation(conversation_id: uuid.UUID, user: AuthUser = Depends(require_user)):
     conv = await _get_owned_conversation(conversation_id, user)
     messages = await ConversationRepository(get_pool()).get_messages(conv.id)
     summary = _to_summary(conv)
@@ -171,17 +169,13 @@ async def rename_conversation(
     )
     if not renamed:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    conv = await convs.get_for_user(
-        str(conversation_id), user.id, include_unowned=user.is_admin
-    )
+    conv = await convs.get_for_user(str(conversation_id), user.id, include_unowned=user.is_admin)
     assert conv is not None
     return _to_summary(conv)
 
 
 @router.delete("/conversations/{conversation_id}", status_code=204)
-async def delete_conversation(
-    conversation_id: uuid.UUID, user: AuthUser = Depends(require_user)
-):
+async def delete_conversation(conversation_id: uuid.UUID, user: AuthUser = Depends(require_user)):
     deleted = await ConversationRepository(get_pool()).delete(
         str(conversation_id), user.id, include_unowned=user.is_admin
     )
@@ -219,9 +213,7 @@ async def send_message(
     # viewer's chat outlives the share link it was started through. The history
     # stays readable; asking anything new needs the link to still be live.
     if not await experts.is_readable_by(expert.id, user.id, include_unowned=user.is_admin):
-        raise HTTPException(
-            status_code=403, detail="This expert is no longer shared with you"
-        )
+        raise HTTPException(status_code=403, detail="This expert is no longer shared with you")
     # A rebuild resets readiness to pending before it wipes the corpus, so this
     # also catches an expert whose sources are being replaced underneath us.
     readiness = await get_readiness(pool, expert.id)
@@ -235,9 +227,7 @@ async def send_message(
         # History for the model: everything before this question, in the exact
         # {role, content} shape stateless clients send. +1 covers the reused-
         # question case below; build_composition_messages caps at the max.
-        history = await convs.recent_history(
-            conv.id, settings.CHAT_HISTORY_MAX_MESSAGES + 1
-        )
+        history = await convs.recent_history(conv.id, settings.CHAT_HISTORY_MAX_MESSAGES + 1)
         if history and history[-1]["role"] == "user" and history[-1]["content"] == req.question:
             # Retry of an orphaned question (its stream died before any tokens):
             # reuse the stored user message instead of inserting a duplicate.
@@ -252,7 +242,9 @@ async def send_message(
 
     logger.info(
         "Streaming answer for conversation %s (expert=%d, history=%d)",
-        conv.id, expert.id, len(history),
+        conv.id,
+        expert.id,
+        len(history),
     )
     return EventSourceResponse(
         _stream_and_persist(pool, convs, conv, expert, req.question, history)
@@ -281,8 +273,7 @@ def answer_error_message(error: BaseException) -> str:
     if isinstance(error, anthropic.APIStatusError):
         detail = provider_error_message(error)[:300].strip()
         return (
-            "The answer could not be composed — the Anthropic API rejected the "
-            f"request: {detail}"
+            f"The answer could not be composed — the Anthropic API rejected the request: {detail}"
         )
     return "The expert hit an internal error while answering."
 
@@ -325,9 +316,15 @@ async def _stream_and_persist(
         )
 
     try:
-        yield {"data": json.dumps({
-            "type": "meta", "conversation_id": conv.id, "title": conv.title,
-        })}
+        yield {
+            "data": json.dumps(
+                {
+                    "type": "meta",
+                    "conversation_id": conv.id,
+                    "title": conv.title,
+                }
+            )
+        }
 
         from peritus.chat.streaming import stream_expert_answer
 
@@ -352,10 +349,14 @@ async def _stream_and_persist(
         logger.exception("Conversation stream failed for %s", conv.id)
         with contextlib.suppress(Exception):
             await _finalize(interrupted=True)
-        yield {"data": json.dumps({
-            "type": "error",
-            "message": answer_error_message(error),
-        })}
+        yield {
+            "data": json.dumps(
+                {
+                    "type": "error",
+                    "message": answer_error_message(error),
+                }
+            )
+        }
 
     finally:
         if not finalized:

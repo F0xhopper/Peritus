@@ -70,8 +70,12 @@ def _treatise(questions: range, toc: bool = True) -> str:
     return front + contents + body
 
 
-def _candidate(title: str, url: str = "", st: SourceType = SourceType.WEB, **meta) -> SourceCandidate:
-    return SourceCandidate(st, url or f"https://x.test/{title.replace(' ', '-')}", title, None, "", dict(meta))
+def _candidate(
+    title: str, url: str = "", st: SourceType = SourceType.WEB, **meta
+) -> SourceCandidate:
+    return SourceCandidate(
+        st, url or f"https://x.test/{title.replace(' ', '-')}", title, None, "", dict(meta)
+    )
 
 
 # ── sections ─────────────────────────────────────────────────────────────────
@@ -128,7 +132,9 @@ def test_no_match_falls_back_to_a_prefix_and_says_why():
 
 def test_apply_sections_records_what_happened():
     text, recorded = apply_sections(
-        _treatise(range(1, 6), toc=False), {"must_have_sections": "q. 3", "text_max_chars": 50_000}, 200_000
+        _treatise(range(1, 6), toc=False),
+        {"must_have_sections": "q. 3", "text_max_chars": 50_000},
+        200_000,
     )
     assert recorded["sections_matched"] is True
     assert recorded["truncated"] is True
@@ -142,14 +148,32 @@ def test_apply_sections_records_what_happened():
 def test_each_concept_passage_is_its_own_lookup_and_the_overall_entry_joins_them():
     """A whole-work hint merged into the concept hints made the cut keep the
     work's opening again, and gave every concept one volume."""
-    works = merge_works([
-        MustHaveWork("Principia (Mathematical Principles)", "Isaac Newton", "text", True,
-                     "Books I-III", SCOPE_OVERALL),
-        MustHaveWork("Principia", "Newton", "text", True, "Book III", SCOPE_CONCEPT, ["gravitation"]),
-        MustHaveWork("Principia", "Newton", "text", True, "Book I, sections 2-3", SCOPE_CONCEPT, ["orbits"]),
-        MustHaveWork("Principia", "Newton", "text", True, "Book III", SCOPE_CONCEPT, ["tides"]),
-        MustHaveWork("Opticks", "Newton", "text", True, "", SCOPE_OVERALL),
-    ])
+    works = merge_works(
+        [
+            MustHaveWork(
+                "Principia (Mathematical Principles)",
+                "Isaac Newton",
+                "text",
+                True,
+                "Books I-III",
+                SCOPE_OVERALL,
+            ),
+            MustHaveWork(
+                "Principia", "Newton", "text", True, "Book III", SCOPE_CONCEPT, ["gravitation"]
+            ),
+            MustHaveWork(
+                "Principia",
+                "Newton",
+                "text",
+                True,
+                "Book I, sections 2-3",
+                SCOPE_CONCEPT,
+                ["orbits"],
+            ),
+            MustHaveWork("Principia", "Newton", "text", True, "Book III", SCOPE_CONCEPT, ["tides"]),
+            MustHaveWork("Opticks", "Newton", "text", True, "", SCOPE_OVERALL),
+        ]
+    )
     lookups = {(w.title, w.sections): (w.scope, w.concepts) for w in works}
     assert lookups == {
         ("Principia", "Book III"): (SCOPE_OVERALL, ["gravitation", "tides"]),
@@ -161,10 +185,24 @@ def test_each_concept_passage_is_its_own_lookup_and_the_overall_entry_joins_them
 def test_two_concepts_on_one_volume_share_one_fetch_with_both_sections():
     from peritus.experts.builder import _merge_same_volume
 
-    a = _candidate("Vol I", "https://g.test/1", must_have_sections="q. 2", must_have_concepts=["proofs"],
-                   fetch_priority=True, priority_rank=1, text_max_chars=60_000)
-    b = _candidate("Vol I", "https://g.test/1/", must_have_sections="qq. 75-89", must_have_concepts=["soul"],
-                   fetch_priority=True, priority_rank=0, text_max_chars=60_000)
+    a = _candidate(
+        "Vol I",
+        "https://g.test/1",
+        must_have_sections="q. 2",
+        must_have_concepts=["proofs"],
+        fetch_priority=True,
+        priority_rank=1,
+        text_max_chars=60_000,
+    )
+    b = _candidate(
+        "Vol I",
+        "https://g.test/1/",
+        must_have_sections="qq. 75-89",
+        must_have_concepts=["soul"],
+        fetch_priority=True,
+        priority_rank=0,
+        text_max_chars=60_000,
+    )
     c = _candidate("Vol III", "https://g.test/3", must_have_sections="qq. 60-83")
     merged = _merge_same_volume([a, b, c], ceiling=200_000)
     assert [m.title for m in merged] == ["Vol I", "Vol III"]
@@ -175,7 +213,9 @@ def test_two_concepts_on_one_volume_share_one_fetch_with_both_sections():
     assert meta["text_max_chars"] == 120_000
 
     big = [
-        _candidate("Vol I", "https://g.test/1", must_have_sections=f"q. {n}", text_max_chars=200_000)
+        _candidate(
+            "Vol I", "https://g.test/1", must_have_sections=f"q. {n}", text_max_chars=200_000
+        )
         for n in (2, 13, 75)
     ]
     [one] = _merge_same_volume(big, ceiling=200_000)
@@ -199,10 +239,22 @@ def test_only_a_primary_source_counts_as_the_work_found():
         MustHaveWork("De Ente et Essentia (On Being and Essence)", public_domain=True),
     ]
     passed = [
-        ("https://en.wikipedia.org/wiki/Summa_Theologica",
-         {"must_have_title": "Summa Theologica", "must_have_extent": EXTENT_WHOLE, "source_tier": "tertiary"}),
-        ("https://dhspriory.test/deente",
-         {"must_have_title": "De Ente et Essentia", "must_have_extent": EXTENT_WHOLE, "source_tier": "primary"}),
+        (
+            "https://en.wikipedia.org/wiki/Summa_Theologica",
+            {
+                "must_have_title": "Summa Theologica",
+                "must_have_extent": EXTENT_WHOLE,
+                "source_tier": "tertiary",
+            },
+        ),
+        (
+            "https://dhspriory.test/deente",
+            {
+                "must_have_title": "De Ente et Essentia",
+                "must_have_extent": EXTENT_WHOLE,
+                "source_tier": "primary",
+            },
+        ),
     ]
     status = {o["title"]: o["status"] for o in must_have_outcomes(works, [], passed)}
     assert status == {
@@ -219,8 +271,12 @@ async def test_an_encyclopedia_article_with_a_works_title_is_not_a_must_have_hit
     async def _gather(params, **_kwargs):
         return [None for _ in params]
 
-    wiki = _candidate("Summa Theologica", "https://en.wikipedia.org/wiki/Summa", SourceType.WIKIPEDIA)
-    text = _candidate("Summa Theologica, Part I", "https://www.gutenberg.org/ebooks/17611", SourceType.GUTENBERG)
+    wiki = _candidate(
+        "Summa Theologica", "https://en.wikipedia.org/wiki/Summa", SourceType.WIKIPEDIA
+    )
+    text = _candidate(
+        "Summa Theologica, Part I", "https://www.gutenberg.org/ebooks/17611", SourceType.GUTENBERG
+    )
     with patch.object(triage_module, "gather_claude_calls", _gather):
         triaged = await triage_candidates("t", [], ["Summa Theologica"], [wiki, text])
     assert not triaged[0].candidate.metadata.get("must_have_title")
@@ -243,7 +299,10 @@ def test_routes_depend_on_the_kind_of_work(kind, public_domain, routes):
 
 
 def test_without_exa_a_paper_still_has_openalex():
-    assert [n for n, _ in _routes_for(MustHaveWork("P", kind="paper"), None)] == [ROUTE_ARXIV, ROUTE_OPENALEX]
+    assert [n for n, _ in _routes_for(MustHaveWork("P", kind="paper"), None)] == [
+        ROUTE_ARXIV,
+        ROUTE_OPENALEX,
+    ]
 
 
 @pytest.mark.asyncio
@@ -270,7 +329,9 @@ async def test_only_the_best_hit_per_work_jumps_the_queue_and_carries_the_ceilin
 
 def test_volume_designators_are_matched_as_pairs_not_loose_numerals():
     volumes = [
-        _candidate("Collected Works, Part I-II (Pars Prima Secundae)", must_have_extent=EXTENT_PARTIAL),
+        _candidate(
+            "Collected Works, Part I-II (Pars Prima Secundae)", must_have_extent=EXTENT_PARTIAL
+        ),
         _candidate("Collected Works, Part I (Prima Pars)", must_have_extent=EXTENT_PARTIAL),
     ]
     assert order_by_sections(list(volumes), "Prima Pars q. 2")[0].title.endswith("(Prima Pars)")
@@ -281,24 +342,35 @@ def test_a_volume_the_hint_points_at_is_enough_to_stop_looking():
     from peritus.sources.canonical import WorkResolution
 
     work = MustHaveWork("Collected Works", sections="I-II qq. 90-97")
-    hit = _candidate("Collected Works, Part I-II", must_have_extent=EXTENT_PARTIAL, sections_expected=True)
+    hit = _candidate(
+        "Collected Works, Part I-II", must_have_extent=EXTENT_PARTIAL, sections_expected=True
+    )
     assert WorkResolution(work, [hit]).sufficient
     assert not WorkResolution(MustHaveWork("Collected Works"), [hit]).sufficient
 
 
 def test_outcomes_distinguish_whole_named_sections_and_fragments():
     works = [
-        MustHaveWork("A"), MustHaveWork("B", sections="ch. 3"), MustHaveWork("C"),
-        MustHaveWork("D", public_domain=True), MustHaveWork("E"),
+        MustHaveWork("A"),
+        MustHaveWork("B", sections="ch. 3"),
+        MustHaveWork("C"),
+        MustHaveWork("D", public_domain=True),
+        MustHaveWork("E"),
     ]
     passed = [
         ("u1", {"must_have_title": "A", "must_have_extent": EXTENT_WHOLE}),
-        ("u2", {"must_have_title": "B", "must_have_extent": EXTENT_WHOLE, "sections_matched": True}),
+        (
+            "u2",
+            {"must_have_title": "B", "must_have_extent": EXTENT_WHOLE, "sections_matched": True},
+        ),
         ("u3", {"must_have_title": "C", "must_have_extent": EXTENT_PARTIAL}),
     ]
     status = {o["title"]: o["status"] for o in must_have_outcomes(works, [], passed)}
     assert status == {
-        "A": FOUND_WHOLE, "B": FOUND_SECTIONS, "C": FOUND_PARTIAL, "D": "not_found",
+        "A": FOUND_WHOLE,
+        "B": FOUND_SECTIONS,
+        "C": FOUND_PARTIAL,
+        "D": "not_found",
         # An in-copyright book with no free text is not a failed search.
         "E": "not_obtainable",
     }
@@ -314,8 +386,13 @@ def test_any_archive_page_routes_to_the_items_text():
     ):
         candidate = as_archive_candidate(_candidate("X", url, SourceType.EXA))
         assert candidate is not None and candidate.metadata["canonical_fetcher"] == "archive"
-    assert archive_identifier("https://archive.org/stream/in.ernet.dli.2015.76179/x.txt") == "in.ernet.dli.2015.76179"
-    assert isinstance(_fetcher_for(_candidate("X", "https://archive.org/details/abc"), {}), ArchiveTextFetcher)
+    assert (
+        archive_identifier("https://archive.org/stream/in.ernet.dli.2015.76179/x.txt")
+        == "in.ernet.dli.2015.76179"
+    )
+    assert isinstance(
+        _fetcher_for(_candidate("X", "https://archive.org/details/abc"), {}), ArchiveTextFetcher
+    )
     assert as_archive_candidate(_candidate("X", "https://example.org/details/abc")) is None
 
 
@@ -341,8 +418,12 @@ def test_archive_items_are_used_only_when_their_metadata_allows_it(metadata, reu
 
 def test_english_is_recognised_and_other_languages_are_not():
     assert english_share(_prose("law", 400)) > 0.3
-    spanish = "La distinción real entre la esencia y la existencia es el núcleo de la metafísica. " * 30
-    german = "Die Unterscheidung zwischen Wesen und Dasein ist der Kern der Metaphysik und bleibt. " * 30
+    spanish = (
+        "La distinción real entre la esencia y la existencia es el núcleo de la metafísica. " * 30
+    )
+    german = (
+        "Die Unterscheidung zwischen Wesen und Dasein ist der Kern der Metaphysik und bleibt. " * 30
+    )
     assert not is_expected_language(spanish)
     assert not is_expected_language(german)
     assert is_expected_language("too short to judge")
@@ -361,7 +442,9 @@ class _Fetcher:
         self.texts = texts
 
     async def fetch(self, candidate):
-        return RawSource(candidate.source_type, candidate.url, candidate.title, None, self.texts[candidate.title])
+        return RawSource(
+            candidate.source_type, candidate.url, candidate.title, None, self.texts[candidate.title]
+        )
 
 
 def _builder(texts: dict[str, str]) -> ExpertBuilder:
@@ -372,7 +455,9 @@ def _builder(texts: dict[str, str]) -> ExpertBuilder:
 
 @pytest.mark.asyncio
 async def test_a_non_english_text_is_dropped_before_validation():
-    spanish = "La distinción real entre la esencia y la existencia es el núcleo de la metafísica. " * 30
+    spanish = (
+        "La distinción real entre la esencia y la existencia es el núcleo de la metafísica. " * 30
+    )
     ranked = [TriagedCandidate(_candidate("es"), 8.0), TriagedCandidate(_candidate("en"), 8.0)]
     outcomes: dict = {}
     results, _ = await _builder({"es": spanish, "en": _prose("en", 400)})._fetch_with_refill(
@@ -397,7 +482,9 @@ async def test_priority_stops_jumping_the_queue_past_its_share_of_the_money():
     results, committed = await _builder(texts)._fetch_with_refill(
         ranked, budget=10, caps={}, budget_usd=Decimal("0.5"), floor=6.0, outcomes=outcomes
     )
-    assert 0 < len(results) < 6, "priority texts may use about half the round's money, not all of it"
+    assert 0 < len(results) < 6, (
+        "priority texts may use about half the round's money, not all of it"
+    )
     assert any(o == "below_floor" for _, o in outcomes.values())
 
 
@@ -424,11 +511,31 @@ def test_the_plan_keeps_concept_texts_for_real_concepts_two_at_most():
             "key_concepts": ["Gravitation", "Orbits"],
             "primary_source_definition": "  Newton's own writings.  ",
             "concept_primary_texts": [
-                {"concept": "gravitation", "title": "Principia", "kind": "text", "public_domain": True,
-                 "sections": "Book III"},
-                {"concept": "Gravitation", "title": "Opticks", "kind": "text", "public_domain": True},
-                {"concept": "Gravitation", "title": "A third", "kind": "text", "public_domain": True},
-                {"concept": "Invented concept", "title": "Nope", "kind": "text", "public_domain": False},
+                {
+                    "concept": "gravitation",
+                    "title": "Principia",
+                    "kind": "text",
+                    "public_domain": True,
+                    "sections": "Book III",
+                },
+                {
+                    "concept": "Gravitation",
+                    "title": "Opticks",
+                    "kind": "text",
+                    "public_domain": True,
+                },
+                {
+                    "concept": "Gravitation",
+                    "title": "A third",
+                    "kind": "text",
+                    "public_domain": True,
+                },
+                {
+                    "concept": "Invented concept",
+                    "title": "Nope",
+                    "kind": "text",
+                    "public_domain": False,
+                },
                 {"concept": "Orbits", "title": "", "kind": "text", "public_domain": False},
             ],
         },
@@ -436,7 +543,8 @@ def test_the_plan_keeps_concept_texts_for_real_concepts_two_at_most():
     )
     assert plan["primary_source_definition"] == "Newton's own writings."
     assert [(t["concept"], t["title"]) for t in plan["concept_primary_texts"]] == [
-        ("Gravitation", "Principia"), ("Gravitation", "Opticks"),
+        ("Gravitation", "Principia"),
+        ("Gravitation", "Opticks"),
     ]
     assert plan["concept_primary_texts"][0]["sections"] == "Book III"
 
@@ -451,8 +559,16 @@ def test_tiers_look_for_more_concept_texts_as_they_deepen():
 
 @pytest.mark.asyncio
 async def test_concepts_without_a_primary_source_get_primary_texts_looked_up_by_title(monkeypatch):
-    suggested = [{"concept": "orbits", "title": "Principia", "author": "Newton", "kind": "text",
-                  "public_domain": True, "sections": "Book I"}]
+    suggested = [
+        {
+            "concept": "orbits",
+            "title": "Principia",
+            "author": "Newton",
+            "kind": "text",
+            "public_domain": True,
+            "sections": "Book I",
+        }
+    ]
     suggest = AsyncMock(return_value=suggested)
     monkeypatch.setattr("peritus.experts.builder.suggest_primary_texts", suggest)
     found = _candidate("Principia", fetch_priority=True)
@@ -468,13 +584,22 @@ async def test_concepts_without_a_primary_source_get_primary_texts_looked_up_by_
         events.append(e)
 
     with (
-        patch("peritus.experts.builder.feedback_queries", AsyncMock(return_value=Feedback({"orbits": ["q"]}))),
+        patch(
+            "peritus.experts.builder.feedback_queries",
+            AsyncMock(return_value=Feedback({"orbits": ["q"]})),
+        ),
         patch("peritus.experts.builder.snowball", AsyncMock(return_value=[])),
     ):
         _, candidates = await builder._plan_round(
             "Newtonian mechanics",
             [ConceptCoverage("orbits", sources=3, primary=0)],
-            [], MagicMock(), ExpertConfig.from_tier(ExpertTier.STANDARD), on_event, 1, {}, [],
+            [],
+            MagicMock(),
+            ExpertConfig.from_tier(ExpertTier.STANDARD),
+            on_event,
+            1,
+            {},
+            [],
         )
     assert candidates == [found]
     suggest.assert_awaited_once()
@@ -493,19 +618,42 @@ async def test_suggestions_are_held_to_the_concepts_asked_about_and_not_repeated
             @staticmethod
             async def create(**_kwargs):
                 block = MagicMock(type="tool_use")
-                block.input = {"texts": [
-                    {"concept": "ORBITS", "title": "Principia", "kind": "text", "public_domain": True},
-                    {"concept": "orbits", "title": "Already Tried", "kind": "text", "public_domain": True},
-                    {"concept": "made up", "title": "X", "kind": "text", "public_domain": True},
-                    {"concept": "orbits", "title": "Second", "kind": "weird", "public_domain": "yes"},
-                    {"concept": "orbits", "title": "Third", "kind": "text", "public_domain": True},
-                ]}
+                block.input = {
+                    "texts": [
+                        {
+                            "concept": "ORBITS",
+                            "title": "Principia",
+                            "kind": "text",
+                            "public_domain": True,
+                        },
+                        {
+                            "concept": "orbits",
+                            "title": "Already Tried",
+                            "kind": "text",
+                            "public_domain": True,
+                        },
+                        {"concept": "made up", "title": "X", "kind": "text", "public_domain": True},
+                        {
+                            "concept": "orbits",
+                            "title": "Second",
+                            "kind": "weird",
+                            "public_domain": "yes",
+                        },
+                        {
+                            "concept": "orbits",
+                            "title": "Third",
+                            "kind": "text",
+                            "public_domain": True,
+                        },
+                    ]
+                }
                 return MagicMock(content=[block])
 
     with patch.object(feedback, "get_anthropic_client", lambda: _Client()):
         out = await feedback.suggest_primary_texts("t", "def", ["orbits"], ["already tried"])
     assert [(t["concept"], t["title"], t["kind"], t["public_domain"]) for t in out] == [
-        ("orbits", "Principia", "text", True), ("orbits", "Second", "book", False),
+        ("orbits", "Principia", "text", True),
+        ("orbits", "Second", "book", False),
     ]
 
 
@@ -530,7 +678,11 @@ def test_the_validator_is_shown_the_topics_definition_of_primary():
 
 
 def test_pirate_mirrors_are_penalised_hard():
-    for url in ("https://docplayer.net/123-A-Book.html", "https://dokumen.pub/a-book.html", "https://ebin.pub/x.html"):
+    for url in (
+        "https://docplayer.net/123-A-Book.html",
+        "https://dokumen.pub/a-book.html",
+        "https://ebin.pub/x.html",
+    ):
         assert domain_adjustment(url) <= -5.0
 
 
@@ -559,7 +711,9 @@ def test_nodes_sent_as_a_json_string_are_decoded_not_discarded():
 
     truncated = json.dumps(nodes + nodes)[:-20]
     result = _parse_extract_response(_Response({"nodes": truncated, "edges": []}), [7])
-    assert [n["label"] for n in result["nodes"]] == ["Inertia"], "complete objects of a cut-off string survive"
+    assert [n["label"] for n in result["nodes"]] == ["Inertia"], (
+        "complete objects of a cut-off string survive"
+    )
 
 
 def test_graph_extraction_reads_a_bounded_number_of_chunks_per_source(monkeypatch):
@@ -571,9 +725,11 @@ def test_graph_extraction_reads_a_bounded_number_of_chunks_per_source(monkeypatc
 
 
 def test_a_specification_s_bare_numbered_headings_count_as_sections():
-    spec = "Request for Comments\n\nTable of Contents\n" + "".join(
-        f"\n{n}.  Title Number {n}\n\n{_prose(f's{n}', 200)}\n" for n in range(1, 12)
-    ) + "\nSection 4 of the licence applies.\n"
+    spec = (
+        "Request for Comments\n\nTable of Contents\n"
+        + "".join(f"\n{n}.  Title Number {n}\n\n{_prose(f's{n}', 200)}\n" for n in range(1, 12))
+        + "\nSection 4 of the licence applies.\n"
+    )
     selection = select_sections(spec, "Section 9", 100_000)
     assert selection.matched
     assert "the s9 of" in selection.text and "the s10 of" not in selection.text

@@ -9,9 +9,7 @@ from peritus.experts.coverage import CoverageTarget, compute_coverage
 from peritus.experts.domain import ExpertConfig, ExpertTier
 from peritus.sources.domain import RawSource, SourceType, ValidatedSource
 
-_LITE = CoverageTarget(
-    min_sources=1, min_source_types=1, require_non_tertiary=False, max_rounds=1
-)
+_LITE = CoverageTarget(min_sources=1, min_source_types=1, require_non_tertiary=False, max_rounds=1)
 _STANDARD = CoverageTarget(
     min_sources=2, min_source_types=2, require_non_tertiary=True, max_rounds=2
 )
@@ -72,9 +70,7 @@ def test_standard_wants_breadth_and_at_least_one_non_tertiary_source():
 def test_unknown_concepts_reported_by_a_source_are_ignored():
     """Only the plan's own concepts count. A validator that invents a tag must
     not be able to declare a concept covered that nobody asked for."""
-    report = compute_coverage(
-        ["analogy"], [_source(["analogy", "something else entirely"])], _LITE
-    )
+    report = compute_coverage(["analogy"], [_source(["analogy", "something else entirely"])], _LITE)
     assert report.counts() == {"analogy": 1}
 
 
@@ -114,12 +110,19 @@ def test_every_tier_config_produces_its_documented_target():
     assert ExpertConfig.from_tier(ExpertTier.LITE).coverage_target() == _LITE
     std = ExpertConfig.from_tier(ExpertTier.STANDARD).coverage_target()
     assert std == CoverageTarget(
-        min_sources=3, min_source_types=2, require_non_tertiary=True,
-        max_rounds=2, require_primary=True, min_rounds=1,
+        min_sources=3,
+        min_source_types=2,
+        require_non_tertiary=True,
+        max_rounds=2,
+        require_primary=True,
+        min_rounds=1,
     )
     pro = ExpertConfig.from_tier(ExpertTier.PRO).coverage_target()
     assert (pro.min_sources, pro.max_rounds, pro.require_primary, pro.min_rounds) == (
-        4, 3, True, 1,
+        4,
+        3,
+        True,
+        1,
     )
 
 
@@ -137,8 +140,11 @@ def test_a_config_snapshotted_before_depth_targets_is_not_regraded():
 
 
 _DEEP = CoverageTarget(
-    min_sources=1, min_source_types=1, require_non_tertiary=False,
-    max_rounds=2, require_primary=True,
+    min_sources=1,
+    min_source_types=1,
+    require_non_tertiary=False,
+    max_rounds=2,
+    require_primary=True,
 )
 
 
@@ -149,16 +155,17 @@ def test_a_concept_without_a_primary_source_is_not_met_when_depth_is_required():
     assert concept.primary == 0
     assert concept.shortfall == 5
 
-    report = compute_coverage(
-        ["metaphysics"], [_source(["metaphysics"], tier="primary")], _DEEP
-    )
+    report = compute_coverage(["metaphysics"], [_source(["metaphysics"], tier="primary")], _DEEP)
     assert report.met
 
 
 def test_missing_primary_ranks_between_a_hole_and_a_wrong_mix():
     target = CoverageTarget(
-        min_sources=1, min_source_types=2, require_non_tertiary=False,
-        max_rounds=2, require_primary=True,
+        min_sources=1,
+        min_source_types=2,
+        require_non_tertiary=False,
+        max_rounds=2,
+        require_primary=True,
     )
     report = compute_coverage(
         ["hole", "no-primary", "one-type"],

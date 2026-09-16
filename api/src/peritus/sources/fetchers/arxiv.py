@@ -32,9 +32,15 @@ class ArxivFetcher:
     async def search(self, query: str, max_results: int = 3) -> list[SourceCandidate]:
         try:
             papers = await asyncio.to_thread(
-                lambda: list(arxiv.Client().results(
-                    arxiv.Search(query=query, max_results=max_results, sort_by=arxiv.SortCriterion.Relevance)
-                ))
+                lambda: list(
+                    arxiv.Client().results(
+                        arxiv.Search(
+                            query=query,
+                            max_results=max_results,
+                            sort_by=arxiv.SortCriterion.Relevance,
+                        )
+                    )
+                )
             )
         except Exception as exc:
             logger.warning("ArXiv search failed for %r: %s", query, exc)

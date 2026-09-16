@@ -245,9 +245,9 @@ def _rounds(events: list[BuildEventRow]) -> list[RoundSummary]:
             _round(n).feedback_queries = _str_list(payload, "queries")
         elif ev.type == _EV_FETCHER_DONE:
             summary = _round(n)
-            summary.candidates_identified = (
-                summary.candidates_identified or 0
-            ) + (_int(payload, "count") or 0)
+            summary.candidates_identified = (summary.candidates_identified or 0) + (
+                _int(payload, "count") or 0
+            )
         elif ev.type == _EV_DEDUP_DONE:
             summary = _round(n)
             summary.identity_duplicates = _int(payload, "identity_merged")
@@ -365,14 +365,10 @@ def derive_discovery_funnel(events: list[BuildEventRow]) -> DiscoveryFunnel | No
         # build's, which is both wrong and flattering in the wrong direction.
         funnel.screened_at_triage = _sum([r.screened_at_triage for r in funnel.rounds])
         funnel.passed_triage = _sum([r.passed_triage for r in funnel.rounds])
-        funnel.identity_duplicates_removed = _sum(
-            [r.identity_duplicates for r in funnel.rounds]
-        )
+        funnel.identity_duplicates_removed = _sum([r.identity_duplicates for r in funnel.rounds])
         funnel.url_duplicates_removed = _sum([r.url_duplicates for r in funnel.rounds])
         funnel.already_seen_skipped = _sum([r.already_seen for r in funnel.rounds])
-        funnel.content_duplicates_removed = _sum(
-            [r.content_duplicates for r in funnel.rounds]
-        )
+        funnel.content_duplicates_removed = _sum([r.content_duplicates for r in funnel.rounds])
     else:
         funnel.screened_at_triage = _int(triage, "candidates")
         funnel.passed_triage = _int(triage, "ranked")
@@ -400,9 +396,7 @@ def derive_discovery_funnel(events: list[BuildEventRow]) -> DiscoveryFunnel | No
 
     snowball_events = [e for e in events if e.type == _EV_SNOWBALL_DONE]
     if snowball_events:
-        funnel.snowballed_added = _sum(
-            [_int(e.payload, "added") for e in snowball_events]
-        )
+        funnel.snowballed_added = _sum([_int(e.payload, "added") for e in snowball_events])
     elif fetch is not None:
         # The pipeline emits snowball_done only when it added something, and it
         # runs immediately after fetching. A completed fetch stage with no
@@ -424,12 +418,8 @@ def derive_discovery_funnel(events: list[BuildEventRow]) -> DiscoveryFunnel | No
         funnel.gapfill_accepted = 0
 
     if funnel.rounds:
-        funnel.reported_validated_passed = _sum(
-            [r.validated_passed for r in funnel.rounds]
-        )
-        funnel.reported_validated_dropped = _sum(
-            [r.validated_dropped for r in funnel.rounds]
-        )
+        funnel.reported_validated_passed = _sum([r.validated_passed for r in funnel.rounds])
+        funnel.reported_validated_dropped = _sum([r.validated_dropped for r in funnel.rounds])
     else:
         funnel.reported_validated_passed = _int(validate, "passed")
         funnel.reported_validated_dropped = _int(validate, "dropped")

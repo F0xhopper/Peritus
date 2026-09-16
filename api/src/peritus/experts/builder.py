@@ -525,7 +525,10 @@ def _plan_tool(max_concepts: int) -> dict[str, Any]:
                         "type": "object",
                         "properties": {
                             "name": {"type": "string"},
-                            "why": {"type": "string", "description": "One line: why their own voice matters here."},
+                            "why": {
+                                "type": "string",
+                                "description": "One line: why their own voice matters here.",
+                            },
                             "work": {
                                 "type": "object",
                                 "properties": _WORK_PROPERTIES,
@@ -590,10 +593,7 @@ _ORIENTATION_PROMPT = (
 
 def _plan_system(max_concepts: int) -> str:
     return (
-        _PLAN_SYSTEM
-        + "\n\n"
-        + _ORIENTATION_PROMPT
-        + "\n\n"
+        _PLAN_SYSTEM + "\n\n" + _ORIENTATION_PROMPT + "\n\n"
         f"Group the concepts under facets — the topic's major areas (for a tradition: its "
         "doctrines, its history and schools, its modern debates; for a science: its "
         "theory, its methods, its applications). The concept count must scale with how "
@@ -850,9 +850,7 @@ class ExpertBuilder:
             _raise_if_provider_down("Research planning")
             raise IncompleteBuildError(["key concepts (research planning failed)"])
         await self._repo.update_key_concepts(expert.id, key_concepts)
-        await _quietly(
-            "store the research plan", self._repo.update_research_plan(expert.id, plan)
-        )
+        await _quietly("store the research plan", self._repo.update_research_plan(expert.id, plan))
         # The whole plan, not only the concepts: the queries, the weights and the
         # must-have works used to exist only in a worker log line, so a build's
         # search could not be reproduced or argued with afterwards. Clients read
@@ -914,7 +912,9 @@ class ExpertBuilder:
         if warning:
             logger.warning(
                 "Expert %d corpus is %d/%d tertiary",
-                expert.id, warning["tertiary"], warning["classified"],
+                expert.id,
+                warning["tertiary"],
+                warning["classified"],
             )
             await _emit_event(on_event, warning)
 
@@ -966,7 +966,8 @@ class ExpertBuilder:
             logger.info(
                 "Graph extraction skips %d chunk(s) past %d per source; they are embedded "
                 "and retrievable, and not read for concepts",
-                graph_skipped, settings.GRAPH_MAX_CHUNKS_PER_SOURCE,
+                graph_skipped,
+                settings.GRAPH_MAX_CHUNKS_PER_SOURCE,
             )
 
         if not all_chunk_ids:
@@ -1052,7 +1053,10 @@ class ExpertBuilder:
 
         logger.info(
             "Resuming expert %d from %s: %d source(s), %d chunk(s)",
-            expert.id, from_readiness.value, current.source_count, current.chunk_count,
+            expert.id,
+            from_readiness.value,
+            current.source_count,
+            current.chunk_count,
         )
         return await self._enrich_and_finish(
             expert,
@@ -1158,7 +1162,11 @@ class ExpertBuilder:
                 record_provider_error(exc)
                 logger.warning(
                     "Persona generation attempt %d/%d failed for expert %d (%s: %s)",
-                    attempt, _PERSONA_ATTEMPTS, expert.id, type(exc).__name__, exc,
+                    attempt,
+                    _PERSONA_ATTEMPTS,
+                    expert.id,
+                    type(exc).__name__,
+                    exc,
                     exc_info=attempt == _PERSONA_ATTEMPTS,
                 )
                 if attempt < _PERSONA_ATTEMPTS:
@@ -1184,7 +1192,10 @@ class ExpertBuilder:
             logger.error(
                 "Expert %d built %d source(s) and %d chunk(s) but is INCOMPLETE: "
                 "missing %s — not marking ready",
-                expert.id, total_sources, total_chunks, " and ".join(missing),
+                expert.id,
+                total_sources,
+                total_chunks,
+                " and ".join(missing),
             )
             if not persona_name:
                 _raise_if_provider_down("Persona generation")
@@ -1301,9 +1312,7 @@ class ExpertBuilder:
         coroutine running after the build it belongs to has gone.
         """
         if not settings.PICTURE_ENABLED:
-            await _emit_event(
-                on_event, {"type": "picture_skipped", "reason": "disabled"}
-            )
+            await _emit_event(on_event, {"type": "picture_skipped", "reason": "disabled"})
             return
 
         pictures = ExpertPictureRepository(self._pool)
@@ -1319,14 +1328,14 @@ class ExpertBuilder:
         except asyncio.CancelledError:
             raise
         except PictureSkipped as skip:
-            await _emit_event(
-                on_event, {"type": "picture_skipped", "reason": skip.reason}
-            )
+            await _emit_event(on_event, {"type": "picture_skipped", "reason": skip.reason})
             return
         except Exception as exc:
             logger.warning(
                 "Picture search failed for expert %d (%s: %s)",
-                expert.id, type(exc).__name__, exc,
+                expert.id,
+                type(exc).__name__,
+                exc,
             )
             await _emit_event(
                 on_event, {"type": "picture_skipped", "reason": "provider_unavailable"}
@@ -1335,16 +1344,23 @@ class ExpertBuilder:
 
         logger.info(
             "Picture for expert %d (%r): %s from %s (%s)",
-            expert.id, expert.name, found.file_name, found.page_title, found.license,
+            expert.id,
+            expert.name,
+            found.file_name,
+            found.page_title,
+            found.license,
         )
-        await _emit_event(on_event, {
-            "type": "picture_ready",
-            "provider": found.provider,
-            "title": found.page_title,
-            "page_url": found.page_url,
-            "license": found.license,
-            "version": found.version,
-        })
+        await _emit_event(
+            on_event,
+            {
+                "type": "picture_ready",
+                "provider": found.provider,
+                "title": found.page_title,
+                "page_url": found.page_url,
+                "license": found.license,
+                "version": found.version,
+            },
+        )
 
     async def _await_picture(self) -> None:
         """Let the picture task finish, but never wait on it indefinitely.
@@ -1397,15 +1413,17 @@ class ExpertBuilder:
         def _measure() -> CoverageReport:
             named = concept_named_texts(self._all_works(plan, config), _outcome_metadata(passed))
             return compute_coverage(
-                key_concepts, passed, target, facets,
+                key_concepts,
+                passed,
+                target,
+                facets,
                 {concept: entry["status"] for concept, entry in named.items()},
             )
 
         base_budget = max(5, round(_BASE_FETCH_BUDGET * config.source_multiplier))
         budget_usd = Decimal(str(discovery_budget_usd(expert.tier, cap_usd=self._cap_usd())))
         batched = (
-            current_execution() is BuildExecution.BACKGROUND
-            and settings.ANTHROPIC_BATCH_ENABLED
+            current_execution() is BuildExecution.BACKGROUND and settings.ANTHROPIC_BATCH_ENABLED
         )
         loop_enabled = discovery_loop_enabled()
         max_rounds = target.max_rounds if loop_enabled else 0
@@ -1515,20 +1533,17 @@ class ExpertBuilder:
             remaining_count -= len(raw_sources)
 
             if not raw_sources:
-                stop_reason = (
-                    STOP_NO_NEW_CANDIDATES if round_n else stop_reason
-                )
+                stop_reason = STOP_NO_NEW_CANDIDATES if round_n else stop_reason
                 if round_n == 0:
-                    raise BuildError(
-                        "No sources discovered. Check API keys and network access."
-                    )
+                    raise BuildError("No sources discovered. Check API keys and network access.")
                 break
 
             round_passed, round_dropped = await self._validate_round(
                 expert, topic, raw_sources, key_concepts, on_event, round_n
             )
             unjudged = sum(
-                1 for d in round_dropped
+                1
+                for d in round_dropped
                 if d.drop_reason in ("validation error", "missing validation")
             )
             if unjudged and not round_passed:
@@ -1546,9 +1561,7 @@ class ExpertBuilder:
             # rejection-rate early: on a live STANDARD build it reserved $3.04
             # of a $3.00 budget for 60 fetched sources when the 48 that passed
             # were the only ones that would ever cost anything to ingest.
-            ingested_cost = sum(
-                _ingest_estimate(vs.raw, batched) for vs in round_passed
-            )
+            ingested_cost = sum(_ingest_estimate(vs.raw, batched) for vs in round_passed)
             committed_usd -= round_cost - ingested_cost
 
             rounds_run += 1
@@ -1583,10 +1596,7 @@ class ExpertBuilder:
             if remaining_count <= 0:
                 stop_reason = STOP_SOURCE_LIMIT
                 break
-            if (
-                judged >= _ACCEPTANCE_MIN_SAMPLE
-                and acceptance < _ACCEPTANCE_COLLAPSE
-            ):
+            if judged >= _ACCEPTANCE_MIN_SAMPLE and acceptance < _ACCEPTANCE_COLLAPSE:
                 # The search space is exhausted: this round fetched real
                 # sources and validation wanted almost none of them. Another
                 # round buys more of the same.
@@ -1608,7 +1618,10 @@ class ExpertBuilder:
             committed_usd=float(committed_usd),
             budget_usd=float(budget_usd),
             corpus=corpus_composition(
-                passed, all_dropped, key_concepts, must_have,
+                passed,
+                all_dropped,
+                key_concepts,
+                must_have,
                 named_texts=concept_named_texts(all_works, accepted_metadata),
                 figures=figure_outcomes(figures, all_works, accepted_metadata),
             ),
@@ -1667,17 +1680,18 @@ class ExpertBuilder:
         # when the work it stands in for is out of reach.
         queued = {w.key for w in self._queued_substitutes}
         substitutes = [
-            r.work.substitute for r in resolutions
-            if r.work.substitute is not None and not r.work.obtainable and not r.whole
+            r.work.substitute
+            for r in resolutions
+            if r.work.substitute is not None
+            and not r.work.obtainable
+            and not r.whole
             and r.work.substitute.key not in queued
         ]
         if substitutes:
             self._queued_substitutes += substitutes
             candidates += await self._resolve_canonical(substitutes, on_event, round_n)
 
-        return _merge_same_volume(
-            candidates, self._text_ceilings.get(SCOPE_OVERALL)
-        )
+        return _merge_same_volume(candidates, self._text_ceilings.get(SCOPE_OVERALL))
 
     async def _retry_canonical(
         self,
@@ -1705,9 +1719,7 @@ class ExpertBuilder:
             return []
         found = {
             o["title"]
-            for o in must_have_outcomes(
-                works, self._canonical, _outcome_metadata(passed)
-            )
+            for o in must_have_outcomes(works, self._canonical, _outcome_metadata(passed))
             if o["status"] in (FOUND_WHOLE, FOUND_SECTIONS)
         }
         retry = [w for w in works if w.title in failed and w.title not in found]
@@ -1770,7 +1782,8 @@ class ExpertBuilder:
                         flat.append(query)
             status = self._fetcher_status
             loop_fetchers = [
-                n for n in self._fetchers
+                n
+                for n in self._fetchers
                 if n in _LOOP_FETCHERS or status.get(n) in TRANSIENT_STATUSES | {STATUS_ERROR}
             ]
             retried = [n for n in loop_fetchers if n not in _LOOP_FETCHERS]
@@ -1841,11 +1854,13 @@ class ExpertBuilder:
                         "round": round_n,
                         "added": len(candidates),
                         "backward": sum(
-                            1 for c in candidates
+                            1
+                            for c in candidates
                             if c.metadata.get("discovered_via") == "snowball:backward"
                         ),
                         "forward": sum(
-                            1 for c in candidates
+                            1
+                            for c in candidates
                             if c.metadata.get("discovered_via") == "snowball:forward"
                         ),
                     },
@@ -1854,11 +1869,7 @@ class ExpertBuilder:
 
     def _all_works(self, plan: dict, config) -> list[MustHaveWork]:
         """Every work this discovery run has looked for: planned, suggested, substituted."""
-        return (
-            _planned_works(plan, config)
-            + self._suggested_works
-            + self._queued_substitutes
-        )
+        return _planned_works(plan, config) + self._suggested_works + self._queued_substitutes
 
     async def _search_authors(
         self,
@@ -1990,7 +2001,12 @@ class ExpertBuilder:
             fetcher, quota = self._fetchers[name]
             await _emit_event(
                 on_event,
-                {"type": "fetcher_retried", "round": round_n, "name": name, "after": outcome.status},
+                {
+                    "type": "fetcher_retried",
+                    "round": round_n,
+                    "name": name,
+                    "after": outcome.status,
+                },
             )
             _, searched[name] = await _search_one(name, fetcher, quota, attempt=1)
 
@@ -2006,9 +2022,7 @@ class ExpertBuilder:
         # This is where the same paper found as an arXiv preprint, a journal DOI
         # and a Semantic Scholar OA PDF becomes one candidate rather than three.
         candidates, dedup = deduplicate_candidates(pooled, seen)
-        await _emit_event(
-            on_event, {"type": "dedup_done", "round": round_n, **dedup.as_event()}
-        )
+        await _emit_event(on_event, {"type": "dedup_done", "round": round_n, **dedup.as_event()})
         if not candidates:
             return [], Decimal(0)
 
@@ -2061,7 +2075,8 @@ class ExpertBuilder:
                 "budget": budget,
                 "floor": floor,
                 "above_floor": sum(
-                    1 for t in ranked
+                    1
+                    for t in ranked
                     if t.score >= floor or t.candidate.metadata.get("fetch_priority")
                 ),
                 "unscored": sum(1 for t in triaged if t.model_score is None),
@@ -2070,8 +2085,16 @@ class ExpertBuilder:
 
         outcomes: dict[int, tuple[int | None, str]] = {}
         sources, committed = await self._fetch_with_refill(
-            ranked, budget, caps, type_counts, budget_usd, batched, on_event, round_n,
-            floor=floor, outcomes=outcomes,
+            ranked,
+            budget,
+            caps,
+            type_counts,
+            budget_usd,
+            batched,
+            on_event,
+            round_n,
+            floor=floor,
+            outcomes=outcomes,
         )
 
         # Content fingerprinting, on text that now exists. This is the
@@ -2194,9 +2217,7 @@ class ExpertBuilder:
                 {
                     "type": "composition_capped",
                     "round": round_n,
-                    "dropped": [
-                        {"title": d.raw.title, "reason": d.drop_reason} for d in capped
-                    ],
+                    "dropped": [{"title": d.raw.title, "reason": d.drop_reason} for d in capped],
                 },
             )
         await _emit_event(
@@ -2211,9 +2232,7 @@ class ExpertBuilder:
         )
         return passed, dropped
 
-    async def _load_upload_chunks(
-        self, expert_id: int
-    ) -> list[tuple[TextChunk, int]]:
+    async def _load_upload_chunks(self, expert_id: int) -> list[tuple[TextChunk, int]]:
         """Chunks belonging to user-supplied sources that survived the reset."""
         return await self._load_chunks(expert_id, uploads_only=True)
 
@@ -2235,7 +2254,8 @@ class ExpertBuilder:
                   AND (NOT $2 OR s.discovered_via = 'upload')
                 ORDER BY c.source_id, c.sequence_n
                 """,
-                expert_id, uploads_only,
+                expert_id,
+                uploads_only,
             )
         out: list[tuple[TextChunk, int]] = []
         per_source: dict[int, int] = {}
@@ -2247,25 +2267,30 @@ class ExpertBuilder:
             meta = r["chunk_meta"]
             if isinstance(meta, str):
                 meta = json.loads(meta)
-            out.append((
-                TextChunk(
-                    text=r["text"],
-                    sequence_n=r["sequence_n"],
-                    chunk_meta=meta or {},
-                ),
-                r["id"],
-            ))
+            out.append(
+                (
+                    TextChunk(
+                        text=r["text"],
+                        sequence_n=r["sequence_n"],
+                        chunk_meta=meta or {},
+                    ),
+                    r["id"],
+                )
+            )
         return out
 
     async def _count_upload_sources(self, expert_id: int) -> int:
         async with self._pool.acquire() as conn:
-            return await conn.fetchval(
-                """
+            return (
+                await conn.fetchval(
+                    """
                 SELECT COUNT(*) FROM sources
                 WHERE expert_id = $1 AND passed = true AND discovered_via = 'upload'
                 """,
-                expert_id,
-            ) or 0
+                    expert_id,
+                )
+                or 0
+            )
 
     async def _fetch_with_refill(
         self,
@@ -2344,7 +2369,10 @@ class ExpertBuilder:
                 logger.info(
                     "Round %d stopped fetching at %d source(s): committed $%.3f of a "
                     "$%.3f estimated-ingest budget",
-                    round_n, len(results), float(committed), float(budget_usd),
+                    round_n,
+                    len(results),
+                    float(committed),
+                    float(budget_usd),
                 )
                 break
             wave: list[TriagedCandidate] = []
@@ -2378,9 +2406,7 @@ class ExpertBuilder:
                 break
             fetched = await asyncio.gather(
                 *[
-                    _safe_fetch_candidate(
-                        _fetcher_for(t.candidate, fetcher_by_type), t.candidate
-                    )
+                    _safe_fetch_candidate(_fetcher_for(t.candidate, fetcher_by_type), t.candidate)
                     for t in wave
                 ]
             )
@@ -2399,7 +2425,9 @@ class ExpertBuilder:
                         counts[candidate.source_type] -= 1
                     logger.info(
                         "Not %s: %r (%s) — dropped before validation",
-                        settings.CORPUS_LANGUAGE, candidate.title, candidate.url,
+                        settings.CORPUS_LANGUAGE,
+                        candidate.title,
+                        candidate.url,
                     )
                     record[id(candidate)] = (position, OUTCOME_NOT_ENGLISH)
                 else:
@@ -2430,7 +2458,8 @@ class ExpertBuilder:
                 record[id(candidate)] = (None, OUTCOME_BELOW_FLOOR)
             else:
                 record[id(candidate)] = (
-                    None, OUTCOME_BUDGET if stopped_on_money else OUTCOME_NOT_REACHED
+                    None,
+                    OUTCOME_BUDGET if stopped_on_money else OUTCOME_NOT_REACHED,
                 )
         return results, committed
 
@@ -2494,7 +2523,8 @@ class ExpertBuilder:
                     vs.first_pass_quality,
                     vs.first_pass_relevance,
                     json.dumps(meta["snowball_seed_urls"])
-                    if meta.get("snowball_seed_urls") else None,
+                    if meta.get("snowball_seed_urls")
+                    else None,
                     _as_score(meta.get("triage_score")),
                     vs.substance or substance_of(vs.raw),
                     json.dumps(vs.concept_depths) if vs.concept_depths else None,
@@ -2639,10 +2669,16 @@ def _merge_same_volume(
             kept.append(candidate)
             continue
         meta, other = first.metadata, candidate.metadata
-        sections = [p for p in (meta.get("must_have_sections"), other.get("must_have_sections")) if p]
+        sections = [
+            p for p in (meta.get("must_have_sections"), other.get("must_have_sections")) if p
+        ]
         if sections:
             meta["must_have_sections"] = "; ".join(dict.fromkeys(sections))
-        concepts = list(dict.fromkeys([*meta.get("must_have_concepts", []), *other.get("must_have_concepts", [])]))
+        concepts = list(
+            dict.fromkeys(
+                [*meta.get("must_have_concepts", []), *other.get("must_have_concepts", [])]
+            )
+        )
         if concepts:
             meta["must_have_concepts"] = concepts
         if other.get("fetch_priority"):
@@ -2680,9 +2716,7 @@ def _type_caps(fetchers: dict, budget: int) -> dict[SourceType, int]:
     shape the mix of the corpus and never cap its size. Deciding size is the
     money's job.
     """
-    quotas = {
-        _FETCHER_SOURCE_TYPES[name]: quota for name, (_, quota) in fetchers.items()
-    }
+    quotas = {_FETCHER_SOURCE_TYPES[name]: quota for name, (_, quota) in fetchers.items()}
     total = sum(quotas.values()) or 1
     return {
         source_type: max(
@@ -2763,9 +2797,7 @@ def _prefetch_cost_estimate(candidate: SourceCandidate, batched: bool) -> Decima
     the order of the fetch queue.
     """
     chars = _EXPECTED_CHARS.get(candidate.source_type, _DEFAULT_EXPECTED_CHARS)
-    method = expected_method(
-        candidate.identifiers, FullTextHints.from_candidate(candidate)
-    )
+    method = expected_method(candidate.identifiers, FullTextHints.from_candidate(candidate))
     pages = estimated_ocr_pages(chars) if method in PAID_METHODS else 0
     return estimated_ingest_cost_usd(chars, pages, batch=batched)
 
@@ -2827,9 +2859,7 @@ def resolve_execution(expert: Expert) -> BuildExecution:
     if configured in (BuildExecution.INTERACTIVE, BuildExecution.BACKGROUND):
         return BuildExecution(configured)
     if configured != "auto":
-        logger.warning(
-            "Unknown BUILD_EXECUTION_DEFAULT=%r — falling back to 'auto'", configured
-        )
+        logger.warning("Unknown BUILD_EXECUTION_DEFAULT=%r — falling back to 'auto'", configured)
     return BuildExecution.BACKGROUND if expert.persona_name else BuildExecution.INTERACTIVE
 
 
@@ -2857,7 +2887,10 @@ async def _plan_research(topic: str, max_concepts: int = 8) -> dict:
         logger.info(
             "Orientation for %r: read %s",
             topic,
-            "; ".join(f"{o.source} {o.title!r} ({len(o.headings)} headings)" for o in orientation.overviews),
+            "; ".join(
+                f"{o.source} {o.title!r} ({len(o.headings)} headings)"
+                for o in orientation.overviews
+            ),
         )
 
     raw_plan: dict = {}
@@ -2878,7 +2911,9 @@ async def _plan_research(topic: str, max_concepts: int = 8) -> dict:
             "Research planning failed (%s: %s) — falling back to raw topic. The build "
             "continues DEGRADED: no key concepts, one query per fetcher instead of "
             "several, and no coverage gap-fill.",
-            type(exc).__name__, exc, exc_info=True,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
         )
 
     plan = _normalise_plan(raw_plan, topic, max_concepts)
@@ -2970,7 +3005,11 @@ def _normalise_plan(raw_plan: dict, topic: str, max_concepts: int = 8) -> dict:
 
 
 def _clean_concepts(raw: Any) -> list[str]:
-    return [c.strip() for c in raw or [] if isinstance(c, str) and c.strip()] if isinstance(raw, list) else []
+    return (
+        [c.strip() for c in raw or [] if isinstance(c, str) and c.strip()]
+        if isinstance(raw, list)
+        else []
+    )
 
 
 def _normalise_facets(raw_plan: dict, topic: str, max_concepts: int) -> list[dict]:
@@ -2998,10 +3037,14 @@ def _normalise_facets(raw_plan: dict, topic: str, max_concepts: int) -> list[dic
         name = raw.get("name")
         concepts = _take(_clean_concepts(raw.get("concepts"))[:_MAX_CONCEPTS_PER_FACET])
         if concepts:
-            facets.append({
-                "name": name.strip() if isinstance(name, str) and name.strip() else f"Facet {len(facets) + 1}",
-                "concepts": concepts,
-            })
+            facets.append(
+                {
+                    "name": name.strip()
+                    if isinstance(name, str) and name.strip()
+                    else f"Facet {len(facets) + 1}",
+                    "concepts": concepts,
+                }
+            )
         if len(facets) >= _MAX_FACETS:
             break
 
@@ -3036,12 +3079,14 @@ def _normalise_figures(raw: Any) -> list[dict]:
         if work is not None:
             work.pop("substitute", None)
             work["author"] = work["author"] or name.strip()
-        figures.append({
-            "name": name.strip(),
-            "why": why.strip() if isinstance(why, str) else "",
-            "work": work if obtainable else None,
-            "obtainable": obtainable,
-        })
+        figures.append(
+            {
+                "name": name.strip(),
+                "why": why.strip() if isinstance(why, str) else "",
+                "work": work if obtainable else None,
+                "obtainable": obtainable,
+            }
+        )
         if len(figures) >= _MAX_FIGURES:
             break
     return figures
@@ -3065,10 +3110,9 @@ def _normalise_work(work: dict, allow_substitute: bool = True) -> dict | None:
     substitute = work.get("substitute")
     if allow_substitute and isinstance(substitute, dict):
         normalised_substitute = _normalise_work(substitute, allow_substitute=False)
-        if (
-            normalised_substitute is not None
-            and title_key(normalised_substitute["title"]) != title_key(normalised["title"])
-        ):
+        if normalised_substitute is not None and title_key(
+            normalised_substitute["title"]
+        ) != title_key(normalised["title"]):
             normalised["substitute"] = normalised_substitute
     return normalised
 
@@ -3168,15 +3212,22 @@ async def _reconcile_claims(
         provider = terminal_provider_error()
         logger.error(
             "Reconciliation for expert %d: every one of %d call(s) failed%s",
-            expert_id, stats.calls_failed,
+            expert_id,
+            stats.calls_failed,
             f" — {provider_error_message(provider)}" if provider else "",
         )
     logger.info(
         "Reconciliation for expert %d: %d concept group(s), %d eligible, %d examined, "
         "%d call(s) failed, %d relation(s) returned, %d rejected %s, %d inserted",
-        expert_id, len(groups), stats.concepts_eligible, stats.concepts_examined,
-        stats.calls_failed, stats.relations_returned, sum(stats.rejected.values()),
-        dict(stats.rejected), inserted,
+        expert_id,
+        len(groups),
+        stats.concepts_eligible,
+        stats.concepts_examined,
+        stats.calls_failed,
+        stats.relations_returned,
+        sum(stats.rejected.values()),
+        dict(stats.rejected),
+        inserted,
     )
     return inserted
 
@@ -3269,7 +3320,10 @@ async def _resolve_entities(
         logger.info(
             "Entity resolution: merged %d duplicate nodes for expert %d "
             "(%d by label, %d by embedding)",
-            merge_count, expert_id, by_label, merge_count - by_label,
+            merge_count,
+            expert_id,
+            by_label,
+            merge_count - by_label,
         )
     return merge_count
 
@@ -3314,7 +3368,11 @@ async def _safe_search(name: str, fetcher, query: str, max_results: int) -> Sear
         elapsed = time.monotonic() - started
         logger.warning(
             "Fetcher %r search failed for %r after %.1fs (%s: %s)",
-            name, query, elapsed, type(exc).__name__, exc,
+            name,
+            query,
+            elapsed,
+            type(exc).__name__,
+            exc,
             exc_info=True,
         )
         status, error = classify_search_error(exc, name)
@@ -3328,9 +3386,13 @@ async def _safe_search(name: str, fetcher, query: str, max_results: int) -> Sear
     log = logger.warning if elapsed > _SLOW_SEARCH_SECONDS else logger.debug
     log(
         "Fetcher %r search %r: %d result(s) in %.1fs%s",
-        name, query, len(results), elapsed,
+        name,
+        query,
+        len(results),
+        elapsed,
         " — slow, this holds up the whole discovery stage"
-        if elapsed > _SLOW_SEARCH_SECONDS else "",
+        if elapsed > _SLOW_SEARCH_SECONDS
+        else "",
     )
     if results:
         return SearchOutcome(list(results), STATUS_OK, "", elapsed)
@@ -3366,9 +3428,7 @@ def _fetcher_for(candidate: SourceCandidate, fetcher_by_type: dict):
     return fetcher
 
 
-def _carry_candidate_metadata(
-    candidate: SourceCandidate, source: RawSource, score: float
-) -> None:
+def _carry_candidate_metadata(candidate: SourceCandidate, source: RawSource, score: float) -> None:
     """Copy the selection facts a fetcher may not have onto the fetched source."""
     for key in _CARRIED_METADATA:
         if key in candidate.metadata and key not in source.metadata:
@@ -3387,9 +3447,7 @@ def _planned_works(plan: dict, config) -> list[MustHaveWork]:
         [MustHaveWork.from_plan(w, SCOPE_OVERALL) for w in plan.get("must_have_works") or []]
         + [
             MustHaveWork.from_plan(w, SCOPE_CONCEPT)
-            for w in (plan.get("concept_primary_texts") or [])[
-                : config.concept_primary_texts
-            ]
+            for w in (plan.get("concept_primary_texts") or [])[: config.concept_primary_texts]
         ]
         + _figure_works(plan.get("figures") or [], config.figure_texts)
     )
@@ -3428,7 +3486,9 @@ def _enforce_ceiling(candidate: SourceCandidate, source: RawSource) -> None:
     logger.warning(
         "ceiling_enforced: %s returned %d chars for %r against a %d ceiling — cut",
         candidate.metadata.get("canonical_fetcher") or candidate.source_type.value,
-        len(source.text), candidate.title, ceiling,
+        len(source.text),
+        candidate.title,
+        ceiling,
     )
     source.text, selected = apply_sections(source.text, candidate.metadata, ceiling)
     source.metadata.update(selected, truncated=True, ceiling_enforced=True)
@@ -3517,13 +3577,18 @@ async def _safe_fetch_candidate(fetcher, candidate: SourceCandidate) -> RawSourc
     except TimeoutError:
         logger.warning(
             "Full fetch timed out after %.0fs for %s %r — abandoning candidate",
-            settings.SOURCE_FETCH_TIMEOUT, candidate.source_type.value, candidate.url,
+            settings.SOURCE_FETCH_TIMEOUT,
+            candidate.source_type.value,
+            candidate.url,
         )
         return None
     except Exception as exc:
         logger.warning(
             "Full fetch failed for %s %r (%s: %s)",
-            candidate.source_type.value, candidate.url, type(exc).__name__, exc,
+            candidate.source_type.value,
+            candidate.url,
+            type(exc).__name__,
+            exc,
         )
         return None
 
@@ -3798,16 +3863,39 @@ _stage_started: ContextVar[tuple[str, float] | None] = ContextVar(
 # Events worth a log line of their own. The rest (per-source validation, per-batch
 # graph progress) are high-volume and already visible in the durable event log —
 # logging those too would bury the ones that matter.
-_LOGGED_EVENTS = frozenset({
-    "stage", "plan_ready", "picture_ready", "picture_skipped",
-    "discovery_started", "round_started", "canonical_resolved", "fetcher_retried",
-    "floor_relaxed", "composition_capped",
-    "feedback_queries", "dedup_done", "triage_done", "fetch_done",
-    "validate_done", "coverage_report", "discovery_done", "snowball_done",
-    "corpus_warning", "chat_ready", "graph_ready", "entities_resolved",
-    "claims_reconciled", "build_resumed",
-    "persona_ready", "stage_degraded", "error", "cancelled", "done",
-})
+_LOGGED_EVENTS = frozenset(
+    {
+        "stage",
+        "plan_ready",
+        "picture_ready",
+        "picture_skipped",
+        "discovery_started",
+        "round_started",
+        "canonical_resolved",
+        "fetcher_retried",
+        "floor_relaxed",
+        "composition_capped",
+        "feedback_queries",
+        "dedup_done",
+        "triage_done",
+        "fetch_done",
+        "validate_done",
+        "coverage_report",
+        "discovery_done",
+        "snowball_done",
+        "corpus_warning",
+        "chat_ready",
+        "graph_ready",
+        "entities_resolved",
+        "claims_reconciled",
+        "build_resumed",
+        "persona_ready",
+        "stage_degraded",
+        "error",
+        "cancelled",
+        "done",
+    }
+)
 
 
 def _clip(value: Any, limit: int = 160) -> str:
@@ -3840,9 +3928,7 @@ def _log_event(event: dict) -> None:
     # Values are model output (concept lists, warning prose) and can run to
     # hundreds of characters. Truncated per field so one verbose event cannot
     # push a whole build's worth of real log lines off the screen.
-    detail = ", ".join(
-        f"{k}={_clip(v)}" for k, v in event.items() if k != "type"
-    )
+    detail = ", ".join(f"{k}={_clip(v)}" for k, v in event.items() if k != "type")
     if kind in ("error", "cancelled"):
         logger.error("Build event %s: %s", kind, detail)
     elif kind in ("stage_degraded", "corpus_warning"):

@@ -102,11 +102,16 @@ async def _run_build(
         return_value={"name": "Dr. Aurelia Vance", "bio": "b", "style": "s"}
     )
     with (
-        patch("peritus.experts.builder._plan_research", AsyncMock(return_value={
-            "fetcher_plans": {},
-            "key_concepts": ["virtue"] if key_concepts is None else key_concepts,
-            "must_have_works": [],
-        })),
+        patch(
+            "peritus.experts.builder._plan_research",
+            AsyncMock(
+                return_value={
+                    "fetcher_plans": {},
+                    "key_concepts": ["virtue"] if key_concepts is None else key_concepts,
+                    "must_have_works": [],
+                }
+            ),
+        ),
         patch("peritus.experts.builder._route_must_have_works"),
         patch("peritus.experts.builder.validate_sources", AsyncMock(return_value=(passed, []))),
         patch(
@@ -180,10 +185,12 @@ async def test_persona_is_retried_in_place_before_giving_up():
     over one transient error would be wildly disproportionate.
     """
     builder = ExpertBuilder(MagicMock())
-    persona = AsyncMock(side_effect=[
-        RuntimeError("truncated tool call"),
-        {"name": "Dr. Aurelia Vance", "bio": "b", "style": "s"},
-    ])
+    persona = AsyncMock(
+        side_effect=[
+            RuntimeError("truncated tool call"),
+            {"name": "Dr. Aurelia Vance", "bio": "b", "style": "s"},
+        ]
+    )
 
     with patch("peritus.experts.builder._PERSONA_ATTEMPTS", 2):
         result, events = await _run_build(builder, [], persona_mock=persona)
@@ -256,9 +263,11 @@ def _resumable_builder(readiness_log: list, expert: Expert) -> ExpertBuilder:
     builder._graph_repo.get_top_nodes = AsyncMock(return_value=[])
     builder._graph_repo.delete_graph = AsyncMock()
     builder._graph_repo.bulk_insert_from_extractions = AsyncMock(return_value=(4, 3))
-    builder._load_chunks = AsyncMock(return_value=[
-        (TextChunk(text="Virtue is the sole good.", sequence_n=0, chunk_meta={}), 201),
-    ])
+    builder._load_chunks = AsyncMock(
+        return_value=[
+            (TextChunk(text="Virtue is the sole good.", sequence_n=0, chunk_meta={}), 201),
+        ]
+    )
     return builder
 
 
@@ -313,9 +322,10 @@ async def test_resume_from_chat_ready_rebuilds_the_graph_from_stored_chunks():
         patch("peritus.experts.builder._plan_research", AsyncMock()) as plan,
         patch("peritus.experts.builder.extract_graph_from_chunks", graph),
         patch("peritus.experts.builder._resolve_entities", AsyncMock(return_value=0)),
-        patch("peritus.experts.builder._generate_persona", AsyncMock(
-            return_value={"name": "Dr. Aurelia Vance", "bio": "b", "style": "s"}
-        )),
+        patch(
+            "peritus.experts.builder._generate_persona",
+            AsyncMock(return_value={"name": "Dr. Aurelia Vance", "bio": "b", "style": "s"}),
+        ),
         patch("peritus.experts.builder.set_readiness", _record),
     ):
         result = await builder.resume(expert, Readiness.CHAT_READY)
@@ -338,10 +348,12 @@ async def test_persona_refused_by_the_provider_is_not_retried():
 
     class _Refused(Exception):
         status_code = 400
-        body = {"error": {
-            "type": "invalid_request_error",
-            "message": "Your credit balance is too low to access the Anthropic API.",
-        }}
+        body = {
+            "error": {
+                "type": "invalid_request_error",
+                "message": "Your credit balance is too low to access the Anthropic API.",
+            }
+        }
 
     persona = AsyncMock(side_effect=_Refused("credit"))
     with (

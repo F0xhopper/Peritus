@@ -31,9 +31,9 @@ UPLOAD_SOURCE_TIER = "primary"
 class UploadKind(StrEnum):
     """How the payload arrived, which decides how text is extracted from it."""
 
-    PDF = "pdf"      # raw bytes → Mistral OCR
-    TEXT = "text"    # decoded text/markdown, already usable
-    URL = "url"      # fetched and extracted at ingest time
+    PDF = "pdf"  # raw bytes → Mistral OCR
+    TEXT = "text"  # decoded text/markdown, already usable
+    URL = "url"  # fetched and extracted at ingest time
 
 
 @dataclass

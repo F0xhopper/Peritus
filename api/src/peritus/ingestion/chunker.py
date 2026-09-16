@@ -44,17 +44,23 @@ MIN_CHUNK_CHARS = 300
 # Each was written against lines sampled from the production corpus.
 
 # "50. That God has proper knowledge of all things ... 80"
-_TOC_LINE = re.compile(r"^\s*(?:\d+(?:\.\d+)*\.?\s+)?\S.{2,}?(?:\.{3,}|…+|\s\.\s\.\s\.)\s*\d{1,4}\s*$")
+_TOC_LINE = re.compile(
+    r"^\s*(?:\d+(?:\.\d+)*\.?\s+)?\S.{2,}?(?:\.{3,}|…+|\s\.\s\.\s\.)\s*\d{1,4}\s*$"
+)
 
 _REFERENCE_LINES = [
     # "22. Johnson RM, Evans JD, Robinson GE (2009) Changes in …"
     re.compile(r"^\s*\d{1,3}\.\s+(?:[A-Z][\w'’-]+\s[A-Z]{1,3}[,.]?\s*){1,}.*\(\d{4}[a-z]?\)"),
     # "6. Blackburn, Simon. 1998. Realism and Truth …" / "30. Lucas, J. R., The Phenomenon …"
-    re.compile(r"^\s*\d{1,3}\.\s+[A-Z][\w'’-]+,\s+(?:[A-Z][a-z]+\.?|(?:[A-Z]\.\s?)+),?\s.*\b(?:1[5-9]|20)\d{2}\b"),
+    re.compile(
+        r"^\s*\d{1,3}\.\s+[A-Z][\w'’-]+,\s+(?:[A-Z][a-z]+\.?|(?:[A-Z]\.\s?)+),?\s.*\b(?:1[5-9]|20)\d{2}\b"
+    ),
     # "17. Id at 153." / "19. Ibid., p. 11."
     re.compile(r"^\s*\d{1,3}\.\s+(?:Ibid|Id\.?|Op\.\s?cit|Cf\.)\b", re.IGNORECASE),
     # Publisher link chrome on a reference entry.
-    re.compile(r"\[(?:Google Scholar|CrossRef|PubMed|Scopus|Web of Science)\]|\bGoogle Scholar\.?\s*$"),
+    re.compile(
+        r"\[(?:Google Scholar|CrossRef|PubMed|Scopus|Web of Science)\]|\bGoogle Scholar\.?\s*$"
+    ),
     # A line that is only a DOI or doi.org link.
     re.compile(r"^\s*(?:doi:\s*|https?://(?:dx\.)?doi\.org/)\S+\s*$", re.IGNORECASE),
 ]
@@ -100,6 +106,7 @@ class TextChunk:
 @dataclass
 class CleanStats:
     """What :func:`clean_text` removed, for the build log."""
+
     chars_in: int
     chars_out: int
 
@@ -117,8 +124,10 @@ def chunk_text(text: str, source_title: str = "") -> list[TextChunk]:
         log = logger.warning if stats.dropped_share >= 0.5 else logger.info
         log(
             "Dropped %.0f%% of %r as non-prose (%d of %d chars)",
-            stats.dropped_share * 100, source_title,
-            stats.chars_in - stats.chars_out, stats.chars_in,
+            stats.dropped_share * 100,
+            source_title,
+            stats.chars_in - stats.chars_out,
+            stats.chars_in,
         )
 
     sections = _detect_sections(cleaned)
@@ -138,11 +147,13 @@ def chunk_text(text: str, source_title: str = "") -> list[TextChunk]:
     for seq, (sec_title, para_text) in enumerate(pieces):
         para_n = para_n_by_section.get(sec_title, 0) + 1
         para_n_by_section[sec_title] = para_n
-        chunks.append(TextChunk(
-            text=para_text,
-            sequence_n=seq,
-            chunk_meta={"section": sec_title, "paragraph_n": para_n},
-        ))
+        chunks.append(
+            TextChunk(
+                text=para_text,
+                sequence_n=seq,
+                chunk_meta={"section": sec_title, "paragraph_n": para_n},
+            )
+        )
 
     logger.info("Built %d chunks for %r", len(chunks), source_title)
     return chunks
@@ -192,7 +203,7 @@ def _drop_boilerplate_sections(text: str) -> str:
                 continue
         elif end - m.start() > _BOILERPLATE_MAX_CHARS:
             continue
-        out.append(text[pos:m.start()])
+        out.append(text[pos : m.start()])
         pos = end
     out.append(text[pos:])
     return "".join(out)
@@ -224,8 +235,8 @@ def _detect_sections(text: str) -> list[tuple[str, str]]:
         return [("Full Text", text)]
 
     sections: list[tuple[str, str]] = []
-    if deduped[0][0] > 0 and text[:deduped[0][0]].strip():
-        sections.append(("Full Text", text[:deduped[0][0]].strip()))
+    if deduped[0][0] > 0 and text[: deduped[0][0]].strip():
+        sections.append(("Full Text", text[: deduped[0][0]].strip()))
     for i, (start, title) in enumerate(deduped):
         end = deduped[i + 1][0] if i + 1 < len(deduped) else len(text)
         sections.append((title, text[start:end].strip()))
@@ -234,7 +245,7 @@ def _detect_sections(text: str) -> list[tuple[str, str]]:
 
 def _line_at(text: str, start: int) -> str:
     end = text.find("\n", start)
-    return text[start:end if end != -1 else len(text)].strip()
+    return text[start : end if end != -1 else len(text)].strip()
 
 
 def _split_paragraphs(text: str, max_chars: int, overlap: int) -> list[str]:

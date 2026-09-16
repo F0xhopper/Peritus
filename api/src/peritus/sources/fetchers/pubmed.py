@@ -47,8 +47,14 @@ MAX_PAGE_SIZE = 100
 # reference list and acknowledgements, <xref> renders as a bare superscript digit
 # mid-sentence, and figures/tables lose their meaning without the graphic.
 _DROP_TAGS = (
-    "back", "ref-list", "table-wrap", "fig", "xref",
-    "graphic", "inline-graphic", "supplementary-material",
+    "back",
+    "ref-list",
+    "table-wrap",
+    "fig",
+    "xref",
+    "graphic",
+    "inline-graphic",
+    "supplementary-material",
 )
 
 _TAG_RE = re.compile(r"<[^>]+>")

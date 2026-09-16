@@ -43,9 +43,7 @@ _GUTENDEX_TIMEOUT = 10.0
 _START_RE = re.compile(
     r"\*{3}\s*START OF (THE|THIS) PROJECT GUTENBERG EBOOK.+?\*{3}", re.IGNORECASE
 )
-_END_RE = re.compile(
-    r"\*{3}\s*END OF (THE|THIS) PROJECT GUTENBERG EBOOK.+?\*{3}", re.IGNORECASE
-)
+_END_RE = re.compile(r"\*{3}\s*END OF (THE|THIS) PROJECT GUTENBERG EBOOK.+?\*{3}", re.IGNORECASE)
 
 _BOOK_TOOL: dict[str, Any] = {
     "name": "identify_canonical_books",
@@ -98,7 +96,8 @@ class GutenbergFetcher:
                 break
             books = (
                 catalogue.resolve(book_info["title"], book_info.get("author"), 3)
-                if catalogue is not None else []
+                if catalogue is not None
+                else []
             )
             book = next((b for b in books if b.id not in seen_ids), None)
             if book is None:
@@ -137,9 +136,7 @@ class GutenbergFetcher:
         async with httpx.AsyncClient(
             timeout=_GUTENDEX_TIMEOUT, headers=_HEADERS, follow_redirects=True
         ) as client:
-            per_book = await asyncio.gather(
-                *[_lookup_book(client, b) for b in identified]
-            )
+            per_book = await asyncio.gather(*[_lookup_book(client, b) for b in identified])
 
         timeouts = 0
         for book_info, (results, timed_out) in zip(identified, per_book, strict=True):
@@ -148,7 +145,8 @@ class GutenbergFetcher:
                 break
             match = next(
                 (
-                    r for r in results
+                    r
+                    for r in results
                     if r["id"] not in seen_ids
                     and title_matches(book_info["title"], r.get("title", ""))
                 ),
@@ -157,7 +155,8 @@ class GutenbergFetcher:
             if match is None:
                 if results:
                     logger.info(
-                        "Gutenberg: no candidate matched %r — skipping", book_info["title"],
+                        "Gutenberg: no candidate matched %r — skipping",
+                        book_info["title"],
                     )
                 continue
             seen_ids.add(match["id"])
@@ -179,7 +178,10 @@ class GutenbergFetcher:
         if timeouts:
             logger.warning(
                 "Gutenberg: %d of %d Gutendex lookup(s) timed out after %.0fs for %r",
-                timeouts, len(identified), _GUTENDEX_TIMEOUT, query,
+                timeouts,
+                len(identified),
+                _GUTENDEX_TIMEOUT,
+                query,
             )
             if not candidates:
                 note_search_failure(
@@ -191,11 +193,11 @@ class GutenbergFetcher:
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
         book_id = candidate.metadata.get("gutenberg_id")
-        async with httpx.AsyncClient(
-            timeout=30, headers=_HEADERS, follow_redirects=True
-        ) as client:
+        async with httpx.AsyncClient(timeout=30, headers=_HEADERS, follow_redirects=True) as client:
             try:
-                text = await _download_book(client, book_id, candidate.metadata.get("formats") or {})
+                text = await _download_book(
+                    client, book_id, candidate.metadata.get("formats") or {}
+                )
             except Exception as exc:
                 logger.warning("Gutenberg download failed for book %s: %s", book_id, exc)
                 return None
@@ -205,7 +207,9 @@ class GutenbergFetcher:
         text, selected = apply_sections(text, candidate.metadata, _MAX_CHARS)
         logger.info(
             "Gutenberg: fetched %r by %s (%d chars%s)",
-            candidate.title, candidate.author, len(text),
+            candidate.title,
+            candidate.author,
+            len(text),
             ", named sections" if selected.get("sections_matched") else "",
         )
         return RawSource(
@@ -313,7 +317,8 @@ async def _download_book(client: httpx.AsyncClient, book_id: int | None, formats
                 return _strip_gutenberg_boilerplate(resp.text)
             logger.info(
                 "Gutenberg: plain text for %s returned %d — trying its format map",
-                book_id, resp.status_code,
+                book_id,
+                resp.status_code,
             )
         except httpx.HTTPError as exc:
             logger.info("Gutenberg: plain text for %s failed (%s)", book_id, exc)
@@ -363,7 +368,7 @@ _title_matches = title_matches
 def _strip_gutenberg_boilerplate(text: str) -> str:
     start = _START_RE.search(text)
     if start:
-        text = text[start.end():]
+        text = text[start.end() :]
     end = _END_RE.search(text)
     if end:
         text = text[: end.start()]

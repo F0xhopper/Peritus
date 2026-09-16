@@ -12,10 +12,7 @@ from peritus.core.config import settings
 
 def _history(n: int) -> list[dict]:
     """n messages alternating user/assistant, each identifiable by index."""
-    return [
-        {"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"}
-        for i in range(n)
-    ]
+    return [{"role": "user" if i % 2 == 0 else "assistant", "content": f"m{i}"} for i in range(n)]
 
 
 def _prefix_texts(messages: list) -> list[str]:

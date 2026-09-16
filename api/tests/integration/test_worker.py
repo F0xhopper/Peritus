@@ -18,8 +18,14 @@ pytestmark = pytest.mark.asyncio
 
 def _result(expert_id: int) -> BuildResult:
     return BuildResult(
-        expert_id=expert_id, source_count=3, dropped_count=1, chunk_count=10,
-        node_count=5, edge_count=4, avg_quality=7.5, persona_name="Dr. Test",
+        expert_id=expert_id,
+        source_count=3,
+        dropped_count=1,
+        chunk_count=10,
+        node_count=5,
+        edge_count=4,
+        avg_quality=7.5,
+        persona_name="Dr. Test",
     )
 
 

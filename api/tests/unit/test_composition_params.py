@@ -47,13 +47,19 @@ async def test_an_answer_with_no_text_raises_instead_of_ending_quietly():
             async def _none():
                 if False:
                     yield ""
+
             return _none()
 
         async def get_final_message(self):
             return SimpleNamespace(stop_reason="max_tokens")
 
     ctx = MagicMock(spec=RetrievedContext)
-    ctx.context_block, ctx.plan, ctx.has_contradiction, ctx.contradiction_points = "", None, False, []
+    ctx.context_block, ctx.plan, ctx.has_contradiction, ctx.contradiction_points = (
+        "",
+        None,
+        False,
+        [],
+    )
 
     class _Agent:
         def __init__(self, _pool):
@@ -64,7 +70,9 @@ async def test_an_answer_with_no_text_raises_instead_of_ending_quietly():
 
     client = MagicMock()
     client.messages.stream = MagicMock(return_value=_Stream())
-    expert = SimpleNamespace(id=1, topic="t", persona_style=None, config=SimpleNamespace(max_response_tokens=2048))
+    expert = SimpleNamespace(
+        id=1, topic="t", persona_style=None, config=SimpleNamespace(max_response_tokens=2048)
+    )
 
     with (
         patch.object(streaming, "ChatAgent", _Agent),

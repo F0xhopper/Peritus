@@ -40,9 +40,7 @@ class RedditFetcher:
         ]
 
     async def fetch(self, candidate: SourceCandidate) -> RawSource | None:
-        async with httpx.AsyncClient(
-            timeout=20, headers=_HEADERS, follow_redirects=True
-        ) as client:
+        async with httpx.AsyncClient(timeout=20, headers=_HEADERS, follow_redirects=True) as client:
             return await _fetch_post(client, candidate.url)
 
 

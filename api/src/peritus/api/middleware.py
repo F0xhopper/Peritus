@@ -111,7 +111,9 @@ class RequestContextMiddleware:
             elapsed_ms = (time.perf_counter() - started) * 1000
             logger.exception(
                 "Unhandled error: %s %s after %.0fms",
-                scope.get("method", "?"), scope.get("path", "?"), elapsed_ms,
+                scope.get("method", "?"),
+                scope.get("path", "?"),
+                elapsed_ms,
             )
             raise
         finally:

@@ -29,6 +29,7 @@ from peritus.experts.domain import ExpertTier
 
 # ── price resolution ────────────────────────────────────────────────────────
 
+
 def test_dated_snapshot_resolves_to_its_family():
     """Config uses dated ids (claude-haiku-4-5-20251001); prices are keyed by family."""
     assert price_for("claude-haiku-4-5-20251001") == price_for("claude-haiku-4-5")
@@ -47,6 +48,7 @@ def test_unknown_model_is_priced_conservatively():
 
 
 # ── cost arithmetic ─────────────────────────────────────────────────────────
+
 
 def test_message_cost_matches_list_price():
     # 1M input + 1M output on Haiku 4.5 = $1.00 + $5.00.
@@ -94,6 +96,7 @@ def test_tier_caps_sit_above_observed_build_cost():
 
 # ── the price ladder ────────────────────────────────────────────────────────
 
+
 def test_credit_cost_increases_with_tier():
     costs = [credit_cost(t) for t in (ExpertTier.LITE, ExpertTier.STANDARD, ExpertTier.PRO)]
     assert costs == sorted(costs) and len(set(costs)) == 3
@@ -116,6 +119,7 @@ def test_unknown_plan_falls_back_to_free():
 
 # ── denial payloads ─────────────────────────────────────────────────────────
 
+
 def test_insufficient_credits_payload_is_renderable():
     exc = InsufficientCredits(required=3, available=1, tier=ExpertTier.STANDARD, plan=FREE)
     payload = exc.to_payload()["error"]
@@ -136,6 +140,7 @@ def test_tier_not_in_plan_lists_the_alternatives():
 
 
 # ── the meter ───────────────────────────────────────────────────────────────
+
 
 def _usage(input_tokens=0, output_tokens=0, cache_creation=0, cache_read=0):
     return SimpleNamespace(
@@ -185,7 +190,7 @@ def test_meter_aggregates_repeated_calls_into_one_row():
         meter.record_message("claude-haiku-4-5", _usage(100, 10), batch=False)
     rows = meter.drain()
     assert len(rows) == 1
-    (_key, bucket), = rows
+    ((_key, bucket),) = rows
     assert bucket.calls == 500
     assert bucket.input_tokens == 50_000
 

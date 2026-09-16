@@ -43,9 +43,13 @@ async def chat_stream(slug: str, req: ChatRequest, user: AuthUser = Depends(chat
                 yield {"data": json.dumps(event)}
         except Exception:
             logger.exception("Chat stream failed for %r", slug)
-            yield {"data": json.dumps({
-                "type": "error",
-                "message": "The expert hit an internal error while answering.",
-            })}
+            yield {
+                "data": json.dumps(
+                    {
+                        "type": "error",
+                        "message": "The expert hit an internal error while answering.",
+                    }
+                )
+            }
 
     return EventSourceResponse(stream_generator())

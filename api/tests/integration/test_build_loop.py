@@ -97,8 +97,20 @@ class _Loop:
         self.events: list[dict] = []
 
     async def _round(
-        self, topic, plan, queries, must_have, budget, budget_usd, seen, extra,
-        caps, type_counts, on_event, n, batched,
+        self,
+        topic,
+        plan,
+        queries,
+        must_have,
+        budget,
+        budget_usd,
+        seen,
+        extra,
+        caps,
+        type_counts,
+        on_event,
+        n,
+        batched,
     ):
         self.rounds_run.append(n)
         self.extras_seen.append(len(extra))
@@ -109,9 +121,7 @@ class _Loop:
         )
 
     async def _validate(self, expert, topic, raws, concepts, on_event, n):
-        accepted = [
-            _validated(raw, self.covered(n)) for raw in raws[: self.accepted_per_round]
-        ]
+        accepted = [_validated(raw, self.covered(n)) for raw in raws[: self.accepted_per_round]]
         return accepted, []
 
     async def run(self, expert: Expert, loop_enabled: bool = True):
@@ -450,7 +460,16 @@ def _english_text(seed: str) -> str:
 
     rng = random.Random(seed)
     nouns = [f"{seed.lower()}{n}" for n in range(60)] + [
-        "law", "reason", "nature", "being", "cause", "form", "matter", "act", "end", "good",
+        "law",
+        "reason",
+        "nature",
+        "being",
+        "cause",
+        "form",
+        "matter",
+        "act",
+        "end",
+        "good",
     ]
     return " ".join(
         f"the {rng.choice(nouns)} of {rng.choice(nouns)} is what {rng.choice(nouns)} was"
@@ -479,7 +498,10 @@ class _Channel:
         return RawSource(
             # Distinct English text per source, or content fingerprinting
             # merges them and the language check drops them.
-            candidate.source_type, candidate.url, candidate.title, None,
+            candidate.source_type,
+            candidate.url,
+            candidate.title,
+            None,
             _english_text(candidate.title),
             metadata=dict(candidate.metadata),
         )
@@ -496,7 +518,9 @@ async def test_a_round_retries_a_timed_out_channel_relaxes_a_thin_floor_and_writ
     from peritus.sources.fetchers.base import STATUS_OK, STATUS_TIMEOUT
     from peritus.sources.triage import TriagedCandidate
 
-    gutenberg = _Channel([(STATUS_TIMEOUT, "Gutendex timed out"), [_hit("Summa", SourceType.GUTENBERG)]])
+    gutenberg = _Channel(
+        [(STATUS_TIMEOUT, "Gutendex timed out"), [_hit("Summa", SourceType.GUTENBERG)]]
+    )
     web = _Channel([[_hit("strong"), _hit("middling"), _hit("junk")]])
 
     builder = ExpertBuilder(MagicMock())
@@ -518,8 +542,19 @@ async def test_a_round_retries_a_timed_out_channel_relaxes_a_thin_floor_and_writ
 
     with patch("peritus.experts.builder.triage_candidates", _triage):
         sources, _ = await builder._discovery_round(
-            "Thomism", _PLAN, {"gutenberg": ["q"], "web": ["q"]}, [], 60, Decimal(3),
-            SeenSet(), [], {}, {}, _on_event, 0, False,
+            "Thomism",
+            _PLAN,
+            {"gutenberg": ["q"], "web": ["q"]},
+            [],
+            60,
+            Decimal(3),
+            SeenSet(),
+            [],
+            {},
+            {},
+            _on_event,
+            0,
+            False,
         )
 
     assert gutenberg.calls == 2, "a timed-out channel is retried once"
@@ -531,7 +566,9 @@ async def test_a_round_retries_a_timed_out_channel_relaxes_a_thin_floor_and_writ
     assert relaxed and relaxed[0]["relaxed_to"] == 5.0, "three candidates cannot fill round 0"
     assert {s.title for s in sources} == {"Summa", "strong", "middling"}
 
-    [(expert_id, job_id, rows)] = [c.args for c in builder._repo.insert_candidate_screenings.call_args_list]
+    [(expert_id, job_id, rows)] = [
+        c.args for c in builder._repo.insert_candidate_screenings.call_args_list
+    ]
     by_title = {r["title"]: r for r in rows}
     assert by_title["junk"]["fetch_outcome"] == "below_floor"
     assert by_title["junk"]["fetch_rank"] is None
@@ -554,13 +591,18 @@ async def test_refused_validation_stops_the_build_instead_of_reporting_a_collaps
         return [], [DroppedSource(raw, 0.0, 0.0, "validation error") for raw in raws]
 
     loop._validate = _validate
-    with patch.object(
-        anthropic_batch, "terminal_provider_error",
-        lambda: RuntimeError("Your credit balance is too low"),
-    ), patch(
-        "peritus.experts.builder.terminal_provider_error",
-        lambda: RuntimeError("Your credit balance is too low"),
-    ), pytest.raises(BuildError, match="credit balance"):
+    with (
+        patch.object(
+            anthropic_batch,
+            "terminal_provider_error",
+            lambda: RuntimeError("Your credit balance is too low"),
+        ),
+        patch(
+            "peritus.experts.builder.terminal_provider_error",
+            lambda: RuntimeError("Your credit balance is too low"),
+        ),
+        pytest.raises(BuildError, match="credit balance"),
+    ):
         await loop.run(_expert())
 
 
@@ -621,10 +663,16 @@ async def test_a_concept_whose_named_text_is_missing_is_unmet_on_treats_tagged_p
     plan = {
         **_PLAN,
         "key_concepts": ["natural law"],
-        "concept_primary_texts": [{
-            "concept": "natural law", "title": "Summa Theologiae", "author": "Aquinas",
-            "kind": "text", "public_domain": True, "sections": "I-II qq. 90-97",
-        }],
+        "concept_primary_texts": [
+            {
+                "concept": "natural law",
+                "title": "Summa Theologiae",
+                "author": "Aquinas",
+                "kind": "text",
+                "public_domain": True,
+                "sections": "I-II qq. 90-97",
+            }
+        ],
     }
     loop = _Loop(_covers("natural law"))
     inner = loop._validate

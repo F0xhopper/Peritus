@@ -59,7 +59,9 @@ async def _chat_async(name: str) -> None:
     console.print()
 
     persona = expert.persona_name or expert.name
-    console.print(f"[bold cyan]Chatting with {persona}[/bold cyan]  [dim](type 'quit' to exit)[/dim]\n")
+    console.print(
+        f"[bold cyan]Chatting with {persona}[/bold cyan]  [dim](type 'quit' to exit)[/dim]\n"
+    )
 
     agent = ChatAgent(pool)
     history = ConversationHistory()

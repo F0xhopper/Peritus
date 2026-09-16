@@ -105,10 +105,7 @@ class SnowballCandidate:
         return (self.co_citations, self.percentile, self.citations)
 
     def worth_fetching(self) -> bool:
-        return (
-            self.co_citations >= _CO_CITATION_OVERRIDE
-            or self.percentile >= _PERCENTILE_FLOOR
-        )
+        return self.co_citations >= _CO_CITATION_OVERRIDE or self.percentile >= _PERCENTILE_FLOOR
 
     @property
     def is_fetchable(self) -> bool:
@@ -243,7 +240,8 @@ async def snowball(
         seed_keys |= source.identifiers.keys()
 
     eligible = [
-        c for c in pool.values()
+        c
+        for c in pool.values()
         if c.worth_fetching()
         and not (c.identifiers.keys() & seed_keys)
         and not (seen is not None and seen.has(c.identifiers, ""))
@@ -270,7 +268,9 @@ async def snowball(
         logger.info(
             "Snowball: %d seed(s) → %d candidate(s) considered → %d proposed "
             "(%d backward, %d forward, %d co-cited by 2+)",
-            len(seeds), len(pool), len(ranked),
+            len(seeds),
+            len(pool),
+            len(ranked),
             sum(1 for c in ranked if c.direction == DISCOVERED_BACKWARD),
             sum(1 for c in ranked if c.direction == DISCOVERED_FORWARD),
             sum(1 for c in ranked if c.co_citations >= _CO_CITATION_OVERRIDE),
@@ -278,9 +278,7 @@ async def snowball(
     return [c.to_candidate() for c in ranked]
 
 
-async def _fetch_list(
-    http: httpx.AsyncClient, key: str, edge: str, limit: int
-) -> list[dict]:
+async def _fetch_list(http: httpx.AsyncClient, key: str, edge: str, limit: int) -> list[dict]:
     """One seed's references or citations, as bare paper records."""
     field_name = "citedPaper" if edge == "references" else "citingPaper"
     try:
@@ -351,9 +349,9 @@ def _absorb(
             existing.identifiers = existing.identifiers.merge(ids)
             existing.citations = max(existing.citations, count)
             existing.abstract = existing.abstract or str(paper.get("abstract") or "").strip()
-            existing.oa_pdf_url = existing.oa_pdf_url or (
-                paper.get("openAccessPdf") or {}
-            ).get("url")
+            existing.oa_pdf_url = existing.oa_pdf_url or (paper.get("openAccessPdf") or {}).get(
+                "url"
+            )
             # A work reached both ways is reported as backward: it is both an
             # ancestor and a descendant of the corpus, and "backward" is the
             # stronger claim about it being foundational.

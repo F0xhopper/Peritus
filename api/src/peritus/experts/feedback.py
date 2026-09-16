@@ -151,12 +151,21 @@ def weak_concepts_block(
         for c in members:
             lines.append(
                 f"{indent}- {c.concept} — {c.sources} accepted source(s)"
-                + (f", types: {', '.join(sorted(t.value for t in c.source_types))}" if c.source_types else "")
+                + (
+                    f", types: {', '.join(sorted(t.value for t in c.source_types))}"
+                    if c.source_types
+                    else ""
+                )
                 + (f", tiers: {', '.join(sorted(c.tiers))}" if c.tiers else "")
-                + (", primary: none — find the primary texts themselves" if not c.has_primary else "")
+                + (
+                    ", primary: none — find the primary texts themselves"
+                    if not c.has_primary
+                    else ""
+                )
                 + (
                     f", named text missing: {'; '.join(missing_texts[c.concept])}"
-                    if missing_texts.get(c.concept) else ""
+                    if missing_texts.get(c.concept)
+                    else ""
                 )
             )
     if voiceless_figures:
@@ -219,8 +228,11 @@ async def feedback_queries(
         return Feedback(fallback)
 
     weak_block = weak_concepts_block(
-        weakest, concept_shares,
-        facet_of=facet_of, missing_texts=missing_texts, voiceless_figures=voiceless_figures,
+        weakest,
+        concept_shares,
+        facet_of=facet_of,
+        missing_texts=missing_texts,
+        voiceless_figures=voiceless_figures,
     )
 
     try:
@@ -231,15 +243,17 @@ async def feedback_queries(
             system=_SYSTEM,
             tools=[_FEEDBACK_TOOL],
             tool_choice={"type": "tool", "name": "write_followup_queries"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Topic: {topic}\n\n"
-                    f"{weak_block}\n\n"
-                    f"Sources already accepted:\n{_digest(accepted)}\n\n"
-                    "Write follow-up queries for each weak concept."
-                ),
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Topic: {topic}\n\n"
+                        f"{weak_block}\n\n"
+                        f"Sources already accepted:\n{_digest(accepted)}\n\n"
+                        "Write follow-up queries for each weak concept."
+                    ),
+                }
+            ],
         )
         block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
         payload = dict(block.input)
@@ -247,7 +261,8 @@ async def feedback_queries(
         logger.warning(
             "Feedback query generation failed (%s: %s) — falling back to "
             "topic+concept queries for this round",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
         return Feedback(fallback)
 
@@ -274,16 +289,14 @@ def _normalise(
         if not name:
             continue
         queries = [
-            q.strip()
-            for q in entry.get("queries") or []
-            if isinstance(q, str) and q.strip()
+            q.strip() for q in entry.get("queries") or [] if isinstance(q, str) and q.strip()
         ][:_MAX_QUERIES_PER_CONCEPT]
         if queries:
             out[name] = queries
 
-    authors = [
-        a.strip() for a in payload.get("authors") or [] if isinstance(a, str) and a.strip()
-    ][:5]
+    authors = [a.strip() for a in payload.get("authors") or [] if isinstance(a, str) and a.strip()][
+        :5
+    ]
 
     for concept, queries in fallback.items():
         out.setdefault(concept, queries)
@@ -364,28 +377,32 @@ async def suggest_primary_texts(
             system=_PRIMARY_SYSTEM,
             tools=[_PRIMARY_TOOL],
             tool_choice={"type": "tool", "name": "name_primary_texts"},
-            messages=[{
-                "role": "user",
-                "content": (
-                    f"Topic: {topic}\n\n"
-                    "Primary sources for this topic are: "
-                    f"{primary_definition or 'the original works, not analysis of them'}\n\n"
-                    "Concepts without a primary source:\n"
-                    + "\n".join(f"- {c}" for c in concepts)
-                    + (
-                        "\n\nAlready tried (do not repeat):\n"
-                        + "\n".join(f"- {t}" for t in already_tried)
-                        if already_tried else ""
-                    )
-                ),
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Topic: {topic}\n\n"
+                        "Primary sources for this topic are: "
+                        f"{primary_definition or 'the original works, not analysis of them'}\n\n"
+                        "Concepts without a primary source:\n"
+                        + "\n".join(f"- {c}" for c in concepts)
+                        + (
+                            "\n\nAlready tried (do not repeat):\n"
+                            + "\n".join(f"- {t}" for t in already_tried)
+                            if already_tried
+                            else ""
+                        )
+                    ),
+                }
+            ],
         )
         block = next(b for b in resp.content if getattr(b, "type", None) == "tool_use")
         raw = block.input.get("texts") or []
     except Exception as exc:
         logger.warning(
             "Primary-text suggestion failed (%s: %s) — the round searches without it",
-            type(exc).__name__, exc,
+            type(exc).__name__,
+            exc,
         )
         return []
 
@@ -403,12 +420,16 @@ async def suggest_primary_texts(
         per_concept[concept] = per_concept.get(concept, 0) + 1
         if per_concept[concept] > 2:
             continue
-        out.append({
-            "concept": concept,
-            "title": title,
-            "author": str(entry.get("author") or "").strip(),
-            "kind": entry.get("kind") if entry.get("kind") in ("text", "book", "paper", "standard") else "book",
-            "public_domain": entry.get("public_domain") is True,
-            "sections": str(entry.get("sections") or "").strip(),
-        })
+        out.append(
+            {
+                "concept": concept,
+                "title": title,
+                "author": str(entry.get("author") or "").strip(),
+                "kind": entry.get("kind")
+                if entry.get("kind") in ("text", "book", "paper", "standard")
+                else "book",
+                "public_domain": entry.get("public_domain") is True,
+                "sections": str(entry.get("sections") or "").strip(),
+            }
+        )
     return out

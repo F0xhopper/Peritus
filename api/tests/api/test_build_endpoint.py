@@ -29,17 +29,35 @@ def _make_expert(tier: ExpertTier = ExpertTier.STANDARD, name: str = "stoicism")
 def _make_job(status: JobStatus = JobStatus.QUEUED) -> BuildJob:
     now = datetime.now(UTC)
     return BuildJob(
-        id=1, expert_id=1, status=status, tier="lite", source_filter=None,
-        attempts=1, max_attempts=3, available_at=now, locked_by=None,
-        heartbeat_at=None, last_error=None, created_at=now, updated_at=now,
+        id=1,
+        expert_id=1,
+        status=status,
+        tier="lite",
+        source_filter=None,
+        attempts=1,
+        max_attempts=3,
+        available_at=now,
+        locked_by=None,
+        heartbeat_at=None,
+        last_error=None,
+        created_at=now,
+        updated_at=now,
     )
 
 
 def _done_event() -> BuildEventRow:
     return BuildEventRow(
-        seq=1, job_id=1, type="done",
-        payload={"type": "done", "expert_id": 1, "source_count": 3,
-                 "chunk_count": 10, "node_count": 5, "edge_count": 4},
+        seq=1,
+        job_id=1,
+        type="done",
+        payload={
+            "type": "done",
+            "expert_id": 1,
+            "source_count": 3,
+            "chunk_count": 10,
+            "node_count": 5,
+            "edge_count": 4,
+        },
         created_at=datetime.now(UTC),
     )
 
@@ -66,6 +84,7 @@ async def client(app):
 
 # ── tier validation (no mocks needed — Pydantic validates first) ──
 
+
 @pytest.mark.asyncio
 async def test_invalid_tier_rejected(client):
     with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
@@ -78,11 +97,13 @@ def test_default_tier_is_unset_so_the_server_resolves_it():
     for the deepest tier the caller's plan allows and balance affords, so
     `{"topic": ...}` alone is always a buildable request."""
     from peritus.api.schemas.experts import BuildRequest
+
     req = BuildRequest(topic="stoicism")
     assert req.tier is None
 
 
 # ── build enqueues a job and streams the durable event log ──
+
 
 @pytest.mark.asyncio
 async def test_build_enqueues_and_streams(client):
@@ -158,6 +179,7 @@ async def test_build_denied_without_credits(client):
 
 # ── reconnect endpoint replays from a cursor ──
 
+
 @pytest.mark.asyncio
 async def test_build_events_reconnect(client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
@@ -183,6 +205,7 @@ async def test_build_events_reconnect(client):
 
 
 # ── delete cancels any in-flight build then removes the expert ──
+
 
 @pytest.mark.asyncio
 async def test_delete_cancels_then_deletes(client):
@@ -214,6 +237,7 @@ async def test_delete_cancels_then_deletes(client):
 
 # ── tier surfaced in GET response ──
 
+
 @pytest.mark.asyncio
 async def test_tier_in_get_response(client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
@@ -233,6 +257,7 @@ async def test_tier_in_get_response(client):
 
 
 # ── topic-only creation: server resolves the tier ──
+
 
 @pytest.mark.asyncio
 async def test_topic_only_build_resolves_tier_from_plan(client):
@@ -305,6 +330,7 @@ async def test_explicit_tier_skips_resolution(client):
 
 # ── slug collisions step over other users' experts instead of 404ing ──
 
+
 @pytest.mark.asyncio
 async def test_slug_collision_autosuffixes(client):
     """Another user already owns 'stoicism': the build lands on 'stoicism-2'
@@ -342,6 +368,7 @@ async def test_slug_collision_autosuffixes(client):
 
 # ── source filter is validated at the door ──
 
+
 @pytest.mark.asyncio
 async def test_unknown_source_type_is_rejected(client):
     with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
@@ -356,13 +383,12 @@ async def test_unknown_source_type_is_rejected(client):
 @pytest.mark.asyncio
 async def test_empty_source_list_is_rejected(client):
     with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
-        resp = await client.post(
-            "/experts/build", json={"topic": "stoicism", "sources": []}
-        )
+        resp = await client.post("/experts/build", json={"topic": "stoicism", "sources": []})
     assert resp.status_code == 400
 
 
 # ── rebuild at a different tier moves tier + config with it ──
+
 
 @pytest.mark.asyncio
 async def test_rebuild_at_new_tier_updates_expert(client):
@@ -387,15 +413,14 @@ async def test_rebuild_at_new_tier_updates_expert(client):
 
         MockEntitlements.return_value = AsyncMock()
 
-        resp = await client.post(
-            "/experts/build", json={"topic": "stoicism", "tier": "standard"}
-        )
+        resp = await client.post("/experts/build", json={"topic": "stoicism", "tier": "standard"})
 
     assert resp.status_code == 200
     mock_repo.update_tier.assert_awaited_once_with(expert.id, ExpertTier.STANDARD)
 
 
 # ── the stream announces which expert it belongs to ──
+
 
 @pytest.mark.asyncio
 async def test_build_appends_created_event(client):
@@ -424,9 +449,7 @@ async def test_build_appends_created_event(client):
         resp = await client.post("/experts/build", json={"topic": "stoicism"})
 
     assert resp.status_code == 200
-    created_calls = [
-        c for c in mock_jobs.append_event.await_args_list if c.args[1] == "created"
-    ]
+    created_calls = [c for c in mock_jobs.append_event.await_args_list if c.args[1] == "created"]
     assert len(created_calls) == 1
     payload = created_calls[0].args[2]
     assert payload["slug"] == "stoicism"

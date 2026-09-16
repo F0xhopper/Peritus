@@ -23,17 +23,20 @@ from peritus.uploads.extract import decode_text_upload, extract
 
 def _upload(kind: UploadKind, **kw) -> PendingUpload:
     return PendingUpload(
-        id=1, expert_id=7, owner_id="user-1", kind=kind,
-        title=kw.pop("title", "A Document"), **kw,
+        id=1,
+        expert_id=7,
+        owner_id="user-1",
+        kind=kind,
+        title=kw.pop("title", "A Document"),
+        **kw,
     )
 
 
 # ── text decoding ───────────────────────────────────────────────────────────
 
+
 def test_decode_prefers_utf8():
-    assert decode_text_upload("margin of safety — Graham".encode()) == (
-        "margin of safety — Graham"
-    )
+    assert decode_text_upload("margin of safety — Graham".encode()) == ("margin of safety — Graham")
 
 
 def test_decode_strips_utf8_bom():
@@ -56,6 +59,7 @@ def test_decode_never_raises_on_binary():
 
 
 # ── extraction dispatch ─────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_extract_text_returns_raw_source():
@@ -97,6 +101,7 @@ async def test_extract_pdf_uses_the_ocr_parser(monkeypatch):
 @pytest.mark.asyncio
 async def test_extract_pdf_failure_is_user_facing(monkeypatch):
     """The raised message reaches the UI, so it must mean something to a person."""
+
     async def boom(data: bytes) -> str:
         raise RuntimeError("HTTP 502 from ocr backend")
 
@@ -138,16 +143,19 @@ async def test_extract_url_uses_the_fetched_text(monkeypatch):
 async def test_extract_pdf_has_no_url():
     """A file has no address. Empty, not a broken link, so citation rendering
     does not produce one."""
+
     async def fake_parse(data: bytes) -> str:
         return "Book text. " * 40
 
     import peritus.uploads.extract as m
+
     m.parse_pdf_bytes = fake_parse
     raw = await extract(_upload(UploadKind.PDF, content=b"%PDF"))
     assert raw.url == ""
 
 
 # ── provenance constants ────────────────────────────────────────────────────
+
 
 def test_upload_provenance_is_primary_and_marked():
     """Uploaded material is the work itself, and the tertiary-corpus warning
@@ -158,14 +166,25 @@ def test_upload_provenance_is_primary_and_marked():
 
 # ── job typing ──────────────────────────────────────────────────────────────
 
+
 def _job(**kw) -> BuildJob:
     from datetime import UTC, datetime
+
     now = datetime.now(UTC)
     base = dict(
-        id=1, expert_id=7, status=JobStatus.QUEUED, tier="standard",
-        source_filter=None, attempts=0, max_attempts=3, available_at=now,
-        locked_by=None, heartbeat_at=None, last_error=None,
-        created_at=now, updated_at=now,
+        id=1,
+        expert_id=7,
+        status=JobStatus.QUEUED,
+        tier="standard",
+        source_filter=None,
+        attempts=0,
+        max_attempts=3,
+        available_at=now,
+        locked_by=None,
+        heartbeat_at=None,
+        last_error=None,
+        created_at=now,
+        updated_at=now,
     )
     base.update(kw)
     return BuildJob(**base)

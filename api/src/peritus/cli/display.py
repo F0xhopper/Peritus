@@ -59,14 +59,18 @@ def _expert_card(expert, top_concepts: list[dict], width: int = 40) -> Panel:
     avg_q = f"{expert.avg_quality:.1f}" if expert.avg_quality is not None else "—"
     built = expert.created_at.strftime("%Y-%m-%d") if expert.created_at else "—"
     lines.append("")
-    lines.append(f"[cyan]{expert.source_count}[/cyan] sources  [cyan]{expert.chunk_count}[/cyan] chunks")
-    lines.append(f"[cyan]{expert.node_count}[/cyan] concepts  [cyan]{expert.edge_count}[/cyan] edges")
+    lines.append(
+        f"[cyan]{expert.source_count}[/cyan] sources  [cyan]{expert.chunk_count}[/cyan] chunks"
+    )
+    lines.append(
+        f"[cyan]{expert.node_count}[/cyan] concepts  [cyan]{expert.edge_count}[/cyan] edges"
+    )
     lines.append(f"Quality [yellow]{avg_q}[/yellow]/10  Built [dim]{built}[/dim]")
 
     if top_concepts:
         labels = "  ".join(c["label"] for c in top_concepts[:5])
         if len(labels) > inner:
-            labels = labels[:inner - 1] + "…"
+            labels = labels[: inner - 1] + "…"
         lines.append("")
         lines.append(f"[dim]{labels}[/dim]")
 
@@ -139,7 +143,9 @@ def experts_table(experts: list) -> Table:
     return t
 
 
-def credential_card(expert, passed_sources: list, dropped_sources: list, top_concepts: list) -> Panel:
+def credential_card(
+    expert, passed_sources: list, dropped_sources: list, top_concepts: list
+) -> Panel:
 
     lines: list[str] = []
 

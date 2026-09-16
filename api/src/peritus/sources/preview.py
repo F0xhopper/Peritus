@@ -85,11 +85,7 @@ def _headings(text: str, limit: int = MAX_HEADINGS) -> list[str]:
         sections = _detect_sections(text)
     except Exception:
         return []
-    headings = [
-        _clip(title, 80)
-        for title, _body in sections
-        if title and title != "Full Text"
-    ]
+    headings = [_clip(title, 80) for title, _body in sections if title and title != "Full Text"]
     # De-duplicated preserving order: numbered subsections repeat their parent's
     # words often enough that a raw list is mostly noise.
     seen: set[str] = set()
@@ -119,12 +115,12 @@ def _samples(text: str, count: int, width: int) -> list[str]:
     out: list[str] = []
     for i in range(count):
         at = usable_start + step * i
-        window = text[at: at + width]
+        window = text[at : at + width]
         # Start at a sentence boundary where one is close, so the sample does not
         # open mid-word.
         break_at = window.find(". ")
         if 0 <= break_at < width // 5:
-            window = window[break_at + 2:]
+            window = window[break_at + 2 :]
         out.append(_WS_RE.sub("\n\n", window).strip())
     return [w for w in out if w]
 

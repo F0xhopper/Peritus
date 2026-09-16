@@ -370,9 +370,7 @@ async def list_experts(user: AuthUser = Depends(require_user)):
 
 
 @router.post("/experts/build")
-async def build_expert(
-    req: BuildRequest, request: Request, user: AuthUser = Depends(require_user)
-):
+async def build_expert(req: BuildRequest, request: Request, user: AuthUser = Depends(require_user)):
     """Enqueue a durable build job and stream its progress.
 
     The build runs in a worker (separate process or in-process), not in this
@@ -454,9 +452,7 @@ async def build_expert(
             raise _entitlement_http_error(exc) from None
 
         if expert is None:
-            expert = await repo.create(
-                name=slug, topic=req.topic, tier=tier, owner_id=user.id
-            )
+            expert = await repo.create(name=slug, topic=req.topic, tier=tier, owner_id=user.id)
         elif expert.tier != tier:
             # Rebuild at a different depth: the worker builds from the expert
             # row, so tier and config must move with the request or the new
@@ -475,14 +471,18 @@ async def build_expert(
         # First event in the durable log, so every client — including one that
         # reconnects later — learns which expert this stream belongs to without
         # re-deriving the slug client-side.
-        await jobs.append_event(job.id, "created", {
-            "type": "created",
-            "slug": expert.name,
-            "expert_id": expert.id,
-            "job_id": job.id,
-            "tier": tier.value,
-            "topic": expert.topic,
-        })
+        await jobs.append_event(
+            job.id,
+            "created",
+            {
+                "type": "created",
+                "slug": expert.name,
+                "expert_id": expert.id,
+                "job_id": job.id,
+                "tier": tier.value,
+                "topic": expert.topic,
+            },
+        )
         # The authoritative charge. Re-checks the balance under a row lock, and
         # is idempotent per job id — so a double-submit that lands on the same
         # job never double-charges. If it fails here the job is cancelled rather
@@ -559,7 +559,9 @@ async def update_expert_catalog(
         raise HTTPException(status_code=404, detail="Expert not found")
     logger.info(
         "Curated expert %r: visibility=%s featured=%s rank=%s",
-        slug, updated.catalog.visibility.value, updated.catalog.is_featured,
+        slug,
+        updated.catalog.visibility.value,
+        updated.catalog.is_featured,
         updated.catalog.catalog_rank,
     )
     return _expert_with_catalog(updated, user)
@@ -613,9 +615,7 @@ _picture_refresh_limiter = SlidingWindowLimiter(limit=6, window=60.0)
 
 
 @router.get("/experts/{slug}/picture")
-async def get_expert_picture(
-    slug: str, request: Request, user: AuthUser = Depends(require_user)
-):
+async def get_expert_picture(slug: str, request: Request, user: AuthUser = Depends(require_user)):
     """The picture's bytes.
 
     Cached hard and forever under a versioned URL: the ``?v=`` the client
@@ -754,9 +754,7 @@ async def build_events(
 
 
 @router.post("/experts/{slug}/build/cancel", status_code=202)
-async def cancel_build(
-    slug: str, user: AuthUser = Depends(require_user)
-) -> dict[str, Any]:
+async def cancel_build(slug: str, user: AuthUser = Depends(require_user)) -> dict[str, Any]:
     """Cancel the active (queued or running) build for an expert.
 
     A running worker notices on its next heartbeat and aborts cooperatively; a
@@ -775,9 +773,14 @@ async def cancel_build(
     await jobs.request_cancel(expert.id, job_type=JobType.BUILD)
     # Terminal event so any client tailing the log stops cleanly, and a status the
     # worker would otherwise only set once its heartbeat fails.
-    await jobs.append_event(job.id, "cancelled", {
-        "type": "cancelled", "message": "Build cancelled",
-    })
+    await jobs.append_event(
+        job.id,
+        "cancelled",
+        {
+            "type": "cancelled",
+            "message": "Build cancelled",
+        },
+    )
     await repo.update_status(expert.id, ExpertStatus.FAILED, "Build cancelled")
     # A *queued* job may never be claimed by a worker, so the refund cannot wait
     # for one to observe the cancellation. Idempotent, so a worker that does
@@ -792,9 +795,7 @@ async def cancel_build(
 
 
 @router.get("/experts/{slug}/build/status")
-async def build_status(
-    slug: str, user: AuthUser = Depends(require_user)
-) -> dict[str, Any]:
+async def build_status(slug: str, user: AuthUser = Depends(require_user)) -> dict[str, Any]:
     """Point-in-time job status for polling clients."""
     pool = get_pool()
     repo = ExpertRepository(pool)
@@ -817,9 +818,7 @@ async def build_status(
 
 
 @router.get("/experts/{slug}/build/usage")
-async def build_usage(
-    slug: str, user: AuthUser = Depends(require_user)
-) -> dict[str, Any]:
+async def build_usage(slug: str, user: AuthUser = Depends(require_user)) -> dict[str, Any]:
     """What the latest build of this expert actually cost, broken down by stage.
 
     Owner-scoped: spend is not part of a catalog expert's public card.

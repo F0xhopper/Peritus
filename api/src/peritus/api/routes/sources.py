@@ -69,9 +69,7 @@ async def _guard_no_active_build(expert: Expert) -> None:
     after the reset and before the graph stage, or after the graph stage and
     never reach the graph at all. Making the user wait is far better than either.
     """
-    active = await JobRepository(get_pool()).get_active_job(
-        expert.id, job_type=JobType.BUILD
-    )
+    active = await JobRepository(get_pool()).get_active_job(expert.id, job_type=JobType.BUILD)
     if active is not None:
         raise HTTPException(
             status_code=409,
@@ -90,7 +88,10 @@ async def _queue(expert: Expert, upload_id: int, title: str, kind: UploadKind) -
     )
     logger.info(
         "Queued ingest job %d for expert %d (upload=%d, kind=%s)",
-        job.id, expert.id, upload_id, kind,
+        job.id,
+        expert.id,
+        upload_id,
+        kind,
     )
     return job.id
 
@@ -132,9 +133,14 @@ async def upload_source(
                 detail=f"PDF is larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
             )
         upload = await repo.create(
-            expert_id=expert.id, owner_id=user.id, kind=UploadKind.PDF,
-            title=resolved_title, author=author, filename=filename or None,
-            media_type=file.content_type, content=data,
+            expert_id=expert.id,
+            owner_id=user.id,
+            kind=UploadKind.PDF,
+            title=resolved_title,
+            author=author,
+            filename=filename or None,
+            media_type=file.content_type,
+            content=data,
         )
         kind = UploadKind.PDF
     elif lowered.endswith(_TEXT_SUFFIXES) or (file.content_type or "").startswith("text/"):
@@ -144,9 +150,14 @@ async def upload_source(
                 detail=f"File is larger than the {MAX_TEXT_BYTES // (1024 * 1024)} MB limit.",
             )
         upload = await repo.create(
-            expert_id=expert.id, owner_id=user.id, kind=UploadKind.TEXT,
-            title=resolved_title, author=author, filename=filename or None,
-            media_type=file.content_type, text_content=decode_text_upload(data),
+            expert_id=expert.id,
+            owner_id=user.id,
+            kind=UploadKind.TEXT,
+            title=resolved_title,
+            author=author,
+            filename=filename or None,
+            media_type=file.content_type,
+            text_content=decode_text_upload(data),
         )
         kind = UploadKind.TEXT
     else:
@@ -178,8 +189,12 @@ async def add_url_source(
 
     title = _clean_title(req.title, req.url)
     upload = await UploadRepository(get_pool()).create(
-        expert_id=expert.id, owner_id=user.id, kind=UploadKind.URL,
-        title=title, author=req.author, url=req.url,
+        expert_id=expert.id,
+        owner_id=user.id,
+        kind=UploadKind.URL,
+        title=title,
+        author=req.author,
+        url=req.url,
     )
     job_id = await _queue(expert, upload.id, title, UploadKind.URL)
     return UploadAcceptedOut(
@@ -188,9 +203,7 @@ async def add_url_source(
 
 
 @router.get("/{slug}/sources", response_model=list[SourceOut])
-async def list_sources(
-    slug: str, user: AuthUser = Depends(require_user)
-) -> list[SourceOut]:
+async def list_sources(slug: str, user: AuthUser = Depends(require_user)) -> list[SourceOut]:
     """Every source in this expert's corpus, newest first.
 
     Owner-scoped like the mutations rather than read-scoped like the audit
@@ -203,9 +216,7 @@ async def list_sources(
 
 
 @router.delete("/{slug}/sources/{source_id}", status_code=204)
-async def delete_source(
-    slug: str, source_id: int, user: AuthUser = Depends(require_user)
-) -> None:
+async def delete_source(slug: str, source_id: int, user: AuthUser = Depends(require_user)) -> None:
     """Remove a source and its chunks from the corpus.
 
     Applies to any source, not only uploads: a build that pulled in something the

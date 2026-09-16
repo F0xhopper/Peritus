@@ -95,14 +95,16 @@ async def test_a_found_picture_is_stored_and_announced():
 
     repo.upsert.assert_awaited_once()
     assert repo.upsert.await_args.kwargs["chosen_by"] == "build"
-    assert events == [{
-        "type": "picture_ready",
-        "provider": "wikipedia",
-        "title": "Zeno of Citium",
-        "page_url": "https://en.wikipedia.org/wiki/Stoicism",
-        "license": "Public domain",
-        "version": "b" * 12,
-    }]
+    assert events == [
+        {
+            "type": "picture_ready",
+            "provider": "wikipedia",
+            "title": "Zeno of Citium",
+            "page_url": "https://en.wikipedia.org/wiki/Stoicism",
+            "license": "Public domain",
+            "version": "b" * 12,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -147,9 +149,7 @@ async def test_the_feature_switch_says_so_rather_than_going_quiet():
     finder = AsyncMock(return_value=_found())
 
     with patch("peritus.experts.builder.settings.PICTURE_ENABLED", False):
-        await builder._find_and_store_picture(
-            _expert(), "Stoic philosophy", [], builder._on_event
-        )
+        await builder._find_and_store_picture(_expert(), "Stoic philosophy", [], builder._on_event)
 
     finder.assert_not_awaited()
     assert events == [{"type": "picture_skipped", "reason": "disabled"}]

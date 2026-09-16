@@ -82,8 +82,9 @@ async def test_upsert_replaces_rather_than_duplicating(db_pool):
     pictures = ExpertPictureRepository(db_pool)
 
     await pictures.upsert(expert.id, _found())
-    await pictures.upsert(expert.id, _found(sha="d" * 64, license_name="CC BY-SA 4.0"),
-                          chosen_by="owner")
+    await pictures.upsert(
+        expert.id, _found(sha="d" * 64, license_name="CC BY-SA 4.0"), chosen_by="owner"
+    )
 
     record = await pictures.get(expert.id)
     assert record is not None

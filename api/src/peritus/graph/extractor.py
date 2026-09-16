@@ -47,8 +47,11 @@ _TOOL: dict[str, Any] = {
                         "content_type": {
                             "type": "string",
                             "enum": [
-                                "definition", "theorem", "example",
-                                "argument", "counterargument",
+                                "definition",
+                                "theorem",
+                                "example",
+                                "argument",
+                                "counterargument",
                             ],
                         },
                         "confidence": {
@@ -127,7 +130,8 @@ def attach_orphan_claims(data: dict) -> int:
     """
     nodes = data.get("nodes", [])
     concepts = [
-        n for n in nodes
+        n
+        for n in nodes
         if str(n.get("node_type", "")).strip().lower() == "concept" and n.get("label")
     ]
     concept_keys = {c["label"].lower().strip() for c in concepts}
@@ -157,11 +161,13 @@ def attach_orphan_claims(data: dict) -> int:
         for shared, concept in overlap[:_MAX_INFERRED_ABOUT]:
             if shared == 0:
                 break
-            data.setdefault("edges", []).append({
-                "from_label": claim["label"],
-                "to_label": concept["label"],
-                "edge_type": "about",
-            })
+            data.setdefault("edges", []).append(
+                {
+                    "from_label": claim["label"],
+                    "to_label": concept["label"],
+                    "edge_type": "about",
+                }
+            )
             added += 1
     return added
 
@@ -195,8 +201,7 @@ async def extract_graph_from_chunks(
     size = batch_size or settings.GRAPH_BATCH_SIZE
 
     batches = [
-        (chunks[i: i + size], chunk_db_ids[i: i + size])
-        for i in range(0, len(chunks), size)
+        (chunks[i : i + size], chunk_db_ids[i : i + size]) for i in range(0, len(chunks), size)
     ]
 
     parsed: dict[int, dict] = {}
@@ -227,22 +232,19 @@ async def extract_graph_from_chunks(
 
 def _extract_params(topic: str, chunks: list[TextChunk]) -> dict[str, Any]:
     """Request params for one extraction batch (consumed by gather_claude_calls)."""
-    chunk_block = "\n\n".join(
-        f"[{i}] {c.text}" for i, c in enumerate(chunks)
-    )
+    chunk_block = "\n\n".join(f"[{i}] {c.text}" for i, c in enumerate(chunks))
     return {
         "model": settings.GRAPH_MODEL,
         "max_tokens": 8192,
         "system": _SYSTEM,
         "tools": [_TOOL],
         "tool_choice": {"type": "tool", "name": "extract_graph"},
-        "messages": [{
-            "role": "user",
-            "content": (
-                f"Topic: {topic}\n\n"
-                f"Chunks ({len(chunks)} total):\n\n{chunk_block}"
-            ),
-        }],
+        "messages": [
+            {
+                "role": "user",
+                "content": (f"Topic: {topic}\n\nChunks ({len(chunks)} total):\n\n{chunk_block}"),
+            }
+        ],
     }
 
 
@@ -268,16 +270,16 @@ def _complete(entries: Any, required: tuple[str, ...] | list[str], kind: str) ->
             return []
         entries = decoded
     if not isinstance(entries, list):
-        logger.warning("Graph extraction returned %s as %s, not a list", kind, type(entries).__name__)
+        logger.warning(
+            "Graph extraction returned %s as %s, not a list", kind, type(entries).__name__
+        )
         return []
-    valid = [
-        e for e in entries
-        if isinstance(e, dict) and all(e.get(k) for k in required)
-    ]
+    valid = [e for e in entries if isinstance(e, dict) and all(e.get(k) for k in required)]
     if len(valid) != len(entries):
         logger.warning(
             "Dropped %d unusable %s(s) — truncated JSON or a non-object entry",
-            len(entries) - len(valid), kind,
+            len(entries) - len(valid),
+            kind,
         )
     return valid
 

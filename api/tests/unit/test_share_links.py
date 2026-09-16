@@ -153,13 +153,12 @@ async def test_workspace_lists_shared_experts_until_left_or_revoked(db_pool):
     assert names == {mine.name, theirs.name}
     # The owner's workspace does not grow because someone opened their link.
     assert {e.name for e in await repo.list_for_user(OWNER, include_unowned=False)} == {
-        "thomism", "unshared",
+        "thomism",
+        "unshared",
     }
 
     assert await shares.remove_access(theirs.id, VIEWER) is True
-    assert {e.name for e in await repo.list_for_user(VIEWER, include_unowned=False)} == {
-        mine.name
-    }
+    assert {e.name for e in await repo.list_for_user(VIEWER, include_unowned=False)} == {mine.name}
 
 
 @pytest.mark.asyncio
@@ -183,7 +182,9 @@ async def test_viewers_and_owner_see_only_their_own_answer_trails(db_pool):
                 INSERT INTO answer_audits (expert_id, conversation_id, question)
                 VALUES ($1, $2::uuid, $3)
                 """,
-                expert.id, conversation_id, question,
+                expert.id,
+                conversation_id,
+                question,
             )
 
     audits = AuditRepository(db_pool)
@@ -209,7 +210,10 @@ async def test_uploaded_source_count_counts_kept_uploads_only(db_pool):
                 INSERT INTO sources (expert_id, source_type, url, title, passed, discovered_via)
                 VALUES ($1, 'pdf', $2, 't', $3, $4)
                 """,
-                expert.id, f"https://example.org/{via}-{passed}", passed, via,
+                expert.id,
+                f"https://example.org/{via}-{passed}",
+                passed,
+                via,
             )
     assert await ShareRepository(db_pool).uploaded_source_count(expert.id) == 1
 

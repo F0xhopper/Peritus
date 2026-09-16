@@ -95,8 +95,12 @@ class ExpertRepository:
                 VALUES ($1, $2, $3, $4, $5::jsonb, $6::uuid)
                 RETURNING *
                 """,
-                name, topic, ExpertStatus.QUEUED.value,
-                tier.value, json.dumps(dataclasses.asdict(config)), owner_id,
+                name,
+                topic,
+                ExpertStatus.QUEUED.value,
+                tier.value,
+                json.dumps(dataclasses.asdict(config)),
+                owner_id,
             )
         return _row_to_expert(row)
 
@@ -160,9 +164,7 @@ class ExpertRepository:
             )
         return [_row_to_expert(r) for r in rows]
 
-    async def get_for_user(
-        self, name: str, owner_id: str, include_unowned: bool
-    ) -> Expert | None:
+    async def get_for_user(self, name: str, owner_id: str, include_unowned: bool) -> Expert | None:
         """Get an expert by slug if the user may READ it.
 
         Read visibility = owned, or admin-visible legacy row, or public, or
@@ -180,13 +182,12 @@ class ExpertRepository:
                 FROM experts e {_PICTURE_JOIN}
                 WHERE lower(e.name) = lower($1) AND {clause}
                 """,
-                name, *params,
+                name,
+                *params,
             )
         return _row_to_expert(row) if row else None
 
-    async def is_readable_by(
-        self, expert_id: int, owner_id: str, include_unowned: bool
-    ) -> bool:
+    async def is_readable_by(self, expert_id: int, owner_id: str, include_unowned: bool) -> bool:
         """Whether the user may still READ this expert, by id.
 
         For paths that reach an expert through something the user owns — a
@@ -197,7 +198,8 @@ class ExpertRepository:
             return bool(
                 await conn.fetchval(
                     f"SELECT EXISTS (SELECT 1 FROM experts e WHERE e.id = $1 AND {clause})",
-                    expert_id, *params,
+                    expert_id,
+                    *params,
                 )
             )
 
@@ -237,19 +239,19 @@ class ExpertRepository:
                 FROM experts e {_PICTURE_JOIN}
                 WHERE lower(e.name) = lower($1) AND {clause}
                 """,
-                name, *params,
+                name,
+                *params,
             )
         return _row_to_expert(row) if row else None
 
-    async def delete_for_user(
-        self, name: str, owner_id: str, include_unowned: bool
-    ) -> bool:
+    async def delete_for_user(self, name: str, owner_id: str, include_unowned: bool) -> bool:
         """Delete an expert by slug if the user owns it. Returns True if a row went."""
         clause, params = _visibility_clause(owner_id, include_unowned, alias="experts", idx=2)
         async with self._pool.acquire() as conn:
             result = await conn.execute(
                 f"DELETE FROM experts WHERE lower(name) = lower($1) AND {clause}",
-                name, *params,
+                name,
+                *params,
             )
         # asyncpg returns e.g. "DELETE 1"
         return result.rsplit(" ", 1)[-1] != "0"
@@ -290,7 +292,7 @@ class ExpertRepository:
                 f"""
                 SELECT e.*, {_SOURCE_TYPE_COUNTS_SQL}, {_BUILD_ACTIVE_SQL}, {_PICTURE_SQL}
                 FROM experts e {_PICTURE_JOIN}
-                WHERE {' AND '.join(filters)}
+                WHERE {" AND ".join(filters)}
                 ORDER BY {_CATALOG_ORDER}
                 LIMIT $1 OFFSET $2
                 """,
@@ -387,7 +389,7 @@ class ExpertRepository:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow(
                 f"""
-                UPDATE experts SET {', '.join(sets)}, updated_at = NOW()
+                UPDATE experts SET {", ".join(sets)}, updated_at = NOW()
                 WHERE id = ${len(params)}
                 RETURNING id
                 """,
@@ -410,14 +412,17 @@ class ExpertRepository:
                 SET status = $1, error = $2, updated_at = NOW()
                 WHERE id = $3
                 """,
-                status.value, error, expert_id,
+                status.value,
+                error,
+                expert_id,
             )
 
     async def update_key_concepts(self, expert_id: int, key_concepts: list[str]) -> None:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE experts SET key_concepts = $1::jsonb, updated_at = NOW() WHERE id = $2",
-                json.dumps(key_concepts), expert_id,
+                json.dumps(key_concepts),
+                expert_id,
             )
 
     async def update_build_summary(self, expert_id: int, summary: dict) -> None:
@@ -430,7 +435,8 @@ class ExpertRepository:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE experts SET build_summary = $1::jsonb, updated_at = NOW() WHERE id = $2",
-                json.dumps(summary), expert_id,
+                json.dumps(summary),
+                expert_id,
             )
 
     async def update_research_plan(self, expert_id: int, plan: dict) -> None:
@@ -438,7 +444,8 @@ class ExpertRepository:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE experts SET research_plan = $1::jsonb, updated_at = NOW() WHERE id = $2",
-                json.dumps(plan), expert_id,
+                json.dumps(plan),
+                expert_id,
             )
 
     async def clear_candidate_screenings(self, expert_id: int, job_id: int | None) -> None:
@@ -455,7 +462,8 @@ class ExpertRepository:
                 )
             else:
                 await conn.execute(
-                    "DELETE FROM candidate_screenings WHERE job_id = $1", job_id,
+                    "DELETE FROM candidate_screenings WHERE job_id = $1",
+                    job_id,
                 )
 
     async def insert_candidate_screenings(
@@ -475,10 +483,20 @@ class ExpertRepository:
                 """,
                 [
                     (
-                        job_id, expert_id, r["round"], r["source_type"], r["url"],
-                        r["title"][:1000], r.get("author"), r.get("snippet") or "",
-                        r["discovered_via"], r["model_score"], r["domain_adjustment"],
-                        r["triage_score"], r["triage_status"], r["fetch_rank"],
+                        job_id,
+                        expert_id,
+                        r["round"],
+                        r["source_type"],
+                        r["url"],
+                        r["title"][:1000],
+                        r.get("author"),
+                        r.get("snippet") or "",
+                        r["discovered_via"],
+                        r["model_score"],
+                        r["domain_adjustment"],
+                        r["triage_score"],
+                        r["triage_status"],
+                        r["fetch_rank"],
                         r["fetch_outcome"],
                     )
                     for r in rows
@@ -546,7 +564,8 @@ class ExpertRepository:
                   AND s.url = cs.url
                   AND (s.discovered_via IS DISTINCT FROM 'upload')
                 """,
-                expert_id, job_id,
+                expert_id,
+                job_id,
             )
 
     async def update_counts(
@@ -567,7 +586,12 @@ class ExpertRepository:
                     avg_quality = $5, updated_at = NOW()
                 WHERE id = $6
                 """,
-                source_count, chunk_count, node_count, edge_count, avg_quality, expert_id,
+                source_count,
+                chunk_count,
+                node_count,
+                edge_count,
+                avg_quality,
+                expert_id,
             )
 
     async def update_persona(
@@ -585,7 +609,10 @@ class ExpertRepository:
                     updated_at = NOW()
                 WHERE id = $4
                 """,
-                persona_name, persona_bio, persona_style, expert_id,
+                persona_name,
+                persona_bio,
+                persona_style,
+                expert_id,
             )
 
     async def passed_source_digest(
@@ -638,7 +665,8 @@ class ExpertRepository:
         async with self._pool.acquire() as conn:
             await conn.execute(
                 "UPDATE experts SET config = $1::jsonb, updated_at = NOW() WHERE id = $2",
-                json.dumps(dataclasses.asdict(config)), expert_id,
+                json.dumps(dataclasses.asdict(config)),
+                expert_id,
             )
 
     async def update_tier(self, expert_id: int, tier: ExpertTier) -> None:
@@ -656,7 +684,9 @@ class ExpertRepository:
                 SET tier = $1, config = $2::jsonb, updated_at = NOW()
                 WHERE id = $3
                 """,
-                tier.value, json.dumps(dataclasses.asdict(config)), expert_id,
+                tier.value,
+                json.dumps(dataclasses.asdict(config)),
+                expert_id,
             )
 
     async def reset_build_state(self, expert_id: int) -> None:
@@ -885,7 +915,9 @@ def _row_to_catalog(row: asyncpg.Record, keys) -> CatalogMeta:
     """Build CatalogMeta, tolerating rows read before migration 015 was applied."""
     raw_visibility = row["visibility"] if "visibility" in keys else None
     try:
-        visibility = ExpertVisibility(raw_visibility) if raw_visibility else ExpertVisibility.PRIVATE
+        visibility = (
+            ExpertVisibility(raw_visibility) if raw_visibility else ExpertVisibility.PRIVATE
+        )
     except ValueError:
         # An unrecognised value must never open a row up — fail closed.
         visibility = ExpertVisibility.PRIVATE

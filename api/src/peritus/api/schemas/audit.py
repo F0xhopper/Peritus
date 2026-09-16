@@ -50,8 +50,7 @@ def _assert_sorts_match() -> None:
     implemented = set(SOURCE_SORTS)
     if declared != implemented:
         raise RuntimeError(
-            "SourceSort and audit.repository.SOURCE_SORTS have diverged: "
-            f"{declared ^ implemented}"
+            f"SourceSort and audit.repository.SOURCE_SORTS have diverged: {declared ^ implemented}"
         )
 
 

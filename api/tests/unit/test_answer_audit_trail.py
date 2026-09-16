@@ -47,13 +47,18 @@ def _trail(steps: list[RetrievalStep], **overrides) -> RetrievalTrail:
 
 # ── dispositions ──
 
+
 def test_every_retrieved_passage_gets_a_disposition():
     steps = [_step(1, 10, 100), _step(2, 11, 101), _step(3, 12, 102), _step(4, 13, 103)]
     passages = [_passage(1, 100), _passage(2, 101), _passage(3, 102)]  # cap = 3
 
     payload = build_audit_payload(
-        trail=_trail(steps), passages=passages, cited={1, 3},
-        answer_text="Grounded [1] and [3].", has_contradiction=False, graph_ready=True,
+        trail=_trail(steps),
+        passages=passages,
+        cited={1, 3},
+        answer_text="Grounded [1] and [3].",
+        has_contradiction=False,
+        graph_ready=True,
     )
 
     dispositions = [d["disposition"] for d in payload["dispositions"]]
@@ -72,13 +77,17 @@ def test_counts_reconcile_across_the_funnel():
     passages = [_passage(1, 100), _passage(2, 101), _passage(3, 102)]
 
     payload = build_audit_payload(
-        trail=_trail(steps, duplicate_hits=2), passages=passages, cited={1},
-        answer_text="[1]", has_contradiction=False, graph_ready=True,
+        trail=_trail(steps, duplicate_hits=2),
+        passages=passages,
+        cited={1},
+        answer_text="[1]",
+        has_contradiction=False,
+        graph_ready=True,
     )
     counts = payload["passages"]
     assert counts["unique"] == 4
     assert counts["duplicate_hits"] == 2
-    assert counts["retrieved"] == 6          # unique + duplicates actually returned
+    assert counts["retrieved"] == 6  # unique + duplicates actually returned
     assert counts["in_context"] == 3
     assert counts["cited"] == 1
     assert counts["not_in_context"] == 1
@@ -91,8 +100,12 @@ def test_sources_are_counted_distinctly_from_passages():
     passages = [_passage(1, 100), _passage(2, 100), _passage(3, 200)]
 
     payload = build_audit_payload(
-        trail=_trail(steps), passages=passages, cited={1, 2},
-        answer_text="[1][2]", has_contradiction=False, graph_ready=True,
+        trail=_trail(steps),
+        passages=passages,
+        cited={1, 2},
+        answer_text="[1][2]",
+        has_contradiction=False,
+        graph_ready=True,
     )
     assert payload["sources"]["in_context"] == 2
     assert payload["sources"]["cited"] == 1
@@ -101,13 +114,21 @@ def test_sources_are_counted_distinctly_from_passages():
 def test_followup_pass_is_attributed_to_the_coverage_round():
     steps = [_step(1, 10, 100), _step(2, 11, 101, via="coverage_followup")]
     payload = build_audit_payload(
-        trail=_trail(steps, followup_queries=["stoic funerary practice"], second_pass=True,
-                     coverage_satisfied=False),
+        trail=_trail(
+            steps,
+            followup_queries=["stoic funerary practice"],
+            second_pass=True,
+            coverage_satisfied=False,
+        ),
         passages=[_passage(1, 100), _passage(2, 101)],
-        cited=set(), answer_text="No citations.", has_contradiction=False, graph_ready=True,
+        cited=set(),
+        answer_text="No citations.",
+        has_contradiction=False,
+        graph_ready=True,
     )
     assert [d["retrieved_via"] for d in payload["dispositions"]] == [
-        "primary", "coverage_followup",
+        "primary",
+        "coverage_followup",
     ]
     assert payload["coverage"] == {"satisfied": False, "second_pass": True}
     assert payload["followup_queries"] == ["stoic funerary practice"]
@@ -115,13 +136,18 @@ def test_followup_pass_is_attributed_to_the_coverage_round():
 
 # ── the graph-not-built distinction ──
 
+
 def test_contradiction_flag_is_null_when_the_graph_is_not_built_yet():
     """An expert can answer before its concept graph exists. Reporting False
     there would read as 'no contradictions found', which is a finding — and
     for this product, the wrong one to invent."""
     payload = build_audit_payload(
-        trail=_trail([_step(1, 10, 100)]), passages=[_passage(1, 100)], cited={1},
-        answer_text="[1]", has_contradiction=False, graph_ready=False,
+        trail=_trail([_step(1, 10, 100)]),
+        passages=[_passage(1, 100)],
+        cited={1},
+        answer_text="[1]",
+        has_contradiction=False,
+        graph_ready=False,
     )
     assert payload["graph"]["contradiction_traversed"] is None
     assert "not a finding that none exist" in payload["graph"]["unavailable_reason"]
@@ -130,8 +156,12 @@ def test_contradiction_flag_is_null_when_the_graph_is_not_built_yet():
 def test_contradiction_flag_is_boolean_once_the_graph_exists():
     for flag in (True, False):
         payload = build_audit_payload(
-            trail=_trail([_step(1, 10, 100)]), passages=[_passage(1, 100)], cited=set(),
-            answer_text="", has_contradiction=flag, graph_ready=True,
+            trail=_trail([_step(1, 10, 100)]),
+            passages=[_passage(1, 100)],
+            cited=set(),
+            answer_text="",
+            has_contradiction=flag,
+            graph_ready=True,
         )
         assert payload["graph"]["contradiction_traversed"] is flag
         assert payload["graph"]["unavailable_reason"] is None
@@ -139,12 +169,17 @@ def test_contradiction_flag_is_boolean_once_the_graph_exists():
 
 # ── it is a trail, not a score ──
 
+
 def test_payload_contains_no_quality_or_confidence_score():
     """Groundedness lives in chat/faithfulness.py for offline evaluation only.
     Its live display was removed deliberately and must not creep back in here."""
     payload = build_audit_payload(
-        trail=_trail([_step(1, 10, 100)]), passages=[_passage(1, 100)], cited={1},
-        answer_text="[1]", has_contradiction=False, graph_ready=True,
+        trail=_trail([_step(1, 10, 100)]),
+        passages=[_passage(1, 100)],
+        cited={1},
+        answer_text="[1]",
+        has_contradiction=False,
+        graph_ready=True,
     )
     flat = repr(payload).lower()
     for banned in ("groundedness", "faithful", "confidence", "accuracy", "grade"):
@@ -153,11 +188,16 @@ def test_payload_contains_no_quality_or_confidence_score():
 
 # ── degraded inputs ──
 
+
 def test_missing_trail_degrades_to_empty_rather_than_raising():
     """Retrieval trails are best-effort; an answer must never fail for want of one."""
     payload = build_audit_payload(
-        trail=None, passages=[], cited=set(), answer_text="hi",
-        has_contradiction=False, graph_ready=True,
+        trail=None,
+        passages=[],
+        cited=set(),
+        answer_text="hi",
+        has_contradiction=False,
+        graph_ready=True,
     )
     assert payload["dispositions"] == []
     assert payload["passages"]["unique"] == 0
@@ -166,11 +206,16 @@ def test_missing_trail_degrades_to_empty_rather_than_raising():
 
 # ── persistence mapping ──
 
+
 def test_db_rows_mirror_the_payload():
     steps = [_step(1, 10, 100), _step(2, 11, 101)]
     payload = build_audit_payload(
-        trail=_trail(steps), passages=[_passage(1, 100)], cited={1},
-        answer_text="[1] only", has_contradiction=True, graph_ready=True,
+        trail=_trail(steps),
+        passages=[_passage(1, 100)],
+        cited={1},
+        answer_text="[1] only",
+        has_contradiction=True,
+        graph_ready=True,
     )
     header, rows = audit_db_rows(payload, expert_id=7, conversation_id="abc", question="Q?")
 
@@ -193,8 +238,12 @@ def test_db_rows_mirror_the_payload():
 def test_ungraphed_contradiction_persists_as_false_not_null():
     """The column is NOT NULL; readiness distinguishes the two states at read time."""
     payload = build_audit_payload(
-        trail=_trail([_step(1, 10, 100)]), passages=[_passage(1, 100)], cited=set(),
-        answer_text="", has_contradiction=False, graph_ready=False,
+        trail=_trail([_step(1, 10, 100)]),
+        passages=[_passage(1, 100)],
+        cited=set(),
+        answer_text="",
+        has_contradiction=False,
+        graph_ready=False,
     )
     header, _ = audit_db_rows(payload, expert_id=1, conversation_id=None, question="Q")
     assert header["contradiction_traversed"] is False
@@ -203,8 +252,12 @@ def test_ungraphed_contradiction_persists_as_false_not_null():
 def test_dangling_citations_are_persisted():
     """Logged and streamed per answer, never stored — so their rate was unqueryable."""
     payload = build_audit_payload(
-        trail=_trail([_step(1, 10, 100)]), passages=[_passage(1, 100)], cited={1},
-        answer_text="[1] and [47]", has_contradiction=False, graph_ready=True,
+        trail=_trail([_step(1, 10, 100)]),
+        passages=[_passage(1, 100)],
+        cited={1},
+        answer_text="[1] and [47]",
+        has_contradiction=False,
+        graph_ready=True,
         dangling={47, 12},
     )
     header, _ = audit_db_rows(payload, expert_id=1, conversation_id=None, question="Q")
