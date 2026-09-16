@@ -8,8 +8,8 @@ from rich.console import Console
 
 from peritus.chat.agent import ChatAgent
 from peritus.chat.history import ConversationHistory
-from peritus.chat.renderer import render_answer, render_thinking
 from peritus.cli.display import credential_card, print_error
+from peritus.cli.render import render_answer, render_thinking
 from peritus.core.exceptions import NotFoundError
 from peritus.experts.domain import ExpertStatus
 from peritus.experts.service import ExpertService

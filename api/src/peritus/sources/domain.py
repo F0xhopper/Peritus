@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from enum import StrEnum
 
 from peritus.sources.identifiers import (
@@ -270,11 +270,6 @@ class DroppedSource:
     @property
     def identifiers(self) -> Identifiers:
         return self.raw.identifiers
-
-
-def with_identifiers[T: (RawSource, SourceCandidate)](item: T, ids: Identifiers) -> T:
-    """A copy of a candidate/source carrying merged identifiers."""
-    return replace(item, identifiers=item.identifiers.merge(ids))
 
 
 def resolved_identifiers[T: (RawSource, SourceCandidate)](item: T) -> Identifiers:

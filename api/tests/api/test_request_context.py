@@ -305,6 +305,46 @@ def test_log_format_renders_records_from_any_logger():
     assert "[-]" in logging.Formatter(_LOG_FORMAT).format(record)
 
 
+# ── the same slot, filled by the worker ──
+
+
+def test_job_context_labels_records_so_a_build_is_greppable():
+    """The worker's half of the correlation field.
+
+    Every build line used to read `-`, across `WORKER_CONCURRENCY` concurrent
+    jobs, so which build produced a line had to be inferred from its text.
+    """
+    from peritus.core.logging import job_context
+
+    with job_context(53, expert_id=12):
+        record = logging.LogRecord("peritus.experts.builder", logging.INFO, "f", 1, "x", None, None)
+        RequestIdFilter().filter(record)
+        assert record.request_id == "job=53 expert=12"
+
+    # Restored on the way out, so a worker that finishes a job does not label the
+    # next one's lines — or the idle loop's — with it.
+    record = logging.LogRecord("peritus.jobs.worker", logging.INFO, "f", 1, "x", None, None)
+    RequestIdFilter().filter(record)
+    assert record.request_id == "-"
+
+
+async def test_job_context_follows_into_gathered_tasks():
+    """A build fetches, validates and embeds concurrently. Context variables are
+    copied into each task at creation, so those lines carry the label too."""
+    import asyncio
+
+    from peritus.core.logging import current_request_id, job_context
+
+    async def _inner() -> str:
+        await asyncio.sleep(0)
+        return current_request_id()
+
+    with job_context(7):
+        labels = await asyncio.gather(_inner(), _inner())
+
+    assert labels == ["job=7", "job=7"]
+
+
 # ── readiness ──
 
 

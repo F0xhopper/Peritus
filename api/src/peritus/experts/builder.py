@@ -3818,18 +3818,6 @@ def _avg_quality(passed: list[ValidatedSource]) -> float | None:
     return round(sum(scores) / len(scores), 2) if scores else None
 
 
-def _deduplicate_by_url[T: (RawSource, SourceCandidate)](items: list[T]) -> list[T]:
-    """Remove items with duplicate URLs, keeping the first occurrence."""
-    seen: set[str] = set()
-    unique: list[T] = []
-    for item in items:
-        key = item.url.rstrip("/").lower()
-        if key not in seen:
-            seen.add(key)
-            unique.append(item)
-    return unique
-
-
 def _raise_if_provider_down(stage: str) -> None:
     """Fail with the provider's own words when the LLM was never reachable.
 

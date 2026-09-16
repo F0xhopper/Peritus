@@ -47,11 +47,3 @@ class IngestionError(PeritusError):
 
 class EmbeddingError(PeritusError):
     pass
-
-
-class FetchError(PeritusError):
-    pass
-
-
-class ValidationError(PeritusError):
-    pass

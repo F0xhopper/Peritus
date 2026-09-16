@@ -136,18 +136,6 @@ class ExpertService:
         )
         return await self.get(expert.id)
 
-    async def remove_picture(self, name_or_id: str | int) -> Expert:
-        """Drop the found picture. The expert falls back to its recipe or sigil.
-
-        Distinct from choosing a sigil style in the picker: that writes a
-        recipe, and Reset would then bring the picture straight back.
-        """
-        from peritus.experts.picture_repository import ExpertPictureRepository
-
-        expert = await self.get(name_or_id)
-        await ExpertPictureRepository(self._pool).delete(expert.id)
-        return await self.get(expert.id)
-
     async def _wikipedia_source_titles(self, expert_id: int) -> tuple[str, ...]:
         """Titles of this expert's validated Wikipedia sources, best first."""
         async with self._pool.acquire() as conn:

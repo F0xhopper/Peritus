@@ -244,18 +244,6 @@ class ExpertRepository:
             )
         return _row_to_expert(row) if row else None
 
-    async def delete_for_user(self, name: str, owner_id: str, include_unowned: bool) -> bool:
-        """Delete an expert by slug if the user owns it. Returns True if a row went."""
-        clause, params = _visibility_clause(owner_id, include_unowned, alias="experts", idx=2)
-        async with self._pool.acquire() as conn:
-            result = await conn.execute(
-                f"DELETE FROM experts WHERE lower(name) = lower($1) AND {clause}",
-                name,
-                *params,
-            )
-        # asyncpg returns e.g. "DELETE 1"
-        return result.rsplit(" ", 1)[-1] != "0"
-
     # ── public catalog ──────────────────────────────────────────────────────
 
     async def list_catalog(
@@ -660,14 +648,6 @@ class ExpertRepository:
             )
         # Re-read for the joined picture — see `update_catalog`.
         return await self.get_by_id(row["id"]) if row else None
-
-    async def update_config(self, expert_id: int, config: ExpertConfig) -> None:
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                "UPDATE experts SET config = $1::jsonb, updated_at = NOW() WHERE id = $2",
-                json.dumps(dataclasses.asdict(config)),
-                expert_id,
-            )
 
     async def update_tier(self, expert_id: int, tier: ExpertTier) -> None:
         """Move an expert to a new tier, with the config that tier implies.

@@ -264,14 +264,6 @@ async def load_catalogue() -> GutenbergCatalogue | None:
         return _catalogue
 
 
-def set_catalogue(catalogue: GutenbergCatalogue | None) -> None:
-    """Install a catalogue directly. For tests, and for a worker that preloads."""
-    global _catalogue, _loaded_at, _failed_at
-    _catalogue = catalogue
-    _loaded_at = time.monotonic() if catalogue is not None else 0.0
-    _failed_at = 0.0
-
-
 def _is_fresh(path: Path) -> bool:
     try:
         return time.time() - path.stat().st_mtime < _MAX_AGE_SECONDS

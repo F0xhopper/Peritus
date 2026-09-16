@@ -1,4 +1,9 @@
-"""Rich renderer for chat answers."""
+"""Rich renderer for chat answers.
+
+A terminal concern, so it lives with the terminal. It sat in the `chat` domain
+package, where it was the only module importing `rich` and the only one that
+knew what a console was — and its sole caller has always been `cli/chat.py`.
+"""
 
 from rich.console import Console
 from rich.markdown import Markdown

@@ -95,15 +95,6 @@ def edge_is_valid(edge_type: EdgeType, from_type: NodeType, to_type: NodeType) -
     return EDGE_ENDPOINTS[edge_type] == (from_type, to_type)
 
 
-def edge_property(edge_type: EdgeType, properties: dict | None) -> str | None:
-    """The stated point or condition for an edge, if its type requires one."""
-    key = EDGE_REQUIRED_PROPERTY.get(edge_type)
-    if key is None or not properties:
-        return None
-    value = properties.get(key)
-    return value.strip() if isinstance(value, str) and value.strip() else None
-
-
 @dataclass
 class Node:
     id: int

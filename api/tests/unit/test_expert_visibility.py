@@ -171,8 +171,6 @@ async def test_public_expert_is_readable_but_not_owned(db_pool):
     # …but not resolvable through the mutation gate, so rebuild/delete/curate 404.
     assert await repo.get_owned_for_user("shared", OTHER, include_unowned=False) is None
     assert await repo.get_owned_for_user("shared", OWNER, include_unowned=False) is not None
-    # And the owner-scoped delete refuses too.
-    assert await repo.delete_for_user("shared", OTHER, include_unowned=False) is False
 
 
 @pytest.mark.asyncio

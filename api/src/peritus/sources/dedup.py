@@ -227,10 +227,6 @@ class SeenSet:
         if fingerprint is not None:
             self.fingerprints.append(fingerprint)
 
-    def add_url(self, url: str) -> None:
-        if url:
-            self.urls.add(normalise_url(url))
-
     def has(self, identifiers: Identifiers, url: str) -> bool:
         if identifiers.keys() & self.identity_keys:
             return True

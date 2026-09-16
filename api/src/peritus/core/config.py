@@ -322,9 +322,6 @@ class Settings(BaseSettings):
     CHUNK_SIZE_CHARS: int = 1000
     CHUNK_OVERLAP_CHARS: int = 200
 
-    # API auth (legacy shared key — retained for backwards compatibility)
-    PERITUS_API_KEY_HASH: str = ""
-
     # ── Supabase Auth ─────────────────────────────────────────────────────────
     # SUPABASE_URL, e.g. https://<project-ref>.supabase.co. When set, the API
     # verifies user access tokens (JWTs) and requires login. When unset, auth is

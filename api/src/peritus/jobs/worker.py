@@ -32,7 +32,7 @@ from peritus.billing.service import EntitlementService
 from peritus.billing.settings import settings as billing_settings
 from peritus.core.config import settings
 from peritus.core.exceptions import BuildError, IngestionError
-from peritus.core.logging import get_logger
+from peritus.core.logging import get_logger, job_context
 from peritus.experts.builder import BuildResult, ExpertBuilder
 from peritus.experts.domain import ExpertStatus, ExpertTier
 from peritus.experts.repository import ExpertRepository
@@ -319,6 +319,19 @@ class BuildWorker:
     # ── single job execution ────────────────────────────────────────────────
 
     async def _run_job(self, job: BuildJob) -> None:
+        """Run one claimed job, with every log line inside it labelled.
+
+        The labelling is the whole reason this wrapper exists. A build is minutes
+        of interleaved output from a dozen modules, and `WORKER_CONCURRENCY` of
+        them run at once — until this, every one of those lines carried `-` and
+        which build it belonged to had to be inferred from its text. Context
+        variables follow the task, so everything below here is stamped, including
+        the builder's own logging and anything it gathers.
+        """
+        with job_context(job.id, job.expert_id):
+            await self._execute(job)
+
+    async def _execute(self, job: BuildJob) -> None:
         expert_repo = ExpertRepository(self._pool)
         expert = await expert_repo.get_by_id(job.expert_id)
         if expert is None:

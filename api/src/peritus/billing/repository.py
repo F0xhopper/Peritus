@@ -97,17 +97,6 @@ class BillingRepository:
                 plan,
             )
 
-    async def set_spend_cap_override(self, owner_id: str, cap_usd: float | None) -> None:
-        async with self._pool.acquire() as conn:
-            await conn.execute(
-                """
-                UPDATE accounts SET spend_cap_override_usd = $2, updated_at = NOW()
-                WHERE owner_id = $1::uuid
-                """,
-                owner_id,
-                Decimal(str(cap_usd)) if cap_usd is not None else None,
-            )
-
     async def list_accounts(self, limit: int = 100) -> list[dict]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch(

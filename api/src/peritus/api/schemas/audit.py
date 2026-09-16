@@ -11,8 +11,6 @@ that reach a query — because those must be validated before they reach SQL.
 
 from enum import StrEnum
 
-from pydantic import BaseModel, Field
-
 from peritus.audit.repository import SOURCE_SORTS
 
 
@@ -91,13 +89,3 @@ GRAPH_NODES_MAX = 1500
 # export, so this sits far above any real corpus and the route reports a
 # truncation rather than emitting a silently partial file.
 EXPORT_MAX_ROWS = 20_000
-
-
-class AuditPage(BaseModel):
-    """Standard pagination echoed back on every paginated audit response."""
-
-    limit: int = Field(ge=1)
-    offset: int = Field(ge=0)
-    returned: int
-    total_matching: int | None
-    has_more: bool

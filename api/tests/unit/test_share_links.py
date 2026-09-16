@@ -70,7 +70,6 @@ async def test_a_slug_grants_nothing_and_a_grant_grants_read(db_pool):
     # Read, never mutate.
     repo = ExpertRepository(db_pool)
     assert await repo.get_owned_for_user("thomism", VIEWER, include_unowned=False) is None
-    assert await repo.delete_for_user("thomism", VIEWER, include_unowned=False) is False
     assert await shares.viewer_count(link.id) == 1
 
 

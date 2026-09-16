@@ -1,6 +1,4 @@
 import asyncio
-import hashlib
-import secrets
 from contextlib import asynccontextmanager, suppress
 from importlib.metadata import version
 
@@ -131,13 +129,3 @@ app = create_app()
 def start() -> None:
     # log_config=None keeps uvicorn from installing its own dictConfig over ours.
     uvicorn.run("peritus.api.app:app", host="0.0.0.0", port=8000, reload=False, log_config=None)
-
-
-def keygen() -> None:
-    """Print a new API key + its SHA-256 hash."""
-    key = "prt_" + secrets.token_urlsafe(32)
-    key_hash = hashlib.sha256(key.encode()).hexdigest()
-    print(f"API Key:  {key}")
-    print(f"Key Hash: {key_hash}")
-    print("\nAdd to .env:")
-    print(f"PERITUS_API_KEY_HASH={key_hash}")

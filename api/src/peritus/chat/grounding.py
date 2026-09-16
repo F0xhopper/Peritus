@@ -276,19 +276,10 @@ def parse_citations(answer_text: str, num_passages: int) -> tuple[set[int], set[
     return cited, dangling
 
 
-def strip_dangling_citations(answer_text: str, num_passages: int) -> str:
-    """Remove ``[n]`` markers that point at no passage.
-
-    Deleting the marker is the least-bad repair: the sentence keeps its claim and
-    loses a reference that never existed, whereas leaving it invites the reader to
-    look for source 47 in a list of 25.
-    """
-
-    def keep(m: re.Match[str]) -> str:
-        n = int(m.group(1))
-        return m.group(0) if 1 <= n <= num_passages else ""
-
-    return _CITATION_RE.sub(keep, answer_text)
+# There is deliberately no `strip_dangling_citations` counterpart. Removing the
+# marker would hide the flaw; migration 028 records dangling citations on the
+# answer's audit row instead, so a model that cites passage 47 out of 25 is
+# visible in the evidence rather than quietly tidied away.
 
 
 def used_citations(passages: list[Passage], cited: set[int]) -> list[dict]:

@@ -8,7 +8,6 @@ from peritus.chat.grounding import (
     build_system_prompt,
     parse_citations,
     parse_cited_indices,
-    strip_dangling_citations,
     used_citation_labels,
     used_citations,
 )
@@ -66,16 +65,6 @@ def test_parse_citations_reports_nothing_dangling_for_a_clean_answer():
     cited, dangling = parse_citations("All good [1][2][3].", num_passages=3)
     assert cited == {1, 2, 3}
     assert dangling == set()
-
-
-def test_strip_dangling_citations_removes_only_the_invalid_markers():
-    out = strip_dangling_citations("Claim [1]. Bogus [42]. Also [2].", num_passages=3)
-    assert out == "Claim [1]. Bogus . Also [2]."
-
-
-def test_strip_dangling_citations_leaves_a_clean_answer_untouched():
-    text = "Claim [1] and [2]."
-    assert strip_dangling_citations(text, num_passages=2) == text
 
 
 def test_used_citations_preserve_numbers_and_order():
