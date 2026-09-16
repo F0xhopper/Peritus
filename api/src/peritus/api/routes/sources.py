@@ -14,9 +14,9 @@ work. Progress rides the existing ``/experts/{slug}/build/events`` SSE stream, s
 clients get upload progress without a second event transport.
 """
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
-from peritus.api.auth import AuthUser, require_user
+from peritus.api.deps import CurrentUser, Jobs, OwnedExpert, Uploads
 from peritus.api.schemas.sources import (
     MAX_TEXT_BYTES,
     MAX_UPLOAD_BYTES,
@@ -28,13 +28,10 @@ from peritus.api.schemas.sources import (
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
-from peritus.experts.repository import ExpertRepository
-from peritus.infrastructure.database import get_pool
 from peritus.jobs.domain import JobType
 from peritus.jobs.repository import JobRepository
 from peritus.uploads.domain import UploadKind
 from peritus.uploads.extract import decode_text_upload
-from peritus.uploads.repository import UploadRepository
 
 logger = get_logger(__name__)
 
@@ -47,21 +44,7 @@ _TEXT_SUFFIXES = (".txt", ".md", ".markdown", ".text")
 _PDF_SUFFIXES = (".pdf",)
 
 
-async def _owned_expert(slug: str, user: AuthUser) -> Expert:
-    """Resolve an expert the caller may *mutate*, or 404.
-
-    404 rather than 403 for anything out of scope, matching the rest of the API:
-    an expert's existence is not disclosed to someone who cannot act on it.
-    """
-    expert = await ExpertRepository(get_pool()).get_owned_for_user(
-        slug, user.id, include_unowned=user.is_admin
-    )
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    return expert
-
-
-async def _guard_no_active_build(expert: Expert) -> None:
+async def _guard_no_active_build(expert: Expert, jobs: JobRepository) -> None:
     """Refuse an ingest while a build is running.
 
     A build wipes and re-fetches the corpus underneath. Uploads survive that
@@ -69,7 +52,7 @@ async def _guard_no_active_build(expert: Expert) -> None:
     after the reset and before the graph stage, or after the graph stage and
     never reach the graph at all. Making the user wait is far better than either.
     """
-    active = await JobRepository(get_pool()).get_active_job(expert.id, job_type=JobType.BUILD)
+    active = await jobs.get_active_job(expert.id, job_type=JobType.BUILD)
     if active is not None:
         raise HTTPException(
             status_code=409,
@@ -77,8 +60,10 @@ async def _guard_no_active_build(expert: Expert) -> None:
         )
 
 
-async def _queue(expert: Expert, upload_id: int, title: str, kind: UploadKind) -> int:
-    job = await JobRepository(get_pool()).enqueue(
+async def _queue(
+    jobs: JobRepository, expert: Expert, upload_id: int, title: str, kind: UploadKind
+) -> int:
+    job = await jobs.enqueue(
         expert_id=expert.id,
         tier=str(expert.tier),
         source_filter=None,
@@ -103,19 +88,20 @@ def _clean_title(raw: str | None, fallback: str) -> str:
 
 @router.post("/{slug}/sources/upload", response_model=UploadAcceptedOut, status_code=202)
 async def upload_source(
-    slug: str,
+    expert: OwnedExpert,
+    user: CurrentUser,
+    uploads: Uploads,
+    jobs: Jobs,
     file: UploadFile = File(...),
     title: str | None = Form(None),
     author: str | None = Form(None),
-    user: AuthUser = Depends(require_user),
 ) -> UploadAcceptedOut:
     """Accept a PDF or text/markdown file and queue it for ingestion.
 
     202, not 201: the source does not exist yet. What exists is a durable
     payload and a queued job, and the response says which job to watch.
     """
-    expert = await _owned_expert(slug, user)
-    await _guard_no_active_build(expert)
+    await _guard_no_active_build(expert, jobs)
 
     filename = (file.filename or "").strip()
     lowered = filename.lower()
@@ -123,7 +109,6 @@ async def upload_source(
     if not data:
         raise HTTPException(status_code=400, detail="The uploaded file is empty.")
 
-    repo = UploadRepository(get_pool())
     resolved_title = _clean_title(title, filename or "Untitled upload")
 
     if lowered.endswith(_PDF_SUFFIXES) or file.content_type == "application/pdf":
@@ -132,7 +117,7 @@ async def upload_source(
                 status_code=413,
                 detail=f"PDF is larger than the {MAX_UPLOAD_BYTES // (1024 * 1024)} MB limit.",
             )
-        upload = await repo.create(
+        upload = await uploads.create(
             expert_id=expert.id,
             owner_id=user.id,
             kind=UploadKind.PDF,
@@ -149,7 +134,7 @@ async def upload_source(
                 status_code=413,
                 detail=f"File is larger than the {MAX_TEXT_BYTES // (1024 * 1024)} MB limit.",
             )
-        upload = await repo.create(
+        upload = await uploads.create(
             expert_id=expert.id,
             owner_id=user.id,
             kind=UploadKind.TEXT,
@@ -166,7 +151,7 @@ async def upload_source(
             detail="Only PDF, .txt and .md files can be uploaded. For a web page, use the URL field.",
         )
 
-    job_id = await _queue(expert, upload.id, resolved_title, kind)
+    job_id = await _queue(jobs, expert, upload.id, resolved_title, kind)
     return UploadAcceptedOut(
         upload_id=upload.id, job_id=job_id, title=resolved_title, kind=str(kind)
     )
@@ -174,9 +159,11 @@ async def upload_source(
 
 @router.post("/{slug}/sources/url", response_model=UploadAcceptedOut, status_code=202)
 async def add_url_source(
-    slug: str,
+    expert: OwnedExpert,
     req: AddUrlRequest,
-    user: AuthUser = Depends(require_user),
+    user: CurrentUser,
+    uploads: Uploads,
+    jobs: Jobs,
 ) -> UploadAcceptedOut:
     """Accept a web page by URL and queue it for ingestion.
 
@@ -184,11 +171,10 @@ async def add_url_source(
     hold an HTTP request open, and a fetch failure should land in the job's event
     log next to everything else about that document.
     """
-    expert = await _owned_expert(slug, user)
-    await _guard_no_active_build(expert)
+    await _guard_no_active_build(expert, jobs)
 
     title = _clean_title(req.title, req.url)
-    upload = await UploadRepository(get_pool()).create(
+    upload = await uploads.create(
         expert_id=expert.id,
         owner_id=user.id,
         kind=UploadKind.URL,
@@ -196,35 +182,33 @@ async def add_url_source(
         author=req.author,
         url=req.url,
     )
-    job_id = await _queue(expert, upload.id, title, UploadKind.URL)
+    job_id = await _queue(jobs, expert, upload.id, title, UploadKind.URL)
     return UploadAcceptedOut(
         upload_id=upload.id, job_id=job_id, title=title, kind=str(UploadKind.URL)
     )
 
 
 @router.get("/{slug}/sources", response_model=list[SourceOut])
-async def list_sources(slug: str, user: AuthUser = Depends(require_user)) -> list[SourceOut]:
+async def list_sources(expert: OwnedExpert, uploads: Uploads) -> list[SourceOut]:
     """Every source in this expert's corpus, newest first.
 
     Owner-scoped like the mutations rather than read-scoped like the audit
     routes: this list is the management view that the delete button acts on, and
     the audit surface already serves the public "what is this made of" question.
     """
-    expert = await _owned_expert(slug, user)
-    rows = await UploadRepository(get_pool()).list_sources(expert.id)
+    rows = await uploads.list_sources(expert.id)
     return [SourceOut(**r) for r in rows]
 
 
 @router.delete("/{slug}/sources/{source_id}", status_code=204)
-async def delete_source(slug: str, source_id: int, user: AuthUser = Depends(require_user)) -> None:
+async def delete_source(expert: OwnedExpert, source_id: int, uploads: Uploads) -> None:
     """Remove a source and its chunks from the corpus.
 
     Applies to any source, not only uploads: a build that pulled in something the
     owner does not want their expert citing should be correctable without a full
     rebuild.
     """
-    expert = await _owned_expert(slug, user)
-    removed = await UploadRepository(get_pool()).delete_source(expert.id, source_id)
+    removed = await uploads.delete_source(expert.id, source_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Source not found")
     logger.info("Deleted source %d from expert %d", source_id, expert.id)

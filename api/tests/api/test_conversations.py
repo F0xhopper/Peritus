@@ -6,13 +6,15 @@ recents filtering) is covered by the DB-backed tests in
 tests/unit/test_conversation_repository.py.
 """
 
+import contextlib
 import json
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from peritus.api import deps
 from peritus.api.routes.conversations import _title_from_question
 from peritus.chat.conversation_repository import Conversation
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
@@ -57,15 +59,8 @@ def _make_conversation(**overrides) -> Conversation:
 
 
 @pytest.fixture
-def app():
-    from peritus.api.app import create_app
-    from peritus.api.auth import AuthUser, require_user
-
-    app = create_app()
-    app.dependency_overrides[require_user] = lambda: AuthUser(
-        id=ADMIN_ID, email="admin@test", is_admin=True
-    )
-    return app
+def app(api_app):
+    return api_app(user=ADMIN_ID, is_admin=True, email="admin@test")
 
 
 @pytest.fixture
@@ -92,19 +87,16 @@ def readiness():
         yield state
 
 
-def _patched(mock_convs=None, mock_experts=None):
-    """Patch the route module's pool + repositories in one place."""
-    return (
-        patch("peritus.api.routes.conversations.get_pool", return_value=MagicMock()),
-        patch(
-            "peritus.api.routes.conversations.ConversationRepository",
-            return_value=mock_convs or AsyncMock(),
-        ),
-        patch(
-            "peritus.api.routes.conversations.ExpertRepository",
-            return_value=mock_experts or AsyncMock(),
-        ),
-    )
+@contextlib.contextmanager
+def _wired(app, mock_convs=None, mock_experts=None):
+    """Substitute the two repositories the conversation routes depend on.
+
+    `dependency_overrides` rather than patching the route module: the handlers
+    take both as dependencies now, so the test names what it replaces.
+    """
+    app.dependency_overrides[deps.conversation_repo] = lambda: mock_convs or AsyncMock()
+    app.dependency_overrides[deps.expert_repo] = lambda: mock_experts or AsyncMock()
+    yield
 
 
 # ── title truncation ──
@@ -133,15 +125,14 @@ def test_title_truncates_at_word_boundary_with_ellipsis():
 
 
 @pytest.mark.asyncio
-async def test_create_conversation(client):
+async def test_create_conversation(client, app):
     mock_experts = AsyncMock()
     mock_experts.get_for_user = AsyncMock(return_value=_make_expert())
     mock_convs = AsyncMock()
     mock_convs.create = AsyncMock(
         return_value=_make_conversation(expert_slug=None, expert_topic=None, expert_status=None)
     )
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3:
+    with _wired(app, mock_convs, mock_experts):
         resp = await client.post("/experts/stoicism/conversations")
 
     assert resp.status_code == 200
@@ -154,22 +145,20 @@ async def test_create_conversation(client):
 
 
 @pytest.mark.asyncio
-async def test_create_conversation_unknown_expert_404(client):
+async def test_create_conversation_unknown_expert_404(client, app):
     mock_experts = AsyncMock()
     mock_experts.get_for_user = AsyncMock(return_value=None)
-    p1, p2, p3 = _patched(mock_experts=mock_experts)
-    with p1, p2, p3:
+    with _wired(app, mock_experts=mock_experts):
         resp = await client.post("/experts/nope/conversations")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_create_conversation_not_ready_409(client, readiness):
+async def test_create_conversation_not_ready_409(client, readiness, app):
     readiness["value"] = Readiness.PENDING
     mock_experts = AsyncMock()
     mock_experts.get_for_user = AsyncMock(return_value=_make_expert(ExpertStatus.BUILDING))
-    p1, p2, p3 = _patched(mock_experts=mock_experts)
-    with p1, p2, p3:
+    with _wired(app, mock_experts=mock_experts):
         resp = await client.post("/experts/stoicism/conversations")
     assert resp.status_code == 409
 
@@ -178,41 +167,37 @@ async def test_create_conversation_not_ready_409(client, readiness):
 
 
 @pytest.mark.asyncio
-async def test_get_conversation_not_visible_404(client):
+async def test_get_conversation_not_visible_404(client, app):
     mock_convs = AsyncMock()
     mock_convs.get_for_user = AsyncMock(return_value=None)
-    p1, p2, p3 = _patched(mock_convs)
-    with p1, p2, p3:
+    with _wired(app, mock_convs):
         resp = await client.get(f"/conversations/{CONV_ID}")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_rename_not_visible_404(client):
+async def test_rename_not_visible_404(client, app):
     mock_convs = AsyncMock()
     mock_convs.rename = AsyncMock(return_value=False)
-    p1, p2, p3 = _patched(mock_convs)
-    with p1, p2, p3:
+    with _wired(app, mock_convs):
         resp = await client.patch(f"/conversations/{CONV_ID}", json={"title": "New title"})
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_delete_not_visible_404(client):
+async def test_delete_not_visible_404(client, app):
     mock_convs = AsyncMock()
     mock_convs.delete = AsyncMock(return_value=False)
-    p1, p2, p3 = _patched(mock_convs)
-    with p1, p2, p3:
+    with _wired(app, mock_convs):
         resp = await client.delete(f"/conversations/{CONV_ID}")
     assert resp.status_code == 404
 
 
 @pytest.mark.asyncio
-async def test_send_message_not_visible_404(client):
+async def test_send_message_not_visible_404(client, app):
     mock_convs = AsyncMock()
     mock_convs.get_for_user = AsyncMock(return_value=None)
-    p1, p2, p3 = _patched(mock_convs)
-    with p1, p2, p3:
+    with _wired(app, mock_convs):
         resp = await client.post(f"/conversations/{CONV_ID}/messages", json={"question": "hi"})
     assert resp.status_code == 404
 
@@ -221,14 +206,13 @@ async def test_send_message_not_visible_404(client):
 
 
 @pytest.mark.asyncio
-async def test_rename_conversation(client):
+async def test_rename_conversation(client, app):
     mock_convs = AsyncMock()
     mock_convs.rename = AsyncMock(return_value=True)
     mock_convs.get_for_user = AsyncMock(
         return_value=_make_conversation(title="New title", message_count=2)
     )
-    p1, p2, p3 = _patched(mock_convs)
-    with p1, p2, p3:
+    with _wired(app, mock_convs):
         resp = await client.patch(f"/conversations/{CONV_ID}", json={"title": "  New title  "})
 
     assert resp.status_code == 200
@@ -240,19 +224,17 @@ async def test_rename_conversation(client):
 
 
 @pytest.mark.asyncio
-async def test_rename_blank_title_422(client):
-    p1, p2, p3 = _patched()
-    with p1, p2, p3:
+async def test_rename_blank_title_422(client, app):
+    with _wired(app):
         resp = await client.patch(f"/conversations/{CONV_ID}", json={"title": "   "})
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_delete_conversation_204(client):
+async def test_delete_conversation_204(client, app):
     mock_convs = AsyncMock()
     mock_convs.delete = AsyncMock(return_value=True)
-    p1, p2, p3 = _patched(mock_convs)
-    with p1, p2, p3:
+    with _wired(app, mock_convs):
         resp = await client.delete(f"/conversations/{CONV_ID}")
     assert resp.status_code == 204
 
@@ -261,13 +243,12 @@ async def test_delete_conversation_204(client):
 
 
 @pytest.mark.asyncio
-async def test_recents_list(client):
+async def test_recents_list(client, app):
     mock_convs = AsyncMock()
     mock_convs.list_recent_for_user = AsyncMock(
         return_value=[_make_conversation(title="What is virtue?", message_count=4)]
     )
-    p1, p2, p3 = _patched(mock_convs)
-    with p1, p2, p3:
+    with _wired(app, mock_convs):
         resp = await client.get("/conversations?limit=8")
 
     assert resp.status_code == 200
@@ -280,21 +261,19 @@ async def test_recents_list(client):
 
 
 @pytest.mark.asyncio
-async def test_recents_limit_over_50_rejected(client):
-    p1, p2, p3 = _patched()
-    with p1, p2, p3:
+async def test_recents_limit_over_50_rejected(client, app):
+    with _wired(app):
         resp = await client.get("/conversations?limit=100")
     assert resp.status_code == 422
 
 
 @pytest.mark.asyncio
-async def test_expert_conversations_list(client):
+async def test_expert_conversations_list(client, app):
     mock_experts = AsyncMock()
     mock_experts.get_for_user = AsyncMock(return_value=_make_expert())
     mock_convs = AsyncMock()
     mock_convs.list_for_expert = AsyncMock(return_value=[_make_conversation(message_count=2)])
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3:
+    with _wired(app, mock_convs, mock_experts):
         resp = await client.get("/experts/stoicism/conversations")
 
     assert resp.status_code == 200
@@ -333,7 +312,7 @@ def _stream_mocks(conversation, expert=None, history=None):
 
 
 @pytest.mark.asyncio
-async def test_send_message_streams_and_persists(client):
+async def test_send_message_streams_and_persists(client, app):
     citations = [{"n": 1, "label": "Meditations, Book 2", "source_id": 7}]
     events = [
         {"type": "status", "message": "Searching…"},
@@ -344,8 +323,10 @@ async def test_send_message_streams_and_persists(client):
     ]
     mock_convs, mock_experts = _stream_mocks(_make_conversation())
 
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3, patch("peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)):
+    with (
+        _wired(app, mock_convs, mock_experts),
+        patch("peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)),
+    ):
         resp = await client.post(
             f"/conversations/{CONV_ID}/messages", json={"question": "What is virtue?"}
         )
@@ -367,23 +348,21 @@ async def test_send_message_streams_and_persists(client):
 
 
 @pytest.mark.asyncio
-async def test_send_message_busy_claim_409(client):
+async def test_send_message_busy_claim_409(client, app):
     mock_convs, mock_experts = _stream_mocks(_make_conversation())
     mock_convs.claim_stream = AsyncMock(return_value=False)
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3:
+    with _wired(app, mock_convs, mock_experts):
         resp = await client.post(f"/conversations/{CONV_ID}/messages", json={"question": "hi"})
     assert resp.status_code == 409
     assert "already streaming" in resp.json()["detail"]
 
 
 @pytest.mark.asyncio
-async def test_send_message_after_share_revoked_403(client):
+async def test_send_message_after_share_revoked_403(client, app):
     """A viewer's chat outlives the link it came through, but cannot continue."""
     mock_convs, mock_experts = _stream_mocks(_make_conversation())
     mock_experts.is_readable_by = AsyncMock(return_value=False)
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3:
+    with _wired(app, mock_convs, mock_experts):
         resp = await client.post(f"/conversations/{CONV_ID}/messages", json={"question": "hi"})
     assert resp.status_code == 403
     assert "no longer shared" in resp.json()["detail"]
@@ -392,28 +371,29 @@ async def test_send_message_after_share_revoked_403(client):
 
 
 @pytest.mark.asyncio
-async def test_send_message_expert_not_ready_409(client, readiness):
+async def test_send_message_expert_not_ready_409(client, readiness, app):
     readiness["value"] = Readiness.PENDING
     mock_convs, mock_experts = _stream_mocks(
         _make_conversation(), expert=_make_expert(ExpertStatus.BUILDING)
     )
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3:
+    with _wired(app, mock_convs, mock_experts):
         resp = await client.post(f"/conversations/{CONV_ID}/messages", json={"question": "hi"})
     assert resp.status_code == 409
     mock_convs.claim_stream.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_send_message_error_persists_partial_interrupted(client):
+async def test_send_message_error_persists_partial_interrupted(client, app):
     events = [
         {"type": "token", "text": "Virtue is"},
         RuntimeError("anthropic exploded"),
     ]
     mock_convs, mock_experts = _stream_mocks(_make_conversation())
 
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3, patch("peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)):
+    with (
+        _wired(app, mock_convs, mock_experts),
+        patch("peritus.chat.streaming.stream_expert_answer", new=_fake_stream(events)),
+    ):
         resp = await client.post(
             f"/conversations/{CONV_ID}/messages", json={"question": "What is virtue?"}
         )
@@ -426,7 +406,7 @@ async def test_send_message_error_persists_partial_interrupted(client):
 
 
 @pytest.mark.asyncio
-async def test_send_message_retry_reuses_orphaned_question(client):
+async def test_send_message_retry_reuses_orphaned_question(client, app):
     # Last stored message is the same user question (its stream died with zero
     # tokens): no duplicate insert, history excludes it.
     history = [
@@ -446,8 +426,10 @@ async def test_send_message_retry_reuses_orphaned_question(client):
         for ev in events:
             yield ev
 
-    p1, p2, p3 = _patched(mock_convs, mock_experts)
-    with p1, p2, p3, patch("peritus.chat.streaming.stream_expert_answer", new=gen):
+    with (
+        _wired(app, mock_convs, mock_experts),
+        patch("peritus.chat.streaming.stream_expert_answer", new=gen),
+    ):
         resp = await client.post(
             f"/conversations/{CONV_ID}/messages", json={"question": "What is virtue?"}
         )
@@ -458,9 +440,8 @@ async def test_send_message_retry_reuses_orphaned_question(client):
 
 
 @pytest.mark.asyncio
-async def test_send_message_question_too_long_422(client):
-    p1, p2, p3 = _patched()
-    with p1, p2, p3:
+async def test_send_message_question_too_long_422(client, app):
+    with _wired(app):
         resp = await client.post(
             f"/conversations/{CONV_ID}/messages", json={"question": "x" * 4001}
         )

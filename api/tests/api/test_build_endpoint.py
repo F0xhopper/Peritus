@@ -3,14 +3,17 @@
 DB and queue are mocked so no infrastructure is required.
 """
 
+import contextlib
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from peritus.api import deps
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
 from peritus.jobs.domain import BuildEventRow, BuildJob, JobStatus
+from tests.conftest import lazy_dep
 
 
 def _make_expert(tier: ExpertTier = ExpertTier.STANDARD, name: str = "stoicism") -> Expert:
@@ -63,17 +66,10 @@ def _done_event() -> BuildEventRow:
 
 
 @pytest.fixture
-def app():
-    from peritus.api.app import create_app
-    from peritus.api.auth import AuthUser, require_user
-
-    app = create_app()
+def app(api_app):
     # Auth is verified elsewhere (test_auth.py); these contract tests run as a
     # fixed admin user so they don't depend on tokens or Supabase env.
-    app.dependency_overrides[require_user] = lambda: AuthUser(
-        id="00000000-0000-0000-0000-000000000000", email="admin@test", is_admin=True
-    )
-    return app
+    return api_app(user="00000000-0000-0000-0000-000000000000", is_admin=True, email="admin@test")
 
 
 @pytest.fixture
@@ -87,7 +83,7 @@ async def client(app):
 
 @pytest.mark.asyncio
 async def test_invalid_tier_rejected(client):
-    with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
+    with contextlib.nullcontext():
         resp = await client.post("/experts/build", json={"topic": "stoicism", "tier": "ultra"})
     assert resp.status_code == 422
 
@@ -106,14 +102,13 @@ def test_default_tier_is_unset_so_the_server_resolves_it():
 
 
 @pytest.mark.asyncio
-async def test_build_enqueues_and_streams(client):
+async def test_build_enqueues_and_streams(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
-        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
+        lazy_dep(app, deps.entitlements) as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
@@ -142,15 +137,14 @@ async def test_build_enqueues_and_streams(client):
 
 
 @pytest.mark.asyncio
-async def test_build_denied_without_credits(client):
+async def test_build_denied_without_credits(app, client):
     """A denial is a structured 402 the client can render, not prose."""
     from peritus.billing.domain import FREE, InsufficientCredits
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
-        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
+        lazy_dep(app, deps.entitlements) as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
@@ -181,13 +175,12 @@ async def test_build_denied_without_credits(client):
 
 
 @pytest.mark.asyncio
-async def test_build_events_reconnect(client):
+async def test_build_events_reconnect(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=expert)
@@ -208,13 +201,12 @@ async def test_build_events_reconnect(client):
 
 
 @pytest.mark.asyncio
-async def test_delete_cancels_then_deletes(client):
+async def test_delete_cancels_then_deletes(app, client):
     expert = _make_expert(name="stoicism")
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
     ):
         mock_repo = AsyncMock()
         # Delete is a mutation, so it resolves the expert via get_owned_for_user
@@ -239,12 +231,11 @@ async def test_delete_cancels_then_deletes(client):
 
 
 @pytest.mark.asyncio
-async def test_tier_in_get_response(client):
+async def test_tier_in_get_response(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_for_user = AsyncMock(return_value=expert)
@@ -260,16 +251,15 @@ async def test_tier_in_get_response(client):
 
 
 @pytest.mark.asyncio
-async def test_topic_only_build_resolves_tier_from_plan(client):
+async def test_topic_only_build_resolves_tier_from_plan(app, client):
     """`{"topic": ...}` with no tier asks the entitlement service which tier
     this account can actually build, instead of 402ing on a fixed default."""
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
-        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
+        lazy_dep(app, deps.entitlements) as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
@@ -297,14 +287,13 @@ async def test_topic_only_build_resolves_tier_from_plan(client):
 
 
 @pytest.mark.asyncio
-async def test_explicit_tier_skips_resolution(client):
+async def test_explicit_tier_skips_resolution(app, client):
     expert = _make_expert(ExpertTier.PRO, name="stoicism")
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
-        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
+        lazy_dep(app, deps.entitlements) as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)
@@ -332,7 +321,7 @@ async def test_explicit_tier_skips_resolution(client):
 
 
 @pytest.mark.asyncio
-async def test_slug_collision_autosuffixes(client):
+async def test_slug_collision_autosuffixes(app, client):
     """Another user already owns 'stoicism': the build lands on 'stoicism-2'
     rather than revealing (or 404ing on) the taken slug."""
     theirs = _make_expert(name="stoicism")
@@ -341,10 +330,9 @@ async def test_slug_collision_autosuffixes(client):
     mine.owner_id = "00000000-0000-0000-0000-000000000000"
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
-        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
+        lazy_dep(app, deps.entitlements) as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(side_effect=[theirs, None])
@@ -371,7 +359,7 @@ async def test_slug_collision_autosuffixes(client):
 
 @pytest.mark.asyncio
 async def test_unknown_source_type_is_rejected(client):
-    with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
+    with contextlib.nullcontext():
         resp = await client.post(
             "/experts/build", json={"topic": "stoicism", "sources": ["wikipedia", "tiktok"]}
         )
@@ -382,7 +370,7 @@ async def test_unknown_source_type_is_rejected(client):
 
 @pytest.mark.asyncio
 async def test_empty_source_list_is_rejected(client):
-    with patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()):
+    with contextlib.nullcontext():
         resp = await client.post("/experts/build", json={"topic": "stoicism", "sources": []})
     assert resp.status_code == 400
 
@@ -391,15 +379,14 @@ async def test_empty_source_list_is_rejected(client):
 
 
 @pytest.mark.asyncio
-async def test_rebuild_at_new_tier_updates_expert(client):
+async def test_rebuild_at_new_tier_updates_expert(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
     expert.owner_id = "00000000-0000-0000-0000-000000000000"
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
-        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
+        lazy_dep(app, deps.entitlements) as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=expert)
@@ -423,14 +410,13 @@ async def test_rebuild_at_new_tier_updates_expert(client):
 
 
 @pytest.mark.asyncio
-async def test_build_appends_created_event(client):
+async def test_build_appends_created_event(app, client):
     expert = _make_expert(ExpertTier.LITE, name="stoicism")
 
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository") as MockRepo,
-        patch("peritus.api.routes.experts.JobRepository") as MockJobs,
-        patch("peritus.api.routes.experts.EntitlementService") as MockEntitlements,
+        lazy_dep(app, deps.expert_repo) as MockRepo,
+        lazy_dep(app, deps.job_repo) as MockJobs,
+        lazy_dep(app, deps.entitlements) as MockEntitlements,
     ):
         mock_repo = AsyncMock()
         mock_repo.get_by_name = AsyncMock(return_value=None)

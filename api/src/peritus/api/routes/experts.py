@@ -25,10 +25,20 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
-from peritus.api.auth import AuthUser, require_user
+from peritus.api.auth import AuthUser
+from peritus.api.deps import (
+    CurrentUser,
+    Entitlements,
+    ExpertRepo,
+    Experts,
+    Jobs,
+    OwnedExpert,
+    Pictures,
+    ReadableExpert,
+)
 from peritus.api.ratelimit import SlidingWindowLimiter
 from peritus.api.schemas.experts import (
     BuildRequest,
@@ -53,7 +63,6 @@ from peritus.billing.domain import (
     get_plan,
     spend_cap_usd,
 )
-from peritus.billing.service import EntitlementService
 from peritus.billing.settings import settings as billing_settings
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
@@ -67,10 +76,6 @@ from peritus.experts.domain import (
     ExpertTier,
     ExpertVisibility,
 )
-from peritus.experts.picture_repository import ExpertPictureRepository
-from peritus.experts.repository import ExpertRepository
-from peritus.experts.service import ExpertService
-from peritus.infrastructure.database import get_pool
 from peritus.jobs.domain import TERMINAL_EVENT_TYPES, BuildJob, JobType
 from peritus.jobs.repository import JobRepository
 
@@ -81,11 +86,6 @@ router = APIRouter(tags=["experts"])
 
 def _slugify(topic: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", topic.lower()).strip("-")[:80]
-
-
-def _entitlements() -> EntitlementService:
-    """Resolved per request so tests can patch the class in this module."""
-    return EntitlementService(get_pool())
 
 
 def _entitlement_http_error(exc: EntitlementError) -> HTTPException:
@@ -231,6 +231,7 @@ def _to_catalog_entry(e) -> CatalogEntry:
 
 @router.get("/catalog", response_model=list[CatalogEntry])
 async def list_catalog(
+    repo: ExpertRepo,
     category: str | None = Query(None, max_length=80),
     tag: str | None = Query(None, max_length=80),
     featured: bool = Query(False),
@@ -238,7 +239,6 @@ async def list_catalog(
     offset: int = Query(0, ge=0),
 ):
     """The curated public shelf. Readable without a session."""
-    repo = ExpertRepository(get_pool())
     experts = await repo.list_catalog(
         category=category, tag=tag, featured_only=featured, limit=limit, offset=offset
     )
@@ -246,16 +246,14 @@ async def list_catalog(
 
 
 @router.get("/catalog/categories", response_model=list[CatalogCategory])
-async def list_catalog_categories():
-    repo = ExpertRepository(get_pool())
+async def list_catalog_categories(repo: ExpertRepo):
     return [CatalogCategory(name=n, count=c) for n, c in await repo.list_catalog_categories()]
 
 
 @router.get("/catalog/{slug}", response_model=CatalogEntry)
-async def get_catalog_expert(slug: str):
+async def get_catalog_expert(slug: str, repo: ExpertRepo):
     """One catalog card. Public experts only — sharing a private expert is a
     token link (``GET /share/{token}``), never its slug."""
-    repo = ExpertRepository(get_pool())
     expert = await repo.get_public(slug)
     if not expert or not expert.is_chattable:
         raise HTTPException(status_code=404, detail="Expert not found")
@@ -276,13 +274,13 @@ def _plan_out(plan) -> PlanOut:
 
 
 @router.get("/billing/me", response_model=CreditStateOut)
-async def get_credit_state(user: AuthUser = Depends(require_user)):
+async def get_credit_state(user: CurrentUser, entitlements: Entitlements):
     """The caller's plan, credit balance, and the price of each tier.
 
     Provisions the account on first call, which is where the free plan's signup
     grant lands. Chat is never gated by anything here.
     """
-    state = await _entitlements().credit_state(user.id, user.email)
+    state = await entitlements.credit_state(user.id, user.email)
     return CreditStateOut(
         plan=_plan_out(state.plan),
         balance=state.balance,
@@ -304,9 +302,11 @@ async def get_credit_state(user: AuthUser = Depends(require_user)):
 
 @router.get("/billing/ledger", response_model=list[LedgerEntryOut])
 async def get_credit_ledger(
-    limit: int = Query(50, ge=1, le=200), user: AuthUser = Depends(require_user)
+    user: CurrentUser,
+    entitlements: Entitlements,
+    limit: int = Query(50, ge=1, le=200),
 ):
-    entries = await _entitlements().ledger(user.id, limit)
+    entries = await entitlements.ledger(user.id, limit)
     return [
         LedgerEntryOut(
             id=e.id,
@@ -325,7 +325,7 @@ async def get_credit_ledger(
 
 @router.post("/admin/credits/grant")
 async def grant_credits(
-    req: GrantCreditsRequest, user: AuthUser = Depends(require_user)
+    req: GrantCreditsRequest, user: CurrentUser, service: Entitlements
 ) -> dict[str, Any]:
     """Issue credits by hand. Admin only.
 
@@ -335,7 +335,6 @@ async def grant_credits(
     """
     if not user.is_admin:
         raise HTTPException(status_code=404, detail="Not found")
-    service = _entitlements()
     owner_id = await service.resolve_owner(req.owner)
     if not owner_id:
         raise HTTPException(status_code=404, detail=f"No account matching {req.owner!r}")
@@ -357,20 +356,25 @@ async def grant_credits(
 
 
 @router.get("/experts", response_model=list[ExpertSummary])
-async def list_experts(user: AuthUser = Depends(require_user)):
+async def list_experts(user: CurrentUser, repo: ExpertRepo):
     """The caller's workspace — their own experts only.
 
     Deliberately does not fold in the public catalog: "my experts" must not grow
     every time the founder publishes something. The catalog is ``GET /catalog``.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
     experts = await repo.list_for_user(user.id, include_unowned=user.is_admin)
     return [_expert_to_summary(e, user) for e in experts]
 
 
 @router.post("/experts/build")
-async def build_expert(req: BuildRequest, request: Request, user: AuthUser = Depends(require_user)):
+async def build_expert(
+    req: BuildRequest,
+    request: Request,
+    user: CurrentUser,
+    repo: ExpertRepo,
+    jobs: Jobs,
+    entitlements: Entitlements,
+):
     """Enqueue a durable build job and stream its progress.
 
     The build runs in a worker (separate process or in-process), not in this
@@ -383,11 +387,6 @@ async def build_expert(req: BuildRequest, request: Request, user: AuthUser = Dep
     spent. Attaching to an already-running build is free: its hold was taken
     when it was enqueued.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    jobs = JobRepository(pool)
-    entitlements = _entitlements()
-
     if req.sources is not None:
         unknown = [s for s in req.sources if s not in FETCHER_NAMES]
         if unknown or not req.sources:
@@ -500,20 +499,15 @@ async def build_expert(req: BuildRequest, request: Request, user: AuthUser = Dep
 
 
 @router.get("/experts/{slug}", response_model=ExpertWithCatalog)
-async def get_expert(slug: str, user: AuthUser = Depends(require_user)):
+async def get_expert(expert: ReadableExpert, user: CurrentUser):
     """Expert detail. Readable if the caller owns it, it is public, or it is
     shared with them through a live link. ``access`` says which."""
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
     return _expert_with_catalog(expert, user)
 
 
 @router.patch("/experts/{slug}/catalog", response_model=ExpertWithCatalog)
 async def update_expert_catalog(
-    slug: str, req: CatalogUpdateRequest, user: AuthUser = Depends(require_user)
+    expert: OwnedExpert, req: CatalogUpdateRequest, user: CurrentUser, repo: ExpertRepo
 ):
     """Curate an expert: publish/unpublish, blurb, category, tags, featured, rank.
 
@@ -526,11 +520,6 @@ async def update_expert_catalog(
     instead (``PUT /experts/{slug}/share``). Taking one's own expert *off* the
     shelf stays open to its owner — nobody should need permission to unpublish.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
     curating_the_shelf = (
         (req.visibility is not None and req.visibility is not ExpertVisibility.PRIVATE)
         or req.is_featured is not None
@@ -559,7 +548,7 @@ async def update_expert_catalog(
         raise HTTPException(status_code=404, detail="Expert not found")
     logger.info(
         "Curated expert %r: visibility=%s featured=%s rank=%s",
-        slug,
+        expert.name,
         updated.catalog.visibility.value,
         updated.catalog.is_featured,
         updated.catalog.catalog_rank,
@@ -569,7 +558,7 @@ async def update_expert_catalog(
 
 @router.put("/experts/{slug}/avatar", response_model=ExpertWithCatalog)
 async def set_expert_avatar(
-    slug: str, req: SetAvatarRequest, user: AuthUser = Depends(require_user)
+    expert: OwnedExpert, req: SetAvatarRequest, user: CurrentUser, repo: ExpertRepo
 ):
     """Pin this expert's picture avatar, or reset it to the generated default.
 
@@ -579,12 +568,6 @@ async def set_expert_avatar(
     PUT rather than PATCH because the body replaces the whole recipe — there is
     no merge, and `{"avatar": null}` is the reset.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-
     try:
         avatar = normalise_avatar(req.avatar.model_dump() if req.avatar else None)
     except InvalidAvatar as exc:
@@ -594,7 +577,7 @@ async def set_expert_avatar(
     if not updated:
         raise HTTPException(status_code=404, detail="Expert not found")
     logger.info(
-        "Set avatar for expert %r: style=%s", slug, avatar["style"] if avatar else "derived"
+        "Set avatar for expert %r: style=%s", expert.name, avatar["style"] if avatar else "derived"
     )
     return _expert_with_catalog(updated, user)
 
@@ -615,7 +598,7 @@ _picture_refresh_limiter = SlidingWindowLimiter(limit=6, window=60.0)
 
 
 @router.get("/experts/{slug}/picture")
-async def get_expert_picture(slug: str, request: Request, user: AuthUser = Depends(require_user)):
+async def get_expert_picture(expert: ReadableExpert, request: Request, pictures: Pictures):
     """The picture's bytes.
 
     Cached hard and forever under a versioned URL: the ``?v=`` the client
@@ -626,13 +609,7 @@ async def get_expert_picture(slug: str, request: Request, user: AuthUser = Depen
     ``private`` rather than ``public`` because a shared proxy must not hold an
     image whose visibility depends on who asked for it.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-
-    blob = await ExpertPictureRepository(pool).get_blob(expert.id)
+    blob = await pictures.get_blob(expert.id)
     if blob is None:
         raise HTTPException(status_code=404, detail="This expert has no picture")
     image, content_type, sha256 = blob
@@ -652,7 +629,7 @@ async def get_expert_picture(slug: str, request: Request, user: AuthUser = Depen
 
 
 @router.post("/experts/{slug}/picture/refresh", response_model=ExpertWithCatalog)
-async def refresh_expert_picture(slug: str, user: AuthUser = Depends(require_user)):
+async def refresh_expert_picture(expert: OwnedExpert, user: CurrentUser, experts: Experts):
     """Search Wikimedia again and store whatever it finds. Owner only.
 
     Synchronous: it is five or six HTTP requests and no model call, so it
@@ -663,12 +640,6 @@ async def refresh_expert_picture(slug: str, user: AuthUser = Depends(require_use
     """
     from peritus.experts.picture import PictureSkipped
 
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-
     ok, retry_after = _picture_refresh_limiter.check_with_retry_after(user.id)
     if not ok:
         raise HTTPException(
@@ -678,30 +649,25 @@ async def refresh_expert_picture(slug: str, user: AuthUser = Depends(require_use
         )
 
     try:
-        updated = await ExpertService(pool).refresh_picture(expert.id)
+        updated = await experts.refresh_picture(expert.id)
     except PictureSkipped as skip:
         raise HTTPException(
             status_code=422, detail=_PICTURE_SKIP_MESSAGES.get(skip.reason, skip.reason)
         ) from None
-    logger.info("Refreshed picture for expert %r", slug)
+    logger.info("Refreshed picture for expert %r", expert.name)
     return _expert_with_catalog(updated, user)
 
 
 @router.delete("/experts/{slug}/picture", status_code=204)
-async def delete_expert_picture(slug: str, user: AuthUser = Depends(require_user)):
+async def delete_expert_picture(expert: OwnedExpert, pictures: Pictures):
     """Remove the found picture; the expert falls back to its recipe or sigil.
 
     Distinct from picking a sigil style in the avatar picker, which writes a
     recipe that Reset would then undo — bringing the picture straight back. This
     is how an owner says "not this, and not any".
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    await ExpertPictureRepository(pool).delete(expert.id)
-    logger.info("Removed picture for expert %r", slug)
+    await pictures.delete(expert.id)
+    logger.info("Removed picture for expert %r", expert.name)
 
 
 # What each skip reason means to the person who pressed the button.
@@ -719,34 +685,23 @@ _PICTURE_SKIP_MESSAGES: dict[str, str] = {
 
 
 @router.delete("/experts/{slug}", status_code=204)
-async def delete_expert(slug: str, user: AuthUser = Depends(require_user)):
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
+async def delete_expert(expert: OwnedExpert, repo: ExpertRepo, jobs: Jobs):
     # Cancel any in-flight build first so the worker aborts cooperatively instead of
     # racing the cascade delete of the expert's rows.
-    await JobRepository(pool).request_cancel(expert.id)
+    await jobs.request_cancel(expert.id)
     await repo.delete(expert.id)
 
 
 @router.get("/experts/{slug}/build/events")
 async def build_events(
-    slug: str,
+    expert: ReadableExpert,
     request: Request,
+    jobs: Jobs,
     after: int = Query(0, ge=0),
-    user: AuthUser = Depends(require_user),
 ):
     """Reconnect to (or re-watch) a build's progress from a cursor. Multiple clients
     can tail the same build; pass the last `seq` you saw as `after` to resume.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    jobs = JobRepository(pool)
     job = await jobs.get_latest_job(expert.id)
     if not job:
         raise HTTPException(status_code=404, detail="No build job for this expert")
@@ -754,19 +709,15 @@ async def build_events(
 
 
 @router.post("/experts/{slug}/build/cancel", status_code=202)
-async def cancel_build(slug: str, user: AuthUser = Depends(require_user)) -> dict[str, Any]:
+async def cancel_build(
+    expert: OwnedExpert, repo: ExpertRepo, jobs: Jobs, entitlements: Entitlements
+) -> dict[str, Any]:
     """Cancel the active (queued or running) build for an expert.
 
     A running worker notices on its next heartbeat and aborts cooperatively; a
     queued job simply never starts. The expert is marked failed so the UI doesn't
     show a build that will never finish.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    jobs = JobRepository(pool)
     job = await jobs.get_active_job(expert.id, job_type=JobType.BUILD)
     if job is None:
         raise HTTPException(status_code=409, detail="No active build for this expert")
@@ -787,22 +738,17 @@ async def cancel_build(slug: str, user: AuthUser = Depends(require_user)) -> dic
     # observe it later is harmless.
     refunded = 0
     try:
-        refunded = await _entitlements().refund_job(job.id, "Build cancelled")
+        refunded = await entitlements.refund_job(job.id, "Build cancelled")
     except Exception as exc:  # never fail a cancel because the refund failed
         logger.warning("Could not refund job %d on cancel: %s", job.id, exc)
-    logger.info("Cancelled build job %d for %r", job.id, slug)
+    logger.info("Cancelled build job %d for %r", job.id, expert.name)
     return {"job_id": job.id, "status": "cancelled", "credits_refunded": refunded}
 
 
 @router.get("/experts/{slug}/build/status")
-async def build_status(slug: str, user: AuthUser = Depends(require_user)) -> dict[str, Any]:
+async def build_status(expert: ReadableExpert, jobs: Jobs) -> dict[str, Any]:
     """Point-in-time job status for polling clients."""
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    job = await JobRepository(pool).get_latest_job(expert.id)
+    job = await jobs.get_latest_job(expert.id)
     if not job:
         raise HTTPException(status_code=404, detail="No build job for this expert")
     return {
@@ -818,20 +764,17 @@ async def build_status(slug: str, user: AuthUser = Depends(require_user)) -> dic
 
 
 @router.get("/experts/{slug}/build/usage")
-async def build_usage(slug: str, user: AuthUser = Depends(require_user)) -> dict[str, Any]:
+async def build_usage(
+    expert: OwnedExpert, jobs: Jobs, entitlements: Entitlements
+) -> dict[str, Any]:
     """What the latest build of this expert actually cost, broken down by stage.
 
     Owner-scoped: spend is not part of a catalog expert's public card.
     """
-    pool = get_pool()
-    repo = ExpertRepository(pool)
-    expert = await repo.get_owned_for_user(slug, user.id, include_unowned=user.is_admin)
-    if not expert:
-        raise HTTPException(status_code=404, detail="Expert not found")
-    job = await JobRepository(pool).get_latest_job(expert.id)
+    job = await jobs.get_latest_job(expert.id)
     if not job:
         raise HTTPException(status_code=404, detail="No build job for this expert")
-    return await _entitlements().usage_for_job(job.id)
+    return await entitlements.usage_for_job(job.id)
 
 
 async def _tail_events(

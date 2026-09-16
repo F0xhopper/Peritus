@@ -8,12 +8,14 @@ rule is the expert's own — so a private expert's picture is a 404 to a strange
 while a published one's is not.
 """
 
+import contextlib
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from peritus.api import deps
 from peritus.experts.domain import (
     Expert,
     ExpertPicture,
@@ -21,6 +23,7 @@ from peritus.experts.domain import (
     ExpertTier,
     ExpertVisibility,
 )
+from tests.conftest import override_dep
 
 OWNER_ID = "11111111-1111-1111-1111-111111111111"
 STRANGER_ID = "22222222-2222-2222-2222-222222222222"
@@ -73,15 +76,8 @@ def _expert(
 
 
 @pytest.fixture
-def app():
-    from peritus.api.app import create_app
-    from peritus.api.auth import AuthUser, require_user
-
-    app = create_app()
-    app.dependency_overrides[require_user] = lambda: AuthUser(
-        id=OWNER_ID, email="owner@test", is_admin=False
-    )
-    return app
+def app(api_app):
+    return api_app(user=OWNER_ID, email="owner@test")
 
 
 @pytest.fixture
@@ -101,22 +97,23 @@ def _repos(expert: Expert | None, blob: tuple[bytes, str, str] | None = None):
     return experts, pictures
 
 
-def _patched(experts, pictures):
-    return (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=experts),
-        patch("peritus.api.routes.experts.ExpertPictureRepository", return_value=pictures),
-    )
+@contextlib.contextmanager
+def _wired(app, experts, pictures):
+    """Substitute the expert and picture repositories for this app."""
+    with (
+        override_dep(app, deps.expert_repo, experts),
+        override_dep(app, deps.picture_repo, pictures),
+    ):
+        yield
 
 
 # ── the picture rides on the expert ─────────────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_the_picture_and_its_provenance_ride_on_expert_detail(client):
+async def test_the_picture_and_its_provenance_ride_on_expert_detail(app, client):
     experts, pictures = _repos(_expert(_picture()))
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get("/experts/stoic-philosophy")
 
     assert resp.status_code == 200
@@ -131,21 +128,19 @@ async def test_the_picture_and_its_provenance_ride_on_expert_detail(client):
 
 
 @pytest.mark.asyncio
-async def test_a_cc_by_picture_requires_attribution(client):
+async def test_a_cc_by_picture_requires_attribution(app, client):
     experts, pictures = _repos(_expert(_picture("CC BY-SA 4.0")))
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get("/experts/stoic-philosophy")
 
     assert resp.json()["picture"]["attribution_required"] is True
 
 
 @pytest.mark.asyncio
-async def test_picture_is_null_not_absent_when_there_is_none(client):
+async def test_picture_is_null_not_absent_when_there_is_none(app, client):
     """A client must never have to distinguish "no picture" from "old server"."""
     experts, pictures = _repos(_expert())
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get("/experts/stoic-philosophy")
 
     body = resp.json()
@@ -154,25 +149,23 @@ async def test_picture_is_null_not_absent_when_there_is_none(client):
 
 
 @pytest.mark.asyncio
-async def test_picture_rides_on_the_workspace_list_too(client):
+async def test_picture_rides_on_the_workspace_list_too(app, client):
     experts, pictures = _repos(_expert(_picture()))
     experts.list_for_user = AsyncMock(return_value=[_expert(_picture())])
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get("/experts")
 
     assert resp.json()[0]["picture"]["version"] == SHA[:12]
 
 
 @pytest.mark.asyncio
-async def test_picture_rides_on_the_public_catalog_card(client):
+async def test_picture_rides_on_the_public_catalog_card(app, client):
     """A catalog card is anonymous-readable, so only the safe fields are on it."""
     experts, pictures = _repos(None)
     experts.get_public = AsyncMock(
         return_value=_expert(_picture(), visibility=ExpertVisibility.PUBLIC)
     )
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get("/catalog/stoic-philosophy")
 
     picture = resp.json()["picture"]
@@ -184,10 +177,9 @@ async def test_picture_rides_on_the_public_catalog_card(client):
 
 
 @pytest.mark.asyncio
-async def test_serves_the_bytes_with_an_etag_and_an_immutable_cache(client):
+async def test_serves_the_bytes_with_an_etag_and_an_immutable_cache(app, client):
     experts, pictures = _repos(_expert(_picture()), blob=(JPEG, "image/jpeg", SHA))
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get("/experts/stoic-philosophy/picture?v=" + SHA[:12])
 
     assert resp.status_code == 200
@@ -199,10 +191,9 @@ async def test_serves_the_bytes_with_an_etag_and_an_immutable_cache(client):
 
 
 @pytest.mark.asyncio
-async def test_if_none_match_revalidates_to_304_with_no_body(client):
+async def test_if_none_match_revalidates_to_304_with_no_body(app, client):
     experts, pictures = _repos(_expert(_picture()), blob=(JPEG, "image/jpeg", SHA))
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get(
             "/experts/stoic-philosophy/picture",
             headers={"If-None-Match": f'"{SHA}"'},
@@ -214,10 +205,9 @@ async def test_if_none_match_revalidates_to_304_with_no_body(client):
 
 
 @pytest.mark.asyncio
-async def test_an_expert_with_no_picture_is_a_404_not_an_empty_image(client):
+async def test_an_expert_with_no_picture_is_a_404_not_an_empty_image(app, client):
     experts, pictures = _repos(_expert(), blob=None)
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.get("/experts/stoic-philosophy/picture")
 
     assert resp.status_code == 404
@@ -232,9 +222,8 @@ async def test_a_private_experts_picture_is_a_404_to_anyone_else(app):
         id=STRANGER_ID, email="stranger@test", is_admin=False
     )
     experts, pictures = _repos(None, blob=(JPEG, "image/jpeg", SHA))
-    a, b, c = _patched(experts, pictures)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
-        with a, b, c:
+    with _wired(app, experts, pictures):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
             resp = await http.get("/experts/stoic-philosophy/picture")
 
     assert resp.status_code == 404
@@ -250,9 +239,8 @@ async def test_a_shared_experts_picture_is_readable_by_a_signed_in_stranger(app)
     )
     shared = _expert(_picture(), visibility=ExpertVisibility.PUBLIC)
     experts, pictures = _repos(shared, blob=(JPEG, "image/jpeg", SHA))
-    a, b, c = _patched(experts, pictures)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
-        with a, b, c:
+    with _wired(app, experts, pictures):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
             resp = await http.get("/experts/stoic-philosophy/picture")
 
     assert resp.status_code == 200
@@ -263,10 +251,9 @@ async def test_a_shared_experts_picture_is_readable_by_a_signed_in_stranger(app)
 
 
 @pytest.mark.asyncio
-async def test_delete_is_204_and_removes_the_row(client):
+async def test_delete_is_204_and_removes_the_row(app, client):
     experts, pictures = _repos(_expert(_picture()))
-    a, b, c = _patched(experts, pictures)
-    with a, b, c:
+    with _wired(app, experts, pictures):
         resp = await client.delete("/experts/stoic-philosophy/picture")
 
     assert resp.status_code == 204
@@ -286,9 +273,8 @@ async def test_delete_is_owner_only(app):
     experts.get_for_user = AsyncMock(
         return_value=_expert(_picture(), visibility=ExpertVisibility.PUBLIC)
     )
-    a, b, c = _patched(experts, pictures)
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
-        with a, b, c:
+    with _wired(app, experts, pictures):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as http:
             resp = await http.delete("/experts/stoic-philosophy/picture")
 
     assert resp.status_code == 404
@@ -296,12 +282,11 @@ async def test_delete_is_owner_only(app):
 
 
 @pytest.mark.asyncio
-async def test_refresh_returns_the_updated_expert(client):
+async def test_refresh_returns_the_updated_expert(app, client):
     experts, pictures = _repos(_expert())
     service = AsyncMock()
     service.refresh_picture = AsyncMock(return_value=_expert(_picture()))
-    a, b, c = _patched(experts, pictures)
-    with a, b, c, patch("peritus.api.routes.experts.ExpertService", return_value=service):
+    with _wired(app, experts, pictures), override_dep(app, deps.expert_service, service):
         resp = await client.post("/experts/stoic-philosophy/picture/refresh")
 
     assert resp.status_code == 200
@@ -310,15 +295,14 @@ async def test_refresh_returns_the_updated_expert(client):
 
 
 @pytest.mark.asyncio
-async def test_a_search_that_finds_nothing_is_a_422_that_says_why(client):
+async def test_a_search_that_finds_nothing_is_a_422_that_says_why(app, client):
     """ "No free image of this subject exists" is an answer, not a server error."""
     from peritus.experts.picture import PictureSkipped
 
     experts, pictures = _repos(_expert())
     service = AsyncMock()
     service.refresh_picture = AsyncMock(side_effect=PictureSkipped("no_candidate"))
-    a, b, c = _patched(experts, pictures)
-    with a, b, c, patch("peritus.api.routes.experts.ExpertService", return_value=service):
+    with _wired(app, experts, pictures), override_dep(app, deps.expert_service, service):
         resp = await client.post("/experts/stoic-philosophy/picture/refresh")
 
     assert resp.status_code == 422
@@ -326,21 +310,18 @@ async def test_a_search_that_finds_nothing_is_a_422_that_says_why(client):
 
 
 @pytest.mark.asyncio
-async def test_refresh_is_throttled_because_each_call_fans_out_to_wikimedia(client):
+async def test_refresh_is_throttled_because_each_call_fans_out_to_wikimedia(app, client):
     from peritus.api.ratelimit import SlidingWindowLimiter
     from peritus.api.routes import experts as routes
 
     experts, pictures = _repos(_expert())
     service = AsyncMock()
     service.refresh_picture = AsyncMock(return_value=_expert(_picture()))
-    a, b, c = _patched(experts, pictures)
     limiter = SlidingWindowLimiter(limit=2, window=60.0)
     with (
-        a,
-        b,
-        c,
+        _wired(app, experts, pictures),
         patch.object(routes, "_picture_refresh_limiter", limiter),
-        patch("peritus.api.routes.experts.ExpertService", return_value=service),
+        override_dep(app, deps.expert_service, service),
     ):
         first = await client.post("/experts/stoic-philosophy/picture/refresh")
         second = await client.post("/experts/stoic-philosophy/picture/refresh")

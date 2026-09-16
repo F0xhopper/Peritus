@@ -6,12 +6,14 @@ a bad request, and that the mutation is owner-scoped like every other one.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from peritus.api import deps
 from peritus.experts.domain import Expert, ExpertStatus, ExpertTier
+from tests.conftest import override_dep
 
 OWNER_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -33,15 +35,8 @@ def _expert(avatar: dict | None = None) -> Expert:
 
 
 @pytest.fixture
-def app():
-    from peritus.api.app import create_app
-    from peritus.api.auth import AuthUser, require_user
-
-    app = create_app()
-    app.dependency_overrides[require_user] = lambda: AuthUser(
-        id=OWNER_ID, email="owner@test", is_admin=False
-    )
-    return app
+def app(api_app):
+    return api_app(user=OWNER_ID, email="owner@test")
 
 
 @pytest.fixture
@@ -59,12 +54,11 @@ def _repo(owned: Expert | None, updated: Expert | None = None):
 
 
 @pytest.mark.asyncio
-async def test_sets_an_avatar_and_returns_the_updated_expert(client):
+async def test_sets_an_avatar_and_returns_the_updated_expert(app, client):
     chosen = {"style": "shapes", "seed": "Dr. Aurelia Vance", "hue": None}
     repo = _repo(_expert(), _expert(avatar=chosen))
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         resp = await client.put("/experts/stoic-philosophy/avatar", json={"avatar": chosen})
 
@@ -74,11 +68,10 @@ async def test_sets_an_avatar_and_returns_the_updated_expert(client):
 
 
 @pytest.mark.asyncio
-async def test_null_avatar_resets_to_the_generated_default(client):
+async def test_null_avatar_resets_to_the_generated_default(app, client):
     repo = _repo(_expert(avatar={"style": "glass", "seed": None, "hue": None}), _expert())
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         resp = await client.put("/experts/stoic-philosophy/avatar", json={"avatar": None})
 
@@ -89,11 +82,10 @@ async def test_null_avatar_resets_to_the_generated_default(client):
 
 
 @pytest.mark.asyncio
-async def test_seed_may_be_omitted(client):
+async def test_seed_may_be_omitted(app, client):
     repo = _repo(_expert())
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         resp = await client.put(
             "/experts/stoic-philosophy/avatar", json={"avatar": {"style": "rings"}}
@@ -104,11 +96,10 @@ async def test_seed_may_be_omitted(client):
 
 
 @pytest.mark.asyncio
-async def test_a_face_style_is_a_400_with_the_allowed_list(client):
+async def test_a_face_style_is_a_400_with_the_allowed_list(app, client):
     repo = _repo(_expert())
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         resp = await client.put(
             "/experts/stoic-philosophy/avatar", json={"avatar": {"style": "avataaars"}}
@@ -121,13 +112,12 @@ async def test_a_face_style_is_a_400_with_the_allowed_list(client):
 
 
 @pytest.mark.asyncio
-async def test_a_hue_is_discarded_not_stored(client):
+async def test_a_hue_is_discarded_not_stored(app, client):
     # There are no per-expert colours. An older client that still sends a hue
     # has its style saved and the hue dropped, rather than getting a 422.
     repo = _repo(_expert())
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         resp = await client.put(
             "/experts/stoic-philosophy/avatar",
@@ -139,12 +129,11 @@ async def test_a_hue_is_discarded_not_stored(client):
 
 
 @pytest.mark.asyncio
-async def test_someone_elses_expert_is_a_404_not_a_403(client):
+async def test_someone_elses_expert_is_a_404_not_a_403(app, client):
     """Existence is not disclosed — the same convention as every other mutation."""
     repo = _repo(None)
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         resp = await client.put(
             "/experts/someone-elses/avatar", json={"avatar": {"style": "shapes"}}
@@ -155,7 +144,7 @@ async def test_someone_elses_expert_is_a_404_not_a_403(client):
 
 
 @pytest.mark.asyncio
-async def test_avatar_rides_on_the_expert_list_and_detail(client):
+async def test_avatar_rides_on_the_expert_list_and_detail(app, client):
     """The web client reads the avatar off the responses it already fetches, so
     a missing field here would mean a second request per expert."""
     chosen = {"style": "identicon", "seed": "pinned", "hue": 40}
@@ -163,8 +152,7 @@ async def test_avatar_rides_on_the_expert_list_and_detail(client):
     repo.list_for_user = AsyncMock(return_value=[_expert(avatar=chosen)])
     repo.get_for_user = AsyncMock(return_value=_expert(avatar=chosen))
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         listed = await client.get("/experts")
         detail = await client.get("/experts/stoic-philosophy")
@@ -174,12 +162,11 @@ async def test_avatar_rides_on_the_expert_list_and_detail(client):
 
 
 @pytest.mark.asyncio
-async def test_derived_avatar_serialises_as_null(client):
+async def test_derived_avatar_serialises_as_null(app, client):
     repo = AsyncMock()
     repo.list_for_user = AsyncMock(return_value=[_expert()])
     with (
-        patch("peritus.api.routes.experts.get_pool", return_value=MagicMock()),
-        patch("peritus.api.routes.experts.ExpertRepository", return_value=repo),
+        override_dep(app, deps.expert_repo, repo),
     ):
         resp = await client.get("/experts")
 
