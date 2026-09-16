@@ -1,4 +1,10 @@
 # ── API ──────────────────────────────────────────────────────────────────────
+#
+# The Python recipes run through `uv run --frozen`, exactly as the `api` CI job
+# does. That means they work without an activated venv, they use the 3.12 that
+# `api/.python-version` pins rather than whatever `python` happens to be, and
+# they install exactly `uv.lock` — so a green `just check` means a green CI run
+# rather than "green against whatever this shell had".
 
 # Run the full local dev stack (API + build worker) via hivemind. This is the
 # one you want: without the worker, builds stall at "Identifying key concepts…".
@@ -7,35 +13,39 @@ dev:
 
 # Run just the API (no worker — builds will queue but not run).
 api:
-    cd api && uvicorn peritus.api.app:app --reload --host 0.0.0.0 --port 8000
+    cd api && uv run --frozen uvicorn peritus.api.app:app --reload --host 0.0.0.0 --port 8000
 
 # Run a standalone build worker (production shape: API and worker as separate processes).
 worker:
-    cd api && python -m peritus.jobs.runner
+    cd api && uv run --frozen python -m peritus.jobs.runner
 
 # Run the API with an in-process build worker (single-process, no hivemind needed).
 dev-solo:
-    cd api && RUN_WORKER_IN_PROCESS=true uvicorn peritus.api.app:app --reload --host 0.0.0.0 --port 8000
+    cd api && RUN_WORKER_IN_PROCESS=true uv run --frozen uvicorn peritus.api.app:app --reload --host 0.0.0.0 --port 8000
 
 test:
-    cd api && python -m pytest
+    cd api && uv run --frozen python -m pytest
 
-# The 54 DB-backed tests (job queue, conversations, credits, uploads, visibility)
+# The DB-backed tests (job queue, conversations, credits, uploads, visibility)
 # skip unless PERITUS_TEST_DATABASE_URL points at a scratch pgvector database.
 # Never point it at a database you care about: the fixture TRUNCATEs.
 test-db url="postgresql://postgres:postgres@localhost:5432/peritus_test":
-    cd api && PERITUS_TEST_DATABASE_URL={{url}} DATABASE_URL={{url}} python migrations/apply.py
-    cd api && PERITUS_TEST_DATABASE_URL={{url}} python -m pytest
+    cd api && PERITUS_TEST_DATABASE_URL={{url}} DATABASE_URL={{url}} DATABASE_SSL=false uv run --frozen python migrations/apply.py
+    cd api && PERITUS_TEST_DATABASE_URL={{url}} uv run --frozen python -m pytest
 
 lint:
-    cd api && ruff check src tests && ruff format --check src tests && mypy src
+    cd api && uv run --frozen ruff check src tests && uv run --frozen ruff format --check src tests && uv run --frozen mypy src
 
 migrate:
-    cd api && python migrations/apply.py
+    cd api && uv run --frozen python migrations/apply.py
+
+# What has run against DATABASE_URL and what is pending. Changes nothing.
+migrate-status:
+    cd api && uv run --frozen python migrations/apply.py --status
 
 # Every setting, its type and its default, as a Markdown table.
 settings:
-    cd api && python scripts/settings_reference.py
+    cd api && uv run --frozen python scripts/settings_reference.py
 
 # ── Web ──────────────────────────────────────────────────────────────────────
 
@@ -69,7 +79,7 @@ lighthouse-web:
 # Write every formatter's output. `just lint` and `lint-web` check the same
 # three; CI checks them too, so this is the fix for a red format gate.
 format:
-    cd api && ruff format src tests
+    cd api && uv run --frozen ruff format src tests
     cd web && npx prettier --write .
     cd cli && cargo fmt
 

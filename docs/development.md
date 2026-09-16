@@ -118,7 +118,7 @@ falling back at the point of use. `just settings` prints the current list.
 
 ## Tests
 
-**Python.** `just test` runs pytest. Around 50 DB-backed tests — job queue claim/heartbeat/reap,
+**Python.** `just test` runs pytest. The DB-backed tests — job queue claim/heartbeat/reap,
 conversation persistence, credit arithmetic, expert visibility, source uploads — **skip silently**
 without `PERITUS_TEST_DATABASE_URL`. To run them:
 

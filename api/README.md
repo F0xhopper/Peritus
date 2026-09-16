@@ -55,7 +55,7 @@ just test-db     # pytest with the DB-backed tests enabled
 just migrate     # apply migrations
 ```
 
-**The DB-backed tests skip silently without `PERITUS_TEST_DATABASE_URL`** — around 50 tests
+**The DB-backed tests skip silently without `PERITUS_TEST_DATABASE_URL`** — the tests
 covering the job queue, conversations, credits, uploads and visibility. CI provides a
 `pgvector/pgvector:pg17` service so they always run there. The fixture `TRUNCATE`s: never point
 that variable at a database you care about.
