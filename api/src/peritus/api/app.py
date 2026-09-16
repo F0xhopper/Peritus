@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import secrets
 from contextlib import asynccontextmanager, suppress
+from importlib.metadata import version
 
 import uvicorn
 from fastapi import FastAPI
@@ -96,7 +97,10 @@ def create_app() -> FastAPI:
     # call in this app using Python's default (unformatted, no file handler) setup.
     setup_logging(settings.LOG_LEVEL, log_file=settings.LOG_FILE or None)
 
-    app = FastAPI(title="Peritus API", version="1.0.0", lifespan=lifespan)
+    # Read from the installed distribution rather than written here: this said
+    # 1.0.0 while pyproject.toml and the git tag both said 2.0.0, and
+    # /openapi.json is what clients generate against.
+    app = FastAPI(title="Peritus API", version=version("peritus"), lifespan=lifespan)
     # Order matters: middleware added last runs first, so the request id is bound
     # before CORS and is therefore available on every log line and error body,
     # including the ones CORS itself produces.

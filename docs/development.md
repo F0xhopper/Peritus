@@ -108,6 +108,14 @@ uvx pre-commit install     # or: pipx install pre-commit && pre-commit install
 large-file checks, and **gitleaks** over the staged files. It uses the repository's own pinned
 Prettier and rustfmt, so a hook and CI can never run different versions.
 
+## Adding a setting
+
+Two places, always: the field on `Settings` in `api/src/peritus/core/config.py` with the comment
+that explains it, and the same key in `api/.env.example` with the same comment.
+`tests/unit/test_env_example.py` fails if you do one without the other, or if the two defaults
+disagree. Enum-valued settings get a `Literal` type so a typo fails at startup rather than silently
+falling back at the point of use. `just settings` prints the current list.
+
 ## Tests
 
 **Python.** `just test` runs pytest. Around 50 DB-backed tests — job queue claim/heartbeat/reap,

@@ -33,6 +33,10 @@ lint:
 migrate:
     cd api && python migrations/apply.py
 
+# Every setting, its type and its default, as a Markdown table.
+settings:
+    cd api && python scripts/settings_reference.py
+
 # ── Web ──────────────────────────────────────────────────────────────────────
 
 web:
