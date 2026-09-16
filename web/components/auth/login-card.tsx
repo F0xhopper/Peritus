@@ -4,13 +4,13 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
-import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { FieldError, Input, Label } from '@/components/ui/input'
 import { Notice } from '@/components/ui/notice'
 import { GoogleMark } from '@/components/auth/google-mark'
 import { cn } from '@/lib/cn'
+import { z } from '@/lib/validation'
 import { ClientApiError, apiVoid, messageFor } from '@/lib/api/client'
 
 /**

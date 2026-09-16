@@ -3,7 +3,6 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useEffect, useRef } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
-import { z } from 'zod'
 
 import { Button } from '@/components/ui/button'
 import { DenialNotice } from '@/components/experts/denial-notice'
@@ -12,6 +11,7 @@ import { Notice } from '@/components/ui/notice'
 import { CostLine, TierPicker } from '@/components/experts/tier-picker'
 import { useStartBuild } from '@/hooks/use-start-build'
 import type { ExpertTier, TierPrice } from '@/lib/api/types'
+import { z } from '@/lib/validation'
 
 /**
  * The full build form.
