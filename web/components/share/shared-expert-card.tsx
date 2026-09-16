@@ -58,7 +58,7 @@ export function SharedExpertCard({
         <p className="mt-5 text-base leading-relaxed text-fg-2">{expert.persona_bio}</p>
       )}
 
-      <dl className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 text-sm min-[480px]:grid-cols-[auto_1fr]">
+      <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
         <Property label="Depth">{humanise(expert.tier)}</Property>
         <Property label="Sources">{plural(expert.source_count, 'source')}</Property>
         <Property label="Passages">{expert.chunk_count}</Property>
