@@ -19,7 +19,7 @@ export default function Loading() {
           </div>
           <div className="mt-6 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2.5">
             {/* Six rows, which is what a ready expert has. Eight shifted
-                *About* down by two rows the moment the real page arrived. */}
+             *About* down by two rows the moment the real page arrived. */}
             {['w-40', 'w-56', 'w-16', 'w-20', 'w-36', 'w-16'].map((width, i) => (
               <div key={i} className="contents">
                 <Skeleton className="ml-auto h-3.5 w-16" />
