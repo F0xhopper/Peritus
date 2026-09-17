@@ -18,7 +18,7 @@ is a constraint on claims, not a licence to stop thinking.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from peritus.graph.retriever import EnrichedResult
 
@@ -201,6 +201,13 @@ class Passage:
     #: The chunk behind the passage, so the audit trail can match a retrieval
     #: step to its number without assuming the two lists line up by position.
     chunk_id: int | None = None
+    #: Whether this passage's claims are on one side of a ``contradicts`` edge.
+    #: The retriever knows it per passage; before this it was flattened into one
+    #: boolean for the whole answer, so a reader told that "sources disagree"
+    #: had to open every citation to find which two.
+    disputed: bool = False
+    #: What is disputed, in the subject's terms — one sentence per disagreement.
+    dispute_points: list[str] = field(default_factory=list)
 
 
 def build_grounded_context(
@@ -237,6 +244,8 @@ def build_grounded_context(
                 source_id=e.result.source_id,
                 text=e.text,
                 chunk_id=chunk_id,
+                disputed=e.has_contradiction,
+                dispute_points=list(e.contradiction_points),
             )
         )
         note = " ".join((e.result.context_text or "").split())
@@ -282,14 +291,44 @@ def parse_citations(answer_text: str, num_passages: int) -> tuple[set[int], set[
 # visible in the evidence rather than quietly tidied away.
 
 
+#: The most passage text a citation carries. Long enough for the paragraph a
+#: sentence was drawn from, short enough that twenty of them do not double the
+#: size of a stored answer.
+CITATION_TEXT_CHARS = 600
+
+
 def used_citations(passages: list[Passage], cited: set[int]) -> list[dict]:
     """The passages the answer cited, in passage order, with their numbers preserved
-    so the UI can render ``[n] label`` that matches the inline ``[n]`` markers."""
+    so the UI can render ``[n] label`` that matches the inline ``[n]`` markers.
+
+    Each carries **the passage itself**. The client's panel is titled "Cited
+    passage" and quotes what it is given; until this field existed the only
+    thing it had was the label, so the quote was the source's title — the reader
+    could open a citation and still not see the sentence it rests on, and two
+    citations from one source were indistinguishable.
+    """
     return [
-        {"n": p.index, "label": p.citation, "source_id": p.source_id}
+        {
+            "n": p.index,
+            "label": p.citation,
+            "source_id": p.source_id,
+            "text": _excerpt(p.text),
+            "disputed": p.disputed,
+            "dispute_points": p.dispute_points,
+        }
         for p in passages
         if p.index in cited
     ]
+
+
+def _excerpt(text: str) -> str:
+    """The passage, trimmed on a word boundary with an ellipsis when it is cut."""
+    clean = " ".join((text or "").split())
+    if len(clean) <= CITATION_TEXT_CHARS:
+        return clean
+    cut = clean[:CITATION_TEXT_CHARS]
+    space = cut.rfind(" ")
+    return (cut[:space] if space > CITATION_TEXT_CHARS // 2 else cut).rstrip(" ,;:") + "…"
 
 
 def used_citation_labels(passages: list[Passage], cited: set[int]) -> list[str]:

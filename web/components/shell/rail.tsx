@@ -81,10 +81,13 @@ export function Rail({
           <Link
             href="/experts"
             aria-current={homeActive ? 'page' : undefined}
+            // No fill when active: the sliding bar already marks where you
+            // are, and a second indicator for Home alone made the rail follow
+            // two rules at once.
             className={cn(
               'grid size-(--rail-item) place-items-center rounded-card text-fg-3',
               'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
-              homeActive && 'bg-raised text-fg'
+              homeActive && 'text-fg'
             )}
           >
             <Home className="size-4" />
@@ -172,7 +175,9 @@ function RailAvatar({ expert, active }: { expert: ExpertSummary; active: boolean
         className={cn(
           'relative grid size-(--rail-item) place-items-center rounded-card',
           'transition-opacity duration-(--dur-1)',
-          active ? 'opacity-100' : 'opacity-70 hover:opacity-100'
+          // 85%, not 70%: a found picture at 40px is already dim, and the
+          // inactive tiles are the app's only expert list at most widths.
+          active ? 'opacity-100' : 'opacity-[0.85] hover:opacity-100'
         )}
       >
         <Avatar expert={expert} size={AVATAR_SIZE} eager />

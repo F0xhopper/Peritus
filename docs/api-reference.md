@@ -150,7 +150,7 @@ Read-only. Full contract in [audit-api.md](audit-api.md).
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/experts/{slug}/corpus-report` | Every source considered — kept *and* rejected — with scores, rubric version, drop reason and the search that produced it |
-| `GET` | `/experts/{slug}/corpus-report/export` | The same as CSV or RIS (what Covidence and Zotero import) |
+| `GET` | `/experts/{slug}/corpus-report/export` | The same as CSV, RIS or BibTeX (`?format=`) |
 | `GET` | `/experts/{slug}/screening-flow` | The funnel: identified → triaged → fetched → validated → included, plus the discovery narrative |
 | `GET` | `/experts/{slug}/coverage` | Evidence strength per planned key concept, including off-plan concepts |
 | `GET` | `/experts/{slug}/contradictions` | Where sources in this corpus were judged to disagree, resolved to passages |

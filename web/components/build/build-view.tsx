@@ -304,7 +304,14 @@ export function BuildView({
           )}
         </div>
 
-        {!noJob && <BuildLog rows={state.rows} live={live} reconnecting={reconnecting} />}
+        {!noJob && (
+          <BuildLog
+            rows={state.rows}
+            live={live}
+            reconnecting={reconnecting}
+            ended={Boolean(terminal)}
+          />
+        )}
       </div>
 
       {/* Cost by stage, once the job has metered anything. Polled by the panel

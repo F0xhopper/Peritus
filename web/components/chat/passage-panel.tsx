@@ -4,37 +4,73 @@ import { ExternalLink, MessageSquare } from 'lucide-react'
 import Link from 'next/link'
 
 import { Button } from '@/components/ui/button'
-import { formatScore, hostOf, humanise } from '@/lib/format'
+import { describeDifficulty, describeTextRead, sourceKind } from '@/lib/source-kind'
+import { hostOf, humanise } from '@/lib/format'
 import type { Citation, LedgerSource } from '@/lib/api/types'
 
 /**
  * The cited passage, in the context panel.
  *
- * The citation label the stream sends is the passage's own text plus its
- * source's title; the ledger row behind it — scores, how much of the source was
- * actually read, why it was accepted — is fetched by the page and passed in
- * where it is known. Where it is not, the label alone is still worth showing:
- * a citation that opens nothing is worse than a citation that opens a quote.
+ * **It quotes the passage.** The panel is titled "Cited passage" and for a long
+ * time the thing in its blockquote was the citation *label* — which the API
+ * built as "Title — Exa · Q:8.5". So the one place in the product that promises
+ * to show you the evidence showed a title, a vendor name and a screening score,
+ * three times over, and two citations from one source were indistinguishable.
+ * The API now sends the passage text; where an older stored answer has none,
+ * the source's title is the honest fallback and the blockquote is dropped
+ * rather than filled with something that is not a quotation.
+ *
+ * **The number is the one on the chip.** Chips are numbered per answer (1, 2,
+ * 3 in order of first use) while `n` is the retrieval index, so heading this
+ * panel with `n` meant clicking **2** and opening "Passage 7".
  */
 export function PassagePanel({
   citation,
   source,
   slug,
+  siblings = [],
   onAsk,
 }: {
   citation: Citation
   source: LedgerSource | null
   slug: string
+  /** Other citations in this answer from the same source, for "also cited as". */
+  siblings?: Citation[]
   onAsk?: (about: string) => void
 }) {
+  const shown = citation.display ?? citation.n
+  const title = source?.title ?? citation.label
+
   return (
     <div className="space-y-3 text-sm">
       <div>
-        <p className="text-label tracking-[0.04em] text-fg-3 uppercase">Passage {citation.n}</p>
-        {/* The cited span itself, washed in the expert's colour. */}
-        <blockquote className="mt-1.5 rounded-card bg-expert-soft p-2.5 text-fg-2">
-          {citation.label}
-        </blockquote>
+        <p className="text-label tracking-[0.04em] text-fg-3 uppercase">
+          Passage {shown}
+          {title && <span className="normal-case"> of {title}</span>}
+        </p>
+        {citation.text ? (
+          // The cited span itself, washed in the expert's colour.
+          <blockquote className="mt-1.5 rounded-card bg-expert-soft p-2.5 text-fg-2">
+            {citation.text}
+          </blockquote>
+        ) : (
+          <p className="mt-1.5 text-xs text-fg-3">
+            This answer was saved before passages were kept with their citations, so the text is not
+            here. The source is below.
+          </p>
+        )}
+        {siblings.length > 0 && (
+          <p className="mt-1.5 text-xs text-fg-3">
+            This source is also cited as{' '}
+            {siblings.map((sibling, index) => (
+              <span key={sibling.n}>
+                {index > 0 && ', '}
+                <span className="font-mono text-fg-2">[{sibling.display ?? sibling.n}]</span>
+              </span>
+            ))}
+            .
+          </p>
+        )}
       </div>
 
       {source ? (
@@ -44,21 +80,27 @@ export function PassagePanel({
             {source.author && <p className="mt-0.5 text-xs text-fg-3">{source.author}</p>}
           </div>
 
+          {/* One vocabulary with the Sources page: what it *is* comes from
+              `sourceKind`, never the fetcher key — this panel used to say
+              "Type: Exa", where the table said "Kind: Paper". */}
           <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-            <Field label="Type">{humanise(source.source_type)}</Field>
-            <Field label="Quality">{formatScore(source.quality_score)}</Field>
-            <Field label="Relevance">{formatScore(source.relevance_score)}</Field>
-            {source.source_tier && <Field label="Tier">{humanise(source.source_tier)}</Field>}
+            <Field label="Kind">{sourceKind(source.source_type)}</Field>
+            {source.source_tier && (
+              <Field label="Tier">{humanise(source.source_tier)} source</Field>
+            )}
             {source.full_text_method && (
-              <Field label="Text read">
+              <Field label="Read">
                 {source.full_text_method === 'abstract' ? (
                   // Worth flagging: an abstract-only source was judged, and is
                   // answering questions, on its abstract alone.
-                  <span className="text-warn">abstract only</span>
+                  <span className="text-warn">Abstract only</span>
                 ) : (
-                  humanise(source.full_text_method)
+                  describeTextRead(source.full_text_method)
                 )}
               </Field>
+            )}
+            {source.difficulty !== null && (
+              <Field label="Level">{describeDifficulty(source.difficulty)}</Field>
             )}
             {source.doi && <Field label="DOI">{source.doi}</Field>}
           </dl>
@@ -79,10 +121,10 @@ export function PassagePanel({
               href={`/experts/${slug}/sources?source=${source.id}`}
               className="inline-flex h-(--row-h) items-center rounded-row border border-border px-2.5 text-xs text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
             >
-              View in Sources
+              See the source
             </Link>
             {onAsk && (
-              <Button variant="ghost" size="sm" onClick={() => onAsk(source.title)}>
+              <Button variant="outline" size="sm" onClick={() => onAsk(source.title)}>
                 <MessageSquare className="size-3" />
                 Ask about this
               </Button>

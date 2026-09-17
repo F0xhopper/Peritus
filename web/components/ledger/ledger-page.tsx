@@ -1,76 +1,58 @@
 'use client'
 
-import { Columns3, Download, Plus, Table as TableIcon } from 'lucide-react'
+import { Download, Plus, Table as TableIcon, X } from 'lucide-react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useCallback, useEffect, useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 
-import { stashAskDraft } from '@/components/chat/new-chat-composer'
 import { AddSourceDialog } from '@/components/ledger/add-source-dialog'
 import { canManage } from '@/lib/access'
-import { ExclusionsSection } from '@/components/ledger/exclusions-section'
 import { LedgerCards } from '@/components/ledger/ledger-cards'
-import { COLUMNS, LedgerTable } from '@/components/ledger/ledger-table'
+import { LedgerTable } from '@/components/ledger/ledger-table'
 import { RowDetail } from '@/components/ledger/row-detail'
-import { SelectionSection } from '@/components/ledger/selection-section'
 import { ContextSlot } from '@/components/shell/context-panel'
 import { useShell } from '@/components/shell/shell-context'
 import { TopBar } from '@/components/shell/top-bar'
 import { Button, buttonStyles } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { MenuContent, MenuItem, MenuLabel, MenuRoot, MenuTrigger } from '@/components/ui/menu'
+import { Input } from '@/components/ui/input'
 import { Notice } from '@/components/ui/notice'
-import { Segmented } from '@/components/ui/segmented'
 import { Select } from '@/components/ui/select'
 import { useBuildEvents } from '@/hooks/use-build-events'
-import { useStoredPreference } from '@/hooks/use-stored-preference'
+import { useStartChat } from '@/hooks/use-start-chat'
 import { cn } from '@/lib/cn'
-import { formatPercent, plural } from '@/lib/format'
+import { hostOf } from '@/lib/format'
 
-import type {
-  CorpusReport,
-  ExpertWithCatalog,
-  LedgerSource,
-  SelectionBlock,
-  SourceDecision,
-  SourceSort,
-} from '@/lib/api/types'
+import type { CorpusReport, ExpertWithCatalog, LedgerSource, SourceSort } from '@/lib/api/types'
 
 /**
- * The sources page.
+ * The sources page: the sources this expert answers from.
  *
- * Filter and sort are **URL state**, pushed through `startTransition`: the page
- * is a server component re-fetch, so a filtered ledger is a shareable link and
- * the back button works. While the transition is pending the table dims to 60%
- * and keeps its height — no spinner, and no jump when the new rows mount.
+ * Sort is **URL state**, pushed through `startTransition`: the page is a server
+ * component re-fetch, so a sorted list is a shareable link and the back button
+ * works. While the transition is pending the table dims to 60% and keeps its
+ * height — no spinner, and no jump when the new rows mount.
  *
- * The table is the `lg`+ form, the same table inside a horizontal scroller at
- * `md`, and a card list below that. All three are in the HTML and toggled with
- * `hidden lg:block`, so the server render is right at every width.
+ * The table is the `md`+ form and a card list below that. Both are in the HTML
+ * and toggled with `hidden md:block`, so the server render is right at every
+ * width.
  */
-const DEFAULT_COLUMNS = new Set(['title', 'type', 'decision', 'quality', 'relevance', 'reason'])
-const COLUMN_PREFERENCE_KEY = 'peritus:ledger-columns'
-
 export function LedgerPage({
   expert,
   report,
-  decision,
   sort,
   page,
   pageSize,
   conceptFilter,
   focusSourceId,
-  selection = null,
 }: {
   expert: ExpertWithCatalog
   report: CorpusReport
-  decision: SourceDecision
   sort: SourceSort
   page: number
   pageSize: number
   conceptFilter: string | null
   focusSourceId: number | null
-  /** The screening-flow report's selection block; null when the report failed or predates it. */
-  selection?: SelectionBlock | null
 }) {
   const router = useRouter()
   const pathname = usePathname()
@@ -80,34 +62,14 @@ export function LedgerPage({
 
   const [localSelection, setLocalSelection] = useState<LedgerSource | null>(null)
   const [adding, setAdding] = useState(false)
-  // A viewer reads the whole record — kept, dropped and why — but cannot add
-  // to it or remove from it.
+  // Client-side over the loaded page, like the sidebar's chat filter. A Pro
+  // build keeps up to sixty sources and the only way to find one was to read
+  // the list.
+  const [filter, setFilter] = useState('')
+  const { start: startChat, starting: startingChat } = useStartChat(expert.name)
+  // A viewer reads the list but cannot add to it or remove from it.
   const owner = canManage(expert)
   const [ingestJob, setIngestJob] = useState<number | null>(null)
-
-  // A per-viewer convenience, so `localStorage` is the right home for it — it
-  // never needs to reach another device or the server.
-  const parseColumns = useCallback((raw: string) => {
-    const keys = JSON.parse(raw) as unknown
-    if (!Array.isArray(keys) || keys.length === 0) return null
-    const set = new Set(keys.filter((key): key is string => typeof key === 'string'))
-    // The title column is the row's identity; without it a row is anonymous.
-    set.add('title')
-    return set
-  }, [])
-  const [visible, setVisible] = useStoredPreference(
-    COLUMN_PREFERENCE_KEY,
-    DEFAULT_COLUMNS,
-    parseColumns
-  )
-
-  const toggleColumn = (key: string) => {
-    const next = new Set(visible)
-    if (next.has(key)) next.delete(key)
-    else next.add(key)
-    next.add('title')
-    setVisible(next, (value) => JSON.stringify([...value]))
-  }
 
   const navigate = (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(params.toString())
@@ -127,15 +89,20 @@ export function LedgerPage({
     },
   })
 
-  // `?concept=` narrows client-side: the API filters by decision and sorts, but
-  // has no concept filter, and the page is already bounded at 500 rows.
+  // `?concept=` narrows client-side: the API filters and sorts, but has no
+  // concept filter, and the page is already bounded at 500 rows. The text
+  // filter runs after it, over title, author and host — the three things
+  // somebody looking for one source actually remembers.
   const rows = useMemo(() => {
-    if (!conceptFilter) return report.sources
-    const needle = conceptFilter.toLowerCase()
-    return report.sources.filter((source) =>
-      source.covered_concepts.some((concept) => concept.toLowerCase() === needle)
-    )
-  }, [report.sources, conceptFilter])
+    const concept = conceptFilter?.toLowerCase()
+    const needle = filter.trim().toLowerCase()
+    return report.sources.filter((source) => {
+      if (concept && !source.covered_concepts.some((c) => c.toLowerCase() === concept)) return false
+      if (!needle) return true
+      const host = source.url ? (hostOf(source.url) ?? '') : ''
+      return `${source.title} ${source.author ?? ''} ${host}`.toLowerCase().includes(needle)
+    })
+  }, [report.sources, conceptFilter, filter])
 
   // A row deep-linked from a citation (`?source=<id>`) shows its detail on
   // arrival. Derived rather than copied into state by an effect: a click sets
@@ -162,7 +129,6 @@ export function LedgerPage({
 
   const total = report.page.total_matching ?? report.sources.length
   const lastPage = Math.max(1, Math.ceil(total / pageSize))
-  const unavailable = collectUnavailable(report)
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -194,7 +160,7 @@ export function LedgerPage({
                 <MenuItem
                   onClick={() => {
                     // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a file download, not a page
-                    window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=csv&decision=${decision}`
+                    window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=csv&decision=accepted`
                   }}
                 >
                   CSV
@@ -202,10 +168,18 @@ export function LedgerPage({
                 <MenuItem
                   onClick={() => {
                     // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a file download, not a page
-                    window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=ris&decision=${decision}`
+                    window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=ris&decision=accepted`
                   }}
                 >
                   RIS — for Zotero, Covidence, EndNote
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- a file download, not a page
+                    window.location.href = `/api/experts/${encodeURIComponent(expert.name)}/sources/export?format=bibtex&decision=accepted`
+                  }}
+                >
+                  BibTeX — for LaTeX
                 </MenuItem>
               </MenuLabel>
             </MenuContent>
@@ -213,35 +187,18 @@ export function LedgerPage({
         }
         overflow={
           <>
-            {owner && <MenuItem onClick={() => setAdding(true)}>Add a source</MenuItem>}
+            {/* Not *Add a source*: it is a button in the toolbar below, and a
+                menu is for what is not already on screen. */}
             <MenuItem onClick={() => router.push(`/experts/${expert.name}`)}>Overview</MenuItem>
-            <MenuItem onClick={() => router.push(`/experts/${expert.name}/graph`)}>Graph</MenuItem>
+            <MenuItem onClick={() => router.push(`/experts/${expert.name}/graph`)}>
+              Concepts
+            </MenuItem>
           </>
         }
       />
 
       <div className="scroll-col flex-1">
         <div className="space-y-3 p-3 md:p-4">
-          {/* The provenance banner, when older rows genuinely lack fields. */}
-          {!report.provenance.complete && (
-            <Notice tone="info" title="Some rows are missing provenance">
-              {report.provenance.note} Nothing is backfilled — a guessed DOI or a guessed full-text
-              method would put a fabrication into the record.
-            </Notice>
-          )}
-
-          {unavailable.length > 0 && (
-            <Notice tone="info" title="Some counts were not recorded">
-              <ul className="space-y-1">
-                {unavailable.map((reason) => (
-                  <li key={reason} className="text-xs">
-                    {reason}
-                  </li>
-                ))}
-              </ul>
-            </Notice>
-          )}
-
           {ingestJob !== null && (
             <Notice tone="info" title="Reading a new source">
               Peritus is reading and indexing it. It appears in the table when it is done.
@@ -249,88 +206,58 @@ export function LedgerPage({
           )}
 
           {conceptFilter && (
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-fg-3">Covering</span>
-              <span className="rounded-chip bg-expert-soft px-2 py-0.5 text-xs text-expert">
-                {conceptFilter}
+            // The count is the filtered one. It used to read "16 sources" over
+            // a table of six, because the toolbar's number came from the report
+            // page while the filtering happened here.
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+              <span className="text-fg-3">
+                {rows.length} of {total} {total === 1 ? 'source' : 'sources'} cover
               </span>
-              <button
-                type="button"
-                onClick={() => navigate({ concept: null })}
-                className="text-xs text-fg-3 underline-offset-2 hover:text-fg-2 hover:underline"
-              >
-                clear
-              </button>
+              <span className="inline-flex items-center gap-1 rounded-chip bg-expert-soft py-0.5 pr-1 pl-2 text-xs text-expert">
+                {conceptFilter}
+                <button
+                  type="button"
+                  onClick={() => navigate({ concept: null })}
+                  aria-label="Show every source"
+                  className="grid size-4 place-items-center rounded-chip transition-colors duration-(--dur-1) hover:bg-expert/20"
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
             </div>
           )}
 
           <div className="flex flex-wrap items-center gap-2">
-            <Segmented
-              label="Decision"
-              value={decision}
-              onChange={(next) => navigate({ decision: next, page: null })}
-              options={[
-                { value: 'all', label: 'All', count: report.totals.considered },
-                { value: 'accepted', label: 'Kept', count: report.totals.accepted },
-                { value: 'rejected', label: 'Dropped', count: report.totals.rejected },
-              ]}
-            />
+            {/* From twenty rows, where reading the list stops being a way to
+                find one. The sidebar uses the same threshold for chats. */}
+            {report.sources.length >= 20 && (
+              <Input
+                value={filter}
+                onChange={(event) => setFilter(event.target.value)}
+                placeholder="Filter sources"
+                aria-label="Filter sources"
+                className="w-full text-xs sm:w-56"
+              />
+            )}
 
             {/* A native select below `lg`, where a sortable header row has no
-                room; the headers themselves sort at `lg` and up. */}
+                room; the headers themselves sort at `lg` and up. The options
+                say "Sort:" because the closed select shows only its value —
+                "Title" alone read as a filter or a column name. */}
             <Select
               aria-label="Sort by"
               value={sort}
               onChange={(event) => navigate({ sort: event.target.value, page: null })}
               className="lg:hidden"
             >
-              <option value="decision">Decision</option>
-              <option value="quality">Quality</option>
-              <option value="relevance">Relevance</option>
-              <option value="title">Title</option>
-              <option value="type">Type</option>
-              <option value="discovered_via">How found</option>
-              <option value="added">Added</option>
+              <option value="title">Sort: Title</option>
+              <option value="type">Sort: Kind</option>
+              <option value="added">Sort: Added</option>
             </Select>
 
-            <MenuRoot>
-              <MenuTrigger
-                className={cn(
-                  buttonStyles({ variant: 'ghost', size: 'md' }),
-                  'hidden lg:inline-flex'
-                )}
-              >
-                <Columns3 className="size-3.5" />
-                Columns
-              </MenuTrigger>
-              <MenuContent align="start">
-                <MenuLabel label="Show">
-                  {COLUMNS.map((column) => (
-                    <MenuItem
-                      key={column.key}
-                      closeOnClick={false}
-                      disabled={column.key === 'title'}
-                      onClick={() => toggleColumn(column.key)}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={cn(
-                          'grid size-3.5 place-items-center rounded-[3px] border',
-                          visible.has(column.key)
-                            ? 'border-expert bg-expert text-accent-fg'
-                            : 'border-border'
-                        )}
-                      >
-                        {visible.has(column.key) && '✓'}
-                      </span>
-                      {column.label}
-                    </MenuItem>
-                  ))}
-                </MenuLabel>
-              </MenuContent>
-            </MenuRoot>
-
             {owner && (
+              // The word is visible from 360px — a bare `+` said nothing about
+              // what it added — while the accessible name stays the full one.
               <Button
                 variant="secondary"
                 size="action"
@@ -338,20 +265,21 @@ export function LedgerPage({
                 onClick={() => setAdding(true)}
               >
                 <Plus className="size-3.5" />
-                <span className="hidden sm:inline">Add a source</span>
+                Add
+                <span className="hidden sm:inline">&nbsp;a source</span>
               </Button>
             )}
 
             <p className="ml-auto text-xs text-fg-3">
-              {formatPercent(report.totals.acceptance_rate, 1)} kept ·{' '}
-              {plural(report.by_search.distinct_searches, 'search', 'searches')}
+              {filter.trim() && `${rows.length} of `}
+              {total} {total === 1 ? 'source' : 'sources'}
             </p>
           </div>
 
           {rows.length === 0 ? (
             <Empty icon={TableIcon}>
-              {report.totals.considered === 0
-                ? 'This expert has no screening record yet — nothing has been searched.'
+              {total === 0
+                ? 'This expert has no sources yet — nothing has been searched.'
                 : 'No sources match this filter.'}
             </Empty>
           ) : (
@@ -363,7 +291,6 @@ export function LedgerPage({
                   onSort={(next) => navigate({ sort: next, page: null })}
                   onSelect={select}
                   selectedId={selected?.id ?? null}
-                  visible={visible}
                   pending={pending}
                 />
               </div>
@@ -401,12 +328,6 @@ export function LedgerPage({
               </Button>
             </div>
           )}
-
-          <ExclusionsSection exclusions={report.exclusions} />
-
-          <SelectionSection selection={selection} />
-
-          <p className="pt-2 text-xs leading-relaxed text-fg-3">{report.method_statement}</p>
         </div>
       </div>
 
@@ -422,10 +343,8 @@ export function LedgerPage({
           <RowDetail
             source={selected}
             slug={expert.name}
-            onAsk={(title) => {
-              stashAskDraft(expert.name, `What does “${title}” say?`)
-              router.push(`/experts/${expert.name}#ask`)
-            }}
+            asking={startingChat}
+            onAsk={(title) => void startChat(`What does “${title}” say?`)}
             onDeleted={
               owner
                 ? () => {
@@ -449,19 +368,4 @@ export function LedgerPage({
       )}
     </div>
   )
-}
-
-/**
- * The `*_unavailable_reason` strings the report carries.
- *
- * Surfaced rather than dropped: a count the system does not persist is returned
- * as null *with a reason*, and rendering the gap is the whole point of the
- * convention. A zero here would be a fabrication.
- */
-function collectUnavailable(report: CorpusReport): string[] {
-  const out: string[] = []
-  for (const [key, value] of Object.entries(report as unknown as Record<string, unknown>)) {
-    if (key.endsWith('_unavailable_reason') && typeof value === 'string' && value) out.push(value)
-  }
-  return out
 }

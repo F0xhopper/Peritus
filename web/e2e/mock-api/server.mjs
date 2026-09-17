@@ -384,11 +384,55 @@ async function handle(req, res) {
         decision === 'all'
           ? report.sources
           : report.sources.filter((source) => source.decision === decision)
+      // `total_matching` counts the whole corpus under this filter, as the API
+      // does — not the handful of rows the fixture carries.
+      const matching =
+        decision === 'accepted'
+          ? report.totals.accepted
+          : decision === 'rejected'
+            ? report.totals.rejected
+            : report.totals.considered
       return json(res, 200, {
         ...report,
         expert: { name: expert.name, topic: expert.topic, tier: expert.tier },
-        page: { ...report.page, decision, returned: sources.length },
+        page: { ...report.page, decision, returned: sources.length, total_matching: matching },
         sources,
+      })
+    }
+    // The stored retrieval trails for a conversation's answers, which is what
+    // makes "how this was answered" survive a reload.
+    if (rest === '/answer-audits' && method === 'GET') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      const events = await fixture('chat-events')
+      const live = events.retrieval_audit
+      const conversation = url.searchParams.get('conversation_id')
+      return json(res, 200, {
+        expert: { name: expert.name, topic: expert.topic, tier: expert.tier },
+        page: { limit: 50, offset: 0, returned: 1, total_matching: 1, has_more: false },
+        audits: [
+          {
+            audit_id: live.audit_id,
+            conversation_id: conversation,
+            question: 'How effective is drone brood removal on its own?',
+            subqueries: live.subqueries,
+            followup_queries: live.follow_ups,
+            coverage_satisfied: live.coverage_verdict === 'adequate',
+            second_pass: false,
+            passages: {
+              retrieved: live.passages_considered,
+              duplicate_hits: 1,
+              unique: live.passages_considered - 1,
+              in_context: live.passages_in_prompt,
+              cited: live.passages_cited,
+              not_in_context: live.passages_considered - live.passages_in_prompt,
+              context_cap: live.passages_in_prompt,
+            },
+            sources: { in_context: 8, cited: live.passages_cited },
+            contradiction_traversed: true,
+            answer_chars: 640,
+            created_at: '2026-09-09T09:00:02.000Z',
+          },
+        ],
       })
     }
     if (rest === '/screening-flow' && method === 'GET') {
@@ -401,18 +445,30 @@ async function handle(req, res) {
     }
     if (rest === '/corpus-report/export' && method === 'GET') {
       const format = url.searchParams.get('format') ?? 'csv'
-      const isRis = format === 'ris'
-      const payload = isRis
-        ? 'TY  - JOUR\nTI  - Varroa destructor and honeybee viral loads\nER  - \n'
-        : 'id,decision,title,quality_score,relevance_score,drop_reason\n804,accepted,"Varroa destructor and honeybee viral loads",8.5,9.0,\n'
+      const bodies = {
+        ris: {
+          body: 'TY  - JOUR\nTI  - Varroa destructor and honeybee viral loads\nER  - \n',
+          type: 'application/x-research-info-systems',
+          extension: 'ris',
+        },
+        bibtex: {
+          body: '@article{peritus804,\n  title = {Varroa destructor and honeybee viral loads}\n}\n',
+          type: 'application/x-bibtex',
+          extension: 'bib',
+        },
+        csv: {
+          body: 'id,decision,title,drop_reason\n804,accepted,"Varroa destructor and honeybee viral loads",\n',
+          type: 'text/csv',
+          extension: 'csv',
+        },
+      }
+      const chosen = bodies[format] ?? bodies.csv
       res.writeHead(200, {
-        'Content-Type': isRis
-          ? 'application/x-research-info-systems; charset=utf-8'
-          : 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${slug}-all.${isRis ? 'ris' : 'csv'}"`,
+        'Content-Type': `${chosen.type}; charset=utf-8`,
+        'Content-Disposition': `attachment; filename="${slug}-all.${chosen.extension}"`,
         'X-Peritus-Export-Rows': '1',
       })
-      return res.end(payload)
+      return res.end(chosen.body)
     }
     if (rest === '/sources/upload' && method === 'POST') {
       const raw = await body(req)

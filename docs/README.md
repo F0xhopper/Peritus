@@ -246,7 +246,7 @@ flowchart LR
 
 - **`corpus-report`** — every source considered, kept *and* rejected, with
   scores, rubric version, drop reason, and the search that produced it;
-  exportable as CSV or RIS (what Covidence/Zotero import).
+  exportable as CSV, RIS or BibTeX (what Covidence, Zotero and LaTeX import).
 - **`screening-flow`** — the funnel: identified → triaged → fetched →
   validated → included, with its two sources of truth deliberately shown
   unreconciled.

@@ -5,7 +5,7 @@ import { Avatar } from '@/components/identity/avatar'
 import { PictureCredit } from '@/components/identity/picture-credit'
 import { OpenSharedExpert } from '@/components/share/open-shared-expert'
 import { sharedPictureUrl, sharePath } from '@/lib/access'
-import { formatScore, humanise, plural } from '@/lib/format'
+import { humanise, plural } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
 import { sourceKind } from '@/lib/source-kind'
 import type { SharedExpert } from '@/lib/api/types'
@@ -58,12 +58,9 @@ export function SharedExpertCard({
         <p className="mt-5 text-base leading-relaxed text-fg-2">{expert.persona_bio}</p>
       )}
 
-      <dl className="mt-6 grid grid-cols-1 gap-x-6 gap-y-2 text-sm min-[480px]:grid-cols-[auto_1fr]">
+      <dl className="mt-6 grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
         <Property label="Depth">{humanise(expert.tier)}</Property>
-        <Property label="Sources">
-          {plural(expert.source_count, 'source')} kept after screening
-        </Property>
-        <Property label="Quality">{formatScore(expert.avg_quality)} average, out of 10</Property>
+        <Property label="Sources">{plural(expert.source_count, 'source')}</Property>
         <Property label="Passages">{expert.chunk_count}</Property>
         {expert.node_count > 0 && <Property label="Concepts">{expert.node_count}</Property>}
       </dl>

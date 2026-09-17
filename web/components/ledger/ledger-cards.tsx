@@ -1,18 +1,17 @@
 'use client'
 
-import { Chip } from '@/components/ui/chip'
+import { ChevronRight } from 'lucide-react'
+
 import { cn } from '@/lib/cn'
-import { describeDiscovery, sourceKind } from '@/lib/source-kind'
-import { formatScore, hostOf } from '@/lib/format'
+import { sourceKind } from '@/lib/source-kind'
+import { hostOf } from '@/lib/format'
 import type { LedgerSource } from '@/lib/api/types'
 
 /**
- * The ledger below `md`.
+ * The sources below `md`.
  *
- * Carries every field the table does except rubric version and DOI, which live
- * in the row's detail sheet — those two are the only ones nobody scans a list
- * for. The two score bars are horizontal here rather than vertical: a card has
- * width to spare and no column to align to.
+ * Title, kind and host, with the rest of the record in the row's detail sheet —
+ * a card list is scanned, not read.
  */
 export function LedgerCards({
   sources,
@@ -32,6 +31,7 @@ export function LedgerCards({
           <button
             type="button"
             onClick={() => onSelect(source)}
+            aria-label={`${source.title} — open details`}
             className={cn(
               // Surface, not border — depth comes from the panel step, and the
               // selected card is the one that gains a ring.
@@ -40,77 +40,20 @@ export function LedgerCards({
               selectedId === source.id ? 'ring-1 ring-fg-3 ring-inset' : 'hover:bg-raised'
             )}
           >
-            <div className="flex items-start justify-between gap-2">
+            <span className="flex items-start gap-2">
               <span className="min-w-0 flex-1 text-sm text-fg-2">{source.title}</span>
-              {source.decision === 'accepted' ? (
-                <Chip tone="ok">Kept</Chip>
-              ) : (
-                <Chip tone="bad">Dropped</Chip>
-              )}
-            </div>
+              {/* The card opens a record; the chevron is what says so. */}
+              <ChevronRight aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-fg-4" />
+            </span>
 
             <p className="mt-1 text-xs text-fg-3">
               {sourceKind(source.source_type)}
               {source.url && <> · {hostOf(source.url)}</>}
-              {source.full_text_method === 'abstract' && (
-                <>
-                  {' '}
-                  · <span className="text-warn">abstract only</span>
-                </>
-              )}
+              {source.passage_count > 0 && <> · {source.passage_count} passages</>}
             </p>
-
-            <dl className="mt-2 space-y-1.5">
-              <ScoreRow
-                label="Quality"
-                value={source.quality_score}
-                accepted={source.decision === 'accepted'}
-              />
-              <ScoreRow
-                label="Relevance"
-                value={source.relevance_score}
-                accepted={source.decision === 'accepted'}
-              />
-            </dl>
-
-            {source.drop_reason && <p className="mt-2 text-xs text-fg-3">{source.drop_reason}</p>}
-            {source.discovered_via && (
-              <p className="mt-1 text-xs text-fg-3">{describeDiscovery(source.discovered_via)}</p>
-            )}
           </button>
         </li>
       ))}
     </ul>
-  )
-}
-
-function ScoreRow({
-  label,
-  value,
-  accepted,
-}: {
-  label: string
-  value: number | null
-  accepted: boolean
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <dt className="w-16 shrink-0 text-xs text-fg-3">{label}</dt>
-      <dd className="flex min-w-0 flex-1 items-center gap-2">
-        <span className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-raised">
-          <span
-            style={{ transform: `scaleX(${value === null ? 0 : Math.min(1, value / 10)})` }}
-            className={cn(
-              'block h-full w-full origin-left rounded-full',
-              accepted ? 'bg-ok' : 'bg-bad',
-              'motion-safe:transition-transform motion-safe:duration-(--dur-3) motion-safe:ease-(--ease-out)'
-            )}
-          />
-        </span>
-        <span className="w-7 shrink-0 text-right font-mono text-xs text-fg-2">
-          {formatScore(value)}
-        </span>
-      </dd>
-    </div>
   )
 }

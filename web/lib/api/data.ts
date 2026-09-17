@@ -19,7 +19,6 @@ import type {
   GraphResponse,
   LedgerEntry,
   Me,
-  ScreeningFlow,
   SharedExpert,
   ShareState,
   SourceDecision,
@@ -185,25 +184,6 @@ export function getCorpusReport(slug: string, query: CorpusQuery = {}) {
     () => proxyJson<CorpusReport>(`/experts/${encodeURIComponent(slug)}/corpus-report?${params}`),
     { next: `/experts/${slug}/sources` }
   )
-}
-
-/**
- * The screening-flow report, for its `selection` block.
- *
- * Null on any API failure, not only a 404: the Sources page *is* the ledger,
- * and this report only annotates it, so a slow or failing funnel query must
- * not take the ledger down with it. A dead session still redirects.
- */
-export async function getScreeningFlow(slug: string): Promise<ScreeningFlow | null> {
-  try {
-    return await optional(() =>
-      proxyJson<ScreeningFlow>(`/experts/${encodeURIComponent(slug)}/screening-flow`)
-    )
-  } catch (error) {
-    if (isNextControlFlow(error)) throw error
-    if (error instanceof ApiError) return null
-    throw error
-  }
 }
 
 // ── graph ───────────────────────────────────────────────────────────────────

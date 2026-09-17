@@ -1,3 +1,38 @@
+import type { ExpertTier } from '@/lib/api/types'
+
+/**
+ * What each depth means to the person choosing it, and the one-line form the
+ * Overview prints beside it.
+ *
+ * Only what is actually fixed per tier (`ExpertConfig` in the API): how many
+ * discovery rounds run and how many passages an answer may cite. The absolute
+ * source count depends on the topic's plan, so it is never promised — which is
+ * why "Standard" alone said nothing to someone who let *Auto* choose, and why
+ * the hint talks about rounds rather than sources.
+ */
+export const DEPTH: Record<ExpertTier, { label: string; blurb: string; hint: string }> = {
+  lite: {
+    label: 'Lite',
+    blurb: 'Quickest. About half the sources of Standard; answers cite up to 8 passages.',
+    hint: 'one round of searching · answers cite up to 8 passages',
+  },
+  standard: {
+    label: 'Standard',
+    blurb: 'Balanced. Two rounds of searching; answers cite up to 15 passages.',
+    hint: 'two rounds of searching · answers cite up to 15 passages',
+  },
+  pro: {
+    label: 'Pro',
+    blurb: 'Deepest and slowest. About twice the sources, three rounds; answers cite up to 25.',
+    hint: 'three rounds of searching · answers cite up to 25 passages',
+  },
+}
+
+/** The depth hint, or an empty string for a tier this build predates. */
+export function depthHint(tier: string | null | undefined): string {
+  return (tier && DEPTH[tier as ExpertTier]?.hint) || ''
+}
+
 /**
  * A build failure, in words for the person who asked for the build.
  *

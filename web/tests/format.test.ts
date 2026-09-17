@@ -8,8 +8,8 @@ import {
   formatDateTime,
   formatElapsed,
   formatNumber,
+  formatInt,
   formatPercent,
-  formatScore,
   formatUsd,
   hostOf,
   humanise,
@@ -32,7 +32,7 @@ const DASH = notRecorded()
 
 describe('null is never rendered as zero', () => {
   it('holds for every numeric formatter', () => {
-    for (const format of [formatNumber, formatScore, formatPercent, formatUsd, formatCredits]) {
+    for (const format of [formatNumber, formatPercent, formatUsd, formatCredits]) {
       expect(format(null)).toBe(DASH)
       expect(format(undefined)).toBe(DASH)
     }
@@ -41,7 +41,6 @@ describe('null is never rendered as zero', () => {
   it('but a genuine zero is rendered as zero', () => {
     // A corpus that truly accepted nothing must say 0, not "not recorded".
     expect(formatNumber(0)).toBe('0')
-    expect(formatScore(0)).toBe('0.0')
     expect(formatPercent(0)).toBe('0%')
     expect(formatUsd(0)).toBe('$0.00')
     expect(formatCredits(0)).toBe('0 credits')
@@ -96,13 +95,6 @@ describe('dates are formatted without Intl', () => {
     expect(formatDate('not a date')).toBe(DASH)
     expect(formatDateTime('not a date')).toBe(DASH)
     expect(formatClock('not a date')).toBe('--:--:--')
-  })
-})
-
-describe('formatScore', () => {
-  it('always shows one decimal, so a column of scores aligns', () => {
-    expect(formatScore(8)).toBe('8.0')
-    expect(formatScore(7.45)).toBe('7.5')
   })
 })
 
@@ -237,5 +229,24 @@ describe('the readiness gate', () => {
 describe('formatElapsed over a day', () => {
   it('switches to days, so a stalled counter does not read as 117 hours', () => {
     expect(formatElapsed(117 * 3600 + 54 * 60)).toBe('4d 21h')
+  })
+})
+
+describe('formatInt', () => {
+  /**
+   * Written out rather than delegated to `toLocaleString`: `Intl` is not stable
+   * across engines, and a number rendered on the server has to match the one the
+   * browser hydrates over.
+   */
+  it('groups thousands', () => {
+    expect(formatInt(0)).toBe('0')
+    expect(formatInt(999)).toBe('999')
+    expect(formatInt(1000)).toBe('1,000')
+    expect(formatInt(1125)).toBe('1,125')
+    expect(formatInt(1234567)).toBe('1,234,567')
+  })
+
+  it('keeps a negative sign outside the grouping', () => {
+    expect(formatInt(-1234)).toBe('-1,234')
   })
 })

@@ -4,26 +4,49 @@
     "conversation_id": "2f2b8a4e-1c9d-4f8a-9b1e-7c0d2a5f6e31",
     "title": "How effective is drone brood removal on its own?"
   },
-  "status_planning": { "type": "status", "message": "Reading the question" },
-  "status_searching": { "type": "status", "message": "Searching 412 passages" },
-  "status_composing": { "type": "status", "message": "Composing the answer" },
-  "token": { "type": "token", "text": "Drone brood removal " },
+  "status_planning": {
+    "type": "status",
+    "message": "Reading the question"
+  },
+  "status_searching": {
+    "type": "status",
+    "message": "Searching 412 passages"
+  },
+  "status_composing": {
+    "type": "status",
+    "message": "Composing the answer"
+  },
+  "token": {
+    "type": "token",
+    "text": "Drone brood removal "
+  },
   "sources": {
     "type": "sources",
     "citations": [
       {
         "n": 1,
-        "label": "Drone brood removal as mechanical control: a randomised trial - removal reduced mite load by 43% relative to untreated controls over one season.",
-        "source_id": 812
+        "label": "Drone brood removal as mechanical control: a randomised trial",
+        "text": "Removal reduced mite load by 43% relative to untreated controls over one season, with no effect on colony weight at the end of the season.",
+        "source_id": 812,
+        "disputed": true,
+        "dispute_points": [
+          "Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years."
+        ]
       },
       {
         "n": 3,
-        "label": "Varroa destructor and honeybee viral loads: a five-year cohort - mechanical control alone did not prevent viral amplification in high-pressure years.",
-        "source_id": 804
+        "label": "Varroa destructor and honeybee viral loads: a five-year cohort",
+        "text": "Mechanical control alone did not prevent viral amplification in high-pressure years; DWV titres rose in five of the eight study apiaries.",
+        "source_id": 804,
+        "disputed": true,
+        "dispute_points": [
+          "Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years."
+        ]
       }
     ],
     "has_contradiction": true,
-    "dangling_citations": [7]
+    "dangling_citations": [7],
+    "disputed_citations": [1, 3]
   },
   "retrieval_audit": {
     "type": "retrieval_audit",
@@ -66,6 +89,11 @@
       }
     ]
   },
-  "done": { "type": "done" },
-  "error": { "type": "error", "message": "The expert hit an internal error while answering." }
+  "done": {
+    "type": "done"
+  },
+  "error": {
+    "type": "error",
+    "message": "The expert hit an internal error while answering."
+  }
 }

@@ -4,25 +4,33 @@ import {
   FileText,
   LayoutGrid,
   MessageSquare,
+  MoreHorizontal,
   Network,
   Plus,
   Search,
-  Settings as SettingsIcon,
+  SlidersHorizontal,
   Table,
   Wallet,
 } from 'lucide-react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useMemo, useState, useSyncExternalStore } from 'react'
 
 import { Avatar } from '@/components/identity/avatar'
 import { useShell } from '@/components/shell/shell-context'
+import { Dialog } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MenuContent, MenuItem, MenuRoot, MenuSeparator, MenuTrigger } from '@/components/ui/menu'
 import { StatusDot, dotState } from '@/components/ui/status-dot'
 import { RelativeTime } from '@/components/ui/relative-time'
+import { Tooltip } from '@/components/ui/tooltip'
+import { useApiAction } from '@/hooks/use-api-action'
 import { canManage } from '@/lib/access'
+import { apiSend, apiVoid } from '@/lib/api/client'
 import { cn } from '@/lib/cn'
-import { chatTitle } from '@/lib/format'
+import { chatTitle, formatInt } from '@/lib/format'
+import { groupChats } from '@/lib/chat-groups'
 import { displayName, subtitle } from '@/lib/persona'
 import { useActiveSlug } from '@/components/shell/rail'
 import { focusAskField } from '@/components/chat/new-chat-composer'
@@ -41,7 +49,8 @@ import type { ConversationSummary, CreditState, ExpertSummary } from '@/lib/api/
  * second list of the same five names in the next column said nothing new and
  * pushed everything that was actually useful below the fold. Home's second
  * column is the two things the rail cannot reach: where to go in the workspace,
- * and the chats, which belong to no single expert.
+ * and the chats, which belong to no single expert. On a phone the drawer lists
+ * them by name, where there is no rail and no hover.
  */
 
 export interface ExpertSidebarProps {
@@ -55,6 +64,11 @@ export interface ExpertSidebarProps {
    * one modal on another.
    */
   showSearch?: boolean
+  /**
+   * The layout's own instance, which folds away at `lg` (`⌘\`). The copy
+   * inside the nav drawer is never collapsible — it *is* the fallback.
+   */
+  collapsible?: boolean
   className?: string
 }
 
@@ -68,15 +82,23 @@ export function ExpertSidebar({
   conversations,
   credits,
   showSearch = false,
+  collapsible = false,
   className,
 }: ExpertSidebarProps) {
   // A chat belongs to an expert even though its URL does not name one, so the
   // sidebar stays on that expert while a conversation is open.
   const slug = useActiveSlug(conversations)
   const selected = experts.find((e) => e.name === slug) ?? null
+  const { sidebarCollapsed } = useShell()
+
+  // The grid drops this column's track at the same time (`ShellGrid`), so a
+  // collapsed sidebar takes no width rather than being hidden inside one — but
+  // the edge that brings it back has to outlive it.
+  if (collapsible && sidebarCollapsed) return <SidebarRail collapsed />
 
   return (
-    <div className={cn('flex h-full min-h-0 flex-col bg-panel', className)}>
+    <div className={cn('relative flex h-full min-h-0 flex-col bg-panel', className)}>
+      {collapsible && <SidebarRail collapsed={false} />}
       {showSearch && <SearchTrigger />}
       {selected ? (
         <ExpertForm
@@ -102,6 +124,7 @@ function ExpertForm({
   const pathname = usePathname()
   const [filter, setFilter] = useState('')
   const base = `/experts/${expert.name}`
+  const onOverview = pathname === base
 
   const filtered = useMemo(() => {
     const needle = filter.trim().toLowerCase()
@@ -111,7 +134,12 @@ function ExpertForm({
 
   return (
     <>
-      {/* The identity header, on the neutral identity wash. */}
+      {/* The identity header, on the neutral identity wash.
+          **It is identity, not selection.** The card and the *Overview* row
+          below it go to the same page, so when the card also took an active
+          fill the column opened with two lit surfaces stacked on top of each
+          other. The fill here says "this is the expert"; the row says "this is
+          the page you are on", and only one of them ever lights up. */}
       <div className="shrink-0 p-2">
         <Link
           href={base}
@@ -131,7 +159,7 @@ function ExpertForm({
       </div>
 
       <nav aria-label={`${displayName(expert)} pages`} className="shrink-0 space-y-0.5 px-2 pb-1">
-        <SidebarRow href={base} icon={FileText} active={pathname === base}>
+        <SidebarRow href={base} icon={FileText} active={onOverview}>
           Overview
         </SidebarRow>
         <SidebarRow
@@ -142,21 +170,26 @@ function ExpertForm({
         >
           Sources
         </SidebarRow>
+        {/* "Graph 1,125" was a count of nothing named. The Overview already
+            calls this number concepts; so does the row now. */}
         <SidebarRow
           href={`${base}/graph`}
           icon={Network}
           active={pathname.startsWith(`${base}/graph`)}
           count={expert.node_count || undefined}
+          countLabel={expert.node_count ? `${expert.node_count} concepts` : undefined}
         >
-          Graph
+          Concepts
         </SidebarRow>
         {canManage(expert) && (
+          // Named and iconed apart from the account's Settings, which is the
+          // gear directly below-left in the rail and at the foot of the drawer.
           <SidebarRow
             href={`${base}/settings`}
-            icon={SidebarSettingsIcon}
+            icon={SlidersHorizontal}
             active={pathname.startsWith(`${base}/settings`)}
           >
-            Settings
+            Expert settings
           </SidebarRow>
         )}
       </nav>
@@ -182,7 +215,7 @@ function ExpertForm({
           />
         )}
 
-        <div className="pan-y min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain">
+        <div className="pan-y min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {filtered.length === 0 ? (
             <p className="px-1.5 py-2 text-xs text-fg-3">
               {conversations.length > 0
@@ -192,13 +225,7 @@ function ExpertForm({
                   : 'No chats — this expert cannot answer yet.'}
             </p>
           ) : (
-            filtered.map((conversation) => (
-              <ChatRow
-                key={conversation.id}
-                conversation={conversation}
-                active={pathname === `/chats/${conversation.id}`}
-              />
-            ))
+            <ChatList chats={filtered} />
           )}
         </div>
       </div>
@@ -260,7 +287,10 @@ function HomeForm({
               href="/settings#credits"
               icon={Wallet}
               active={false}
-              count={credits.balance}
+              // Every other number in this column counts the things in its row.
+              // A bare "2" here read as two credit items.
+              countText={`${credits.balance} cr`}
+              countLabel={`${credits.balance} credits`}
             >
               Credits
             </SidebarRow>
@@ -281,7 +311,7 @@ function HomeForm({
           />
         )}
 
-        <div className="pan-y min-h-0 flex-1 space-y-0.5 overflow-y-auto overscroll-contain">
+        <div className="pan-y min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {filtered.length === 0 ? (
             <p className="px-1.5 py-2 text-xs text-fg-3">
               {conversations.length === 0
@@ -289,14 +319,7 @@ function HomeForm({
                 : 'No chats match.'}
             </p>
           ) : (
-            filtered.map((conversation) => (
-              <ChatRow
-                key={conversation.id}
-                conversation={conversation}
-                expert={experts.find((e) => e.name === conversation.expert_slug) ?? null}
-                active={pathname === `/chats/${conversation.id}`}
-              />
-            ))
+            <ChatList chats={filtered} experts={experts} />
           )}
         </div>
       </div>
@@ -347,6 +370,44 @@ function SearchTrigger() {
   )
 }
 
+/**
+ * The column's own edge, as the control that folds it away.
+ *
+ * A drag-handle-shaped strip down the sidebar's trailing edge: invisible until
+ * you reach it, a hairline under the cursor, and a click toggles the column
+ * (`⌘\` does the same from the keyboard). It replaces a button in the search
+ * row, which spent a permanent 28px of the column's one toolbar on something
+ * used once a session — and it puts the affordance where the hand already goes
+ * to resize a panel.
+ *
+ * Collapsed, the strip sits against the rail instead, `fixed`, because the
+ * column it belonged to no longer has a track in the grid.
+ */
+function SidebarRail({ collapsed }: { collapsed: boolean }) {
+  const { toggleSidebar } = useShell()
+  return (
+    <button
+      type="button"
+      onClick={toggleSidebar}
+      aria-label={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
+      title={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
+      className={cn(
+        'group absolute inset-y-0 z-20 hidden w-3 lg:block',
+        // The cursor says which way it goes before anything is clicked.
+        collapsed ? 'fixed left-rail cursor-e-resize' : '-right-1.5 cursor-w-resize'
+      )}
+    >
+      <span
+        aria-hidden="true"
+        className={cn(
+          'absolute inset-y-0 left-1/2 w-px -translate-x-1/2 bg-transparent',
+          'transition-colors duration-(--dur-1) group-hover:bg-fg-4 group-focus-visible:bg-fg'
+        )}
+      />
+    </button>
+  )
+}
+
 const noopSubscribe = () => () => {}
 
 // ── rows ────────────────────────────────────────────────────────────────────
@@ -356,14 +417,21 @@ function SidebarRow({
   icon: Icon,
   active,
   count,
+  countText,
+  countLabel,
   children,
 }: {
   href: string
   icon: React.ComponentType<{ className?: string }>
   active: boolean
   count?: number
+  /** Overrides the rendered count, for a value that is not a number of rows. */
+  countText?: string
+  /** What the count *means*, for a reader who cannot infer it from the label. */
+  countLabel?: string
   children: React.ReactNode
 }) {
+  const shown = countText ?? (count === undefined ? null : formatInt(count))
   return (
     <Link
       href={href}
@@ -377,7 +445,14 @@ function SidebarRow({
     >
       <Icon className={cn('size-4 shrink-0', active ? 'text-fg-2' : 'text-fg-3')} />
       <span className="min-w-0 flex-1 truncate">{children}</span>
-      {count !== undefined && <span className="text-xs text-fg-3">{count}</span>}
+      {/* `title` only. An `aria-label` here would rename the whole row — the
+          Credits link announced itself as "Credits 2 credits" — and make a
+          plain span something a label query can find. */}
+      {shown !== null && (
+        <span title={countLabel} className="text-xs text-fg-3">
+          {shown}
+        </span>
+      )}
     </Link>
   )
 }
@@ -404,20 +479,64 @@ function SectionHeader({
       <span className="text-label tracking-[0.04em] text-fg-3 uppercase">{label}</span>
       {count !== undefined && count > 0 && <span className="text-xs text-fg-3">{count}</span>}
       {action && (
-        <Link
-          href={action.href}
-          aria-label={action.label}
-          onClick={(event) => {
-            // Already on the page the link points into: Next only scrolls to a
-            // hash, so put the cursor in the question field as well.
-            if (focusAskField(action.href)) event.preventDefault()
-          }}
-          className="ml-auto grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
-        >
-          <Plus className="size-3.5" />
-        </Link>
+        // Labelled *and* tipped: a bare `+` at the head of a chat list is a
+        // guess for anyone with a mouse, and `aria-label` says nothing to them.
+        <Tooltip content={action.label} side="right">
+          <Link
+            href={action.href}
+            aria-label={action.label}
+            onClick={(event) => {
+              // Already on the page the link points into: Next only scrolls to
+              // a hash, so put the cursor in the question field as well.
+              if (focusAskField(action.href)) event.preventDefault()
+            }}
+            className="ml-auto grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
+          >
+            <Plus className="size-3.5" />
+          </Link>
+        </Tooltip>
       )}
     </div>
+  )
+}
+
+/**
+ * The chats, under day headings.
+ *
+ * The headings depend on what time it is, so they appear only once the browser
+ * has taken over: the server renders one ungrouped list and the first client
+ * render matches it, which is the only way to put "Today" in a list without
+ * risking a hydration mismatch at midnight. See `lib/chat-groups.ts`.
+ */
+function ChatList({ chats, experts }: { chats: ConversationSummary[]; experts?: ExpertSummary[] }) {
+  const pathname = usePathname()
+  const mounted = useSyncExternalStore(
+    noopSubscribe,
+    () => true,
+    () => false
+  )
+  const groups = useMemo(() => groupChats(chats, mounted ? new Date() : null), [chats, mounted])
+
+  return (
+    <>
+      {groups.map((group) => (
+        <div key={group.label ?? 'all'} className="space-y-0.5">
+          {group.label && (
+            <p className="px-1.5 pt-2 pb-0.5 text-label tracking-[0.04em] text-fg-3 uppercase">
+              {group.label}
+            </p>
+          )}
+          {group.chats.map((conversation) => (
+            <ChatRow
+              key={conversation.id}
+              conversation={conversation}
+              expert={experts?.find((e) => e.name === conversation.expert_slug) ?? null}
+              active={pathname === `/chats/${conversation.id}`}
+            />
+          ))}
+        </div>
+      ))}
+    </>
   )
 }
 
@@ -432,27 +551,177 @@ function ChatRow({
   active: boolean
 }) {
   return (
-    <Link
-      href={`/chats/${conversation.id}`}
-      prefetch
-      aria-current={active ? 'page' : undefined}
+    <div
       className={cn(
-        'flex h-(--row-h) items-center gap-2 rounded-row px-1.5 text-sm',
-        'transition-colors duration-(--dur-1)',
-        active ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg'
+        'group relative rounded-row transition-colors duration-(--dur-1)',
+        active ? 'bg-raised' : 'hover:bg-raised'
       )}
     >
-      {expert && (
-        <span className="shrink-0">
-          <Avatar expert={expert} size={18} />
-        </span>
-      )}
-      <span className="min-w-0 flex-1 truncate">{chatTitle(conversation.title)}</span>
-      <RelativeTime iso={conversation.last_message_at} className="shrink-0 text-xs text-fg-3" />
-    </Link>
+      <Link
+        href={`/chats/${conversation.id}`}
+        prefetch
+        aria-current={active ? 'page' : undefined}
+        className={cn(
+          'flex h-(--row-h) items-center gap-2 rounded-row px-1.5 pr-8 text-sm',
+          active ? 'text-fg' : 'text-fg-2 group-hover:text-fg'
+        )}
+      >
+        {expert && (
+          <span className="shrink-0">
+            <Avatar expert={expert} size={18} />
+          </span>
+        )}
+        <span className="min-w-0 flex-1 truncate">{chatTitle(conversation.title)}</span>
+        <RelativeTime iso={conversation.last_message_at} className="shrink-0 text-xs text-fg-3" />
+      </Link>
+      <ChatRowMenu conversation={conversation} active={active} />
+    </div>
   )
 }
 
-// `Settings` collides with the page component's name in a few files; aliased
-// here so the import list above reads as the rows do.
-const SidebarSettingsIcon = SettingsIcon
+/**
+ * Rename and Delete, on the row.
+ *
+ * Both already existed — in the *chat page's* overflow, which you had to open
+ * the chat to reach. Hidden until hover or focus with a fine pointer, always
+ * visible where there is no hover.
+ */
+function ChatRowMenu({
+  conversation,
+  active,
+}: {
+  conversation: ConversationSummary
+  active: boolean
+}) {
+  const router = useRouter()
+  const [renaming, setRenaming] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [title, setTitle] = useState(conversation.title ?? '')
+
+  const { run: rename, pending: saving } = useApiAction(
+    () =>
+      apiSend(
+        `/api/conversations/${conversation.id}`,
+        'PATCH',
+        { title: title.trim() },
+        'Could not rename that chat.'
+      ),
+    {
+      error: 'Could not rename that chat.',
+      onSuccess: () => setRenaming(false),
+    }
+  )
+
+  const { run: remove, pending: deleting } = useApiAction(
+    () =>
+      apiVoid(
+        `/api/conversations/${conversation.id}`,
+        { method: 'DELETE' },
+        'Could not delete that chat.'
+      ),
+    {
+      error: 'Could not delete that chat.',
+      onSuccess: () => {
+        setConfirming(false)
+        // The open chat just stopped existing; staying on it would 404 on the
+        // next refresh. Its expert is the nearest page that still does.
+        if (active) router.push(`/experts/${conversation.expert_slug}`)
+      },
+    }
+  )
+
+  return (
+    <>
+      <MenuRoot>
+        <MenuTrigger
+          aria-label={`Actions for ${chatTitle(conversation.title)}`}
+          className={cn(
+            'absolute top-1/2 right-1 grid size-(--icon-btn-sm) -translate-y-1/2 place-items-center',
+            'rounded-chip text-fg-3 transition-[opacity,color] duration-(--dur-1) hover:text-fg',
+            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+            '[@media(hover:none)]:opacity-100'
+          )}
+        >
+          <MoreHorizontal className="size-3.5" />
+        </MenuTrigger>
+        <MenuContent align="start">
+          <MenuItem
+            onClick={() => {
+              setTitle(conversation.title ?? '')
+              setRenaming(true)
+            }}
+          >
+            Rename
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem tone="danger" onClick={() => setConfirming(true)}>
+            Delete chat
+          </MenuItem>
+        </MenuContent>
+      </MenuRoot>
+
+      {/* Mounted only while open. A sidebar holds twenty chat rows, and two
+          dialogs each — forty Base UI trees — is work the shell does on every
+          page load for something almost nobody opens. */}
+      {renaming && (
+        <Dialog
+          open
+          onOpenChange={setRenaming}
+          title="Rename this chat"
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setRenaming(false)}>
+                Cancel
+              </Button>
+              <Button
+                loading={saving}
+                disabled={title.trim().length === 0}
+                onClick={() => void rename()}
+                minWidth={92}
+              >
+                Rename
+              </Button>
+            </>
+          }
+        >
+          <Input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            aria-label="New chat title"
+            autoFocus
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && title.trim().length > 0) void rename()
+            }}
+          />
+        </Dialog>
+      )}
+
+      {confirming && (
+        <Dialog
+          open
+          onOpenChange={setConfirming}
+          title="Delete this chat?"
+          description="The whole conversation goes. The expert and its sources are untouched."
+          disablePointerDismissal
+          footer={
+            <>
+              <Button variant="ghost" onClick={() => setConfirming(false)}>
+                Keep it
+              </Button>
+              <Button
+                variant="danger"
+                loading={deleting}
+                onClick={() => void remove()}
+                minWidth={92}
+              >
+                Delete
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-fg-3">{chatTitle(conversation.title)}</p>
+        </Dialog>
+      )}
+    </>
+  )
+}

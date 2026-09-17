@@ -209,14 +209,17 @@ accepted source.
 
 ## `GET /experts/{slug}/corpus-report/export`
 
-Downloads the ledger. **Query:** `format` = `csv` | `ris` (default `csv`) ·
+Downloads the ledger. **Query:** `format` = `csv` | `ris` | `bibtex` (default `csv`) ·
 `decision` = `all` | `accepted` | `rejected`
 
 Returns a file with `Content-Disposition: attachment` and `X-Peritus-Export-Rows`.
-Both formats include rejected sources with exclusion reason and originating search.
+Every format includes rejected sources with exclusion reason and originating search.
 
 `ris` is the operationally important one: it is what Covidence, Zotero and EndNote import,
 so it is how a grey-literature source Peritus found reaches the review the user is running.
+`bibtex` is the same ledger for a bibliography built in LaTeX — entry types follow the shape of
+the source (`@article`, `@misc` for a preprint, `@techreport` for grey literature, `@online`),
+and the citation key is `peritus<id>`.
 
 **`507` if the corpus exceeds the 20,000-row export guard.** Exports are never partial — a
 truncated ledger would misrepresent the search, so no file is produced. Render the message

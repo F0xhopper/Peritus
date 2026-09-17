@@ -675,8 +675,21 @@ export type BuildEvent =
 
 export interface Citation {
   n: number
+  /** The source's title. It used to carry the fetcher and the screening score. */
   label: string
+  /**
+   * The passage itself, trimmed to ~600 characters by the API.
+   *
+   * Optional because an answer stored before the field existed has none: the
+   * panel falls back to naming the source rather than quoting something that is
+   * not a quotation.
+   */
+  text?: string | null
   source_id: number | null
+  /** This passage is on one side of a disagreement in the corpus. */
+  disputed?: boolean
+  /** What is disputed, in the subject's terms. */
+  dispute_points?: string[]
   /** Client-side only: the number this citation shows as within its answer —
    *  1, 2, 3 in order of first use — where `n` is the passage index. */
   display?: number
@@ -765,6 +778,40 @@ export interface ChatRetrievalAuditEvent {
   graph_expanded?: boolean
   passages?: RetrievalAuditPassage[]
   [k: string]: unknown
+}
+
+/**
+ * One stored retrieval trail, as `GET /experts/{slug}/answer-audits` returns it.
+ *
+ * The same facts as the live `retrieval_audit` event under different names —
+ * the event is written for a stream and this is written for a record — so the
+ * chat page maps one onto the other rather than teaching the card two shapes.
+ */
+export interface StoredAnswerAudit {
+  audit_id: string
+  conversation_id: string | null
+  question: string
+  subqueries: string[]
+  followup_queries: string[]
+  coverage_satisfied: boolean | null
+  second_pass: boolean | null
+  passages: {
+    retrieved: number
+    duplicate_hits: number
+    unique: number
+    in_context: number
+    cited: number
+    not_in_context: number
+    context_cap: number | null
+  }
+  sources: { in_context: number; cited: number }
+  contradiction_traversed: boolean | null
+  answer_chars: number
+  created_at: string
+}
+
+export interface AnswerAuditsPage {
+  audits: StoredAnswerAudit[]
 }
 
 export interface ChatDoneEvent {

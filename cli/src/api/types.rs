@@ -270,29 +270,16 @@ pub enum BuildEvent {
         #[serde(default)]
         forward: u64,
     },
-    // Validator scores are 0–10 (see validator.py's rubric).
     SourceValidated {
         title: String,
         passed: bool,
-        #[serde(default)]
-        q: f64,
-        #[serde(default)]
-        r: f64,
     },
     /// A borderline first-pass verdict re-examined by a stronger model, whose
-    /// score replaces it. `first_q`/`first_r` are null when the first pass
-    /// errored rather than scored.
+    /// verdict replaces it. The scores behind either verdict stay on the wire;
+    /// the TUI reports the outcome, not the arithmetic.
     SourceReviewed {
         title: String,
         passed: bool,
-        #[serde(default)]
-        q: f64,
-        #[serde(default)]
-        r: f64,
-        #[serde(default)]
-        first_q: Option<f64>,
-        #[serde(default)]
-        first_r: Option<f64>,
         #[serde(default)]
         reversed: bool,
     },
@@ -713,42 +700,24 @@ mod tests {
         ));
     }
 
+    // The event carries the scores and the reviewing model; the TUI reads the
+    // verdict and ignores the rest, so parsing must tolerate the extra fields.
     #[test]
-    fn source_reviewed_carries_both_verdicts() {
+    fn source_reviewed_carries_its_verdict() {
         let raw = r#"{"type":"source_reviewed","title":"On Being and Essence","source_type":"web",
             "first_q":5.5,"first_r":5.5,"q":7.0,"r":8.0,"passed":true,"reversed":true,
             "review_model":"claude-sonnet-5"}"#;
         match serde_json::from_str::<BuildEvent>(raw).unwrap() {
             BuildEvent::SourceReviewed {
-                first_q,
-                q,
+                title,
                 reversed,
                 passed,
-                ..
             } => {
-                assert_eq!(first_q, Some(5.5));
-                assert_eq!(q, 7.0);
+                assert_eq!(title, "On Being and Essence");
                 assert!(reversed && passed);
             }
             other => panic!("expected SourceReviewed, got {other:?}"),
         }
-    }
-
-    // An errored first pass has no scores to report; null must not become 0.0,
-    // which would read as "the model scored it zero".
-    #[test]
-    fn source_reviewed_tolerates_a_first_pass_that_never_scored() {
-        let raw = r#"{"type":"source_reviewed","title":"x","source_type":"web",
-            "first_q":null,"first_r":null,"q":6.0,"r":7.0,"passed":true,"reversed":false,
-            "review_model":"claude-sonnet-5"}"#;
-        assert!(matches!(
-            serde_json::from_str::<BuildEvent>(raw).unwrap(),
-            BuildEvent::SourceReviewed {
-                first_q: None,
-                first_r: None,
-                ..
-            }
-        ));
     }
 
     #[test]

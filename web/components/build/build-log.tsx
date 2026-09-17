@@ -5,7 +5,6 @@ import { ArrowDown, Check, ChevronRight, X } from 'lucide-react'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { cn } from '@/lib/cn'
-import { formatScore } from '@/lib/format'
 import { STAGE_LABEL, groupRows, rowKey, type LogRow, type RowGroup } from '@/lib/build/reducer'
 import { useIsTabletUp } from '@/hooks/use-media-query'
 
@@ -41,11 +40,14 @@ export function BuildLog({
   rows,
   live,
   reconnecting,
+  ended = false,
   className,
 }: {
   rows: LogRow[]
   live: boolean
   reconnecting: boolean
+  /** The job has finished, one way or another. Changes what "empty" means. */
+  ended?: boolean
   className?: string
 }) {
   const isTabletUp = useIsTabletUp()
@@ -141,7 +143,14 @@ export function BuildLog({
         className="anchor-none h-full overflow-y-auto overscroll-contain pan-y rounded-card bg-panel font-mono text-xs"
       >
         {items.length === 0 ? (
-          <p className="p-3 text-fg-3">Waiting for Peritus to start this build…</p>
+          <p className="p-3 text-fg-3">
+            {/* A finished build with no rows is not a build about to start. The
+                page said "Build finished" and "Waiting for Peritus to start
+                this build…" on the same screen. */}
+            {ended
+              ? 'No log was kept for this build.'
+              : 'Waiting for Peritus to start this build…'}
+          </p>
         ) : (
           <div style={{ height: virtualizer.getTotalSize() }} className="relative w-full">
             {virtualizer.getVirtualItems().map((virtualRow) => {
@@ -223,23 +232,6 @@ function Row({ row, indent }: { row: LogRow; indent?: boolean }) {
       <span className={cn('min-w-0 flex-1 md:truncate', MESSAGE_COLOUR[row.kind])}>
         {row.message}
       </span>
-      {row.scores && (
-        // The words where there is room for them; a nobody-outside-the-team
-        // "q8.5 r9.0" everywhere else, with the meaning on the title.
-        <span className="shrink-0 text-fg-3" title="Quality · relevance, each out of 10">
-          {row.scores.firstQ !== undefined && row.scores.firstQ !== null && (
-            <span className="text-fg-3">
-              {formatScore(row.scores.firstQ)}/{formatScore(row.scores.firstR)}{' '}
-              <span aria-hidden="true">→</span>{' '}
-            </span>
-          )}
-          <span className="xl:hidden">q</span>
-          <span className="hidden xl:inline">quality </span>
-          {formatScore(row.scores.q)} <span className="xl:hidden">r</span>
-          <span className="hidden xl:inline">· relevance </span>
-          {formatScore(row.scores.r)}
-        </span>
-      )}
     </div>
   )
 }

@@ -120,7 +120,12 @@ function CitationChip({
           })
         }
       }}
-      aria-label={`Citation ${shown}: ${citation.label}`}
+      // The label is the source's title. It used to be "Title — Exa · Q:8.5",
+      // so a screen reader read a vendor name and a screening score aloud on
+      // every marker in every answer.
+      // "Citation 1: <title>", and the dispute after it rather than inside the
+      // name — the number and the source are what identify the chip.
+      aria-label={`Citation ${shown}: ${citation.label}${citation.disputed ? ' — disputed' : ''}`}
       aria-pressed={selected}
       className={cn(
         // The visible chip sits in the line of text; on a coarse pointer the
@@ -132,7 +137,11 @@ function CitationChip({
         'transition-colors duration-(--dur-1)',
         selected
           ? 'bg-fg text-bg'
-          : 'bg-raised text-fg ring-1 ring-border ring-inset hover:bg-border'
+          : citation.disputed
+            ? // Marked, not coloured in: the passage is still evidence, it is
+              // evidence something else in this corpus argues with.
+              'bg-raised text-fg ring-1 ring-warn/70 ring-inset hover:bg-border'
+            : 'bg-raised text-fg ring-1 ring-border ring-inset hover:bg-border'
       )}
     >
       {shown}
@@ -148,8 +157,29 @@ function CitationChip({
           passing one would put role="button" on an element that has it. */}
       <PopoverTrigger render={chip} />
       <PopoverContent side="top" className="hidden lg:block">
-        <p className="text-xs text-fg-3">Passage {shown}</p>
-        <p className="mt-1 text-sm text-fg-2">{truncate(citation.label, 240)}</p>
+        {/* The passage where there is one — the point of a preview is to show
+            the evidence without leaving the sentence. The title is the caption
+            under it, not the preview itself. */}
+        {citation.text ? (
+          <>
+            <p className="text-sm text-fg-2">{truncate(citation.text, 280)}</p>
+            <p className="mt-1.5 text-xs text-fg-3">
+              Passage {shown} · {truncate(citation.label, 80)}
+            </p>
+            {citation.disputed && (
+              <p className="mt-1 text-xs text-warn">
+                {citation.dispute_points?.[0]
+                  ? truncate(citation.dispute_points[0], 160)
+                  : 'Another source in this corpus disagrees with this.'}
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-xs text-fg-3">Passage {shown}</p>
+            <p className="mt-1 text-sm text-fg-2">{truncate(citation.label, 240)}</p>
+          </>
+        )}
       </PopoverContent>
     </PopoverRoot>
   )
@@ -205,7 +235,11 @@ export function CitationList({
               selected === citation.n ? 'text-fg' : 'text-fg-3 hover:text-fg-2'
             )}
           >
-            <span className="shrink-0 font-mono text-fg-2">[{citation.display ?? citation.n}]</span>
+            <span
+              className={cn('shrink-0 font-mono', citation.disputed ? 'text-warn' : 'text-fg-2')}
+            >
+              [{citation.display ?? citation.n}]
+            </span>
             <span className="min-w-0 flex-1">{citation.label}</span>
           </button>
         </li>

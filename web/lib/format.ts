@@ -17,13 +17,25 @@ export function notRecorded(): string {
 
 export function formatNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return NOT_RECORDED
-  return value.toLocaleString('en-GB')
+  return formatInt(value)
 }
 
-/** A 0–10 score to one decimal. */
-export function formatScore(value: number | null | undefined): string {
-  if (value === null || value === undefined) return NOT_RECORDED
-  return value.toFixed(1)
+/**
+ * An integer with thousands separators, written out rather than delegated.
+ *
+ * `toLocaleString` is `Intl`, and `Intl` is not stable across engines — the
+ * same rule that keeps every rendered date out of it (see `formatDate`). A
+ * grouped number is three lines of arithmetic; a hydration mismatch is not.
+ */
+export function formatInt(value: number): string {
+  const negative = value < 0
+  const digits = Math.abs(Math.trunc(value)).toString()
+  let out = ''
+  for (let i = 0; i < digits.length; i += 1) {
+    if (i > 0 && (digits.length - i) % 3 === 0) out += ','
+    out += digits[i]
+  }
+  return negative ? `-${out}` : out
 }
 
 export function formatPercent(value: number | null | undefined, digits = 0): string {

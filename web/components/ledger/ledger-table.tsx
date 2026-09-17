@@ -1,25 +1,30 @@
 'use client'
 
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown, ChevronRight } from 'lucide-react'
 
-import { Chip } from '@/components/ui/chip'
+import { DateText } from '@/components/ui/relative-time'
 import { cn } from '@/lib/cn'
-import { describeDiscovery, describeTextRead, sourceKind, sourceProvider } from '@/lib/source-kind'
-import { formatScore, hostOf, truncate } from '@/lib/format'
+import { sourceKind, sourceProvider } from '@/lib/source-kind'
+import { hostOf } from '@/lib/format'
 import type { LedgerSource, SourceSort } from '@/lib/api/types'
 
 /**
- * The ledger, as a table.
- *
- * Every source the corpus was built from **and every source it rejected**, with
- * the reason. The rejected half is a first-class view, not a debug panel: the
- * excluded sources are the evidence that the included ones were selected, and
- * nothing else in the product makes that argument.
+ * The sources, as a table.
  *
  * 28px rows (40px on touch, from `--table-row-h`), a sticky header, and a
  * horizontal scroll container with the title column `sticky left-0` at `md` —
  * a table is one of the three things allowed to scroll sideways, and only
  * inside its own box.
+ *
+ * **The title gets the width.** It was capped at 22rem inside a table twice
+ * that wide, so every real title was cut ("A Virulent Strain of Deformed Wing
+ * Virus (DWV) of Hon…") while the middle of the table stood empty — and the
+ * host, which shared that truncated cell, survived only on short titles. The
+ * host now has its own muted column, because telling a doi.org paper from a
+ * blog post is most of what a reader scans this list for.
+ *
+ * **A row opens a record, and now says so**: the cursor, a trailing chevron and
+ * an accessible name. The detail panel used to be discoverable by accident.
  */
 
 export interface Column {
@@ -28,20 +33,16 @@ export interface Column {
   /** Only the columns the API can actually sort by are sortable. */
   sort?: SourceSort
   align?: 'left' | 'right'
-  /** Dropped first when the table is narrow. */
-  optional?: boolean
+  /** Hidden below `lg`, where the table is inside a horizontal scroller. */
+  wide?: boolean
 }
 
 export const COLUMNS: Column[] = [
-  { key: 'title', label: 'Source' },
+  { key: 'title', label: 'Source', sort: 'title' },
+  { key: 'host', label: 'Where', wide: true },
   { key: 'type', label: 'Kind', sort: 'type' },
-  { key: 'decision', label: 'Decision', sort: 'decision' },
-  { key: 'quality', label: 'Quality', sort: 'quality', align: 'right' },
-  { key: 'relevance', label: 'Relevance', sort: 'relevance', align: 'right' },
-  { key: 'reason', label: 'Why', optional: true },
-  { key: 'discovered', label: 'How found', sort: 'discovered_via', optional: true },
-  { key: 'text', label: 'Text read', optional: true },
-  { key: 'passages', label: 'Passages', align: 'right', optional: true },
+  { key: 'added', label: 'Added', sort: 'added', align: 'right', wide: true },
+  { key: 'passages', label: 'Passages', align: 'right' },
 ]
 
 export function LedgerTable({
@@ -50,7 +51,6 @@ export function LedgerTable({
   onSort,
   onSelect,
   selectedId,
-  visible,
   pending,
 }: {
   sources: LedgerSource[]
@@ -58,13 +58,9 @@ export function LedgerTable({
   onSort: (sort: SourceSort) => void
   onSelect: (source: LedgerSource) => void
   selectedId: number | null
-  /** Column keys to render, from the column picker. */
-  visible: Set<string>
-  /** True during a filter transition: the table dims rather than spinning. */
+  /** True during a sort transition: the table dims rather than spinning. */
   pending: boolean
 }) {
-  const columns = COLUMNS.filter((column) => visible.has(column.key))
-
   return (
     <div
       className={cn(
@@ -73,10 +69,18 @@ export function LedgerTable({
         pending && 'opacity-60'
       )}
     >
-      <table className="w-full min-w-[720px] border-collapse text-sm">
+      <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
+        <colgroup>
+          <col />
+          <col className="hidden w-40 lg:table-column" />
+          <col className="w-28" />
+          <col className="hidden w-24 lg:table-column" />
+          <col className="w-20" />
+          <col className="w-8" />
+        </colgroup>
         <thead className="sticky top-0 z-10 bg-panel">
           <tr>
-            {columns.map((column) => (
+            {COLUMNS.map((column) => (
               <th
                 key={column.key}
                 scope="col"
@@ -85,6 +89,7 @@ export function LedgerTable({
                   // capitals read as shouting next to the rows beneath.
                   'border-b border-border px-2 py-1.5 text-label font-normal tracking-[0.04em] whitespace-nowrap text-fg-3 uppercase',
                   column.align === 'right' ? 'text-right' : 'text-left',
+                  column.wide && 'hidden lg:table-cell',
                   // The title column stays put while the rest scrolls.
                   column.key === 'title' && 'sticky left-0 z-20 bg-panel'
                 )}
@@ -100,7 +105,7 @@ export function LedgerTable({
                       // table read-only on an iPad.
                       // `uppercase` again: a button does not inherit the
                       // header's text-transform (the UA sheet resets it), so
-                      // the sortable headers read "Decision" beside "SOURCE".
+                      // the sortable headers read "Kind" beside "PASSAGES".
                       'inline-flex h-(--icon-btn) items-center gap-1 uppercase',
                       'transition-colors duration-(--dur-1) hover:text-fg-2',
                       sort === column.sort && 'text-fg-2'
@@ -114,6 +119,9 @@ export function LedgerTable({
                 )}
               </th>
             ))}
+            <th scope="col" className="border-b border-border">
+              <span className="sr-only">Details</span>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -132,18 +140,20 @@ export function LedgerTable({
                 }
               }}
               aria-selected={selectedId === source.id}
+              aria-label={`${source.title} — open details`}
               className={cn(
-                'h-(--table-row-h) cursor-default transition-colors duration-(--dur-1)',
+                'group h-(--table-row-h) cursor-pointer transition-colors duration-(--dur-1)',
                 'focus-visible:bg-raised focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-fg',
                 selectedId === source.id ? 'bg-raised' : 'hover:bg-raised'
               )}
             >
-              {columns.map((column) => (
+              {COLUMNS.map((column) => (
                 <td
                   key={column.key}
                   className={cn(
-                    'border-b border-border-soft px-2',
+                    'overflow-hidden border-b border-border-soft px-2',
                     column.align === 'right' ? 'text-right' : 'text-left',
+                    column.wide && 'hidden lg:table-cell',
                     column.key === 'title' &&
                       cn('sticky left-0 z-10', selectedId === source.id ? 'bg-raised' : 'bg-panel')
                   )}
@@ -151,6 +161,12 @@ export function LedgerTable({
                   <Cell column={column.key} source={source} />
                 </td>
               ))}
+              <td className="border-b border-border-soft pr-1.5">
+                <ChevronRight
+                  aria-hidden="true"
+                  className="size-3.5 text-fg-4 transition-colors duration-(--dur-1) group-hover:text-fg-2"
+                />
+              </td>
             </tr>
           ))}
         </tbody>
@@ -163,68 +179,32 @@ function Cell({ column, source }: { column: string; source: LedgerSource }) {
   switch (column) {
     case 'title':
       return (
-        <span className="block max-w-[22rem] truncate text-fg-2" title={source.title}>
+        <span className="block truncate text-fg-2" title={source.title}>
           {source.title}
-          {source.url && <span className="ml-1.5 text-xs text-fg-3">{hostOf(source.url)}</span>}
+          {source.author && <span className="ml-1.5 text-xs text-fg-3">{source.author}</span>}
         </span>
+      )
+
+    case 'host':
+      return source.url ? (
+        <span className="block truncate text-xs text-fg-3">{hostOf(source.url)}</span>
+      ) : (
+        <span className="text-fg-4">—</span>
       )
 
     case 'type':
       // No wrap: "Thought leader" broke onto two lines and doubled its row.
       return (
         <span
-          className="whitespace-nowrap text-fg-3"
+          className="block truncate whitespace-nowrap text-fg-3"
           title={`Found via ${sourceProvider(source.source_type)}`}
         >
           {sourceKind(source.source_type)}
         </span>
       )
 
-    case 'decision':
-      // A filled chip, which the design reserves for exactly this column and
-      // citation markers.
-      return source.decision === 'accepted' ? (
-        <Chip tone="ok">Kept</Chip>
-      ) : (
-        <Chip tone="bad">Dropped</Chip>
-      )
-
-    case 'quality':
-      return <ScoreCell value={source.quality_score} />
-
-    case 'relevance':
-      return <ScoreCell value={source.relevance_score} />
-
-    case 'reason':
-      // Null on every kept row by contract — a kept source has no reason to be
-      // dropped. An empty cell says that; a dash read as missing data.
-      return source.drop_reason ? (
-        <span className="block max-w-[18rem] truncate text-xs text-fg-3" title={source.drop_reason}>
-          {source.drop_reason}
-        </span>
-      ) : source.decision === 'accepted' ? null : (
-        <span className="text-fg-3">—</span>
-      )
-
-    case 'discovered':
-      return source.discovered_via ? (
-        <span className="text-xs text-fg-3" title={source.discovered_via}>
-          {truncate(describeDiscovery(source.discovered_via), 32)}
-        </span>
-      ) : (
-        <span className="text-fg-3">—</span>
-      )
-
-    case 'text':
-      if (!source.full_text_method) return <span className="text-fg-3">—</span>
-      // "abstract" means the source was judged, and is answering questions, on
-      // its abstract alone. That is the first thing a reviewer asks about a
-      // corpus, so it is coloured rather than buried.
-      return source.full_text_method === 'abstract' ? (
-        <span className="text-xs text-warn">Abstract only</span>
-      ) : (
-        <span className="text-xs text-fg-3">{describeTextRead(source.full_text_method)}</span>
-      )
+    case 'added':
+      return <DateText iso={source.created_at} className="text-xs text-fg-3" />
 
     case 'passages':
       return <span className="text-fg-3">{source.passage_count}</span>
@@ -232,16 +212,4 @@ function Cell({ column, source }: { column: string; source: LedgerSource }) {
     default:
       return null
   }
-}
-
-/**
- * A score plus a 4px inline bar.
- *
- * The bar fills with a `scaleX` transform on first paint only — a re-sort or a
- * filter change is instant, because animating two hundred bars on every
- * interaction is noise, not feedback.
- */
-function ScoreCell({ value }: { value: number | null }) {
-  if (value === null) return <span className="text-fg-3">—</span>
-  return <span className="font-mono text-xs text-fg-2">{formatScore(value)}</span>
 }

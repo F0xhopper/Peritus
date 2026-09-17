@@ -190,10 +190,9 @@ test('the overview reads correctly and gates chat on readiness', async ({ page }
   // Properties, read off the real payload.
   // Status and readiness are one line now, not two rows saying the same thing.
   await expect(content(page).getByText('Ready · concept map built')).toBeVisible()
-  await expect(content(page).getByText('21 kept of 30 screened')).toBeVisible()
-  // The acceptance rate and the rubric are stated, not implied.
-  await expect(content(page).getByText(/70.0%/)).toBeVisible()
-  await expect(content(page).getByText('v5-structured-q5r6', { exact: false })).toBeVisible()
+  // The source count, off the expert payload rather than a screening report.
+  await expect(content(page).getByRole('term').filter({ hasText: 'Sources' })).toBeVisible()
+  await expect(content(page).getByRole('definition').filter({ hasText: /^21$/ })).toBeVisible()
 
   // Chat is offered, because readiness is past pending.
   await expect(page.getByRole('heading', { name: /^Ask Dr\. Marta Belen$/ })).toBeVisible()
@@ -252,6 +251,34 @@ test('an answer streams, cites its sources, and flags an invented marker', async
   })
 
   await expectResponsive(page, isTouchProject(testInfo.project.name))
+})
+
+test('a stored answer keeps its passage, its trail and its disagreement', async ({ page }) => {
+  await page.goto('/chats/2f2b8a4e-1c9d-4f8a-9b1e-7c0d2a5f6e31')
+  await waitForHydration(page)
+
+  // The trail is fetched from the record, so it outlives the stream that
+  // produced it — this page was reloaded and the answer still accounts for
+  // itself. Read before the citation is opened: below `lg` the passage sheet
+  // covers the transcript and makes everything under it inert.
+  await content(page)
+    .getByRole('button', { name: /Show how this was answered/ })
+    .click()
+  await expect(content(page).getByText(/Grounded in 2 of 23 retrieved passages/)).toBeVisible({
+    timeout: 15_000,
+  })
+
+  // The citation opens the passage, not the source's title. The API sends the
+  // text with the citation; before that this panel quoted the label.
+  await content(page)
+    .getByRole('button', { name: /^Citation 1:/ })
+    .first()
+    .click()
+  const panel = page
+    .getByRole('complementary', { name: 'Cited passage' })
+    .or(page.getByRole('dialog', { name: 'Cited passage' }))
+  await expect(panel.getByText(/Removal reduced mite load by 43%/)).toBeVisible({ timeout: 15_000 })
+  await expect(panel.getByText(/Passage 1 of/)).toBeVisible()
 })
 
 test('a busy conversation says so and counts down instead of retrying blindly', async ({
@@ -331,6 +358,10 @@ test('the command palette finds an expert and jumps to it', async ({ page }, tes
   )
 
   await page.goto('/experts')
+  // ⌘K is a window listener React attaches on hydration; pressing it a
+  // millisecond early is a key that lands with nothing bound to it, and the
+  // failure then looks like a broken palette.
+  await waitForHydration(page)
   await page.keyboard.press('ControlOrMeta+k')
 
   const search = page.getByLabel('Search experts, chats and actions')

@@ -9,7 +9,7 @@ import { Empty } from '@/components/ui/empty'
 import { StatTile } from '@/components/ui/stat-tile'
 import { isBuilding } from '@/components/ui/status-dot'
 import { cn } from '@/lib/cn'
-import { formatScore, plural } from '@/lib/format'
+import { plural } from '@/lib/format'
 import { getBilling, getConversations, getExperts } from '@/lib/api/data'
 
 export const metadata = { title: 'Home' }
@@ -22,11 +22,7 @@ export default async function ExpertsHomePage() {
   ])
 
   const building = experts.filter(isBuilding)
-  const scored = experts.filter((e) => e.avg_quality !== null)
-  const meanQuality =
-    scored.length > 0
-      ? scored.reduce((sum, e) => sum + (e.avg_quality ?? 0), 0) / scored.length
-      : null
+  const sources = experts.reduce((sum, expert) => sum + expert.source_count, 0)
   // Every credit element is hidden when the API is not enforcing them, rather
   // than showing a balance that means nothing (web-production.md, rule 3).
   const showCredits = credits?.credits_enforced === true
@@ -88,11 +84,7 @@ export default async function ExpertsHomePage() {
                 }
               />
             ) : (
-              <StatTile
-                label="Mean quality"
-                value={formatScore(meanQuality)}
-                hint="across scored sources"
-              />
+              <StatTile label="Sources" value={sources} hint="across every expert" />
             )}
           </div>
 

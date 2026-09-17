@@ -73,8 +73,6 @@ export interface LogRow {
   /** Which pipeline stage was running. Rendered in the second column. */
   stage: StageName | null
   message: string
-  /** Rendered right-aligned in monospace: `q 7.5 · r 8.0`. */
-  scores?: { q: number; r: number; firstQ?: number | null; firstR?: number | null }
   /** Rows in a collapsed group share a `group`; the group counts as one row. */
   group?: string
   raw: BuildEvent
@@ -503,12 +501,6 @@ export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEve
         message:
           `${title}${reviewed ? ' (reviewed' + (event.reversed ? ', reversed' : '') + ')' : ''}` +
           (passed ? '' : ` — ${reason}`),
-        scores: {
-          q: num(event.q),
-          r: num(event.r),
-          firstQ: reviewed ? (event.first_q as number | null) : undefined,
-          firstR: reviewed ? (event.first_r as number | null) : undefined,
-        },
       })
       return next
     }

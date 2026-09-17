@@ -3,48 +3,47 @@
 import { ExternalLink, MessageSquare, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
+import Link from 'next/link'
+
 import { DateText } from '@/components/ui/relative-time'
 import { Button } from '@/components/ui/button'
-import { Chip } from '@/components/ui/chip'
 import { Dialog } from '@/components/ui/dialog'
-import { cn } from '@/lib/cn'
-import { describeDiscovery, describeTextRead, sourceProvider } from '@/lib/source-kind'
-import { formatNumber, formatScore, hostOf, humanise } from '@/lib/format'
+import { describeDifficulty, describeTextRead, sourceKind, sourceProvider } from '@/lib/source-kind'
+import { formatNumber, hostOf, humanise } from '@/lib/format'
 import type { LedgerSource } from '@/lib/api/types'
 import { useApiAction } from '@/hooks/use-api-action'
 import { apiVoid } from '@/lib/api/client'
 
 /**
- * One source's full record.
+ * One source's record: what it is, what it covers, and how to open it.
  *
- * The two fields the card list leaves out — rubric version and the identifiers
- * — live here, along with the parts of the trail that only matter once you have
- * picked a row: which search found it, what it was first scored at before
- * review, and how much of its text was actually read.
+ * Everything the card list leaves out lives here — the identifiers, the key
+ * claims and the concepts it covers — because none of them is something anyone
+ * scans a list for.
  *
- * Two provenance details are called out rather than listed flatly, because
- * they change how a reader should weigh the row:
- *
- * - **A reviewed row is not a less reliable row.** It is the one place in the
- *   ledger where a borderline decision was made twice, by a stronger model
- *   reading far more of the source.
- * - **A duplicate's zeros are not a quality verdict.** A source dropped by
- *   fingerprinting was never judged on merit.
+ * **One vocabulary with the table and the chat's passage panel.** This panel
+ * used to say "Type: Openalex" (the fetcher's key) beside "Content: Paper"
+ * while the table said "Kind: Paper" and the chat said "Type: Exa" — three
+ * names for one fact. *Kind* is what it is; *Found via* is where it came from;
+ * and the numbers that meant nothing without their scale (Difficulty 5, 48,210
+ * characters) are words now, or gone.
  */
 export function RowDetail({
   source,
   slug,
   onAsk,
+  asking = false,
   onDeleted,
 }: {
   source: LedgerSource
   slug: string
   onAsk?: (title: string) => void
+  /** True while the chat that question will be asked in is being created. */
+  asking?: boolean
   /** Present only for the owner. Without it there is no Remove button. */
   onDeleted?: () => void
 }) {
   const [confirming, setConfirming] = useState(false)
-  const isDuplicate = source.drop_reason?.startsWith('duplicate of') ?? false
 
   const { run: remove, pending: deleting } = useApiAction(
     () =>
@@ -67,96 +66,35 @@ export function RowDetail({
   return (
     <div className="space-y-4 text-sm">
       <div>
-        <div className="flex items-start justify-between gap-2">
-          <h3 className="min-w-0 flex-1 font-medium text-fg">{source.title}</h3>
-          {source.decision === 'accepted' ? (
-            <Chip tone="ok">Kept</Chip>
-          ) : (
-            <Chip tone="bad">Dropped</Chip>
-          )}
-        </div>
+        <h3 className="min-w-0 flex-1 font-medium text-fg">{source.title}</h3>
         {source.author && <p className="mt-0.5 text-xs text-fg-3">{source.author}</p>}
       </div>
 
-      {source.drop_reason && (
-        <div className={cn('rounded-card px-2.5 py-2', isDuplicate ? 'bg-raised' : 'bg-bad/8')}>
-          <p className={cn('text-xs', isDuplicate ? 'text-fg-3' : 'text-bad')}>
-            {source.drop_reason}
-          </p>
-          {isDuplicate && (
-            <p className="mt-1 text-xs text-fg-3">
-              Dropped by content fingerprinting, so its zero scores are not a quality verdict — it
-              was never judged on merit.
-            </p>
-          )}
-        </div>
-      )}
-
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-        <Field label="Type">{humanise(source.source_type)}</Field>
-        {source.content_type && <Field label="Content">{humanise(source.content_type)}</Field>}
-        <Field label="Quality">{formatScore(source.quality_score)}</Field>
-        <Field label="Relevance">{formatScore(source.relevance_score)}</Field>
-        {source.source_tier && <Field label="Tier">{humanise(source.source_tier)}</Field>}
-        {source.difficulty !== null && <Field label="Difficulty">{source.difficulty}</Field>}
-        <Field label="Passages">{formatNumber(source.passage_count)}</Field>
-        {source.text_chars !== null && (
-          <Field label="Characters">{formatNumber(source.text_chars)}</Field>
+        <Field label="Kind">{sourceKind(source.source_type)}</Field>
+        <Field label="Found via">{sourceProvider(source.source_type)}</Field>
+        {source.source_tier && <Field label="Tier">{humanise(source.source_tier)} source</Field>}
+        {source.difficulty !== null && (
+          <Field label="Level" hint={`${source.difficulty} of 5`}>
+            {describeDifficulty(source.difficulty)}
+          </Field>
         )}
+        {/* Whether a paper's one passage came from its abstract or its full
+            text is the fact that decides how far to trust a citation from it. */}
+        {source.full_text_method && (
+          <Field label="Read">
+            {source.full_text_method === 'abstract' ? (
+              <span className="text-warn">Abstract only</span>
+            ) : (
+              describeTextRead(source.full_text_method)
+            )}
+          </Field>
+        )}
+        <Field label="Passages">{formatNumber(source.passage_count)}</Field>
         <Field label="Added">
           <DateText iso={source.created_at} />
         </Field>
-        {source.rubric_version && <Field label="Screening rules">{source.rubric_version}</Field>}
       </dl>
-
-      {source.reviewed && (
-        <div className="rounded-card bg-raised px-2.5 py-2">
-          <p className="text-xs font-medium text-fg-2">Reviewed a second time</p>
-          <p className="mt-1 text-xs text-fg-3">
-            First pass scored q{formatScore(source.first_pass_quality)} r
-            {formatScore(source.first_pass_relevance)}; {source.review_model ?? 'a stronger model'}{' '}
-            re-read it and settled on q{formatScore(source.quality_score)} r
-            {formatScore(source.relevance_score)}. The second verdict stands.
-          </p>
-        </div>
-      )}
-
-      {source.full_text_method && (
-        <div>
-          <p className="text-label tracking-[0.04em] text-fg-3 uppercase">Text read</p>
-          <p className="mt-1 text-xs">
-            {source.full_text_method === 'abstract' ? (
-              <span className="text-warn">
-                Abstract only — this source was judged, and answers questions, on its abstract.
-              </span>
-            ) : (
-              <span className="text-fg-2">{describeTextRead(source.full_text_method)}</span>
-            )}
-          </p>
-        </div>
-      )}
-
-      {source.discovered_via && (
-        <div>
-          <p className="text-label tracking-[0.04em] text-fg-3 uppercase">How it was found</p>
-          <p className="mt-1 text-xs text-fg-2">
-            {describeDiscovery(source.discovered_via)} · via {sourceProvider(source.source_type)}
-          </p>
-          {source.gap_filled_for_concept && (
-            <p className="mt-1 text-xs text-fg-3">
-              This search ran only because{' '}
-              <span className="text-fg">{source.gap_filled_for_concept}</span> had no accepted
-              source yet.
-            </p>
-          )}
-          {source.snowball_seed_urls && source.snowball_seed_urls.length > 0 && (
-            <p className="mt-1 text-xs text-fg-3">
-              Followed from {source.snowball_seed_urls.length} citing source
-              {source.snowball_seed_urls.length === 1 ? '' : 's'}.
-            </p>
-          )}
-        </div>
-      )}
 
       {source.covered_concepts.length > 0 && (
         <div>
@@ -165,7 +103,12 @@ export function RowDetail({
             {source.covered_concepts.map((concept, index) => (
               <span key={concept}>
                 {index > 0 && <span className="text-fg-4"> · </span>}
-                <span className="text-fg">{concept}</span>
+                <Link
+                  href={`/experts/${slug}/sources?concept=${encodeURIComponent(concept)}`}
+                  className="text-fg underline decoration-fg-4 underline-offset-2 hover:decoration-fg-2"
+                >
+                  {concept}
+                </Link>
               </span>
             ))}
           </p>
@@ -230,7 +173,7 @@ export function RowDetail({
           </a>
         )}
         {onAsk && (
-          <Button variant="outline" size="sm" onClick={() => onAsk(source.title)}>
+          <Button variant="outline" size="sm" loading={asking} onClick={() => onAsk(source.title)}>
             <MessageSquare className="size-3" />
             Ask about this
           </Button>
@@ -252,7 +195,7 @@ export function RowDetail({
         open={confirming}
         onOpenChange={setConfirming}
         title="Remove this source?"
-        description="Its passages go too, so answers will stop citing it. The build's screening record keeps the row."
+        description="Its passages go too, so answers will stop citing it."
         disablePointerDismissal
         footer={
           <>
@@ -271,11 +214,22 @@ export function RowDetail({
   )
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string
+  /** The raw value behind a word — "Expert" carries "5 of 5" on its title. */
+  hint?: string
+  children: React.ReactNode
+}) {
   return (
     <div className="min-w-0">
       <dt className="text-fg-3">{label}</dt>
-      <dd className="truncate text-fg-2">{children}</dd>
+      <dd title={hint} className="truncate text-fg-2">
+        {children}
+      </dd>
     </div>
   )
 }

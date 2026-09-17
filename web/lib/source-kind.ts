@@ -86,3 +86,17 @@ export function describeTextRead(method: string | null | undefined): string {
   }
   return known[method] ?? method.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase())
 }
+
+/**
+ * The validator's 1–5 difficulty, in words.
+ *
+ * The number alone ("Difficulty 5") is a scale the reader was never shown: 1 is
+ * something you could hand a beginner, 5 needs the field's own vocabulary. The
+ * number stays on the `title` for anyone who wants it.
+ */
+const DIFFICULTY = ['Introductory', 'Accessible', 'Intermediate', 'Advanced', 'Expert']
+
+export function describeDifficulty(level: number | null | undefined): string {
+  if (level === null || level === undefined) return '—'
+  return DIFFICULTY[Math.min(Math.max(Math.round(level), 1), 5) - 1]
+}

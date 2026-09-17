@@ -2,6 +2,7 @@
 
 import { Menu, MoreHorizontal, Search } from 'lucide-react'
 import Link from 'next/link'
+import { usePathname } from 'next/navigation'
 
 import { Avatar } from '@/components/identity/avatar'
 import { MenuContent, MenuRoot, MenuTrigger } from '@/components/ui/menu'
@@ -42,7 +43,10 @@ export interface TopBarProps {
 }
 
 export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch }: TopBarProps) {
-  const { openNav, openPalette, navTriggerRef } = useShell()
+  const { openNav, openPalette, navTriggerRef, sidebarCollapsed } = useShell()
+  // Both of these live in the sidebar from `lg`. Folded away, they come back
+  // here, or a collapsed shell would have no navigation and no search at all.
+  const railOnly = sidebarCollapsed ? '' : 'lg:hidden'
 
   return (
     <header
@@ -55,25 +59,19 @@ export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch 
         type="button"
         onClick={openNav}
         aria-label="Open navigation"
-        className="grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg lg:hidden"
+        className={cn(
+          'grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3',
+          'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
+          railOnly
+        )}
       >
         <Menu className="size-4" />
       </button>
 
-      {expert && (
-        <Link
-          href={`/experts/${expert.name}`}
-          className="flex min-h-(--row-h) min-w-0 shrink-0 items-center gap-1.5"
-        >
-          <Avatar expert={expert} size={20} />
-          <span className="hidden max-w-40 truncate text-sm text-fg-2 sm:inline">
-            {displayName(expert)}
-          </span>
-          <span aria-hidden="true" className="hidden text-fg-4 sm:inline">
-            /
-          </span>
-        </Link>
-      )}
+      {/* On the expert's own Overview the crumb is text, not a link to the page
+          it is already on — a self-link is a dead end a keyboard user has to
+          tab through and a screen reader announces as a way out. */}
+      {expert && <Crumb expert={expert} />}
 
       {/* Not a heading: this is the breadcrumb's leaf, and the page below it
           owns the document's one `h1`. Two `h1`s per page is a real
@@ -96,7 +94,11 @@ export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch 
             type="button"
             onClick={openPalette}
             aria-label="Search"
-            className="grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg lg:hidden"
+            className={cn(
+              'grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3',
+              'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
+              railOnly
+            )}
           >
             <Search className="size-4" />
           </button>
@@ -117,5 +119,35 @@ export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch 
         )}
       </div>
     </header>
+  )
+}
+
+function Crumb({ expert }: { expert: ExpertSummary }) {
+  const pathname = usePathname()
+  const here = pathname === `/experts/${expert.name}`
+  const inner = (
+    <>
+      <Avatar expert={expert} size={20} />
+      <span className="hidden max-w-40 truncate text-sm text-fg-2 sm:inline">
+        {displayName(expert)}
+      </span>
+      <span aria-hidden="true" className="hidden text-fg-4 sm:inline">
+        /
+      </span>
+    </>
+  )
+  const className = 'flex min-h-(--row-h) min-w-0 shrink-0 items-center gap-1.5'
+
+  if (here) {
+    return (
+      <span aria-current="page" className={className}>
+        {inner}
+      </span>
+    )
+  }
+  return (
+    <Link href={`/experts/${expert.name}`} className={className}>
+      {inner}
+    </Link>
   )
 }

@@ -188,11 +188,10 @@ describe('the stage timeline', () => {
 })
 
 describe('screening rows', () => {
-  it('marks a kept source as a keep row with its scores', () => {
+  it('marks a kept source as a keep row', () => {
     const state = play('created', 'source_validated_keep')
     const row = state.rows.at(-1)!
     expect(row.kind).toBe('keep')
-    expect(row.scores).toMatchObject({ q: 8.5, r: 9 })
     expect(state.counts.kept).toBe(1)
   })
 
@@ -210,11 +209,6 @@ describe('screening rows', () => {
     const state = play('created', 'source_validated_keep', 'source_reviewed')
     expect(state.counts.kept).toBe(1)
     expect(state.rows.at(-1)!.message).toContain('reviewed, reversed')
-  })
-
-  it('shows the first-pass scores on a reviewed row', () => {
-    const state = play('created', 'source_reviewed')
-    expect(state.rows.at(-1)!.scores).toMatchObject({ firstQ: 5.5, firstR: 5.5, q: 8, r: 8.5 })
   })
 })
 

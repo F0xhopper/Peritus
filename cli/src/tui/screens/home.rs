@@ -438,12 +438,6 @@ impl HomeScreen {
                         },
                     ),
                 ];
-                // Quality is what the validator scored it; absent for uploads,
-                // which bypass validation.
-                match src.quality_score {
-                    Some(q) => spans.push(Span::styled(format!("{q:>4.1} "), Theme::normal())),
-                    None => spans.push(Span::styled("   · ", Theme::dim())),
-                }
                 spans.push(Span::styled(
                     format!("{:>4}c ", src.chunk_count),
                     Theme::dim(),
@@ -458,7 +452,7 @@ impl HomeScreen {
                     _ => ("· ", Theme::dim()),
                 };
                 spans.push(Span::styled(mark, style));
-                let used: usize = 15 + 1 + 5 + 5 + 2;
+                let used: usize = 15 + 1 + 5 + 2;
                 spans.push(Span::styled(
                     truncate(&src.title, width.saturating_sub(used)),
                     Theme::normal(),
@@ -649,7 +643,7 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
             Theme::dim().add_modifier(Modifier::ITALIC),
         ))
     } else {
-        let mut stats = vec![
+        let stats = vec![
             Span::styled(fmt_count(expert.node_count), Theme::normal()),
             // "concepts" here is the extracted graph, not the planned
             // syllabus listed below — hence "graph concepts".
@@ -658,11 +652,6 @@ fn render_ready_card_body(f: &mut Frame, area: Rect, expert: &ExpertSummary, sep
             Span::styled(fmt_count(expert.source_count), Theme::normal()),
             Span::styled(" sources", Theme::dim()),
         ];
-        if let Some(q) = expert.avg_quality {
-            stats.push(Span::styled("  ·  ", Theme::dim()));
-            stats.push(Span::styled(format!("Q {q:.1}"), Theme::normal()));
-            stats.push(Span::styled(" avg", Theme::dim()));
-        }
         Line::from(stats)
     };
     f.render_widget(Paragraph::new(stats_line), chunks[1]);

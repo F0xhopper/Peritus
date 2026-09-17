@@ -1,11 +1,14 @@
 'use client'
 
 import { ArrowDown, RotateCcw } from 'lucide-react'
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
 import { AssistantCard } from '@/components/chat/assistant-card'
 import { StatusLine } from '@/components/chat/status-line'
+import { Avatar } from '@/components/identity/avatar'
 import { cn } from '@/lib/cn'
+import { firstSentence, formatDate, formatDateTime } from '@/lib/format'
+import { displayName } from '@/lib/persona'
 import type {
   ChatRetrievalAuditEvent,
   Citation,
@@ -32,6 +35,9 @@ const AT_BOTTOM_SLACK = 48
 export function Transcript({
   expert,
   messages,
+  intro,
+  storedAudits,
+  onStarter,
   pendingQuestion,
   streamingAnswer,
   streamingCitations,
@@ -46,6 +52,12 @@ export function Transcript({
 }: {
   expert: Pick<ExpertSummary, 'name' | 'persona_name' | 'topic' | 'avatar'>
   messages: ConversationMessage[]
+  /** Shown on an empty chat: the expert's bio and what it can be asked about. */
+  intro?: { bio: string | null; concepts: string[] }
+  /** Retrieval trails for the persisted answers, by message id. */
+  storedAudits?: Map<number, ChatRetrievalAuditEvent>
+  /** A starter chip was tapped; the question goes into the composer. */
+  onStarter?: (question: string) => void
   /** The question in flight, until the refetched transcript carries it. */
   pendingQuestion: string | null
   streamingAnswer: string
@@ -55,7 +67,7 @@ export function Transcript({
   streaming: boolean
   audit: ChatRetrievalAuditEvent | null
   hasContradiction: boolean
-  onSelectCitation: (citation: Citation) => void
+  onSelectCitation: (citation: Citation, all: Citation[]) => void
   selectedCitation: number | null
   onRegenerate: (question: string) => void
 }) {
@@ -105,30 +117,47 @@ export function Transcript({
             empty screen, and put the answer exactly where the cited-passage
             sheet opens on a phone or tablet. A long conversation still opens
             at, and follows, its end — see the at-bottom effect above. */}
-        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-3 py-4 md:px-4">
-          {messages.map((message, index) =>
-            message.role === 'user' ? (
-              <UserTurn key={message.id}>{message.content}</UserTurn>
-            ) : (
-              <AssistantCard
-                key={message.id}
-                expert={expert}
-                content={message.content}
-                citations={message.citations ?? []}
-                dangling={[]}
-                interrupted={message.interrupted}
-                hasContradiction={message.has_contradiction}
-                onSelectCitation={onSelectCitation}
-                selectedCitation={selectedCitation}
-                onRegenerate={
-                  // Retry the question that produced this answer.
-                  index > 0 && messages[index - 1]?.role === 'user'
-                    ? () => onRegenerate(messages[index - 1].content)
-                    : undefined
-                }
-              />
-            )
+        {/* **Left-aligned from `xl`, not centred.** From `xl` the cited-passage
+            panel is a real grid column, so opening a citation narrows `main` by
+            360px — and a centred measure re-centres, sliding the sentence the
+            reader just clicked 130px to the left and back again on close.
+            Anchored to the left of `main` with a fixed gutter, the text does
+            not move at all. Below `xl` the panel is an overlay or a sheet and
+            `main` never changes width, so the measure stays centred there. */}
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-3 py-4 md:px-4 xl:mx-0 xl:ml-12">
+          {messages.length === 0 && !pendingQuestion && !streaming && intro && (
+            <ChatIntro expert={expert} intro={intro} onStarter={onStarter} />
           )}
+
+          {messages.map((message, index) => (
+            <Fragment key={message.id}>
+              {/* An absolute date, not "Today": the divider is server-rendered
+                  and a relative label would disagree with the browser across
+                  midnight. Only where the day changes. */}
+              {startsANewDay(messages, index) && <DayDivider iso={message.created_at} />}
+              {message.role === 'user' ? (
+                <UserTurn iso={message.created_at}>{message.content}</UserTurn>
+              ) : (
+                <AssistantCard
+                  expert={expert}
+                  content={message.content}
+                  citations={message.citations ?? []}
+                  dangling={[]}
+                  interrupted={message.interrupted}
+                  hasContradiction={message.has_contradiction}
+                  audit={storedAudits?.get(message.id) ?? null}
+                  onSelectCitation={onSelectCitation}
+                  selectedCitation={selectedCitation}
+                  onRegenerate={
+                    // Retry the question that produced this answer.
+                    index > 0 && messages[index - 1]?.role === 'user'
+                      ? () => onRegenerate(messages[index - 1].content)
+                      : undefined
+                  }
+                />
+              )}
+            </Fragment>
+          ))}
 
           {/**
            * A question whose answer never arrived.
@@ -216,8 +245,87 @@ export function Transcript({
  * because it is the heading of its turn — at `--fg-2` it read as quieter than
  * the answer under it.
  */
-function UserTurn({ children }: { children: React.ReactNode }) {
+function UserTurn({ children, iso }: { children: React.ReactNode; iso?: string }) {
   return (
-    <p className="text-base leading-relaxed font-medium whitespace-pre-wrap text-fg">{children}</p>
+    <p
+      // When it was asked, on the turn itself: someone returning to a chat
+      // could not tell whether it was from this morning or last month.
+      title={iso ? formatDateTime(iso) : undefined}
+      className="text-base leading-relaxed font-medium whitespace-pre-wrap text-fg"
+    >
+      {children}
+    </p>
+  )
+}
+
+/** True when this message is the first of its calendar day in the transcript. */
+function startsANewDay(messages: ConversationMessage[], index: number): boolean {
+  const day = (iso: string) => new Date(iso).toDateString()
+  if (index === 0) return messages.length > 1
+  return day(messages[index].created_at) !== day(messages[index - 1].created_at)
+}
+
+function DayDivider({ iso }: { iso: string }) {
+  return (
+    <div className="flex items-center gap-2" role="separator" aria-label={formatDate(iso)}>
+      <span aria-hidden="true" className="h-px flex-1 bg-border-soft" />
+      <span className="text-label tracking-[0.04em] text-fg-3 uppercase">{formatDate(iso)}</span>
+      <span aria-hidden="true" className="h-px flex-1 bg-border-soft" />
+    </div>
+  )
+}
+
+/**
+ * An empty chat, before the first question.
+ *
+ * It used to be a bare column and a composer: nothing said who this expert was
+ * or what it could be asked, and the reader had usually just come from a page
+ * that did. The bio and the plan's own key concepts are already on the expert,
+ * and a concept in the composer is one tap from a question.
+ */
+function ChatIntro({
+  expert,
+  intro,
+  onStarter,
+}: {
+  expert: Pick<ExpertSummary, 'name' | 'persona_name' | 'topic' | 'avatar'>
+  intro: { bio: string | null; concepts: string[] }
+  onStarter?: (question: string) => void
+}) {
+  const bio = firstSentence(intro.bio)
+  const concepts = intro.concepts.slice(0, 5)
+
+  return (
+    <section className="rounded-card bg-panel p-3 md:p-4">
+      <div className="flex items-start gap-3">
+        <Avatar expert={expert} size={32} />
+        <div className="min-w-0 flex-1">
+          <p className="font-medium text-fg">{displayName(expert)}</p>
+          {bio && <p className="mt-1 text-sm leading-relaxed text-fg-2">{bio}</p>}
+        </div>
+      </div>
+
+      {concepts.length > 0 && onStarter && (
+        <div className="mt-3">
+          <p className="text-label tracking-[0.04em] text-fg-3 uppercase">Ask about</p>
+          <ul className="mt-1.5 flex flex-wrap gap-1.5">
+            {concepts.map((concept) => (
+              <li key={concept}>
+                <button
+                  type="button"
+                  onClick={() => onStarter(`Explain ${concept}.`)}
+                  className={cn(
+                    'inline-flex min-h-(--chip-h) items-center rounded-chip bg-raised px-2.5 py-1 text-xs text-fg-2',
+                    'transition-colors duration-(--dur-1) hover:bg-border hover:text-fg'
+                  )}
+                >
+                  {concept}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   )
 }

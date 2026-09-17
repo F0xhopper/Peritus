@@ -750,7 +750,7 @@ export interface paths {
     }
     /**
      * Corpus Report Export
-     * @description Download the screening ledger as CSV or RIS.
+     * @description Download the screening ledger as CSV, RIS or BibTeX.
      *
      *     RIS carries the sources into Covidence, Zotero and EndNote, which is what
      *     makes a grey-literature find usable in the review the reviewer is actually
@@ -1726,10 +1726,11 @@ export interface components {
      *
      *     ``ris`` is the one that matters operationally: it is what Covidence, Zotero
      *     and EndNote import, so it is how a grey-literature source Peritus found
-     *     reaches the review the user is actually running.
+     *     reaches the review the user is actually running. ``bibtex`` is the same
+     *     ledger for anyone whose bibliography is a ``.bib`` file.
      * @enum {string}
      */
-    ExportFormat: 'csv' | 'ris'
+    ExportFormat: 'csv' | 'ris' | 'bibtex'
     /**
      * GrantCreditsRequest
      * @description Manual/admin credit issuance. No payment provider is involved.

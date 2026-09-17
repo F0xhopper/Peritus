@@ -98,9 +98,7 @@ pub struct BuildScreen {
     validated_passed_before_round: u64,
     validated_dropped_before_round: u64,
     validate_total: u64,
-    validate_last: Option<(String, bool, f64, f64)>, // (title, passed, q, r)
-    accepted_q_sum: f64,
-    accepted_r_sum: f64,
+    validate_last: Option<(String, bool)>, // (title, passed)
     // Ingestion
     ingest_last: Option<(String, u64)>, // (title, chunks)
     ingest_count: u64,
@@ -282,8 +280,6 @@ impl BuildScreen {
             validated_dropped_before_round: 0,
             validate_total: 0,
             validate_last: None,
-            accepted_q_sum: 0.0,
-            accepted_r_sum: 0.0,
             ingest_last: None,
             ingest_count: 0,
             ingest_total: 0,
@@ -417,8 +413,6 @@ impl BuildScreen {
         self.validated_dropped_before_round = 0;
         self.validate_total = 0;
         self.validate_last = None;
-        self.accepted_q_sum = 0.0;
-        self.accepted_r_sum = 0.0;
         self.ingest_last = None;
         self.ingest_count = 0;
         self.ingest_total = 0;
@@ -851,26 +845,15 @@ impl BuildScreen {
                         LogLevel::Success,
                     );
                 }
-                BuildEvent::SourceValidated {
-                    title,
-                    passed,
-                    q,
-                    r,
-                } => {
+                BuildEvent::SourceValidated { title, passed } => {
                     let short = trunc(title, 44);
-                    self.validate_last = Some((short.clone(), *passed, *q, *r));
-                    // q/r are the validator's 0–10 quality/relevance scores.
+                    self.validate_last = Some((short.clone(), *passed));
                     if *passed {
                         self.validate_passed += 1;
-                        self.accepted_q_sum += q;
-                        self.accepted_r_sum += r;
-                        self.log(
-                            format!("✓ {short} (Q {q:.1} · R {r:.1})"),
-                            LogLevel::Success,
-                        );
+                        self.log(format!("✓ {short}"), LogLevel::Success);
                     } else {
                         self.validate_dropped += 1;
-                        self.log(format!("✗ {short} (Q {q:.1} · R {r:.1})"), LogLevel::Info);
+                        self.log(format!("✗ {short}"), LogLevel::Info);
                     }
                 }
                 // A borderline verdict the stronger model re-examined. Logged
@@ -879,24 +862,14 @@ impl BuildScreen {
                 BuildEvent::SourceReviewed {
                     title,
                     passed,
-                    q,
-                    r,
-                    first_q,
-                    first_r,
                     reversed,
                 } => {
                     if *reversed {
-                        let fq = first_q.map_or_else(|| "—".into(), |v| format!("{v:.1}"));
-                        let fr = first_r.map_or_else(|| "—".into(), |v| format!("{v:.1}"));
                         self.log(
                             format!(
-                                "⟳ {} {} on review (Q {}→{:.1} · R {}→{:.1})",
+                                "⟳ {} {} on review",
                                 if *passed { "kept" } else { "dropped" },
                                 trunc(title, 40),
-                                fq,
-                                q,
-                                fr,
-                                r,
                             ),
                             LogLevel::Info,
                         );
@@ -1399,7 +1372,7 @@ impl BuildScreen {
             ])
         };
 
-        let mut verdict_spans = vec![
+        let verdict_spans = vec![
             Span::styled("✓ ", Theme::success()),
             Span::styled(
                 format!("{}", self.validate_passed),
@@ -1410,18 +1383,8 @@ impl BuildScreen {
             Span::styled(format!("{}", self.validate_dropped), Theme::normal()),
             Span::styled(" dropped", Theme::dim()),
         ];
-        if self.validate_passed > 0 {
-            verdict_spans.push(Span::styled(
-                format!(
-                    "    avg Q {:.1} · R {:.1}",
-                    self.accepted_q_sum / self.validate_passed as f64,
-                    self.accepted_r_sum / self.validate_passed as f64,
-                ),
-                Theme::dim(),
-            ));
-        }
 
-        let last_line = if let Some((title, passed, q, r)) = &self.validate_last {
+        let last_line = if let Some((title, passed)) = &self.validate_last {
             let (mark, style) = if *passed {
                 ("✓", Theme::success())
             } else {
@@ -1429,15 +1392,14 @@ impl BuildScreen {
             };
             Line::from(vec![
                 Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
-                Span::styled("Last scored:  ", Theme::dim()),
+                Span::styled("Last screened:  ", Theme::dim()),
                 Span::styled(format!("{mark} "), style),
                 Span::styled(title.as_str(), Theme::normal()),
-                Span::styled(format!("  (Q {q:.1} · R {r:.1})"), Theme::dim()),
             ])
         } else {
             Line::from(vec![
                 Span::styled(format!("{}  ", spinner::braille(tick)), Theme::accent()),
-                Span::styled("Scoring relevance and quality…", Theme::dim()),
+                Span::styled("Screening sources…", Theme::dim()),
             ])
         };
 

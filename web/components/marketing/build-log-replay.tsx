@@ -10,7 +10,7 @@ import { usePrefersReducedMotion } from '@/hooks/use-media-query'
  *
  * Captured from an actual build rather than written as marketing copy, which is
  * the whole point — the claim is "we show you what we threw away", and the
- * evidence is a log with drop reasons and scores in it.
+ * evidence is a log with the drop reasons in it.
  *
  * Three behaviours that keep it from being an annoyance:
  *
@@ -28,7 +28,6 @@ interface ReplayRow {
   kind: 'stage' | 'keep' | 'drop' | 'info' | 'ok'
   stage: string
   text: string
-  scores?: string
 }
 
 const ROWS: ReplayRow[] = [
@@ -51,42 +50,36 @@ const ROWS: ReplayRow[] = [
     kind: 'keep',
     stage: 'validate',
     text: 'Varroa destructor and honeybee viral loads: a five-year cohort',
-    scores: 'q8.5 r9.0',
   },
   {
     after: 240,
     kind: 'drop',
     stage: 'validate',
     text: 'Top 10 beekeeping tips for spring — secondary commentary, no primary data',
-    scores: 'q2.5 r4.0',
   },
   {
     after: 260,
     kind: 'keep',
     stage: 'validate',
     text: 'Amitraz resistance in field populations, 2019–2024',
-    scores: 'q8.0 r8.5',
   },
   {
     after: 220,
     kind: 'drop',
     stage: 'validate',
     text: 'Hive supply catalogue — product listing, not a source',
-    scores: 'q1.0 r2.0',
   },
   {
     after: 250,
     kind: 'keep',
     stage: 'validate',
     text: 'Drone brood removal as mechanical control: a randomised trial',
-    scores: 'q7.5 r8.5',
   },
   {
     after: 230,
     kind: 'drop',
     stage: 'validate',
     text: 'duplicate of doi:10.1234/varroa-cohort',
-    scores: 'q0.0 r0.0',
   },
   { after: 420, kind: 'info', stage: 'validate', text: 'Screening done — kept 21, dropped 9' },
   {
@@ -188,7 +181,6 @@ export function BuildLogReplay({ className }: { className?: string }) {
             </span>
             <span className="hidden w-16 shrink-0 text-fg-3 sm:inline">{row.stage}</span>
             <span className={cn('min-w-0 flex-1', TEXT_COLOUR[row.kind])}>{row.text}</span>
-            {row.scores && <span className="shrink-0 text-fg-3">{row.scores}</span>}
           </div>
         ))}
         {visible >= ROWS.length && <p className="mt-2 text-fg-3">— end of log —</p>}

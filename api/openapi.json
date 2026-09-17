@@ -1297,10 +1297,11 @@
         "type": "object"
       },
       "ExportFormat": {
-        "description": "Ledger export formats.\n\n``ris`` is the one that matters operationally: it is what Covidence, Zotero\nand EndNote import, so it is how a grey-literature source Peritus found\nreaches the review the user is actually running.",
+        "description": "Ledger export formats.\n\n``ris`` is the one that matters operationally: it is what Covidence, Zotero\nand EndNote import, so it is how a grey-literature source Peritus found\nreaches the review the user is actually running. ``bibtex`` is the same\nledger for anyone whose bibliography is a ``.bib`` file.",
         "enum": [
           "csv",
-          "ris"
+          "ris",
+          "bibtex"
         ],
         "title": "ExportFormat",
         "type": "string"
@@ -3992,7 +3993,7 @@
     },
     "/experts/{slug}/corpus-report/export": {
       "get": {
-        "description": "Download the screening ledger as CSV or RIS.\n\nRIS carries the sources into Covidence, Zotero and EndNote, which is what\nmakes a grey-literature find usable in the review the reviewer is actually\nrunning. Both formats include rejected sources with their exclusion reason\nand the search that produced them.\n\nExports are never partial: if a corpus somehow exceeds the runaway guard the\nrequest fails loudly rather than returning a file that looks complete.",
+        "description": "Download the screening ledger as CSV, RIS or BibTeX.\n\nRIS carries the sources into Covidence, Zotero and EndNote, which is what\nmakes a grey-literature find usable in the review the reviewer is actually\nrunning. Both formats include rejected sources with their exclusion reason\nand the search that produced them.\n\nExports are never partial: if a corpus somehow exceeds the runaway guard the\nrequest fails loudly rather than returning a file that looks complete.",
         "operationId": "corpus_report_export_experts__slug__corpus_report_export_get",
         "parameters": [
           {
