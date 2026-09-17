@@ -203,7 +203,7 @@ export async function waitForHydration(page: Page) {
 }
 
 /**
- * Wait for hydration, click, fill — and check the value survived.
+ * Wait for hydration, click, then fill.
  *
  * `fill()` alone is enough in Chromium, but on WebKit a fill into a field that
  * has never been focused — one that has only just hydrated — is sometimes
@@ -211,25 +211,19 @@ export async function waitForHydration(page: Page) {
  * first is also what a person actually does, so the test matches the
  * interaction it claims to be checking.
  *
- * **And then it is checked.** `waitForHydration` waits for React to attach
- * *somewhere* in the document; React 19 hydrates island by island, so a field
- * can still be filled a moment before its own form comes alive — and hydrating
- * over a controlled input throws the typed value away. The failure surfaces far
- * from its cause, as a disabled Send button that Playwright waits sixty seconds
- * for, which is exactly what CI kept seeing on the slower projects. Asserting
- * the value stuck, and typing it again if it did not, makes the race visible
- * where it happens and survivable.
+ * **It does not assert the value stuck**, and that was tried: a generic
+ * `toHaveValue` here is wrong for a composite field. The login code is six
+ * inputs that redistribute what is typed, so a digit does not stay in the box
+ * it was typed into — the assertion failed two real tests, and its retry added
+ * seven seconds to every other call, which was enough to push CI's e2e job past
+ * its thirty-minute limit. Where a fill *has* to have landed, wait on the
+ * control it enables instead: `askQuestion` below does that for the composer,
+ * whose Send button is the only thing that reflects its React state.
  */
 export async function fillField(field: Locator, value: string) {
   await waitForHydration(field.page())
   await field.click()
   await field.fill(value)
-  try {
-    await expect(field).toHaveValue(value, { timeout: 2_000 })
-  } catch {
-    await field.fill(value)
-    await expect(field).toHaveValue(value, { timeout: 5_000 })
-  }
 }
 
 /**
