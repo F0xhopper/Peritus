@@ -248,6 +248,25 @@ export async function fillUntil(field: Locator, value: string, produces: Locator
 }
 
 /**
+ * Click something and wait for what clicking it is supposed to produce.
+ *
+ * The click twin of `fillUntil`, and the same cause: a control that is in the
+ * server's HTML but whose island has not hydrated swallows the first click
+ * silently — no handler, no error, nothing on screen. The chat title's rename
+ * field is the case that keeps finding this on the slower device profiles.
+ */
+export async function clickUntil(control: Locator, produces: Locator) {
+  await waitForHydration(control.page())
+  await control.click()
+  try {
+    await expect(produces).toBeVisible({ timeout: 3_000 })
+  } catch {
+    await control.click()
+    await expect(produces).toBeVisible({ timeout: 10_000 })
+  }
+}
+
+/**
  * Type a question into the chat composer and send it.
  *
  * Send is disabled until the composer's *React state* holds a question, and

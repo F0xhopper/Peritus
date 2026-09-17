@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 import {
   askQuestion,
+  clickUntil,
   fillField,
   content,
   expectResponsive,
@@ -329,9 +330,8 @@ test('renaming a chat is optimistic and persists', async ({ page }) => {
 
   // The title is server-rendered, so it is clickable before React has attached
   // its handler — a click that early is lost and the field never opens.
-  await waitForHydration(page)
-  await page.getByTitle('Click to rename').click()
   const field = page.getByLabel('Chat title')
+  await clickUntil(page.getByTitle('Click to rename'), field)
   await fillField(field, 'Drone brood removal, revisited')
   await field.press('Enter')
 
