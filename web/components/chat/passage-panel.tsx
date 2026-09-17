@@ -54,17 +54,27 @@ export function PassagePanel({
           Passage {shown}
           {title && <span className="normal-case"> of {title}</span>}
         </p>
-        {citation.text ? (
-          // The cited span itself, washed in the expert's colour.
-          <blockquote className="mt-1.5 rounded-card bg-expert-soft p-2.5 text-fg-2">
-            {citation.text}
-          </blockquote>
-        ) : (
-          <p className="mt-1.5 text-xs text-fg-3">
-            This answer was saved before passages were kept with their citations, so the text is not
-            here. The source is below.
-          </p>
-        )}
+        {/* The evidence itself: the cited paragraph in the source where there
+            is one to fetch, and the citation's own excerpt until then. */}
+        <div className="mt-1.5">
+          {citation.chunk_id !== null && citation.chunk_id !== undefined && source ? (
+            <PassageContext
+              slug={slug}
+              sourceId={source.id}
+              chunkId={citation.chunk_id}
+              quote={citation.text}
+            />
+          ) : citation.text ? (
+            <blockquote className="rounded-card bg-expert-soft p-2.5 text-fg-2">
+              {citation.text}
+            </blockquote>
+          ) : (
+            <p className="text-xs text-fg-3">
+              This answer was saved before passages were kept with their citations, so the text is
+              not here. The source is below.
+            </p>
+          )}
+        </div>
         {siblings.length > 0 && (
           <p className="mt-1.5 text-xs text-fg-3">
             This source is also cited as{' '}
@@ -110,12 +120,6 @@ export function PassagePanel({
             )}
             {source.doi && <Field label="DOI">{source.doi}</Field>}
           </dl>
-
-          {/* Older answers carry no `chunk_id`, so there is nothing to centre a
-              window on; the quote above stands alone, as it did before. */}
-          {citation.chunk_id !== null && citation.chunk_id !== undefined && (
-            <PassageContext slug={slug} sourceId={source.id} chunkId={citation.chunk_id} />
-          )}
 
           <div className="flex flex-wrap gap-2">
             {source.url && (

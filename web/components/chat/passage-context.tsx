@@ -13,9 +13,16 @@ import type { PassageWindow } from '@/lib/api/types'
  * before and after it is the evidence — and it is where a citation that does
  * not support its sentence becomes obvious without leaving the answer.
  *
- * **No spinner.** The quote is already on screen above this; the context
- * arrives under it, or it does not arrive and nothing is shown. A failure here
- * must never make the panel look broken, because the panel was already useful.
+ * **The window replaces the quote rather than repeating it.** The citation
+ * carries an excerpt and the window carries the whole chunk that excerpt came
+ * from, so rendering both put the same sentence on screen twice — and made the
+ * panel's own test ambiguous about which one it meant. Until the window
+ * arrives (or if it never does) the excerpt is the evidence; once it has, the
+ * cited paragraph *inside* the window is.
+ *
+ * **No spinner.** The quote is on screen from the first frame and the context
+ * replaces it in place. A failure here must never make the panel look broken,
+ * because the panel was already useful.
  *
  * **It says what it is showing.** No original is kept — a fetched PDF or page
  * is never stored, only the cleaned extraction — so this is *the text the
@@ -26,10 +33,13 @@ export function PassageContext({
   slug,
   sourceId,
   chunkId,
+  quote,
 }: {
   slug: string
   sourceId: number
   chunkId: number
+  /** The citation's own excerpt, shown until — and instead of — the window. */
+  quote?: string | null
 }) {
   const [window_, setWindow] = useState<PassageWindow | null>(null)
 
@@ -59,7 +69,12 @@ export function PassageContext({
     return () => controller.abort()
   }, [slug, sourceId, chunkId])
 
-  if (!window_ || window_.passages.length <= 1) return null
+  // Nothing yet, or nothing worth calling context: the excerpt stands alone.
+  if (!window_ || window_.passages.length <= 1) {
+    return quote ? (
+      <blockquote className="rounded-card bg-expert-soft p-2.5 text-fg-2">{quote}</blockquote>
+    ) : null
+  }
 
   const first = window_.passages[0]
   return (

@@ -4,6 +4,7 @@ import {
   content,
   expectResponsive,
   fillField,
+  fillUntil,
   isTouchProject,
   resetApi,
   signIn,
@@ -133,8 +134,7 @@ test('searching a concept focuses it and opens its detail', async ({ page }, tes
 
   await page.goto(`/experts/${SLUG}/graph`)
   const search = page.getByLabel('Find a concept')
-  await fillField(search, 'amitraz')
-  await expect(page.getByRole('button', { name: /amitraz/ })).toBeVisible()
+  await fillUntil(search, 'amitraz', page.getByRole('button', { name: /amitraz/ }))
   await search.press('Enter')
 
   const panel = page
@@ -149,13 +149,14 @@ test('a contradiction is labelled as a judgement about this corpus', async ({ pa
 
   await page.goto(`/experts/${SLUG}/graph`)
   // The claim that sits on one side of the fixture's contradiction.
-  await fillField(page.getByLabel('Find a concept'), 'Mechanical control alone')
+  const suggestion = page.getByRole('button', { name: /^Mechanical control alone/ })
+  await fillUntil(page.getByLabel('Find a concept'), 'Mechanical control alone', suggestion)
   // Clicked, not Enter: this test is about what the panel *says* about a
   // contradiction, and the keyboard path has its own test above. A key event
   // has to land in the window between the suggestion rendering and the next
   // re-render, which under a loaded machine is a coin toss; a click on a
   // visible button is not.
-  await page.getByRole('button', { name: /^Mechanical control alone/ }).click()
+  await suggestion.click()
 
   const panel = page
     .getByRole('complementary', { name: 'Concept' })
