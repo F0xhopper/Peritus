@@ -210,11 +210,43 @@ export async function waitForHydration(page: Page) {
  * dropped, and the symptom is a submit button that never enables. Clicking
  * first is also what a person actually does, so the test matches the
  * interaction it claims to be checking.
+ *
+ * **It does not assert the value stuck**, and that was tried: a generic
+ * `toHaveValue` here is wrong for a composite field. The login code is six
+ * inputs that redistribute what is typed, so a digit does not stay in the box
+ * it was typed into — the assertion failed two real tests, and its retry added
+ * seven seconds to every other call, which was enough to push CI's e2e job past
+ * its thirty-minute limit. Where a fill *has* to have landed, wait on the
+ * control it enables instead: `askQuestion` below does that for the composer,
+ * whose Send button is the only thing that reflects its React state.
  */
 export async function fillField(field: Locator, value: string) {
   await waitForHydration(field.page())
   await field.click()
   await field.fill(value)
+}
+
+/**
+ * Type a question into the chat composer and send it.
+ *
+ * Send is disabled until the composer's *React state* holds a question, and
+ * that is the thing a too-early fill loses: `fillField` can see the text in the
+ * DOM and the component still be a hydration behind. Waiting on the button —
+ * and typing again if it never enables — checks the only state that matters,
+ * and it is why this is a helper rather than three copies of the same two
+ * lines. CI's slower device profiles hit this where a local run does not.
+ */
+export async function askQuestion(page: Page, question: string) {
+  const field = page.getByLabel('Your question')
+  const send = page.getByRole('button', { name: 'Send' })
+  await fillField(field, question)
+  try {
+    await expect(send).toBeEnabled({ timeout: 2_000 })
+  } catch {
+    await field.fill(question)
+    await expect(send).toBeEnabled({ timeout: 10_000 })
+  }
+  await send.click()
 }
 
 /** True for the projects that emulate a touch device. */
