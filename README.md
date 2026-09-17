@@ -6,7 +6,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+  <a href="https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/F0xhopper/Peritus/actions/workflows/ci.yml/badge.svg?event=pull_request"></a>
+  <a href="https://github.com/F0xhopper/Peritus/actions/workflows/deploy.yml"><img alt="Deploy" src="https://github.com/F0xhopper/Peritus/actions/workflows/deploy.yml/badge.svg?branch=main"></a>
   <a href="https://www.python.org/downloads/"><img alt="Python 3.12+" src="https://img.shields.io/badge/python-3.12+-3776ab.svg"></a>
   <a href="https://nextjs.org"><img alt="Next.js 16" src="https://img.shields.io/badge/next.js-16-000000.svg"></a>
   <a href="https://www.rust-lang.org"><img alt="Rust stable" src="https://img.shields.io/badge/rust-stable-dea584.svg"></a>

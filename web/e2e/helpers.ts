@@ -203,18 +203,56 @@ export async function waitForHydration(page: Page) {
 }
 
 /**
- * Wait for hydration, click, then fill.
+ * Wait for hydration, click, fill — and check the value survived.
  *
  * `fill()` alone is enough in Chromium, but on WebKit a fill into a field that
  * has never been focused — one that has only just hydrated — is sometimes
  * dropped, and the symptom is a submit button that never enables. Clicking
  * first is also what a person actually does, so the test matches the
  * interaction it claims to be checking.
+ *
+ * **And then it is checked.** `waitForHydration` waits for React to attach
+ * *somewhere* in the document; React 19 hydrates island by island, so a field
+ * can still be filled a moment before its own form comes alive — and hydrating
+ * over a controlled input throws the typed value away. The failure surfaces far
+ * from its cause, as a disabled Send button that Playwright waits sixty seconds
+ * for, which is exactly what CI kept seeing on the slower projects. Asserting
+ * the value stuck, and typing it again if it did not, makes the race visible
+ * where it happens and survivable.
  */
 export async function fillField(field: Locator, value: string) {
   await waitForHydration(field.page())
   await field.click()
   await field.fill(value)
+  try {
+    await expect(field).toHaveValue(value, { timeout: 2_000 })
+  } catch {
+    await field.fill(value)
+    await expect(field).toHaveValue(value, { timeout: 5_000 })
+  }
+}
+
+/**
+ * Type a question into the chat composer and send it.
+ *
+ * Send is disabled until the composer's *React state* holds a question, and
+ * that is the thing a too-early fill loses: `fillField` can see the text in the
+ * DOM and the component still be a hydration behind. Waiting on the button —
+ * and typing again if it never enables — checks the only state that matters,
+ * and it is why this is a helper rather than three copies of the same two
+ * lines. CI's slower device profiles hit this where a local run does not.
+ */
+export async function askQuestion(page: Page, question: string) {
+  const field = page.getByLabel('Your question')
+  const send = page.getByRole('button', { name: 'Send' })
+  await fillField(field, question)
+  try {
+    await expect(send).toBeEnabled({ timeout: 2_000 })
+  } catch {
+    await field.fill(question)
+    await expect(send).toBeEnabled({ timeout: 10_000 })
+  }
+  await send.click()
 }
 
 /** True for the projects that emulate a touch device. */

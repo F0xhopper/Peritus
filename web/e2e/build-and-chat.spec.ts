@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 import {
+  askQuestion,
   fillField,
   content,
   expectResponsive,
@@ -218,9 +219,7 @@ test('an answer streams, cites its sources, and flags an invented marker', async
       .first()
   ).toBeVisible()
 
-  const composer = page.getByLabel('Your question')
-  await fillField(composer, 'Does the timing of removal matter?')
-  await page.getByRole('button', { name: 'Send' }).click()
+  await askQuestion(page, 'Does the timing of removal matter?')
 
   // The status line, then tokens.
   await expect(content(page).getByText(/Searching|Composing|Reading the question/)).toBeVisible({
@@ -287,8 +286,7 @@ test('a busy conversation says so and counts down instead of retrying blindly', 
   await page.goto('/chats/2f2b8a4e-1c9d-4f8a-9b1e-7c0d2a5f6e31')
   await useScenario(page, 'chat-busy')
 
-  await fillField(page.getByLabel('Your question'), 'Anything at all')
-  await page.getByRole('button', { name: 'Send' }).click()
+  await askQuestion(page, 'Anything at all')
 
   await expect(content(page).getByText('Still answering')).toBeVisible({
     timeout: 15_000,
