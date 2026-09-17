@@ -15,6 +15,12 @@ import { useIsDesktop, useIsLaptopUp } from '@/hooks/use-media-query'
  *   content fades in; there is no layout animation, because animating a grid
  *   column would reflow the centre column on every frame.
  * - `lg`: an overlay sheet from the right with a backdrop.
+ *
+ * **Inline from `xl`, though it re-centres the transcript when it opens.** An
+ * overlay from 1,280 to 1,535 would hold the text still, and it was tried: it
+ * also puts a backdrop over the answer the passage is evidence *for*, at the
+ * commonest desktop width there is. Reading the sentence and its passage
+ * together is the point of the panel, so the shift stays.
  * - below `lg`: a bottom sheet at 50% / 92%, so a cited passage can be read
  *   with the answer still visible behind it.
  *

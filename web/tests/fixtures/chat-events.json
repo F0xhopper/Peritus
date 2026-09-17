@@ -31,7 +31,8 @@
         "disputed": true,
         "dispute_points": [
           "Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years."
-        ]
+        ],
+        "chunk_id": 9001
       },
       {
         "n": 3,
@@ -41,7 +42,8 @@
         "disputed": true,
         "dispute_points": [
           "Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years."
-        ]
+        ],
+        "chunk_id": 8804
       }
     ],
     "has_contradiction": true,

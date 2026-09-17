@@ -117,14 +117,13 @@ export function Transcript({
             empty screen, and put the answer exactly where the cited-passage
             sheet opens on a phone or tablet. A long conversation still opens
             at, and follows, its end — see the at-bottom effect above. */}
-        {/* **Left-aligned from `xl`, not centred.** From `xl` the cited-passage
-            panel is a real grid column, so opening a citation narrows `main` by
-            360px — and a centred measure re-centres, sliding the sentence the
-            reader just clicked 130px to the left and back again on close.
-            Anchored to the left of `main` with a fixed gutter, the text does
-            not move at all. Below `xl` the panel is an overlay or a sheet and
-            `main` never changes width, so the measure stays centred there. */}
-        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-3 py-4 md:px-4 xl:mx-0 xl:ml-12">
+        {/* Centred, like every other reading measure in the app.
+            Left-aligning it from `xl` would hold it still when the
+            cited-passage panel opens beside it — that was tried — but a 720px
+            column pinned to the left of a 1,124px area, with a gutter matching
+            nothing else on the page, looks like a mistake at every width where
+            the panel is *closed*, which is most of them. */}
+        <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4 px-3 py-4 md:px-4">
           {messages.length === 0 && !pendingQuestion && !streaming && intro && (
             <ChatIntro expert={expert} intro={intro} onStarter={onStarter} />
           )}

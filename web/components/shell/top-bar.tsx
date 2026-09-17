@@ -34,6 +34,15 @@ export interface TopBarProps {
   title: string
   /** One button. Anything more belongs in `overflow`. */
   action?: React.ReactNode
+  /**
+   * A second, quieter control, to the left of the action.
+   *
+   * The budget above is still one *prominent* action; this exists for the
+   * Overview's Share, which is the thing an owner looks for in the top-right of
+   * a page and could not find inside the ⋯ menu. `ghost` only, and icon-only
+   * below `sm`, so the title keeps its width on a phone.
+   */
+  secondary?: React.ReactNode
   overflow?: React.ReactNode
   /** Replaces the title with an editable field (the chat rename). */
   titleSlot?: React.ReactNode
@@ -42,7 +51,15 @@ export interface TopBarProps {
   hideSearch?: boolean
 }
 
-export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch }: TopBarProps) {
+export function TopBar({
+  expert,
+  title,
+  action,
+  secondary,
+  overflow,
+  titleSlot,
+  hideSearch,
+}: TopBarProps) {
   const { openNav, openPalette, navTriggerRef, sidebarCollapsed } = useShell()
   // Both of these live in the sidebar from `lg`. Folded away, they come back
   // here, or a collapsed shell would have no navigation and no search at all.
@@ -104,6 +121,7 @@ export function TopBar({ expert, title, action, overflow, titleSlot, hideSearch 
           </button>
         )}
 
+        {secondary}
         {action}
 
         {overflow && (

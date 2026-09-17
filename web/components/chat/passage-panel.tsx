@@ -3,6 +3,7 @@
 import { ExternalLink, MessageSquare } from 'lucide-react'
 import Link from 'next/link'
 
+import { PassageContext } from '@/components/chat/passage-context'
 import { Button } from '@/components/ui/button'
 import { describeDifficulty, describeTextRead, sourceKind } from '@/lib/source-kind'
 import { hostOf, humanise } from '@/lib/format'
@@ -23,6 +24,11 @@ import type { Citation, LedgerSource } from '@/lib/api/types'
  * **The number is the one on the chip.** Chips are numbered per answer (1, 2,
  * 3 in order of first use) while `n` is the retrieval index, so heading this
  * panel with `n` meant clicking **2** and opening "Passage 7".
+ *
+ * **And the passage is shown in its source.** Where the citation says which
+ * chunk it is, the paragraphs either side of it load underneath — see
+ * `PassageContext`. That is the difference between quoting the evidence and
+ * showing it.
  */
 export function PassagePanel({
   citation,
@@ -104,6 +110,12 @@ export function PassagePanel({
             )}
             {source.doi && <Field label="DOI">{source.doi}</Field>}
           </dl>
+
+          {/* Older answers carry no `chunk_id`, so there is nothing to centre a
+              window on; the quote above stands alone, as it did before. */}
+          {citation.chunk_id !== null && citation.chunk_id !== undefined && (
+            <PassageContext slug={slug} sourceId={source.id} chunkId={citation.chunk_id} />
+          )}
 
           <div className="flex flex-wrap gap-2">
             {source.url && (

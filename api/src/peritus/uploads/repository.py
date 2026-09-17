@@ -163,6 +163,75 @@ class UploadRepository:
             )
         return [dict(r) for r in rows]
 
+    async def passage_window(
+        self, expert_id: int, source_id: int, around: int | None, before: int, after: int
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+        """A source, and the chunks either side of one of its chunks.
+
+        Two queries rather than one: the cited chunk's ``sequence_n`` is not
+        known to the caller — a citation carries a chunk id — and a window is a
+        range over that ordering. ``(None, [])`` when the chunk is not in that
+        source, which is what a citation from before a re-ingest looks like.
+
+        The whole source is a legitimate window: the largest source in the
+        database is 165 chunks, so ``before``/``after`` bound the response for
+        the panel's sake, not the database's.
+        """
+        async with self._pool.acquire() as conn:
+            source = await conn.fetchrow(
+                """
+                SELECT s.id, s.title, s.author, s.url, s.source_type,
+                       s.full_text_method, s.text_chars,
+                       COUNT(c.id)::int AS passage_count
+                FROM sources s
+                LEFT JOIN source_chunks c ON c.source_id = s.id
+                WHERE s.id = $1 AND s.expert_id = $2 AND s.passed = true
+                GROUP BY s.id
+                """,
+                source_id,
+                expert_id,
+            )
+            if source is None:
+                return None, []
+
+            centre = (
+                await conn.fetchval(
+                    """
+                SELECT sequence_n FROM source_chunks
+                WHERE id = $1 AND source_id = $2 AND expert_id = $3
+                """,
+                    around,
+                    source_id,
+                    expert_id,
+                )
+                if around is not None
+                else await conn.fetchval(
+                    """
+                SELECT MIN(sequence_n) FROM source_chunks
+                WHERE source_id = $1 AND expert_id = $2
+                """,
+                    source_id,
+                    expert_id,
+                )
+            )
+            if centre is None:
+                return dict(source), []
+
+            rows = await conn.fetch(
+                """
+                SELECT id, sequence_n, text, chunk_meta
+                FROM source_chunks
+                WHERE expert_id = $1 AND source_id = $2
+                  AND sequence_n BETWEEN $3 AND $4
+                ORDER BY sequence_n
+                """,
+                expert_id,
+                source_id,
+                centre - before,
+                centre + after,
+            )
+        return dict(source), [dict(r) for r in rows]
+
     async def delete_source(self, expert_id: int, source_id: int) -> bool:
         """Remove a source and everything derived from it. Returns False if absent.
 

@@ -1043,6 +1043,39 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/experts/{slug}/sources/{source_id}/passages': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Source Passages
+     * @description The cited passage in context — the paragraphs either side of it.
+     *
+     *     A quote with a bibliography entry is a claim; the quote with the paragraph
+     *     before and after it is the evidence, and it is where a citation that does
+     *     not support its sentence becomes obvious.
+     *
+     *     **This is the text the expert read, not the original.** No original is kept
+     *     (`source_uploads.content` is cleared once ingestion succeeds) and the
+     *     extraction can drop a great deal — a table of contents, page chrome — so a
+     *     client showing this must say which one it is showing.
+     *
+     *     ``whole=true`` is a request, not an instruction: the server returns the
+     *     whole text only for the kinds it may reproduce, and a window otherwise,
+     *     with ``scope`` saying which happened.
+     */
+    get: operations['source_passages_experts__slug__sources__source_id__passages_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/health': {
     parameters: {
       query?: never
@@ -1343,14 +1376,35 @@ export interface components {
      * Citation
      * @description One cited passage, numbered to match the inline ``[n]`` markers — the
      *     exact shape the SSE ``sources`` event emits and JSONB stores.
+     *
+     *     That last clause was a promise the model broke. It declared three fields,
+     *     so every field the stream had added since — the passage text itself, the
+     *     dispute flags — was **discarded on the way out**: the row on disk kept them
+     *     (`conversation_repository` stores the dict untouched), the stream showed
+     *     them, and a reload lost them. The chat's cited-passage panel duly fell back
+     *     to "this answer was saved before passages were kept" for answers written
+     *     the same hour.
+     *
+     *     Anything `used_citations()` puts on a citation belongs here.
      */
     Citation: {
+      /** Chunk Id */
+      chunk_id?: number | null
+      /** Dispute Points */
+      dispute_points?: string[]
+      /**
+       * Disputed
+       * @default false
+       */
+      disputed: boolean
       /** Label */
       label: string
       /** N */
       n: number
       /** Source Id */
       source_id?: number | null
+      /** Text */
+      text?: string | null
     }
     /** ConversationDetail */
     ConversationDetail: {
@@ -1803,6 +1857,67 @@ export interface components {
     OtpRequest: {
       /** Email */
       email: string
+    }
+    /**
+     * PassageOut
+     * @description One chunk of a source, as a reader sees it.
+     */
+    PassageOut: {
+      /** Chunk Id */
+      chunk_id: number
+      /** Paragraph N */
+      paragraph_n?: number | null
+      /** Section */
+      section?: string | null
+      /** Sequence N */
+      sequence_n: number
+      /** Text */
+      text: string
+    }
+    /**
+     * PassageSourceOut
+     * @description The source a window was read from — enough to caption it honestly.
+     */
+    PassageSourceOut: {
+      /** Author */
+      author?: string | null
+      /** Full Text Method */
+      full_text_method?: string | null
+      /** Id */
+      id: number
+      /** Passage Count */
+      passage_count: number
+      /** Source Type */
+      source_type: string
+      /** Text Chars */
+      text_chars?: number | null
+      /** Title */
+      title: string
+      /** Url */
+      url?: string | null
+    }
+    /**
+     * PassageWindowOut
+     * @description A cited passage with what surrounds it — or the whole source.
+     *
+     *     ``scope`` is the server's decision, never the client's ask: ``whole`` only
+     *     for the kinds we may reproduce (see the route), ``window`` for everything
+     *     else. A client offers "read the whole source" when, and only when, a window
+     *     comes back saying the whole is available.
+     */
+    PassageWindowOut: {
+      /** Cited */
+      cited?: number | null
+      /** Passages */
+      passages: components['schemas']['PassageOut'][]
+      /**
+       * Scope
+       * @enum {string}
+       */
+      scope: 'window' | 'whole'
+      source: components['schemas']['PassageSourceOut']
+      /** Whole Available */
+      whole_available: boolean
     }
     /** PlanOut */
     PlanOut: {
@@ -3695,6 +3810,45 @@ export interface operations {
           [name: string]: unknown
         }
         content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  source_passages_experts__slug__sources__source_id__passages_get: {
+    parameters: {
+      query?: {
+        /** @description The chunk id a citation points at; the first chunk when omitted. */
+        around?: number | null
+        before?: number
+        after?: number
+        /** @description Ask for the whole source; the server decides. */
+        whole?: boolean
+      }
+      header?: never
+      path: {
+        source_id: number
+        slug: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['PassageWindowOut']
+        }
       }
       /** @description Validation Error */
       422: {

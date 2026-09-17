@@ -1,6 +1,6 @@
 'use client'
 
-import { ExternalLink, MessageSquare, Trash2 } from 'lucide-react'
+import { BookOpen, ExternalLink, MessageSquare, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 
 import Link from 'next/link'
@@ -8,7 +8,13 @@ import Link from 'next/link'
 import { DateText } from '@/components/ui/relative-time'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
-import { describeDifficulty, describeTextRead, sourceKind, sourceProvider } from '@/lib/source-kind'
+import {
+  describeDifficulty,
+  describeTextRead,
+  mayReadWhole,
+  sourceKind,
+  sourceProvider,
+} from '@/lib/source-kind'
 import { formatNumber, hostOf, humanise } from '@/lib/format'
 import type { LedgerSource } from '@/lib/api/types'
 import { useApiAction } from '@/hooks/use-api-action'
@@ -31,12 +37,15 @@ import { apiVoid } from '@/lib/api/client'
 export function RowDetail({
   source,
   slug,
+  owner = false,
   onAsk,
   asking = false,
   onDeleted,
 }: {
   source: LedgerSource
   slug: string
+  /** Whether the reader owns this expert — an upload is theirs to read whole. */
+  owner?: boolean
   onAsk?: (title: string) => void
   /** True while the chat that question will be asked in is being created. */
   asking?: boolean
@@ -161,6 +170,17 @@ export function RowDetail({
       )}
 
       <div className="flex flex-wrap gap-2 border-t border-border-soft pt-3">
+        {/* Offered only where the API would actually serve the whole text, so
+            nobody is sent to a page that then explains it cannot. */}
+        {mayReadWhole(source, owner) && (
+          <Link
+            href={`/experts/${slug}/sources/${source.id}/read`}
+            className="inline-flex h-(--row-h) items-center gap-1.5 rounded-row border border-border px-2.5 text-xs text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
+          >
+            <BookOpen className="size-3" />
+            Read the text
+          </Link>
+        )}
         {source.url && (
           <a
             href={source.url}

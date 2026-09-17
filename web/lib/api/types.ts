@@ -686,6 +686,8 @@ export interface Citation {
    */
   text?: string | null
   source_id: number | null
+  /** The chunk the passage is, so the reader can show what surrounds it. */
+  chunk_id?: number | null
   /** This passage is on one side of a disagreement in the corpus. */
   disputed?: boolean
   /** What is disputed, in the subject's terms. */
@@ -693,6 +695,40 @@ export interface Citation {
   /** Client-side only: the number this citation shows as within its answer —
    *  1, 2, 3 in order of first use — where `n` is the passage index. */
   display?: number
+}
+
+/** One chunk of a source, as the reader shows it. */
+export interface Passage {
+  chunk_id: number
+  sequence_n: number
+  section: string | null
+  paragraph_n: number | null
+  text: string
+}
+
+/**
+ * A cited passage with what surrounds it — or, where the licence allows, the
+ * whole of a source.
+ *
+ * `scope` is the server's answer, never the client's ask: asking for the whole
+ * of a source we may not reproduce returns a window and says so, and
+ * `whole_available` is what the "read it all" action is offered on.
+ */
+export interface PassageWindow {
+  source: {
+    id: number
+    title: string
+    author: string | null
+    url: string | null
+    source_type: string
+    full_text_method: string | null
+    text_chars: number | null
+    passage_count: number
+  }
+  scope: 'window' | 'whole'
+  whole_available: boolean
+  cited: number | null
+  passages: Passage[]
 }
 
 export interface ConversationMessage {

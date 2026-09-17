@@ -60,13 +60,14 @@ test('an owner creates, resets and turns off a link from Settings', async ({ pag
   await expect(main.getByLabel('Share link')).toHaveCount(0)
 })
 
-test('the Overview menu opens the same share controls', async ({ page }) => {
+test('the Overview opens the same share controls, from the bar', async ({ page }) => {
   await signIn(page)
   await page.goto(`/experts/${SLUG}`)
   await waitForHydration(page)
 
-  await content(page).getByRole('button', { name: 'More actions' }).click()
-  await page.getByRole('menuitem', { name: 'Share…' }).click()
+  // In the top bar beside the ⋯ menu, not inside it: sharing is what an owner
+  // looks for in the top-right of the page.
+  await content(page).getByRole('button', { name: 'Share this expert' }).click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.getByRole('button', { name: 'Create link' })).toBeVisible()
 })
@@ -117,10 +118,10 @@ test('a signed-in viewer opens the expert and meets no owner controls', async ({
   await expect(main.getByText(/Shared with you/)).toBeVisible()
   // Reading and asking, yes.
   await expect(visible(page, `[id="ask"]`)).toBeVisible()
-  // Changing, no: no avatar picker, and no Settings or Share in the menu.
+  // Changing, no: no avatar picker, no Share, and no Settings in the menu.
   await expect(main.getByRole('button', { name: 'Change avatar' })).toHaveCount(0)
+  await expect(main.getByRole('button', { name: 'Share this expert' })).toHaveCount(0)
   await main.getByRole('button', { name: 'More actions' }).click()
-  await expect(page.getByRole('menuitem', { name: 'Share…' })).toHaveCount(0)
   await expect(page.getByRole('menuitem', { name: 'Settings' })).toHaveCount(0)
   await expect(page.getByRole('menuitem', { name: 'Remove from my experts' })).toBeVisible()
   await page.keyboard.press('Escape')

@@ -1,6 +1,6 @@
 'use client'
 
-import { MessageSquare, RotateCcw } from 'lucide-react'
+import { MessageSquare, RotateCcw, Share2 } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 
@@ -165,6 +165,24 @@ export function OverviewPage({
         // the leaf read "Thomism / Thomism". Every other expert page names
         // itself here, so this one does too.
         title="Overview"
+        // Share sits beside the ⋯ menu rather than inside it — the bar's action
+        // budget is one, and this is the second, deliberately: sharing is what
+        // an expert is *for* once it is built, and four taps into an overflow
+        // is where it went unfound. Quiet, icon-only below `sm`.
+        secondary={
+          owner ? (
+            <Button
+              variant="ghost"
+              size="action"
+              aria-label="Share this expert"
+              onClick={() => setSharing(true)}
+              className="shrink-0"
+            >
+              <Share2 className="size-3.5" />
+              <span className="hidden sm:inline">Share</span>
+            </Button>
+          ) : undefined
+        }
         action={
           chattable ? (
             /**
@@ -203,10 +221,8 @@ export function OverviewPage({
         }
         overflow={
           <>
-            {/* Share first: from `lg` the rows under it are all in the sidebar
-                beside this menu, and sharing is the one thing that lives only
-                here — it was last. */}
-            {owner && <MenuItem onClick={() => setSharing(true)}>Share…</MenuItem>}
+            {/* Not Share: it is a button beside the expert's name now, which
+                is where someone looks for it. */}
             <MenuLinkItem render={<Link href={`/experts/${expert.name}/sources`} />}>
               Sources
             </MenuLinkItem>

@@ -274,7 +274,7 @@ def _split_paragraphs(text: str, max_chars: int, overlap: int) -> list[str]:
     for para in paras:
         if current and current_len + len(para) + 2 > max_chars:
             chunks.append("\n\n".join(current))
-            tail = _last_sentence(current[-1])
+            tail = last_sentence(current[-1])
             if tail and len(tail) <= overlap and len(tail) + len(para) + 1 <= max_chars:
                 current, current_len = [tail], len(tail) + 2
             else:
@@ -289,7 +289,13 @@ def _split_paragraphs(text: str, max_chars: int, overlap: int) -> list[str]:
     return [c for c in chunks if c.strip()]
 
 
-def _last_sentence(text: str) -> str:
+def last_sentence(text: str) -> str:
+    """The sentence a following chunk repeats as its overlap, or "".
+
+    Public because the reader takes it back off: a window of consecutive chunks
+    read as running prose would otherwise say the same sentence twice, and the
+    rule for what counts as overlap has to be the one that put it there.
+    """
     sentences = [s for s in _SENTENCE_BREAK.split(text.strip()) if s.strip()]
     # A one-sentence paragraph carried whole is a repeated paragraph, not overlap.
     return sentences[-1].strip() if len(sentences) > 1 else ""

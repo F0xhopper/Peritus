@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import schema from '../../api/openapi.json'
 import type { components } from '@/lib/api/types.generated'
 import type {
+  Citation,
   ConversationDetail,
   ConversationSummary,
   ExpertSummary,
@@ -58,6 +59,9 @@ type _ExpertWithCatalog = Assert<Matches<Schemas['ExpertWithCatalog'], ExpertWit
 // ── conversations ──
 type _ConversationSummary = Assert<Matches<Schemas['ConversationSummary'], ConversationSummary>>
 type _ConversationDetail = Assert<Matches<Schemas['ConversationDetail'], ConversationDetail>>
+// `display` is the client's own per-answer number and has no wire counterpart,
+// so it is excluded from our side rather than added to the schema.
+type _Citation = Assert<Matches<Schemas['Citation'], Omit<Citation, 'display'>>>
 
 // ── sources, sharing, billing, identity ──
 type _Source = Assert<Matches<Schemas['SourceOut'], SourceRow>>

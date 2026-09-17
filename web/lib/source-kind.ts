@@ -100,3 +100,29 @@ export function describeDifficulty(level: number | null | undefined): string {
   if (level === null || level === undefined) return '—'
   return DIFFICULTY[Math.min(Math.max(Math.round(level), 1), 5) - 1]
 }
+
+/**
+ * Whether the reader may show the whole of a source, rather than a window.
+ *
+ * **The server decides**; this only decides whether to *offer* the action, so
+ * that a reader is not sent to a page that then explains it cannot show them
+ * what they clicked for. Keep it in step with `_whole_text_allowed` in
+ * `api/src/peritus/api/routes/sources.py`, which is the gate that matters.
+ *
+ * The rule there: the kinds whose text is free to reproduce, plus anything read
+ * through a resolved open-access copy (`oa_…`, the one licence fact the
+ * pipeline records) — and an upload for its owner alone, because the rights
+ * warning at upload was shown to the uploader and not to whoever they later
+ * share the expert with.
+ */
+const WHOLE_TEXT_KINDS = new Set(['gutenberg', 'wikipedia', 'arxiv'])
+
+export function mayReadWhole(
+  source: { source_type: string; full_text_method?: string | null },
+  isOwner: boolean
+): boolean {
+  const method = source.full_text_method ?? ''
+  if (method === 'abstract') return false
+  if (source.source_type === 'upload') return isOwner
+  return WHOLE_TEXT_KINDS.has(source.source_type) || method.startsWith('oa_')
+}
