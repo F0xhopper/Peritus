@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 
+import { handleAccount, logoutOthers, resetAccount } from './account.mjs'
 import { body, json, noContent, slugify } from './http.mjs'
 import { newToken, seed, shareState, sharedCard } from './seed.mjs'
 import { PICTURE_BYTES, PICTURE_SHA, bigGraph, fixture, pictureMeta, state } from './state.mjs'
@@ -47,11 +48,13 @@ async function handle(req, res) {
     state.foreign = null
     state.scenario = 'happy'
     state.scenarioSlug = null
+    resetAccount()
     await seed()
     return json(res, 200, { ok: true })
   }
 
   // ── auth ──
+  if (await handleAccount(req, res, path, method, url)) return
   if (path === '/auth/status') {
     return json(res, 200, { auth_enabled: true, login_available: true })
   }
@@ -76,7 +79,10 @@ async function handle(req, res) {
     if (refresh !== 'mock-refresh') return json(res, 401, { detail: 'Invalid refresh token' })
     return json(res, 200, session('tester@example.com'))
   }
-  if (path === '/auth/logout' && method === 'POST') return noContent(res)
+  if (path === '/auth/logout' && method === 'POST') {
+    if (url.searchParams.get('scope') === 'others') logoutOthers()
+    return noContent(res)
+  }
   if (path === '/auth/me') {
     return json(res, 200, {
       id: '11111111-1111-1111-1111-111111111111',

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from peritus.api.middleware import RequestContextMiddleware, install_error_handlers
 from peritus.api.routes import (
+    account,
     audit,
     auth,
     billing,
@@ -119,6 +120,7 @@ def create_app() -> FastAPI:
     install_error_handlers(app)
     app.include_router(health.router)
     app.include_router(auth.router)
+    app.include_router(account.router)
     app.include_router(catalog.router)
     app.include_router(billing.router)
     app.include_router(experts.router)

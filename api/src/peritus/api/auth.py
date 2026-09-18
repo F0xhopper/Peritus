@@ -11,7 +11,7 @@ the existing test suite keep working without a login.
 """
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import jwt
 from fastapi import HTTPException, Security, status
@@ -34,6 +34,13 @@ class AuthUser:
     email: str | None
     is_admin: bool
     role: str = "authenticated"
+    # The GoTrue session this token belongs to (`session_id` claim). Lets the
+    # account page mark "this device" in its session list.
+    session_id: str | None = None
+    # The verified bearer itself, for the account routes that act on the user's
+    # own GoTrue record and must present it. Kept out of repr so it never lands
+    # in a log line that formats the user.
+    access_token: str | None = field(default=None, repr=False, compare=False)
 
 
 def _is_admin(email: str | None) -> bool:
@@ -100,6 +107,8 @@ async def verify_access_token(token: str) -> AuthUser:
         email=email,
         is_admin=_is_admin(email),
         role=claims.get("role", "authenticated"),
+        session_id=claims.get("session_id"),
+        access_token=token,
     )
 
 

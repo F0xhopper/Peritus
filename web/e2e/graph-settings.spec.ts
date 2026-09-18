@@ -168,8 +168,8 @@ test('a contradiction is labelled as a judgement about this corpus', async ({ pa
 test('settings shows the account, the theme and the credit state', async ({ page }, testInfo) => {
   await page.goto('/settings')
 
-  await expect(page.getByRole('heading', { name: 'Account' })).toBeVisible()
-  await expect(content(page).getByText('tester@example.com')).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Account', exact: true })).toBeVisible()
+  await expect(content(page).getByText('tester@example.com').first()).toBeVisible()
 
   await expect(page.getByRole('heading', { name: 'Credits' })).toBeVisible()
   await expect(content(page).getByText('Free', { exact: true })).toBeVisible()

@@ -76,7 +76,7 @@ export default function LandingPage() {
             </p>
             <div className="mt-6 flex flex-wrap items-center gap-2">
               <Link
-                href="/login"
+                href="/signup"
                 className="inline-flex h-(--btn-lg) items-center gap-1.5 rounded-row bg-accent px-4 text-sm font-medium text-accent-fg transition-[filter] duration-(--dur-1) hover:brightness-110"
               >
                 {/* Not a second "Sign in": the nav already has one, and two

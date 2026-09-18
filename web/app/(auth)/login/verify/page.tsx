@@ -8,7 +8,7 @@ export const metadata = { title: 'Enter your code' }
 export default async function VerifyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ email?: string; next?: string }>
+  searchParams: Promise<{ email?: string; next?: string; type?: string }>
 }) {
   const params = await searchParams
   const email = params.email?.trim()
@@ -16,5 +16,11 @@ export default async function VerifyPage({
   // pasted link. There is nothing to verify against, so start over.
   if (!email) redirect('/login')
 
-  return <VerifyCard email={email} next={safeNext(params.next)} />
+  return (
+    <VerifyCard
+      email={email}
+      next={safeNext(params.next)}
+      type={params.type === 'signup' ? 'signup' : 'email'}
+    />
+  )
 }

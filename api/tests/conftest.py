@@ -104,6 +104,7 @@ def api_app():
         "pictures": deps.picture_repo,
         "billing": deps.billing_repo,
         "entitlements": deps.entitlements,
+        "accounts": deps.account_repo,
     }
 
     def _build(

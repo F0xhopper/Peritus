@@ -1,25 +1,36 @@
 """Auth routes — a thin backend-for-frontend over Supabase Auth (GoTrue).
 
-Clients log in by email OTP: request a code, then verify it for a session. The
-server holds the Supabase anon key; clients only ever see the resulting session
-tokens. When auth is disabled (dev mode) these endpoints return 503 so a client
-knows login isn't required.
+Three ways in, all ending in the same session: an emailed six-digit code, a
+password, or Google (PKCE). The server holds the Supabase anon key; clients only
+ever see the resulting session tokens. When auth is disabled (dev mode) these
+endpoints return 503 so a client knows login isn't required.
+
+**Nothing here says whether an email has an account.** Sign-up, "forgot my
+password" and a resend answer identically for a stranger and for a member, and a
+wrong password reads the same as an unknown email. The single exception, "email
+not confirmed", is only reachable by someone who already knows the password.
 """
 
 import time
+from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from peritus.api.auth import AuthUser, require_user
 from peritus.api.ratelimit import auth_rate_limit
 from peritus.api.schemas.auth import (
+    EmailRequest,
     MeResponse,
     OAuthExchangeRequest,
     OtpRequest,
+    PasswordLoginRequest,
+    PasswordResetRequest,
     RefreshRequest,
     Session,
+    SignupRequest,
+    SignupResponse,
     VerifyRequest,
 )
 from peritus.core.config import settings
@@ -32,6 +43,49 @@ _bearer = HTTPBearer(auto_error=False)
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def coded_error(status_code: int, code: str, message: str) -> HTTPException:
+    """An error the web client can branch on without parsing English.
+
+    ``detail`` is ``{code, message}``; the client shows ``message`` and routes on
+    ``code`` (``email_not_confirmed`` → the code page, and so on).
+    """
+    return HTTPException(status_code, {"code": code, "message": message})
+
+
+# GoTrue's `error_code` → what a person should read. Anything not listed keeps
+# GoTrue's own sentence.
+_FRIENDLY: dict[str, str] = {
+    "weak_password": "Choose a stronger password — longer, and not a common one.",
+    "same_password": "That is already your password. Choose a new one.",
+    "otp_expired": "That code is wrong or has expired. Ask for a new one.",
+    "email_address_invalid": "That email address cannot receive mail.",
+    "over_email_send_rate_limit": "Too many emails sent. Wait a minute and try again.",
+    "over_request_rate_limit": "Too many attempts. Wait a minute and try again.",
+}
+
+
+def gotrue_error(exc: SupabaseAuthError) -> HTTPException:
+    """Pass a GoTrue failure on with its status and, where it has one, its code.
+
+    A 5xx from GoTrue becomes a 502: it is an upstream failure, and a client
+    must not read it as something the person did wrong.
+    """
+    status_code = exc.status if 400 <= exc.status < 500 else status.HTTP_502_BAD_GATEWAY
+    message = _FRIENDLY.get(exc.code or "", str(exc))
+    if exc.code:
+        return coded_error(status_code, exc.code, message)
+    return HTTPException(status_code, message)
+
+
+def client_agent(request: Request) -> str | None:
+    """The person's own User-Agent, to stamp on a session this request creates.
+
+    The web server forwards the browser's; the CLI and TUI send their own. It
+    only ever labels the caller's own session, so there is nothing to trust.
+    """
+    return request.headers.get("user-agent")
 
 
 def _require_auth_configured() -> None:
@@ -70,12 +124,14 @@ async def send_otp(req: OtpRequest) -> None:
 
 
 @router.post("/verify", response_model=Session, dependencies=[Depends(auth_rate_limit)])
-async def verify_otp(req: VerifyRequest) -> dict:
+async def verify_otp(req: VerifyRequest, request: Request) -> dict:
     _require_auth_configured()
     started = time.monotonic()
     logger.info("OTP verify attempt: email=%s", req.email)
     try:
-        session = await supabase_auth.verify_otp(req.email, req.token)
+        session = await supabase_auth.verify_otp(
+            req.email, req.token, type=req.type, user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         logger.warning(
             "OTP verify failed: email=%s status=%s elapsed=%.2fs error=%s",
@@ -90,6 +146,143 @@ async def verify_otp(req: VerifyRequest) -> dict:
         req.email,
         time.monotonic() - started,
     )
+    return session
+
+
+@router.post("/password/login", response_model=Session, dependencies=[Depends(auth_rate_limit)])
+async def password_login(req: PasswordLoginRequest, request: Request) -> dict:
+    """Sign in with an email and a password."""
+    _require_auth_configured()
+    try:
+        session = await supabase_auth.password_login(
+            req.email, req.password, user_agent=client_agent(request)
+        )
+    except SupabaseAuthError as exc:
+        if exc.code == "email_not_confirmed":
+            # Right password, unconfirmed address. Send a fresh code so the page
+            # it lands on has something to verify; best-effort, since the old
+            # one may still be good.
+            try:
+                await supabase_auth.resend_signup(req.email)
+            except SupabaseAuthError as resend_exc:
+                logger.info("Confirmation resend on login failed: %s", resend_exc)
+            raise coded_error(
+                status.HTTP_403_FORBIDDEN,
+                "email_not_confirmed",
+                "Confirm your email first — we have sent you a code.",
+            ) from exc
+        if exc.status == 429 or exc.status >= 500:
+            raise gotrue_error(exc) from exc
+        logger.info("Password login refused: email=%s code=%s", req.email, exc.code)
+        # One message for unknown email and wrong password alike.
+        raise coded_error(
+            status.HTTP_400_BAD_REQUEST, "invalid_credentials", "Incorrect email or password."
+        ) from exc
+    logger.info("Password login succeeded: email=%s", req.email)
+    return session
+
+
+@router.post(
+    "/signup",
+    response_model=SignupResponse,
+    status_code=202,
+    dependencies=[Depends(auth_rate_limit)],
+)
+async def signup(req: SignupRequest, request: Request) -> SignupResponse:
+    """Create a password account. A code is emailed to confirm the address."""
+    _require_auth_configured()
+    if not settings.AUTH_ALLOW_SIGNUP:
+        raise coded_error(
+            status.HTTP_403_FORBIDDEN, "signup_disabled", "Sign-ups are closed on this server."
+        )
+    data = {"full_name": req.name.strip()} if req.name and req.name.strip() else None
+    try:
+        result = await supabase_auth.signup(
+            req.email, req.password, data=data, user_agent=client_agent(request)
+        )
+    except SupabaseAuthError as exc:
+        if exc.code == "signup_disabled":
+            raise coded_error(
+                status.HTTP_403_FORBIDDEN, "signup_disabled", "Sign-ups are closed on this server."
+            ) from exc
+        if exc.code in ("user_already_exists", "email_exists"):
+            # Only reachable when the project auto-confirms; answer as if a code
+            # had been sent, so this endpoint cannot be used to find accounts.
+            return SignupResponse(confirmation_required=True)
+        logger.warning("Signup failed: email=%s status=%s code=%s", req.email, exc.status, exc.code)
+        raise gotrue_error(exc) from exc
+
+    if result.get("access_token"):
+        logger.info("Signup succeeded (auto-confirmed): email=%s", req.email)
+        return SignupResponse(confirmation_required=False, session=Session(**result))
+    logger.info("Signup pending confirmation: email=%s", req.email)
+    return SignupResponse(confirmation_required=True)
+
+
+@router.post("/resend", status_code=204, dependencies=[Depends(auth_rate_limit)])
+async def resend_confirmation(req: EmailRequest) -> None:
+    """Send the sign-up confirmation code again. Silent about unknown emails."""
+    _require_auth_configured()
+    try:
+        await supabase_auth.resend_signup(req.email)
+    except SupabaseAuthError as exc:
+        if exc.status == 429:
+            raise gotrue_error(exc) from exc
+        logger.info("Confirmation resend swallowed: email=%s code=%s", req.email, exc.code)
+
+
+@router.post("/password/forgot", status_code=204, dependencies=[Depends(auth_rate_limit)])
+async def forgot_password(req: EmailRequest) -> None:
+    """Email a password-reset code.
+
+    Always 204 (except a rate limit): an error for an unknown address — or a
+    delivery failure that only happens for a known one — would say who has an
+    account. Failures are logged instead.
+    """
+    _require_auth_configured()
+    try:
+        await supabase_auth.recover(req.email)
+    except SupabaseAuthError as exc:
+        if exc.status == 429:
+            raise gotrue_error(exc) from exc
+        logger.warning(
+            "Password reset email not sent: email=%s status=%s error=%s", req.email, exc.status, exc
+        )
+
+
+@router.post("/password/reset", response_model=Session, dependencies=[Depends(auth_rate_limit)])
+async def reset_password(req: PasswordResetRequest, request: Request) -> dict:
+    """Trade a reset code and a new password for a signed-in session.
+
+    Two GoTrue calls: the code is verified (``type=recovery``), which yields a
+    session, and that session sets the password. If the second fails the first
+    has still consumed the code — so the error says to ask for a new one.
+    """
+    _require_auth_configured()
+    try:
+        session = await supabase_auth.verify_otp(
+            req.email, req.token, type="recovery", user_agent=client_agent(request)
+        )
+    except SupabaseAuthError as exc:
+        if exc.status == 429 or exc.status >= 500:
+            raise gotrue_error(exc) from exc
+        raise coded_error(
+            status.HTTP_400_BAD_REQUEST,
+            "invalid_code",
+            "That code is wrong or has expired. Ask for a new one.",
+        ) from exc
+    try:
+        await supabase_auth.update_user(session["access_token"], {"password": req.password})
+    except SupabaseAuthError as exc:
+        logger.warning("Password reset update failed: email=%s code=%s", req.email, exc.code)
+        raise gotrue_error(exc) from exc
+    # A reset is what someone does when they think a password is known to
+    # someone else, so every other session goes.
+    try:
+        await supabase_auth.logout(session["access_token"], scope="others")
+    except SupabaseAuthError as exc:
+        logger.info("Revoking other sessions after reset failed: %s", exc)
+    logger.info("Password reset completed: email=%s", req.email)
     return session
 
 
@@ -117,12 +310,14 @@ async def oauth_authorize(provider: str, code_challenge: str, redirect_to: str) 
 
 
 @router.post("/oauth/exchange", response_model=Session, dependencies=[Depends(auth_rate_limit)])
-async def oauth_exchange(req: OAuthExchangeRequest) -> dict:
+async def oauth_exchange(req: OAuthExchangeRequest, request: Request) -> dict:
     """Trade an OAuth PKCE code for a session after the provider redirect."""
     _require_auth_configured()
     started = time.monotonic()
     try:
-        session = await supabase_auth.exchange_code(req.auth_code, req.code_verifier)
+        session = await supabase_auth.exchange_code(
+            req.auth_code, req.code_verifier, user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         logger.warning(
             "OAuth exchange failed: status=%s elapsed=%.2fs error=%s",
@@ -142,8 +337,12 @@ async def oauth_exchange(req: OAuthExchangeRequest) -> dict:
 @router.post("/logout", status_code=204)
 async def logout(
     bearer: HTTPAuthorizationCredentials | None = Security(_bearer),
+    scope: Literal["global", "local", "others"] = "global",
 ) -> None:
-    """Revoke the caller's Supabase session so the refresh token can't be reused.
+    """Revoke the caller's Supabase sessions so their refresh tokens can't be reused.
+
+    ``global`` (the default, which older clients rely on) signs out every
+    device; ``local`` only this one; ``others`` every device but this one.
 
     Best-effort: clients also drop their local session. A missing/expired token is
     treated as already-logged-out (204) rather than an error.
@@ -152,7 +351,7 @@ async def logout(
     if bearer is None:
         return
     try:
-        await supabase_auth.logout(bearer.credentials)
+        await supabase_auth.logout(bearer.credentials, scope=scope)
     except SupabaseAuthError as exc:
         # The token may already be invalid/expired — nothing left to revoke.
         logger.info("Logout revocation returned %s: %s", exc.status, exc)

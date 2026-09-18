@@ -127,6 +127,10 @@ These come from `web-production.md` and are enforced in code, not in copy.
 - **shadcn was not run.** `components/ui/*` is a small hand-written set on Base
   UI, because the design's rules (rounded fills instead of rules, colour as text,
   no shadows except popovers) fight shadcn's defaults more than they share them.
+  The exception is shape, not styling: `ui/field.tsx` and `ui/card.tsx` are
+  shadcn's `Field` and `Card` APIs ported onto these tokens, and the auth forms
+  follow shadcn's `login-03` block. Use them for new forms; do not install the
+  CLI, whose theme variables would fight `globals.css`.
 - **The avatar is a stored recipe, not a client-side derivation.** See below.
 - **There are no per-expert colours.** web-design.md §4's twelve expert hues are
   not used — neither hashed from a name nor offered in the picker. See _Colour_.
@@ -198,6 +202,26 @@ Two consequences worth knowing before changing this:
 - **Contrast:** `--fg-3` meets 4.5:1 on ground, panel and raised in both themes;
   `--fg-4` is for decoration and disabled states only, never for text a reader
   needs.
+
+## Accounts
+
+The plan is `docs/plans/accounts.md`; the Supabase dashboard steps it depends on
+are in `docs/deploy.md`. Rules for the web side:
+
+- **Three ways in, one account:** Google, email + password (`/login`), and an
+  emailed code (`/login/code`). Sign-up (`/signup`) and reset (`/login/forgot` →
+  `/login/reset`) confirm by six-digit code, never by link.
+- **Every flow that mints a session ends in `lib/auth/respond.ts`** (`signedIn`,
+  `postForSession`), which turns the tokens into the two cookies and passes the
+  browser's `User-Agent` on (`clientAgent`) — GoTrue labels a session with the
+  agent of the request that made it, and before this every session read
+  `python-httpx`.
+- **Forms branch on `errorCode(error)`**, the API's `detail.code`, never on the
+  English message.
+- **A 204 endpoint is called with `apiVoid`**, not `apiSend` — `apiJson` treats an
+  empty body as a failure.
+- **Nothing reveals whether an email has an account.** Copy after sign-up, resend
+  and forgot-password says "if there is an account" or moves on regardless.
 
 ## Sharing and the viewer
 

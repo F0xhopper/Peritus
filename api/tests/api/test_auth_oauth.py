@@ -4,7 +4,7 @@ GoTrue is mocked — these verify the authorize-URL construction, the provider
 allowlist, and that the exchange endpoint proxies codes/errors faithfully.
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -87,7 +87,7 @@ async def test_exchange_returns_session(client):
             )
     assert resp.status_code == 200
     assert resp.json()["access_token"] == "at"
-    mock.assert_awaited_once_with("one-time-code", VERIFIER)
+    mock.assert_awaited_once_with("one-time-code", VERIFIER, user_agent=ANY)
 
 
 @pytest.mark.asyncio

@@ -47,8 +47,16 @@ async function decode(res: Response, fallback: string): Promise<ClientApiError> 
     // A proxy error page, an empty body, a 502 from somewhere else. The status
     // is still the honest thing to report.
   }
+  // The auth routes answer `{code, message}` so a form can branch on `code`
+  // without parsing English; the message is still what a person reads.
+  const coded =
+    detail &&
+    typeof detail === 'object' &&
+    typeof (detail as { message?: unknown }).message === 'string'
+      ? (detail as { message: string }).message
+      : null
   const message =
-    typeof detail === 'string' && detail ? detail : friendlyMessage(res.status, fallback)
+    typeof detail === 'string' && detail ? detail : (coded ?? friendlyMessage(res.status, fallback))
   return new ClientApiError(
     res.status,
     message,
@@ -117,6 +125,20 @@ export function apiSend<T>(
     },
     fallback
   )
+}
+
+/** The machine-readable `code` of a coded API error (`email_not_confirmed`, …). */
+export function errorCode(error: unknown): string | null {
+  if (!(error instanceof ApiError)) return null
+  const detail = error.detail
+  if (
+    detail &&
+    typeof detail === 'object' &&
+    typeof (detail as { code?: unknown }).code === 'string'
+  ) {
+    return (detail as { code: string }).code
+  }
+  return null
 }
 
 /** The message to show for anything thrown by the calls above. */
