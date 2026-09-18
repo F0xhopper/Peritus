@@ -7,7 +7,8 @@ import { useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 
 import { FormNotice, GoogleButton, NoAuthNotice } from '@/components/auth/auth-parts'
-import { PasswordInput, PasswordMeter } from '@/components/auth/password-input'
+import { PasswordInput } from '@/components/auth/password-input'
+import { PasswordMeter } from '@/components/auth/password-meter'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import {

@@ -3,8 +3,10 @@
 import Link from 'next/link'
 import { useState } from 'react'
 
-import { CODE_LENGTH, CodeInput, FormNotice } from '@/components/auth/auth-parts'
-import { PasswordInput, PasswordMeter } from '@/components/auth/password-input'
+import { CODE_LENGTH, CodeInput } from '@/components/auth/code-input'
+import { FormNotice } from '@/components/auth/auth-parts'
+import { PasswordInput } from '@/components/auth/password-input'
+import { PasswordMeter } from '@/components/auth/password-meter'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'

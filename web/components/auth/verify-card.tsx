@@ -3,7 +3,8 @@
 import Link from 'next/link'
 import { useRef, useState } from 'react'
 
-import { CODE_LENGTH, CodeInput, FormNotice, useCountdown } from '@/components/auth/auth-parts'
+import { CODE_LENGTH, CodeInput } from '@/components/auth/code-input'
+import { FormNotice, useCountdown } from '@/components/auth/auth-parts'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ClientApiError, apiSend, apiVoid, messageFor } from '@/lib/api/client'

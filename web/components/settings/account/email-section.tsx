@@ -3,7 +3,8 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
-import { CODE_LENGTH, CodeInput, FormNotice } from '@/components/auth/auth-parts'
+import { CODE_LENGTH, CodeInput } from '@/components/auth/code-input'
+import { FormNotice } from '@/components/auth/auth-parts'
 import { SettingsSection } from '@/components/settings/account/section'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
