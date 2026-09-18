@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { Avatar } from '@/components/identity/avatar'
+import { UserAvatar } from '@/components/identity/user-avatar'
 import { useShell } from '@/components/shell/shell-context'
 import { isBuilding } from '@/components/ui/status-dot'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -129,7 +130,7 @@ export function Rail({
           </Link>
         </Tooltip>
         {me && (
-          <Tooltip content={me.email ?? 'Account'} side="right">
+          <Tooltip content={me.name || me.email || 'Account'} side="right">
             <Link
               href="/settings"
               aria-label="Account"
@@ -138,9 +139,7 @@ export function Rail({
               // what has to reach 44px on touch rather than the circle.
               className="grid size-(--icon-btn) place-items-center text-fg-3 transition-colors duration-(--dur-1) hover:text-fg"
             >
-              <span className="grid size-8 place-items-center rounded-full bg-raised text-xs font-medium text-fg-2">
-                {(me.email ?? '?').slice(0, 1).toUpperCase()}
-              </span>
+              <UserAvatar name={me.name} email={me.email} avatarUrl={me.avatar_url} size={32} />
             </Link>
           </Tooltip>
         )}

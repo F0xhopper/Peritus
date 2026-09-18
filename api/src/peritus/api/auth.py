@@ -41,6 +41,18 @@ class AuthUser:
     # own GoTrue record and must present it. Kept out of repr so it never lands
     # in a log line that formats the user.
     access_token: str | None = field(default=None, repr=False, compare=False)
+    # From the token's `user_metadata`: the display name and picture Google
+    # supplies on sign-in (or a name set in Settings). Read from the claims so
+    # `/auth/me` stays a zero-network call.
+    name: str | None = None
+    avatar_url: str | None = None
+
+
+def _https_url(value: object) -> str | None:
+    """An absolute https URL, or None — the web app renders it as an <img>."""
+    if isinstance(value, str) and value.startswith("https://") and len(value) <= 2048:
+        return value
+    return None
 
 
 def _is_admin(email: str | None) -> bool:
@@ -102,6 +114,9 @@ async def verify_access_token(token: str) -> AuthUser:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid access token") from exc
 
     email = claims.get("email")
+    meta = claims.get("user_metadata")
+    meta = meta if isinstance(meta, dict) else {}
+    name = meta.get("full_name") or meta.get("name")
     return AuthUser(
         id=str(claims["sub"]),
         email=email,
@@ -109,6 +124,8 @@ async def verify_access_token(token: str) -> AuthUser:
         role=claims.get("role", "authenticated"),
         session_id=claims.get("session_id"),
         access_token=token,
+        name=name if isinstance(name, str) and name.strip() else None,
+        avatar_url=_https_url(meta.get("avatar_url") or meta.get("picture")),
     )
 
 

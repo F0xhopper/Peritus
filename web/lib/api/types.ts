@@ -48,6 +48,10 @@ export interface Me {
   id: string
   email: string | null
   is_admin: boolean
+  /** From the sign-in provider's profile (Google), or set in Settings. */
+  name?: string | null
+  /** The Google profile picture, when the account has one. */
+  avatar_url?: string | null
 }
 
 /** One way into the account. `provider` is `email` or `google`. */

@@ -387,4 +387,10 @@ async def refresh(req: RefreshRequest) -> dict:
 
 @router.get("/me", response_model=MeResponse)
 async def me(user: AuthUser = Depends(require_user)) -> MeResponse:
-    return MeResponse(id=user.id, email=user.email, is_admin=user.is_admin)
+    return MeResponse(
+        id=user.id,
+        email=user.email,
+        is_admin=user.is_admin,
+        name=user.name,
+        avatar_url=user.avatar_url,
+    )

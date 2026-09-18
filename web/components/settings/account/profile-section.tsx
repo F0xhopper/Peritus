@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 
+import { UserAvatar } from '@/components/identity/user-avatar'
 import { SettingsSection } from '@/components/settings/account/section'
 import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldError, FieldLabel } from '@/components/ui/field'
@@ -10,7 +11,7 @@ import { useApiAction } from '@/hooks/use-api-action'
 import { apiSend } from '@/lib/api/client'
 import type { Account } from '@/lib/api/types'
 
-/** The display name. Used in the app's chrome; never shown to other people. */
+/** The picture and display name. Used in the app's chrome; never shown to other people. */
 export function ProfileSection({ account }: { account: Account }) {
   const [name, setName] = useState(account.name ?? '')
   const [error, setError] = useState<string | null>(null)
@@ -36,7 +37,15 @@ export function ProfileSection({ account }: { account: Account }) {
       >
         <Field>
           <FieldLabel htmlFor="profile-name">Name</FieldLabel>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {/* Google's picture when the account has one; it is not uploaded
+                or changed here, so there is no control for it. */}
+            <UserAvatar
+              name={account.name}
+              email={account.email}
+              avatarUrl={account.avatar_url}
+              size={32}
+            />
             <Input
               id="profile-name"
               autoComplete="name"

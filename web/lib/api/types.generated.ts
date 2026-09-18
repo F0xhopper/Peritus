@@ -2247,12 +2247,16 @@ export interface components {
     }
     /** MeResponse */
     MeResponse: {
+      /** Avatar Url */
+      avatar_url?: string | null
       /** Email */
       email?: string | null
       /** Id */
       id: string
       /** Is Admin */
       is_admin: boolean
+      /** Name */
+      name?: string | null
     }
     /** OAuthExchangeRequest */
     OAuthExchangeRequest: {

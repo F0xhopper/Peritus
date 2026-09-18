@@ -29,8 +29,10 @@ const contentSecurityPolicy = [
   "script-src 'self' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
   // `data:` and `blob:` for the generated avatars and anything the image
-  // optimiser produces; expert pictures are served from this origin.
-  "img-src 'self' data: blob:",
+  // optimiser produces; expert pictures are served from this origin. Google's
+  // image host for the signed-in person's own profile picture, which is the one
+  // image loaded from elsewhere.
+  "img-src 'self' data: blob: https://*.googleusercontent.com",
   "font-src 'self'",
   "connect-src 'self'",
   // The modern spelling of `X-Frame-Options: DENY`, which is kept below for

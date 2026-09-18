@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
 import { Avatar } from '@/components/identity/avatar'
+import { UserAvatar } from '@/components/identity/user-avatar'
 import { ExpertSidebar } from '@/components/shell/expert-sidebar'
 import { Sheet } from '@/components/shell/sheet'
 import { useShell } from '@/components/shell/shell-context'
@@ -141,7 +142,11 @@ export function NavDrawer({
           href="/settings"
           className="flex min-h-(--row-h) items-center gap-2 rounded-row px-1.5 py-1 text-sm text-fg-2 hover:bg-raised"
         >
-          <Settings className="size-4 shrink-0 text-fg-3" />
+          {me ? (
+            <UserAvatar name={me.name} email={me.email} avatarUrl={me.avatar_url} size={20} />
+          ) : (
+            <Settings className="size-4 shrink-0 text-fg-3" />
+          )}
           <span className="min-w-0 flex-1">
             <span className="block truncate">Account</span>
             {me?.email && <span className="block truncate text-xs text-fg-3">{me.email}</span>}

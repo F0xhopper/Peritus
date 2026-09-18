@@ -1771,6 +1771,17 @@
       },
       "MeResponse": {
         "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
           "email": {
             "anyOf": [
               {
@@ -1789,6 +1800,17 @@
           "is_admin": {
             "title": "Is Admin",
             "type": "boolean"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
           }
         },
         "required": [

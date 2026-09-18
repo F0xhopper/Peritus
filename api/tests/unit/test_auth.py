@@ -48,6 +48,35 @@ async def test_valid_token_resolves_user(hs256_env):
     assert user.is_admin is False
 
 
+async def test_google_profile_read_from_user_metadata(hs256_env):
+    meta = {
+        "full_name": "Ada Lovelace",
+        "avatar_url": "https://lh3.googleusercontent.com/a/abc=s96-c",
+    }
+    user = await authmod.verify_access_token(_token(_base_claims(user_metadata=meta)))
+    assert user.name == "Ada Lovelace"
+    assert user.avatar_url == "https://lh3.googleusercontent.com/a/abc=s96-c"
+
+
+async def test_picture_falls_back_and_rejects_non_https(hs256_env):
+    user = await authmod.verify_access_token(
+        _token(_base_claims(user_metadata={"picture": "https://example.com/p.png"}))
+    )
+    assert user.avatar_url == "https://example.com/p.png"
+    assert user.name is None
+
+    for bad in ("http://example.com/p.png", "javascript:alert(1)", 42):
+        user = await authmod.verify_access_token(
+            _token(_base_claims(user_metadata={"avatar_url": bad}))
+        )
+        assert user.avatar_url is None
+
+
+async def test_no_user_metadata_means_no_profile(hs256_env):
+    user = await authmod.verify_access_token(_token(_base_claims()))
+    assert user.name is None and user.avatar_url is None
+
+
 async def test_admin_email_detected(hs256_env):
     user = await authmod.verify_access_token(_token(_base_claims(email="admin@example.com")))
     assert user.is_admin is True

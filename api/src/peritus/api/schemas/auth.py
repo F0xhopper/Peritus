@@ -107,6 +107,8 @@ class MeResponse(BaseModel):
     id: str
     email: str | None = None
     is_admin: bool
+    name: str | None = None
+    avatar_url: str | None = None
 
 
 class Identity(BaseModel):
