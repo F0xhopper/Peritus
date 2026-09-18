@@ -5,8 +5,9 @@ import chatEvents from './fixtures/chat-events.json' with { type: 'json' }
 import corpusReport from './fixtures/corpus-report.json' with { type: 'json' }
 import denials from './fixtures/denial.json' with { type: 'json' }
 import expert from './fixtures/expert.json' with { type: 'json' }
-import graph from './fixtures/graph.json' with { type: 'json' }
-import graphPending from './fixtures/graph-not-computed.json' with { type: 'json' }
+import expertMap from './fixtures/map.json' with { type: 'json' }
+import mapConcept from './fixtures/map-concept.json' with { type: 'json' }
+import mapPending from './fixtures/map-not-computed.json' with { type: 'json' }
 import screeningFlow from './fixtures/screening-flow.json' with { type: 'json' }
 import {
   isEntitlementDenial,
@@ -15,7 +16,8 @@ import {
   type CreditState,
   type EntitlementDenial,
   type ExpertWithCatalog,
-  type GraphResponse,
+  type MapConceptDetail,
+  type MapResponse,
   type ScreeningFlow,
 } from '@/lib/api/types'
 
@@ -30,15 +32,16 @@ import {
  *
  * The assertions cover the handful of contract rules the types cannot express:
  * null means "not recorded", `drop_reason` is null on accepted rows, and
- * `computed: false` comes with an empty graph.
+ * `computed: false` comes with an empty cloud.
  */
 
 // These four annotations are the actual test.
 const expertFixture: ExpertWithCatalog = expert as ExpertWithCatalog
 const billingFixture: CreditState = billing as CreditState
 const reportFixture: CorpusReport = corpusReport as CorpusReport
-const graphFixture: GraphResponse = graph as GraphResponse
-const graphPendingFixture: GraphResponse = graphPending as GraphResponse
+const mapFixture: MapResponse = expertMap as MapResponse
+const mapPendingFixture: MapResponse = mapPending as MapResponse
+const mapConceptFixture: MapConceptDetail = mapConcept as MapConceptDetail
 const chatFixtures: Record<string, ChatEvent> = chatEvents
 const flowFixture: ScreeningFlow = screeningFlow as ScreeningFlow
 
@@ -195,34 +198,53 @@ describe('screening flow', () => {
   })
 })
 
-describe('graph', () => {
-  it('gives every edge endpoints that exist among the nodes', () => {
-    const ids = new Set(graphFixture.nodes.map((node) => node.id))
-    for (const edge of graphFixture.edges) {
-      expect(ids.has(edge.source), `edge ${edge.id} source`).toBe(true)
-      expect(ids.has(edge.target), `edge ${edge.id} target`).toBe(true)
+describe('the expert map', () => {
+  it('links only concepts it returns, and draws only concepts some kept source discusses', () => {
+    const ids = new Set(mapFixture.concepts.map((concept) => concept.id))
+    for (const link of mapFixture.links) {
+      expect(ids.has(link.from), `link from ${link.from}`).toBe(true)
+      expect(ids.has(link.to), `link to ${link.to}`).toBe(true)
+    }
+    const sources = new Set(mapFixture.sources.map((source) => source.id))
+    for (const concept of mapFixture.concepts) {
+      expect(concept.source_ids.length).toBeGreaterThan(0)
+      for (const id of concept.source_ids) expect(sources.has(id), `source ${id}`).toBe(true)
     }
   })
 
-  it('reports truncation against the true total', () => {
-    expect(graphFixture.truncated).toBe(true)
-    expect(graphFixture.total_nodes).toBeGreaterThan(graphFixture.nodes.length)
+  it('indexes key concepts from tags, facets, concepts and gaps within the syllabus', () => {
+    const count = mapFixture.syllabus.key_concepts.length
+    const inRange = (index: number | null) => index === null || (index >= 0 && index < count)
+    for (const source of mapFixture.sources)
+      for (const tag of source.tags) expect(inRange(tag.key_concept)).toBe(true)
+    for (const facet of mapFixture.syllabus.facets ?? [])
+      for (const i of facet.concepts) expect(inRange(i)).toBe(true)
+    for (const concept of mapFixture.concepts) expect(inRange(concept.key_concept)).toBe(true)
+    for (const gap of mapFixture.syllabus.gaps) expect(inRange(gap.key_concept)).toBe(true)
   })
 
-  it('puts claims, not concepts, on both ends of a contradiction', () => {
-    // Two concepts can differ; only two propositions can be incompatible.
-    const byId = new Map(graphFixture.nodes.map((node) => [node.id, node]))
-    for (const edge of graphFixture.edges.filter((e) => e.edge_type === 'contradicts')) {
-      expect(byId.get(edge.source)!.node_type).toBe('claim')
-      expect(byId.get(edge.target)!.node_type).toBe('claim')
+  it('reports what is shown against what exists', () => {
+    expect(mapFixture.totals.concepts_shown).toBe(mapFixture.concepts.length)
+    expect(mapFixture.totals.concepts).toBeGreaterThan(mapFixture.concepts.length)
+  })
+
+  it('pairs computed:false with an empty cloud and unrecorded totals, never zeros', () => {
+    expect(mapPendingFixture.computed).toBe(false)
+    expect(mapPendingFixture.concepts).toEqual([])
+    expect(mapPendingFixture.links).toEqual([])
+    // "No concepts found" would be the worst available lie.
+    expect(mapPendingFixture.totals.concepts).toBeNull()
+    expect(mapPendingFixture.totals.claims).toBeNull()
+  })
+
+  it("lists a concept's disputed claims first, each with the point in dispute", () => {
+    const [first] = mapConceptFixture.claims
+    expect(first.disputed).toBe(true)
+    const dispute = first.relations.find((relation) => relation.type === 'contradicts')
+    expect(dispute?.point).toBeTruthy()
+    for (const claim of mapConceptFixture.claims) {
+      for (const source of claim.sources) expect(source.chunk_id).toBeGreaterThan(0)
     }
-  })
-
-  it('pairs computed:false with an empty graph, which means "not yet"', () => {
-    expect(graphPendingFixture.computed).toBe(false)
-    expect(graphPendingFixture.nodes).toEqual([])
-    // Rendering this as "no concepts found" would be the worst available lie.
-    expect(graphPendingFixture.edges).toEqual([])
   })
 })
 

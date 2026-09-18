@@ -157,8 +157,8 @@ export function BuildView({
         overflow={
           <>
             <MenuItem onClick={() => router.push(`/experts/${expert.name}`)}>Overview</MenuItem>
-            <MenuItem onClick={() => router.push(`/experts/${expert.name}/sources`)}>
-              Sources
+            <MenuItem onClick={() => router.push(`/experts/${expert.name}/knowledge`)}>
+              Knowledge
             </MenuItem>
             {/* The cost panel is inline only from 1280px; this opens it as an
                 overlay or a sheet everywhere below that. */}

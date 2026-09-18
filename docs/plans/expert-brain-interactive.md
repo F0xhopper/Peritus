@@ -6,11 +6,11 @@
 the motion rule and the `/map` API are all defined there and not repeated here.
 **Questions answered:** is the brain a picture *of* the expert, or the place an
 owner works *on* the expert? And should a build look like the brain growing?
-**Against:** `main` at `af303e5`, plus a working tree in which phase 0 of
-expert-brain.md is under way (`api/migrations/034_node_key_concepts.sql` and
-`api/src/peritus/graph/key_concepts.py` exist; neither the builder nor the
-upload path calls them yet). Evidence is the build's event vocabulary, the
-upload service, and the build and Sources pages.
+**Against:** branch `feat/expert-brain`, on which phases 0–7 of expert-brain.md
+were implemented the same day (the API at `d7c00c3`; the web side still
+uncommitted). So the Knowledge page, the map, `/map` and key-concept assignment
+exist; nothing in *this* file does. Evidence is the build's event vocabulary,
+the upload service, and the build, Overview and Knowledge pages.
 
 ## The short answer
 
@@ -66,17 +66,17 @@ toast that says "Reading…", and some time later a new table row.
 uploaded source is `treats`. (`source_tier` is stored; the orbit's shape rule
 works unchanged.)
 
-**New concepts arrive without a sector.** `_extend_graph` does not assign
-`key_concept_idx` — nothing does yet. Once phase 0 is wired into the builder it
-must be wired here too, or everything a user adds lands in the unassigned arc.
+**New concepts do get a sector.** `_extend_graph` calls `assign_key_concepts`
+after an upload's extraction, as the builder does at the end of its graph stage,
+so what a user adds lands where it belongs rather than in the unassigned arc.
 
-**Removing a source leaves its concepts behind.** `delete_source` cascades the
-chunks and, by design, keeps the graph nodes: "the node's `chunk_ids` simply
-stop resolving". For retrieval that is harmless. For the map it means `/map`
-must derive `source_ids` from a live join (it does, by design) **and drop any
-node with no resolving chunk**, or removed knowledge lingers as orphan dots. The
-correct consequence — a concept falls below the two-source bar and leaves the
-cloud — is worth showing, not hiding.
+**Removing a source leaves its concept nodes in the database, and the map
+already copes.** `delete_source` cascades the chunks and, by design, keeps the
+graph nodes: "the node's `chunk_ids` simply stop resolving". `map_concepts`
+reads each concept's sources off a live join and `select_concepts` drops any
+with none, so removed knowledge does not linger as orphan dots. The visible
+consequence — a concept falls below the two-source bar and leaves the cloud — is
+correct, and worth showing rather than hiding.
 
 **What the build log can draw today:**
 
@@ -162,6 +162,49 @@ with its neighbours easing over.
   a rebuild writes over them, and the edit would silently vanish.
 - **Chat inside the map.** "Ask about this" goes to chat; phase 7 of
   expert-brain.md brings the answer back as lit sources. One link each way.
+
+## The Overview carries the brain; it does not become it
+
+The question was whether the brain should *be* the expert's Overview. **No — it
+should be the Overview's centrepiece.** Resolves open question 3 of
+expert-brain.md.
+
+What the Overview does that a map cannot: it is where **asking comes first**
+(the composer sits under the header for an expert with no chats — a decision
+from the September UX review); it carries the failed, degraded and "it can
+answer now" notices; it holds the properties, the picture credit and Share; it
+is the page a phone lands on, where the Map is not even the default view; and it
+is the only page that makes sense for an expert that is queued, failed or has no
+graph — states in which there is little or nothing to draw. Make the canvas the
+landing page and every one of those gets worse.
+
+What the brain does better than the Overview: the **key concepts and coverage
+section** (`overview/coverage.tsx`). That is a list of links standing in for
+exactly what the map shows.
+
+So, from `lg` with a fine pointer:
+
+- Header, then the composer, as now. Asking stays first.
+- Beneath them the brain, large, **in its idle state permanently** — tilted,
+  turning, firing now and then. This is the one place where nobody is working on
+  it, so "idle is alive" is simply what it looks like here. It replaces the key
+  concept list; the properties sit beside or below it.
+- **Read-only, and every click leaves.** Hover names a thing; a click opens
+  `/knowledge?view=map` with that thing selected. It never flattens, opens no
+  panel and offers no Add. Two rooms: the Overview is where you meet the expert
+  and ask it, Knowledge is where you work on it. Put the workbench on the
+  landing page and asking stops coming first.
+- Below `lg`, on touch, and as the accessible form: the key concept list stays,
+  as it is.
+- The canvas is loaded lazily, after the composer has painted. `/map` measured
+  45–75 ms for Thomism; the cost to watch is the worker and the idle loop on a
+  page that today paints nothing per frame.
+- During a build the same slot shows the growing brain (G3's reducer, read-only
+  there too), so the Overview of a building expert is not an empty page with a
+  notice.
+
+Small, web-only, a second consumer of `brain-canvas.tsx` with interaction turned
+off. Phase **G2b**, after G2.
 
 ## The build as the brain growing
 
@@ -252,13 +295,13 @@ target. It tilts into its idle orbit once, at `done`.
 Lettered, so they do not collide with expert-brain.md's numbers. G1 needs that
 plan's phases 3–4 (layout, paint); G2 needs its phase 5 (the page).
 
-**G0 — Events, and the two joins that are missing.** `source_ingested` gains
-`source_id`, `tier` and `tags: [{ key_concept, depth }]`; `graph_batch_done`
-gains `source_ids`. Both additive — `lib/build/reducer.ts` and the CLI ignore
-keys they do not know. Key-concept assignment runs in the builder **before**
-`graph_ready` is emitted, and in `_extend_graph`. `/map` drops nodes with no
-resolving chunk. pytest on the payloads; fixtures and the mock API's SSE build
-script gain the fields.
+**G0 — Events.** `source_ingested` gains `source_id`, `tier` and
+`tags: [{ key_concept, depth }]`; `graph_batch_done` gains `source_ids`. Both
+additive — `lib/build/reducer.ts` and the CLI ignore keys they do not know.
+One ordering the page depends on is already right and must stay so:
+`_graph_stage` assigns key concepts before `_enrich_and_finish` emits
+`graph_ready`, which is the page's cue to fetch `/map`. pytest on the payloads; fixtures and the mock API's SSE build script gain the
+fields.
 
 **G1 — The growth reducer.** `lib/brain/grow.ts`: a pure fold from the build
 vocabulary (including the upload events) to a partial `/map` payload plus a list
@@ -270,6 +313,11 @@ removal preview and fade, the "what changed" toast. **First, because it is the
 smallest use of G1** — one source, a few events, no build to mock — and the one
 an owner meets most often. *Done when* an added source lands at the angle
 `/knowledge` gives it after a reload.
+
+**G2b — The brain on the Overview.** The read-only, always-idle brain in place
+of the key concept list from `lg`; click-through to `/knowledge`; lazy-loaded;
+the list kept below `lg`. Overflow and tap-target assertions unchanged; the
+reduced-motion project asserts it is still.
 
 **G3 — The build page grows a brain.** The panel, the sequence, flat until
 `done`; retry, failed and cancelled; the 280px form; reduced motion. E2E, per

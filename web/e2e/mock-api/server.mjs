@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { handleAccount, logoutOthers, resetAccount } from './account.mjs'
 import { body, json, noContent, slugify } from './http.mjs'
 import { newToken, seed, shareState, sharedCard } from './seed.mjs'
-import { PICTURE_BYTES, PICTURE_SHA, bigGraph, fixture, pictureMeta, state } from './state.mjs'
+import { PICTURE_BYTES, PICTURE_SHA, bigMap, fixture, pictureMeta, state } from './state.mjs'
 import { startBuild, streamBuild, streamChat } from './streams.mjs'
 
 /**
@@ -550,20 +550,50 @@ async function handle(req, res) {
     const sourceMatch = /^\/sources\/(\d+)$/.exec(rest)
     if (sourceMatch && method === 'DELETE') return noContent(res)
 
-    if (rest === '/graph' && method === 'GET') {
+    if (rest === '/map' && method === 'GET') {
       if (!expert) return json(res, 404, { detail: 'Expert not found' })
-      if (!expert.graph_expanded) return json(res, 200, await fixture('graph-not-computed'))
-      const graph =
-        state.scenario === 'big-graph' ? bigGraph(await fixture('graph')) : await fixture('graph')
-      const limit = Number(url.searchParams.get('limit') || 400)
-      const nodes = graph.nodes.slice(0, limit)
-      const ids = new Set(nodes.map((node) => node.id))
+      if (!expert.graph_expanded) {
+        return json(res, 200, {
+          ...(await fixture('map-not-computed')),
+          expert: { slug: expert.name, topic: expert.topic },
+        })
+      }
+      const map = state.scenario === 'big-map' ? bigMap(await fixture('map')) : await fixture('map')
+      const expand = url.searchParams.get('expand')
       return json(res, 200, {
-        ...graph,
-        expert: { name: expert.name, topic: expert.topic },
-        nodes,
-        edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)),
-        truncated: nodes.length < graph.total_nodes,
+        ...map,
+        expert: { slug: expert.name, topic: expert.topic },
+        expanded: expand === null ? null : Number(expand),
+      })
+    }
+    const conceptMatch = /^\/map\/concepts\/(\d+)$/.exec(rest)
+    if (conceptMatch && method === 'GET') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      const detail = await fixture('map-concept')
+      const id = Number(conceptMatch[1])
+      if (id === detail.id) return json(res, 200, detail)
+      // Any other concept on the map: its own label, its sources, no claims.
+      const map = state.scenario === 'big-map' ? bigMap(await fixture('map')) : await fixture('map')
+      const concept = map.concepts.find((row) => row.id === id)
+      if (!concept) return json(res, 404, { detail: 'No such concept in this expert.' })
+      const sources = map.sources.filter((source) => concept.source_ids.includes(source.id))
+      return json(res, 200, {
+        id,
+        label: concept.label,
+        description: null,
+        key_concept: concept.key_concept,
+        sources: sources.map((source) => ({
+          id: source.id,
+          title: source.title,
+          author: source.author,
+          kind: source.kind,
+          tier: source.tier,
+          passages: 1,
+          chunk_id: 8000 + source.id,
+        })),
+        claims: [],
+        disputes: 0,
+        part_of: [],
       })
     }
     if (rest === '/conversations' && method === 'GET') {

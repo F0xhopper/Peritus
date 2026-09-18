@@ -17,7 +17,7 @@ import type {
   CreditState,
   ExpertWithCatalog,
   ExpertSummary,
-  GraphResponse,
+  MapResponse,
   LedgerEntry,
   Me,
   PassageWindow,
@@ -213,7 +213,7 @@ export function getCorpusReport(slug: string, query: CorpusQuery = {}) {
   })
   return safely(
     () => proxyJson<CorpusReport>(`/experts/${encodeURIComponent(slug)}/corpus-report?${params}`),
-    { next: `/experts/${slug}/sources` }
+    { next: `/experts/${slug}/knowledge` }
   )
 }
 
@@ -238,17 +238,18 @@ export function getPassages(
       proxyJson<PassageWindow>(
         `/experts/${encodeURIComponent(slug)}/sources/${sourceId}/passages?${params}`
       ),
-    { next: `/experts/${slug}/sources` }
+    { next: `/experts/${slug}/knowledge` }
   )
 }
 
-// ── graph ───────────────────────────────────────────────────────────────────
+// ── the expert's map ─────────────────────────────────────────────────────────
 
-export function getGraph(slug: string, limit = 400) {
-  return safely(
-    () => proxyJson<GraphResponse>(`/experts/${encodeURIComponent(slug)}/graph?limit=${limit}`),
-    { next: `/experts/${slug}/graph` }
-  )
+/** The expert's map. `expand` adds every concept in one key concept's sector. */
+export function getExpertMap(slug: string, expand: number | null = null) {
+  const query = expand === null ? '' : `?expand=${expand}`
+  return safely(() => proxyJson<MapResponse>(`/experts/${encodeURIComponent(slug)}/map${query}`), {
+    next: `/experts/${slug}/knowledge`,
+  })
 }
 
 // ── conversations ───────────────────────────────────────────────────────────

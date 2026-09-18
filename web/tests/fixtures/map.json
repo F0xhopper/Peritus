@@ -1,0 +1,508 @@
+{
+  "expert": {
+    "slug": "varroa-mite-control-in-temperate-beekeeping",
+    "topic": "Varroa mite control in temperate beekeeping"
+  },
+  "computed": true,
+  "syllabus": {
+    "facets": [
+      {
+        "name": "Biology",
+        "concepts": [0, 3]
+      },
+      {
+        "name": "Control",
+        "concepts": [1, 2, 4]
+      }
+    ],
+    "key_concepts": [
+      {
+        "index": 0,
+        "label": "varroa biology",
+        "facet": "Biology",
+        "sources": 5,
+        "depth_counts": {
+          "sets_out": 1,
+          "treats": 4
+        },
+        "met": true,
+        "named_text": null
+      },
+      {
+        "index": 1,
+        "label": "acaricide resistance",
+        "facet": "Control",
+        "sources": 3,
+        "depth_counts": {
+          "sets_out": 1,
+          "treats": 2
+        },
+        "met": true,
+        "named_text": {
+          "status": "found",
+          "title": "Amitraz resistance in field populations",
+          "author": "Okonkwo, A."
+        }
+      },
+      {
+        "index": 2,
+        "label": "drone brood removal",
+        "facet": "Control",
+        "sources": 2,
+        "depth_counts": {
+          "sets_out": 1,
+          "treats": 1
+        },
+        "met": false,
+        "named_text": null
+      },
+      {
+        "index": 3,
+        "label": "viral co-infection",
+        "facet": "Biology",
+        "sources": 4,
+        "depth_counts": {
+          "sets_out": 1,
+          "treats": 3
+        },
+        "met": true,
+        "named_text": null
+      },
+      {
+        "index": 4,
+        "label": "monitoring thresholds",
+        "facet": "Control",
+        "sources": 2,
+        "depth_counts": {
+          "treats": 2
+        },
+        "met": false,
+        "named_text": {
+          "status": "missing",
+          "title": "Tools for Varroa Management",
+          "author": "Honey Bee Health Coalition"
+        }
+      }
+    ],
+    "gaps": [
+      {
+        "key_concept": 4,
+        "title": "Tools for Varroa Management",
+        "author": "Honey Bee Health Coalition",
+        "kind": "named_text"
+      },
+      {
+        "key_concept": null,
+        "title": "The Biology of the Honey Bee",
+        "author": "Mark L. Winston",
+        "kind": "must_have"
+      }
+    ]
+  },
+  "sources": [
+    {
+      "id": 804,
+      "title": "Varroa destructor and honeybee viral loads: a five-year cohort",
+      "author": "Beaumont, R. and Halvorsen, K.",
+      "kind": "openalex",
+      "tier": "primary",
+      "passage_count": 34,
+      "tags": [
+        {
+          "key_concept": 0,
+          "depth": "sets_out"
+        },
+        {
+          "key_concept": 3,
+          "depth": "treats"
+        }
+      ]
+    },
+    {
+      "id": 812,
+      "title": "Amitraz resistance in field populations, 2019-2024",
+      "author": "Okonkwo, A.",
+      "kind": "pubmed",
+      "tier": "primary",
+      "passage_count": 4,
+      "tags": [
+        {
+          "key_concept": 1,
+          "depth": "sets_out"
+        }
+      ]
+    },
+    {
+      "id": 815,
+      "title": "Drone brood trapping as integrated pest management",
+      "author": "Lindqvist, M.",
+      "kind": "openalex",
+      "tier": "primary",
+      "passage_count": 22,
+      "tags": [
+        {
+          "key_concept": 2,
+          "depth": "sets_out"
+        },
+        {
+          "key_concept": 4,
+          "depth": "mentions"
+        }
+      ]
+    },
+    {
+      "id": 816,
+      "title": "Deformed wing virus: transmission by Varroa",
+      "author": "Ortega, L.",
+      "kind": "pubmed",
+      "tier": "primary",
+      "passage_count": 18,
+      "tags": [
+        {
+          "key_concept": 3,
+          "depth": "sets_out"
+        },
+        {
+          "key_concept": 0,
+          "depth": "treats"
+        }
+      ]
+    },
+    {
+      "id": 817,
+      "title": "Sugar roll and alcohol wash compared",
+      "author": "Kimura, T.",
+      "kind": "exa",
+      "tier": "secondary",
+      "passage_count": 9,
+      "tags": [
+        {
+          "key_concept": 4,
+          "depth": "treats"
+        }
+      ]
+    },
+    {
+      "id": 818,
+      "title": "Varroa mite",
+      "author": null,
+      "kind": "wikipedia",
+      "tier": "tertiary",
+      "passage_count": 12,
+      "tags": [
+        {
+          "key_concept": 0,
+          "depth": "treats"
+        },
+        {
+          "key_concept": 1,
+          "depth": "mentions"
+        }
+      ]
+    },
+    {
+      "id": 819,
+      "title": "Resistance management for acaricides in apiculture",
+      "author": "Fischer, H.",
+      "kind": "web",
+      "tier": "secondary",
+      "passage_count": 14,
+      "tags": [
+        {
+          "key_concept": 1,
+          "depth": "treats"
+        },
+        {
+          "key_concept": 4,
+          "depth": "treats"
+        }
+      ]
+    },
+    {
+      "id": 820,
+      "title": "Mite biology for beekeepers",
+      "author": "Arnott, J.",
+      "kind": "gutenberg",
+      "tier": "secondary",
+      "passage_count": 40,
+      "tags": [
+        {
+          "key_concept": 0,
+          "depth": "treats"
+        },
+        {
+          "key_concept": 2,
+          "depth": "treats"
+        }
+      ]
+    },
+    {
+      "id": 821,
+      "title": "Viral co-infection in overwintering colonies",
+      "author": "Sato, Y.",
+      "kind": "arxiv",
+      "tier": "primary",
+      "passage_count": 16,
+      "tags": [
+        {
+          "key_concept": 3,
+          "depth": "treats"
+        }
+      ]
+    },
+    {
+      "id": 822,
+      "title": "Beekeeping forum: what worked this winter",
+      "author": null,
+      "kind": "reddit",
+      "tier": "tertiary",
+      "passage_count": 3,
+      "tags": []
+    }
+  ],
+  "concepts": [
+    {
+      "id": 5001,
+      "label": "varroa destructor",
+      "key_concept": 0,
+      "source_ids": [804, 816, 818, 820],
+      "degree": 22,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5002,
+      "label": "deformed wing virus",
+      "key_concept": 3,
+      "source_ids": [804, 816, 821],
+      "degree": 9,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5003,
+      "label": "amitraz",
+      "key_concept": 1,
+      "source_ids": [812, 819],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5004,
+      "label": "drone brood removal",
+      "key_concept": 2,
+      "source_ids": [815, 820],
+      "degree": 6,
+      "disputes": 1,
+      "topped_up": false
+    },
+    {
+      "id": 5007,
+      "label": "phoretic mites",
+      "key_concept": 0,
+      "source_ids": [804, 818],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5008,
+      "label": "reproductive cycle in capped brood",
+      "key_concept": 0,
+      "source_ids": [818, 820],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5009,
+      "label": "tau-fluvalinate",
+      "key_concept": 1,
+      "source_ids": [812, 819],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5010,
+      "label": "coumaphos",
+      "key_concept": 1,
+      "source_ids": [812, 819],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5011,
+      "label": "acaricide rotation",
+      "key_concept": 1,
+      "source_ids": [812, 819],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5012,
+      "label": "drone comb frames",
+      "key_concept": 2,
+      "source_ids": [815, 820],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5013,
+      "label": "brood break",
+      "key_concept": 2,
+      "source_ids": [815, 820],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5014,
+      "label": "acute bee paralysis virus",
+      "key_concept": 3,
+      "source_ids": [816, 821],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5015,
+      "label": "viral titre",
+      "key_concept": 3,
+      "source_ids": [804, 821],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5016,
+      "label": "immunosuppression",
+      "key_concept": 3,
+      "source_ids": [804, 816, 821],
+      "degree": 9,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5017,
+      "label": "alcohol wash",
+      "key_concept": 4,
+      "source_ids": [817, 819],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5018,
+      "label": "sugar roll",
+      "key_concept": 4,
+      "source_ids": [815, 817],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5019,
+      "label": "treatment threshold",
+      "key_concept": 4,
+      "source_ids": [815, 817, 819],
+      "degree": 9,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5020,
+      "label": "sticky board",
+      "key_concept": 4,
+      "source_ids": [815, 817],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5021,
+      "label": "winter losses",
+      "key_concept": null,
+      "source_ids": [821, 822],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5022,
+      "label": "colony collapse",
+      "key_concept": null,
+      "source_ids": [804, 822],
+      "degree": 6,
+      "disputes": 0,
+      "topped_up": false
+    },
+    {
+      "id": 5023,
+      "label": "hygienic behaviour",
+      "key_concept": 0,
+      "source_ids": [820],
+      "degree": 3,
+      "disputes": 0,
+      "topped_up": true
+    },
+    {
+      "id": 5024,
+      "label": "oxalic acid",
+      "key_concept": 1,
+      "source_ids": [819],
+      "degree": 3,
+      "disputes": 0,
+      "topped_up": true
+    }
+  ],
+  "links": [
+    {
+      "from": 5007,
+      "to": 5001
+    },
+    {
+      "from": 5008,
+      "to": 5001
+    },
+    {
+      "from": 5009,
+      "to": 5011
+    },
+    {
+      "from": 5010,
+      "to": 5011
+    },
+    {
+      "from": 5012,
+      "to": 5004
+    },
+    {
+      "from": 5014,
+      "to": 5002
+    },
+    {
+      "from": 5017,
+      "to": 5019
+    },
+    {
+      "from": 5018,
+      "to": 5019
+    },
+    {
+      "from": 5020,
+      "to": 5019
+    }
+  ],
+  "totals": {
+    "concepts": 187,
+    "concepts_shown": 22,
+    "claims": 96,
+    "sources": 10
+  },
+  "expanded": null
+}

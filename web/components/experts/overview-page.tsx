@@ -223,11 +223,8 @@ export function OverviewPage({
           <>
             {/* Not Share: it is a button beside the expert's name now, which
                 is where someone looks for it. */}
-            <MenuLinkItem render={<Link href={`/experts/${expert.name}/sources`} />}>
-              Sources
-            </MenuLinkItem>
-            <MenuLinkItem render={<Link href={`/experts/${expert.name}/graph`} />}>
-              Concepts
+            <MenuLinkItem render={<Link href={`/experts/${expert.name}/knowledge`} />}>
+              Knowledge
             </MenuLinkItem>
             {owner ? (
               <MenuLinkItem render={<Link href={`/experts/${expert.name}/settings`} />}>

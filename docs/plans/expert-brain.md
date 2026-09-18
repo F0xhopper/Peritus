@@ -1,7 +1,9 @@
 # The expert's brain — syllabus, concepts and sources in one map
 
 **Date:** 2026-09-18
-**Status:** proposed, nothing built.
+**Status:** phases 0–7 implemented on branch `feat/expert-brain` (2026-09-18),
+not pushed; see *Implementation status* at the end. Phase 8 is superseded by
+[expert-brain-interactive.md](expert-brain-interactive.md) G3.
 **Question answered:** can Sources and Concepts become one thing — a knowledge
 graph or "brain" per expert, showing the syllabus, the concepts and the sources
 together — and can it look alive: orbiting, neurons firing?
@@ -405,3 +407,48 @@ along with the map as the place an owner adds to and removes from the expert.
    relevant.
 3. **Should the Overview carry a small, still brain** in place of the key
    concept list? Attractive, and a second consumer of `/map`. After phase 5.
+
+## Implementation status (2026-09-18)
+
+Branch `feat/expert-brain`, not pushed. What landed, and where it departs from
+the text above:
+
+- **Phase 0.** Migration 034, `graph/key_concepts.py` (floor 0.40, tie margin
+  0.02 broken by `sets_out` tags), called at the end of the build's graph stage
+  and after an upload's graph extension; `peritus graph assign-key-concepts
+  <slug>|--all` backfills. Measured above. **Not yet run against production**:
+  the migration applies on the next API deploy, and the backfill has to be run
+  after it (`fly ssh console -a peritus -C "peritus graph assign-key-concepts
+  --all"` or locally against `DATABASE_URL`). Until then every concept is
+  unassigned and sits in the foot arc.
+- **Phase 1.** `GET /experts/{slug}/map` and `/map/concepts/{id}`
+  (`audit/expert_map.py`, pure; SQL in `AuditRepository`). Coverage is live via
+  `compute_coverage`; named-text *status* still comes from `build_summary`
+  (it needs fetch metadata the database does not keep) and its title/author
+  from `research_plan.concept_primary_texts`. Gaps are missing named texts plus
+  `must_have` works with status `not_found`. The cloud is capped at 250 by
+  default (the paint budget), 600 with a sector expanded. Measured on a local
+  copy: 45–75 ms for Thomism's map, 23 ms for one concept.
+- **Phase 2** was folded into phase 5: the panels were written once, for the
+  new page, rather than twice.
+- **Phases 3–6.** `lib/brain/{layout,paint,motion,scene,selection}.ts`, all
+  pure and unit-tested; `components/brain/brain-canvas.tsx`;
+  `components/knowledge/*`. The worker settles the layout and posts it once, so
+  the cloud never visibly converges; there are no fixed nodes in the
+  simulation, the band force keeps concepts off the ring and the orbit. Facet
+  names sit just outside the orbit on their bisectors, like compass points, and
+  key-concept labels are set radially outward from their discs: on Thomism's
+  real payload (10 key concepts, 5 facets) names inside the ring overlapped each
+  other and the nucleus. Resting dendrites fade with their number. Key-concept
+  labels are elided at 30 characters: "Being, essence, and existence", the
+  example above, is 29. The map's code is loaded only where the Map is shown
+  (`next/dynamic`): bundled with the page it delayed the List's hydration.
+- **Phase 7.** A "Show the cited sources on the map" action on every answer
+  opens `/knowledge?view=map&cited=<source ids>` rather than `?answer=<audit
+  id>`: citations already carry `source_id`, and an audit id would have needed
+  a fetch to get back to them.
+- **Not done:** phase 8 (see G3 of the companion plan); the real-phone check of
+  the idle loop and the 4 ms paint budget (`web/docs/real-device-checklist.md`);
+  removing `GET /experts/{slug}/graph` from the API, which nothing in the web or
+  the CLI calls any more.
+

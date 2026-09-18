@@ -19,37 +19,55 @@ export async function fixture(name) {
 }
 
 /**
- * The graph fixture blown up to the size a real corpus reaches.
+ * The map fixture blown up to the size a real expert reaches.
  *
- * The captured fixture has six concepts. A real expert has a thousand, and the
- * page caps the view at four hundred — a scale at which the layout worker, the
- * quadtree and the paint loop behave differently from six nodes in a row. The
- * shape is deterministic (a ring with chords) so a test can assert on it, and
- * the first six nodes stay exactly as the fixture has them, so every existing
- * assertion about labels and contradictions still holds.
+ * The captured fixture has twenty-two concepts and ten sources. Thomism draws
+ * 132 concepts on 37 sources and the cloud is capped at 250 — a scale at which
+ * the layout worker, the labels' collision pass and the paint loop behave
+ * differently. Deterministic, so a test can assert on it; the fixture's own
+ * rows stay exactly as they are, so every assertion about them still holds.
  */
-export function bigGraph(base) {
-  const NODES = 400
-  const nodes = [...base.nodes]
-  for (let i = nodes.length; i < NODES; i += 1) {
-    nodes.push({
-      id: 1000 + i,
+export function bigMap(base) {
+  const SOURCES = 48
+  const CONCEPTS = 250
+  const keys = base.syllabus.key_concepts.length
+  const sources = [...base.sources]
+  for (let i = sources.length; i < SOURCES; i += 1) {
+    sources.push({
+      id: 2000 + i,
+      title: `Synthetic source ${i}`,
+      author: null,
+      kind: ['openalex', 'pubmed', 'web', 'gutenberg'][i % 4],
+      tier: ['primary', 'secondary', 'tertiary'][i % 3],
+      passage_count: 3 + ((i * 7) % 40),
+      tags: [{ key_concept: i % keys, depth: ['sets_out', 'treats', 'mentions'][i % 3] }],
+    })
+  }
+  const concepts = [...base.concepts]
+  for (let i = concepts.length; i < CONCEPTS; i += 1) {
+    const a = sources[i % SOURCES].id
+    const b = sources[(i * 5 + 3) % SOURCES].id
+    concepts.push({
+      id: 20000 + i,
       label: `synthetic concept ${i}`,
-      node_type: 'concept',
-      degree: 1 + (i % 7),
+      key_concept: i % 9 === 0 ? null : i % keys,
+      source_ids: a === b ? [a] : [a, b].sort((x, y) => x - y),
+      degree: 1 + (i % 11),
+      disputes: 0,
+      topped_up: a === b,
     })
   }
-  const edges = [...base.edges]
-  for (let i = 0; i < NODES; i += 1) {
-    edges.push({
-      id: 5000 + i,
-      source: nodes[i].id,
-      target: nodes[(i + 1) % NODES].id,
-      edge_type: 'related_to',
-      evidence: 1 + (i % 3),
-    })
+  const links = [...base.links]
+  for (let i = base.concepts.length; i < CONCEPTS - 1; i += 3) {
+    links.push({ from: concepts[i].id, to: concepts[i + 1].id })
   }
-  return { ...base, nodes, edges, total_nodes: 1125, total_edges: edges.length }
+  return {
+    ...base,
+    sources,
+    concepts,
+    links,
+    totals: { concepts: 1063, concepts_shown: CONCEPTS, claims: 1820, sources: SOURCES },
+  }
 }
 
 export const state = {

@@ -4,7 +4,7 @@ import {
   FileText,
   Moon,
   MessageSquare,
-  Network,
+  Orbit,
   Plus,
   Search,
   Settings,
@@ -217,20 +217,22 @@ export function CommandPalette({
     // expert — the commonest thing to want from a palette.
     const subPages: Item[] = experts.flatMap((expert) => [
       {
+        id: `map:${expert.id}`,
+        section: 'Actions' as const,
+        label: `${displayName(expert)} — map`,
+        icon: <Orbit className="size-4 text-fg-3" />,
+        run: go(`/experts/${expert.name}/knowledge?view=map`),
+        haystack:
+          `knowledge map brain graph concepts syllabus ${expert.persona_name ?? ''} ${expert.topic}`.toLowerCase(),
+      },
+      {
         id: `sources:${expert.id}`,
         section: 'Actions' as const,
         label: `${displayName(expert)} — sources`,
         icon: <Table className="size-4 text-fg-3" />,
-        run: go(`/experts/${expert.name}/sources`),
-        haystack: `sources ledger ${expert.persona_name ?? ''} ${expert.topic}`.toLowerCase(),
-      },
-      {
-        id: `graph:${expert.id}`,
-        section: 'Actions' as const,
-        label: `${displayName(expert)} — graph`,
-        icon: <Network className="size-4 text-fg-3" />,
-        run: go(`/experts/${expert.name}/graph`),
-        haystack: `graph concepts ${expert.persona_name ?? ''} ${expert.topic}`.toLowerCase(),
+        run: go(`/experts/${expert.name}/knowledge?view=list`),
+        haystack:
+          `knowledge sources list ledger ${expert.persona_name ?? ''} ${expert.topic}`.toLowerCase(),
       },
     ])
 
@@ -246,7 +248,7 @@ export function CommandPalette({
           (item) => item.haystack.includes(needle) || item.label.toLowerCase().includes(needle)
         )
       : // With no query, the sub-page actions are noise.
-        items.filter((item) => !item.id.startsWith('sources:') && !item.id.startsWith('graph:'))
+        items.filter((item) => !item.id.startsWith('sources:') && !item.id.startsWith('map:'))
     return filtered.slice(0, 40)
   }, [items, queryText])
 

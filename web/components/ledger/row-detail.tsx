@@ -113,7 +113,7 @@ export function RowDetail({
               <span key={concept}>
                 {index > 0 && <span className="text-fg-4"> · </span>}
                 <Link
-                  href={`/experts/${slug}/sources?concept=${encodeURIComponent(concept)}`}
+                  href={`/experts/${slug}/knowledge?view=list&concept=${encodeURIComponent(concept)}`}
                   className="text-fg underline decoration-fg-4 underline-offset-2 hover:decoration-fg-2"
                 >
                   {concept}

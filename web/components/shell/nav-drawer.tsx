@@ -58,7 +58,7 @@ export function NavDrawer({
       finalFocus={navTriggerRef}
       // Up to `lg`, not `md`: between 768 and 1023px the expert sidebar is gone
       // too, and without the drawer a tablet in portrait had no route to an
-      // expert's Sources, Concepts, settings or chats except the palette. With
+      // expert's Knowledge, settings or chats except the palette. With
       // the sidebar collapsed the same is true at every width, so the drawer
       // stays available there too.
       className={sidebarCollapsed ? undefined : 'lg:hidden'}

@@ -86,8 +86,9 @@ These come from `web-production.md` and are enforced in code, not in copy.
   A hidden, occluded or mid-view-transition document simply does not run the
   callback, so `if (frame.current) return` wedged the graph canvas permanently:
   the simulation kept ticking, every repaint request was swallowed, and the page
-  showed a live node count over an empty canvas. `graph-canvas.tsx` cancels and
-  re-arms, and repaints on `visibilitychange`.
+  showed a live node count over an empty canvas. `brain-canvas.tsx` (which
+  replaced the graph canvas) cancels and re-arms, and repaints on
+  `visibilitychange`.
 - **Adjust state during render, not in an effect**, when it has to follow a prop
   (the dialogs that reset on open). `react-hooks/set-state-in-effect` catches the
   wrong form.
@@ -230,7 +231,7 @@ An owner shares an expert with a token link (`/share/{token}`); the design is in
 
 - **Every management control goes through `canManage(expert)`** (`lib/access.ts`),
   which reads `expert.access`. A viewer — someone who opened a share link — gets the
-  Overview, Sources, graph, build log and composer, and none of: the avatar picker,
+  Overview, Knowledge (Map and List), build log and composer, and none of: the avatar picker,
   Settings (the route 404s), Share, Rebuild, Cancel, Cost, Add a source, Remove source,
   Delete. Their one action on the expert is "Remove from my experts". A new control
   that changes an expert must check it too; the API would refuse it anyway, and a
@@ -296,6 +297,32 @@ CC BY and CC BY-SA oblige attribution, so `PictureCredit` renders wherever the p
 is the identity of a page (the Overview header, expert settings) and deliberately
 nowhere a 20px tile is only a navigational mark.
 
+## The Knowledge page
+
+Sources and Concepts are one page, `/experts/[slug]/knowledge`, with a **Map**
+and a **List** of the same selection (`docs/plans/expert-brain.md`). The old
+`/sources` and `/graph` routes redirect to it with their parameters;
+`/sources/[id]/read` is unchanged. Rules:
+
+- **The selection is URL state** (`?source=`, `?node=`, `?concept=` — a key
+  concept by label, which also narrows the List — and `?gap=`), written with
+  `history.replaceState`, not the router: Next keeps `useSearchParams` in step,
+  and a router push would re-fetch the expert, the list and the map per click.
+  Sort, page and `?expand=` need the server and go through `router.push`.
+- **No `?view=` means both views are in the HTML**: the Map from `lg` with a fine
+  pointer, the List otherwise, toggled by `pointer-fine:lg:` classes. The canvas
+  starts no worker and paints nothing while it has no size.
+- **The layout never moves; the view does.** `lib/brain/layout.ts` is pure and
+  deterministic (asserted byte for byte). Idle, the map is drawn tilted and turns
+  once in eight minutes; any pointer movement, touch, wheel, search keypress or
+  selection flattens it, and it stays flat until six seconds pass with nothing
+  open (`lib/brain/motion.ts`). Under reduced motion it never tilts, turns or
+  fires — `knowledge.spec` compares two screenshots a second apart.
+- **Monochrome.** Facets are position, tier is shape and fill; the only hue on
+  the canvas is `--warn` on a disputed concept.
+- **Claims are not in the map payload.** A concept's claims come from
+  `/map/concepts/{id}` when its panel opens.
+
 ## Testing
 
 - `npx vitest run` — the SSE frame parser, the build-event reducer, the proxy's
@@ -315,11 +342,11 @@ nowhere a 20px tile is only a navigational mark.
   it does not know about and leaves it there, so the field _looks_ filled while
   the component's state is empty — and the failure then points at whatever was
   supposed to appear next.
-- **A canvas test must assert that pixels were painted.** `graph-settings.spec`
-  counts opaque pixels, at the fixture's six nodes and at four hundred
-  (`big-graph` in the mock). Asserting a correctly sized canvas is not a test:
-  a blank canvas is also correctly sized, which is how the wedged paint loop
-  above stayed green.
+- **A canvas test must assert that pixels were painted.** `knowledge.spec`
+  counts opaque pixels on the map, at the fixture's twenty-two concepts and at
+  two hundred and fifty (`big-map` in the mock). Asserting a correctly sized
+  canvas is not a test: a blank canvas is also correctly sized, which is how the
+  wedged paint loop above stayed green.
 - `npm run lighthouse` — the budgets from web-design.md §9 (LCP < 2.5s, CLS <
   0.1, TBT < 200ms as the lab stand-in for INP) on `/` and `/login` without a
   session and on `/experts` and a seeded chat with one, three runs each,

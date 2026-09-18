@@ -1148,33 +1148,127 @@ export interface UploadAccepted {
   kind: 'pdf' | 'text' | 'url' | string
 }
 
-// ── graph ───────────────────────────────────────────────────────────────────
+// ── the expert's map (docs/plans/expert-brain.md) ────────────────────────────
 
-export interface GraphNode {
+/** How deeply a source treats a key concept, as the validator graded it. */
+export type ConceptDepth = 'sets_out' | 'treats' | 'mentions'
+
+export interface MapFacet {
+  name: string
+  /** Indexes into `syllabus.key_concepts`. */
+  concepts: number[]
+}
+
+export interface MapNamedText {
+  status: 'found' | 'partial' | 'missing'
+  title: string | null
+  author: string | null
+}
+
+export interface MapKeyConcept {
+  index: number
+  label: string
+  facet: string | null
+  /** Kept sources that count toward this concept, computed live. */
+  sources: number
+  depth_counts: Partial<Record<ConceptDepth, number>>
+  met: boolean
+  /** The primary text the plan named for it, or null when none was named. */
+  named_text: MapNamedText | null
+}
+
+/** A text the plan named and the build never found. */
+export interface MapGap {
+  /** The key concept it was named for; null sits at the foot of the orbit. */
+  key_concept: number | null
+  title: string
+  author: string | null
+  kind: 'named_text' | 'must_have'
+}
+
+export interface MapSource {
+  id: number
+  title: string
+  author: string | null
+  /** The fetcher key; rendered through `lib/source-kind.ts`. */
+  kind: string
+  tier: string | null
+  passage_count: number
+  tags: { key_concept: number; depth: ConceptDepth }[]
+}
+
+export interface MapConcept {
   id: number
   label: string
-  node_type: string
+  /** The key concept whose sector it sits in, or null for the neutral arc. */
+  key_concept: number | null
+  /** Kept sources whose passages it was extracted from. */
+  source_ids: number[]
   degree: number
+  /** `contradicts` edges between claims about it. */
+  disputes: number
+  /** Drawn only because the cloud was thin: one source discusses it. */
+  topped_up: boolean
 }
 
-export interface GraphEdge {
-  id: number
-  source: number
-  target: number
-  edge_type: string
-  evidence: number
-}
-
-export interface GraphResponse {
-  expert: { name: string; topic: string; [k: string]: unknown }
-  /** False while the concept graph is still being extracted. Never render an
-   *  empty canvas in that state — say the graph is still building. */
+export interface MapResponse {
+  expert: { slug: string; topic: string }
+  /** False while concepts are still being extracted. The syllabus and the
+   *  sources are still true then, so they are drawn; the cloud is empty. */
   computed: boolean
-  nodes: GraphNode[]
-  edges: GraphEdge[]
-  total_nodes: number
-  total_edges: number
-  truncated: boolean
+  syllabus: {
+    facets: MapFacet[] | null
+    key_concepts: MapKeyConcept[]
+    gaps: MapGap[]
+  }
+  sources: MapSource[]
+  concepts: MapConcept[]
+  /** `part_of`, between returned concepts. */
+  links: { from: number; to: number }[]
+  totals: {
+    concepts: number | null
+    concepts_shown: number
+    claims: number | null
+    sources: number
+  }
+  /** The key concept whose sector is expanded, if any. */
+  expanded: number | null
+}
+
+export interface MapClaimRelation {
+  type: 'contradicts' | 'qualifies' | 'supports'
+  claim_id: number
+  text: string
+  point: string | null
+  condition: string | null
+}
+
+export interface MapClaim {
+  id: number
+  text: string
+  /** Every kept source whose passage states it, with that passage's id. */
+  sources: { source_id: number; title: string | null; chunk_id: number }[]
+  relations: MapClaimRelation[]
+  disputed: boolean
+}
+
+export interface MapConceptDetail {
+  id: number
+  label: string
+  description: string | null
+  key_concept: number | null
+  sources: {
+    id: number
+    title: string
+    author: string | null
+    kind: string
+    tier: string | null
+    passages: number
+    chunk_id: number
+  }[]
+  claims: MapClaim[]
+  disputes: number
+  part_of: { id: number; label: string; relation: 'whole' | 'part' }[]
 }
 
 // ── misc ────────────────────────────────────────────────────────────────────

@@ -277,8 +277,8 @@ export function ChatView({
                 <MenuItem onClick={() => router.push(`/experts/${expert.name}`)}>
                   Open the expert
                 </MenuItem>
-                <MenuItem onClick={() => router.push(`/experts/${expert.name}/sources`)}>
-                  Sources
+                <MenuItem onClick={() => router.push(`/experts/${expert.name}/knowledge`)}>
+                  Knowledge
                 </MenuItem>
               </>
             )}
@@ -309,6 +309,7 @@ export function ChatView({
 
       <Transcript
         expert={expert}
+        showOnMap={!unavailable}
         messages={conversation.messages}
         pendingQuestion={pendingQuestion}
         streamingAnswer={streamedTurnPersisted ? '' : chat.answer}

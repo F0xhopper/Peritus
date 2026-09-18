@@ -1,6 +1,7 @@
 'use client'
 
-import { Check, Copy, RotateCcw, ScrollText } from 'lucide-react'
+import { Check, Copy, Orbit, RotateCcw, ScrollText } from 'lucide-react'
+import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { Avatar } from '@/components/identity/avatar'
@@ -37,6 +38,7 @@ export function AssistantCard({
   onSelectCitation,
   selectedCitation,
   onRegenerate,
+  showOnMap = false,
   className,
 }: {
   expert: Pick<ExpertSummary, 'name' | 'persona_name' | 'topic' | 'avatar'>
@@ -52,6 +54,8 @@ export function AssistantCard({
   onSelectCitation: (citation: Citation, all: Citation[]) => void
   selectedCitation: number | null
   onRegenerate?: () => void
+  /** Offer "Show on the map" — the cited sources, lit, on the Knowledge page. */
+  showOnMap?: boolean
   className?: string
 }) {
   const [copied, setCopied] = useState(false)
@@ -59,6 +63,14 @@ export function AssistantCard({
 
   // 1, 2, 3 in the order this answer cites them, rather than the passage index.
   const numbered = useMemo(() => numberCitations(content, citations), [content, citations])
+  const citedSources = useMemo(
+    () => [
+      ...new Set(
+        citations.map((citation) => citation.source_id).filter((id): id is number => id !== null)
+      ),
+    ],
+    [citations]
+  )
   // An answer that ends mid-sentence with nothing saying so looks finished. The
   // server marks the cases it knows about as interrupted; this catches the rest
   // (a length cut recorded before the stop reason was kept).
@@ -200,6 +212,20 @@ export function AssistantCard({
             <IconAction onClick={onRegenerate} label="Ask again">
               <RotateCcw className="size-3.5" />
             </IconAction>
+          )}
+          {showOnMap && citedSources.length > 0 && (
+            // The answer in the brain (docs/plans/expert-brain.md, phase 7):
+            // the cited sources light on the map, with what they feed, and
+            // pulses run inward from them. Citations already carry their
+            // source, so this is a link and nothing more.
+            <Link
+              href={`/experts/${expert.name}/knowledge?view=map&cited=${citedSources.join(',')}`}
+              aria-label="Show the cited sources on the map"
+              title="Show the cited sources on the map"
+              className="grid size-(--icon-btn) place-items-center rounded-row text-fg-3 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
+            >
+              <Orbit className="size-3.5" />
+            </Link>
           )}
           {audit && (
             <IconAction

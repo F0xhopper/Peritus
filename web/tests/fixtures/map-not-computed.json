@@ -1,0 +1,32 @@
+{
+  "expert": {
+    "slug": "measurement-error-in-nutritional-epidemiology",
+    "topic": "Measurement error in nutritional epidemiology"
+  },
+  "computed": false,
+  "syllabus": {
+    "facets": null,
+    "key_concepts": [
+      {
+        "index": 0,
+        "label": "regression calibration",
+        "facet": null,
+        "sources": 0,
+        "depth_counts": {},
+        "met": false,
+        "named_text": null
+      }
+    ],
+    "gaps": []
+  },
+  "sources": [],
+  "concepts": [],
+  "links": [],
+  "totals": {
+    "concepts": null,
+    "concepts_shown": 0,
+    "claims": null,
+    "sources": 0
+  },
+  "expanded": null
+}

@@ -71,7 +71,9 @@ export function SourceReader({
         overflow={
           <>
             <MenuItem
-              onClick={() => router.push(`/experts/${expert.name}/sources?source=${source.id}`)}
+              onClick={() =>
+                router.push(`/experts/${expert.name}/knowledge?view=list&source=${source.id}`)
+              }
             >
               The source record
             </MenuItem>
@@ -111,7 +113,7 @@ export function SourceReader({
               Only the passages around the citation are shown. This source is not one Peritus may
               reproduce in full — its record and a link to the original are on the{' '}
               <Link
-                href={`/experts/${expert.name}/sources?source=${source.id}`}
+                href={`/experts/${expert.name}/knowledge?view=list&source=${source.id}`}
                 className="text-fg underline underline-offset-2"
               >
                 Sources page

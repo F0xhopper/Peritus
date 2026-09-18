@@ -49,6 +49,7 @@ export function Transcript({
   onSelectCitation,
   selectedCitation,
   onRegenerate,
+  showOnMap = true,
 }: {
   expert: Pick<ExpertSummary, 'name' | 'persona_name' | 'topic' | 'avatar'>
   messages: ConversationMessage[]
@@ -70,6 +71,8 @@ export function Transcript({
   onSelectCitation: (citation: Citation, all: Citation[]) => void
   selectedCitation: number | null
   onRegenerate: (question: string) => void
+  /** Offer each answer's "Show on the map". Off when the expert is no longer readable. */
+  showOnMap?: boolean
 }) {
   const scroller = useRef<HTMLDivElement>(null)
   const [atBottom, setAtBottom] = useState(true)
@@ -147,6 +150,7 @@ export function Transcript({
                   audit={storedAudits?.get(message.id) ?? null}
                   onSelectCitation={onSelectCitation}
                   selectedCitation={selectedCitation}
+                  showOnMap={showOnMap}
                   onRegenerate={
                     // Retry the question that produced this answer.
                     index > 0 && messages[index - 1]?.role === 'user'
@@ -202,6 +206,7 @@ export function Transcript({
                   hasContradiction={hasContradiction}
                   onSelectCitation={onSelectCitation}
                   selectedCitation={selectedCitation}
+                  showOnMap={showOnMap}
                   onRegenerate={
                     !streaming && lastQuestion ? () => onRegenerate(lastQuestion) : undefined
                   }

@@ -42,15 +42,10 @@ test('walking the expert’s pages raises nothing and reloads nothing', async ({
   // navigation is the case that rejects.
   for (let lap = 0; lap < 3; lap += 1) {
     await page
-      .getByRole('link', { name: /^Sources/ })
+      .getByRole('link', { name: /^Knowledge/ })
       .first()
       .click()
-    await page.waitForURL(`**/${SLUG}/sources`)
-    await page
-      .getByRole('link', { name: /^Concepts/ })
-      .first()
-      .click()
-    await page.waitForURL(`**/${SLUG}/graph`)
+    await page.waitForURL(`**/${SLUG}/knowledge`)
     await page.getByRole('link', { name: 'Overview' }).first().click()
     await page.waitForURL(`**/${SLUG}`)
   }

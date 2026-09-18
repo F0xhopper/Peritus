@@ -5,12 +5,11 @@ import {
   LayoutGrid,
   MessageSquare,
   MoreHorizontal,
-  Network,
+  Orbit,
   PanelLeftClose,
   Plus,
   Search,
   SlidersHorizontal,
-  Table,
   Wallet,
 } from 'lucide-react'
 import Link from 'next/link'
@@ -163,24 +162,22 @@ function ExpertForm({
         <SidebarRow href={base} icon={FileText} active={onOverview}>
           Overview
         </SidebarRow>
+        {/* One row where Sources and Concepts used to be two
+            (docs/plans/expert-brain.md). The count is the sources: the old
+            "Concepts" count was every node in the graph, claims included, and
+            two thirds of those are sentences. */}
         <SidebarRow
-          href={`${base}/sources`}
-          icon={Table}
-          active={pathname.startsWith(`${base}/sources`)}
+          href={`${base}/knowledge`}
+          icon={Orbit}
+          active={pathname.startsWith(`${base}/knowledge`)}
           count={expert.source_count || undefined}
+          countLabel={
+            expert.source_count
+              ? `${expert.source_count} ${expert.source_count === 1 ? 'source' : 'sources'}`
+              : undefined
+          }
         >
-          Sources
-        </SidebarRow>
-        {/* "Graph 1,125" was a count of nothing named. The Overview already
-            calls this number concepts; so does the row now. */}
-        <SidebarRow
-          href={`${base}/graph`}
-          icon={Network}
-          active={pathname.startsWith(`${base}/graph`)}
-          count={expert.node_count || undefined}
-          countLabel={expert.node_count ? `${expert.node_count} concepts` : undefined}
-        >
-          Concepts
+          Knowledge
         </SidebarRow>
         {canManage(expert) && (
           // Named and iconed apart from the account's Settings, which is the

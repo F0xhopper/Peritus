@@ -1,15 +1,6 @@
 'use client'
 
-import {
-  LogOut,
-  MessageSquare,
-  MoreHorizontal,
-  Network,
-  Settings,
-  Table,
-  Trash2,
-  Users,
-} from 'lucide-react'
+import { LogOut, MessageSquare, MoreHorizontal, Orbit, Settings, Trash2, Users } from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 import { ViewTransition } from 'react'
@@ -197,13 +188,9 @@ export function ExpertCard({
                 Overview
               </MenuLinkItem>
             )}
-            <MenuLinkItem render={<Link href={`${base}/sources`} />}>
-              <Table className="size-3.5" />
-              Sources
-            </MenuLinkItem>
-            <MenuLinkItem render={<Link href={`${base}/graph`} />}>
-              <Network className="size-3.5" />
-              Concepts
+            <MenuLinkItem render={<Link href={`${base}/knowledge`} />}>
+              <Orbit className="size-3.5" />
+              Knowledge
             </MenuLinkItem>
             {owner ? (
               <>

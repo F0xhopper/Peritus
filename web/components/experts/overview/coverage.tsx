@@ -33,7 +33,7 @@ export function OverviewCoverage({ expert }: { expert: ExpertWithCatalog }) {
             {expert.key_concepts.map((concept) => (
               <li key={concept}>
                 <Link
-                  href={`/experts/${expert.name}/sources?concept=${encodeURIComponent(concept)}`}
+                  href={`/experts/${expert.name}/knowledge?concept=${encodeURIComponent(concept)}`}
                   className="group flex items-start gap-2 rounded-row px-2 py-1.5 text-sm transition-colors duration-(--dur-1) hover:bg-panel"
                 >
                   <span className="min-w-0 flex-1 text-fg-2 group-hover:text-fg">{concept}</span>

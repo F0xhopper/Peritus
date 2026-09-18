@@ -134,7 +134,7 @@ export function PassagePanel({
               </a>
             )}
             <Link
-              href={`/experts/${slug}/sources?source=${source.id}`}
+              href={`/experts/${slug}/knowledge?view=list&source=${source.id}`}
               className="inline-flex h-(--row-h) items-center rounded-row border border-border px-2.5 text-xs text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
             >
               See the source
@@ -150,7 +150,10 @@ export function PassagePanel({
       ) : (
         <p className="text-xs text-fg-3">
           The full record for this passage&rsquo;s source is on the{' '}
-          <Link href={`/experts/${slug}/sources`} className="text-fg underline underline-offset-2">
+          <Link
+            href={`/experts/${slug}/knowledge?view=list`}
+            className="text-fg underline underline-offset-2"
+          >
             Sources page
           </Link>
           .

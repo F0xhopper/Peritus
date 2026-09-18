@@ -1,6 +1,10 @@
 import { Skeleton, SkeletonTopBar } from '@/components/ui/skeleton'
 
-/** The sources: the toolbar, then a full-width table at the table row height. */
+/**
+ * The Knowledge page: the toolbar, then the List's table — the view every width
+ * below a fine-pointer laptop opens on, and the one whose shape is known before
+ * the map is laid out.
+ */
 export default function Loading() {
   return (
     <>

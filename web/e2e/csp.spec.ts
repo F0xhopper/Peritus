@@ -54,8 +54,8 @@ async function visit(page: import('@playwright/test').Page, path: string): Promi
 const APP_PAGES = [
   '/experts',
   `/experts/${SLUG}`,
-  `/experts/${SLUG}/sources`,
-  `/experts/${SLUG}/graph`,
+  `/experts/${SLUG}/knowledge?view=list`,
+  `/experts/${SLUG}/knowledge?view=map`,
   `/experts/${SLUG}/settings`,
   '/settings',
 ]

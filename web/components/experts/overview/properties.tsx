@@ -23,7 +23,7 @@ import type { BuildStatus, ExpertWithCatalog } from '@/lib/api/types'
  * Graph-ready — retrieval expands with concepts", which read as the same fact
  * said twice.
  *
- * **The counts are links.** Sources and Concepts are the two pages behind those
+ * **The counts are links.** The Knowledge page's List and Map are behind those
  * numbers, and a number that is a dead end invites reading it as the whole
  * story. Last built goes to the build it came from, which is otherwise
  * unreachable once the build has finished.
@@ -64,17 +64,21 @@ export function OverviewProperties({
       {showCorpus && (
         <>
           <Property label="Sources">
-            <PropertyLink href={`${base}/sources`}>{formatInt(expert.source_count)}</PropertyLink>
+            <PropertyLink href={`${base}/knowledge?view=list`}>
+              {formatInt(expert.source_count)}
+            </PropertyLink>
           </Property>
           <Property label="Passages">
             <span className="text-fg-2">{formatInt(expert.chunk_count)}</span>
           </Property>
+          {/* Not "Concepts": `node_count` is every node in the graph, and two
+              thirds of those are claims — sentences. The map counts concepts. */}
           {expert.node_count > 0 && (
-            <Property label="Concepts">
-              <PropertyLink href={`${base}/graph`}>
+            <Property label="Graph">
+              <PropertyLink href={`${base}/knowledge?view=map`}>
                 {formatInt(expert.node_count)}
                 <span className="text-fg-3">
-                  {' · '}
+                  {' concepts and claims · '}
                   {formatInt(expert.edge_count)} links
                 </span>
               </PropertyLink>

@@ -131,8 +131,8 @@ test('a signed-in viewer opens the expert and meets no owner controls', async ({
     await expect(visible(page, `a[href="/experts/${FOREIGN_SLUG}/settings"]`)).toHaveCount(0)
   }
 
-  // The Sources page reads the whole record but offers no way to add to it.
-  await page.goto(`/experts/${FOREIGN_SLUG}/sources`)
+  // The Knowledge page reads the whole record but offers no way to add to it.
+  await page.goto(`/experts/${FOREIGN_SLUG}/knowledge?view=list`)
   // Wait for the page itself, or an absence assertion passes on a blank one.
   await expect(content(page).getByRole('button', { name: 'Export the sources' })).toBeVisible()
   await expect(content(page).getByRole('button', { name: 'Add a source' })).toHaveCount(0)

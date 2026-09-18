@@ -1,0 +1,78 @@
+{
+  "id": 5004,
+  "label": "drone brood removal",
+  "description": "Cutting out capped drone brood, where Varroa prefers to reproduce, to take mites out of the colony without chemicals.",
+  "key_concept": 2,
+  "sources": [
+    {
+      "id": 815,
+      "title": "Drone brood trapping as integrated pest management",
+      "author": "Lindqvist, M.",
+      "kind": "openalex",
+      "tier": "primary",
+      "passages": 3,
+      "chunk_id": 8815
+    },
+    {
+      "id": 820,
+      "title": "Mite biology for beekeepers",
+      "author": "Arnott, J.",
+      "kind": "gutenberg",
+      "tier": "secondary",
+      "passages": 1,
+      "chunk_id": 8820
+    }
+  ],
+  "claims": [
+    {
+      "id": 5005,
+      "text": "Mechanical control alone did not prevent viral amplification in high-pressure years.",
+      "sources": [
+        {
+          "source_id": 820,
+          "title": "Mite biology for beekeepers",
+          "chunk_id": 8820
+        }
+      ],
+      "relations": [
+        {
+          "type": "contradicts",
+          "claim_id": 5006,
+          "text": "Drone brood removal reduced mite load by 43% relative to untreated controls.",
+          "point": "whether removal alone controls mites",
+          "condition": null
+        }
+      ],
+      "disputed": true
+    },
+    {
+      "id": 5006,
+      "text": "Drone brood removal reduced mite load by 43% relative to untreated controls.",
+      "sources": [
+        {
+          "source_id": 815,
+          "title": "Drone brood trapping as integrated pest management",
+          "chunk_id": 8815
+        }
+      ],
+      "relations": [
+        {
+          "type": "contradicts",
+          "claim_id": 5005,
+          "text": "Mechanical control alone did not prevent viral amplification in high-pressure years.",
+          "point": "whether removal alone controls mites",
+          "condition": null
+        }
+      ],
+      "disputed": true
+    }
+  ],
+  "disputes": 2,
+  "part_of": [
+    {
+      "id": 5012,
+      "label": "drone comb frames",
+      "relation": "part"
+    }
+  ]
+}

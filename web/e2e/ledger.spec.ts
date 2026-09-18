@@ -11,10 +11,11 @@ import {
 } from './helpers'
 
 /**
- * The sources page.
+ * The Knowledge page's List view — what the Sources page was.
  *
  * It lists the sources an expert answers from: what they are, how many passages
- * each contributed, and a way into the record behind any one of them.
+ * each contributed, and a way into the record behind any one of them. The Map
+ * view has its own spec, `knowledge.spec.ts`.
  */
 
 const SLUG = 'varroa-mite-control-in-temperate-beekeeping'
@@ -25,7 +26,7 @@ test.beforeEach(async ({ page }) => {
 })
 
 test('the page lists the sources the expert answers from', async ({ page }, testInfo) => {
-  await page.goto(`/experts/${SLUG}/sources`)
+  await page.goto(`/experts/${SLUG}/knowledge?view=list`)
 
   await expect(
     visibleContent(page).getByText('Varroa destructor and honeybee viral loads').first()
@@ -41,7 +42,7 @@ test('the page lists the sources the expert answers from', async ({ page }, test
 })
 
 test('sort is URL state, so a sorted list is a link', async ({ page }, testInfo) => {
-  await page.goto(`/experts/${SLUG}/sources`)
+  await page.goto(`/experts/${SLUG}/knowledge?view=list`)
 
   if (isPhoneProject(testInfo.project.name)) {
     await page.getByLabel('Sort by').selectOption('added')
@@ -59,7 +60,7 @@ test('sort is URL state, so a sorted list is a link', async ({ page }, testInfo)
 })
 
 test('a row opens its record', async ({ page }) => {
-  await page.goto(`/experts/${SLUG}/sources`)
+  await page.goto(`/experts/${SLUG}/knowledge?view=list`)
 
   await visibleContent(page).getByText('Amitraz resistance in field populations').first().click()
 
@@ -75,7 +76,7 @@ test('a row opens its record', async ({ page }) => {
 })
 
 test('the export menu offers CSV and RIS, and the download works', async ({ page }) => {
-  await page.goto(`/experts/${SLUG}/sources`)
+  await page.goto(`/experts/${SLUG}/knowledge?view=list`)
 
   await page.getByRole('button', { name: /Export/ }).click()
   await expect(page.getByRole('menuitem', { name: 'CSV' })).toBeVisible()
@@ -95,7 +96,7 @@ test('the export menu offers CSV and RIS, and the download works', async ({ page
 })
 
 test('adding a source by URL queues an ingest and says it is reading', async ({ page }) => {
-  await page.goto(`/experts/${SLUG}/sources`)
+  await page.goto(`/experts/${SLUG}/knowledge?view=list`)
 
   await page
     .getByRole('button', { name: /Add a source/ })
@@ -114,7 +115,7 @@ test('adding a source by URL queues an ingest and says it is reading', async ({ 
 })
 
 test('the upload tab refuses an oversized file before sending it', async ({ page }) => {
-  await page.goto(`/experts/${SLUG}/sources`)
+  await page.goto(`/experts/${SLUG}/knowledge?view=list`)
   await page
     .getByRole('button', { name: /Add a source/ })
     .first()
@@ -131,7 +132,7 @@ test('the upload tab refuses an oversized file before sending it', async ({ page
 })
 
 test('the sources are a card list on a phone and a table above it', async ({ page }, testInfo) => {
-  await page.goto(`/experts/${SLUG}/sources`)
+  await page.goto(`/experts/${SLUG}/knowledge?view=list`)
   const phone = isPhoneProject(testInfo.project.name)
 
   if (phone) {
@@ -151,6 +152,9 @@ test('a concept link from the overview filters the list', async ({ page }) => {
   await expect(page).toHaveURL(/concept=acaricide\+resistance|concept=acaricide%20resistance/, {
     timeout: 15_000,
   })
+  // A fine pointer at laptop width opens on the Map, with the key concept's
+  // panel; the List is one click away and keeps the concept.
+  await page.locator('[role=radio]:visible', { hasText: 'List' }).click()
   await expect(visibleContent(page).getByText('acaricide resistance').first()).toBeVisible()
   // Only the source that covers it.
   await expect(
