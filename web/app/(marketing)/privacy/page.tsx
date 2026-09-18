@@ -12,7 +12,7 @@ export const metadata = {
  */
 export default function PrivacyPage() {
   return (
-    <LegalPage title="Privacy" updated="12 September 2026">
+    <LegalPage title="Privacy" updated="18 September 2026">
       <h2>What this covers</h2>
       <p>
         Peritus builds subject experts from public sources and answers questions from them. This
@@ -22,10 +22,14 @@ export default function PrivacyPage() {
 
       <h2>Signing in</h2>
       <p>
-        Authentication is handled by Supabase Auth. Signing in with an email code stores your email
-        address and an account identifier; signing in with Google stores the same two things, taken
-        from the Google profile you consent to share. No password is ever stored, because Peritus
-        does not use one.
+        Authentication is handled by Supabase Auth. Your account stores your email address, an
+        account identifier and, if you give one, your name. Signing in with Google stores the same
+        email and identifier, taken from the Google profile you consent to share. If you set a
+        password, Supabase Auth keeps only a one-way hash of it, never the password itself.
+      </p>
+      <p>
+        Each session records the browser it was started from, so Settings can show where you are
+        signed in and let you sign any of those sessions out.
       </p>
       <p>
         Your session lives in two cookies set by this site, marked

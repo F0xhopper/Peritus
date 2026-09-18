@@ -30,7 +30,7 @@ import { useLeaveExpert } from '@/hooks/use-leave-expert'
 import { useStartChat } from '@/hooks/use-start-chat'
 import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
-import { firstSentence } from '@/lib/format'
+import { firstSentence, formatInt } from '@/lib/format'
 import { displayName, subtitle } from '@/lib/persona'
 import type { ExpertSummary } from '@/lib/api/types'
 import { useApiAction } from '@/hooks/use-api-action'
@@ -143,8 +143,16 @@ export function ExpertCard({
             </div>
             <div className="flex shrink-0 items-center gap-1">
               <dt className="text-fg-3">Sources</dt>
-              <dd className="text-fg-2">{expert.source_count}</dd>
+              <dd className="text-fg-2 tabular-nums">{formatInt(expert.source_count)}</dd>
             </div>
+            {/* Concepts only once the graph has any: a building expert has
+                none yet, and "Concepts 0" beside "Building" reads as a fault. */}
+            {expert.node_count > 0 && (
+              <div className="flex shrink-0 items-center gap-1">
+                <dt className="text-fg-3">Concepts</dt>
+                <dd className="text-fg-2 tabular-nums">{formatInt(expert.node_count)}</dd>
+              </div>
+            )}
             {chattable && (
               // Straight into a new chat from Home, composer focused — no stop at
               // the Overview on the way.
@@ -195,7 +203,7 @@ export function ExpertCard({
             </MenuLinkItem>
             <MenuLinkItem render={<Link href={`${base}/graph`} />}>
               <Network className="size-3.5" />
-              Graph
+              Concepts
             </MenuLinkItem>
             {owner ? (
               <>

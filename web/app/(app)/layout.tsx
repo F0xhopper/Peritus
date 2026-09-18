@@ -81,7 +81,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               credits={credits}
               showSearch
               collapsible
-              className="scroll-col hidden lg:flex"
+              // Not a scroll container: its chat list scrolls on its own, and
+              // `overflow` here clipped the outer half of the edge strip that
+              // folds the column away.
+              className="hidden lg:flex"
             />
 
             <main className="flex min-h-0 min-w-0 flex-col bg-bg">

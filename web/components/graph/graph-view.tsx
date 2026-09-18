@@ -83,7 +83,7 @@ export function GraphView({
   if (!graph.computed) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <TopBar expert={expert} title="Graph" />
+        <TopBar expert={expert} title="Concepts" />
         <div className="scroll-col flex flex-1 items-center justify-center p-4">
           <div className="w-full max-w-sm text-center">
             <Empty icon={Network}>
@@ -111,7 +111,7 @@ export function GraphView({
     <div className="flex min-h-0 flex-1 flex-col">
       <TopBar
         expert={expert}
-        title="Graph"
+        title="Concepts"
         // The concept search is this page's search; the palette stays on ⌘K.
         hideSearch
         action={

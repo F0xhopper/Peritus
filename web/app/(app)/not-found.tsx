@@ -1,3 +1,4 @@
+import { TopBar } from '@/components/shell/top-bar'
 import { ButtonLink } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { FileQuestion } from 'lucide-react'
@@ -10,16 +11,22 @@ import { FileQuestion } from 'lucide-react'
  * yours" without disclosing which.
  */
 export default function AppNotFound() {
+  // The top bar is what carries the menu button below `lg`: without it a phone
+  // that landed here had no navigation at all, only the one link back.
   return (
-    <div className="flex flex-1 items-center justify-center p-4">
-      <div className="w-full max-w-sm text-center">
-        <Empty icon={FileQuestion}>
-          Nothing here. This expert or chat does not exist, or it belongs to someone else.
-        </Empty>
-        <ButtonLink variant="outline" className="mt-1" href="/experts">
-          Back to Home
-        </ButtonLink>
+    <>
+      <TopBar title="Not found" />
+      <div className="flex flex-1 items-center justify-center p-4">
+        <div className="w-full max-w-sm text-center">
+          <h1 className="sr-only">Not found</h1>
+          <Empty icon={FileQuestion}>
+            Nothing here. This expert or chat does not exist, or it belongs to someone else.
+          </Empty>
+          <ButtonLink variant="outline" className="mt-1" href="/experts">
+            Back to Home
+          </ButtonLink>
+        </div>
       </div>
-    </div>
+    </>
   )
 }

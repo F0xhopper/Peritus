@@ -96,34 +96,36 @@ test('the sidebar folds away, and says so on the next load', async ({ page }, te
   const sidebar = page.getByRole('navigation', { name: /Dr\. Marta Belen pages/ })
   await expect(sidebar).toBeVisible()
 
-  // The column's own edge is the control (shadcn's sidebar rail).
+  // A visible button in the column's search row folds it away.
   await page.getByRole('button', { name: 'Collapse the sidebar' }).click()
   await expect(sidebar).toBeHidden()
-  // Nothing becomes unreachable: the drawer's button comes back with it.
-  const menu = page.getByRole('button', { name: 'Open navigation' })
-  await expect(menu).toBeVisible()
+  // Nothing becomes unreachable: the top bar gets a button that brings the
+  // column back in place.
+  const expand = page.getByRole('button', { name: 'Expand the sidebar' })
+  await expect(expand).toBeVisible()
 
   // The preference is a cookie, so the *server* renders the next load already
   // collapsed — there is no frame in which the column is back.
   await page.reload()
   await expect(sidebar).toBeHidden()
-  await expect(menu).toBeVisible()
-
-  // And the drawer still reaches every page of the expert.
-  await menu.click()
-  const drawer = page.getByRole('dialog')
-  await expect(drawer.getByRole('link', { name: /^Sources/ })).toBeVisible()
-  await page.keyboard.press('Escape')
+  await expect(expand).toBeVisible()
 
   await waitForHydration(page)
+  await expand.click()
+  await expect(sidebar).toBeVisible()
+
+  // The keyboard shortcut does the same both ways.
+  await page.keyboard.press('ControlOrMeta+\\')
+  await expect(sidebar).toBeHidden()
   await page.keyboard.press('ControlOrMeta+\\')
   await expect(sidebar).toBeVisible()
 
-  // And the edge brings it back on a click, from where the column used to be.
-  await page.getByRole('button', { name: 'Collapse the sidebar' }).click()
+  // And the column's edge is a wider mouse target for the same toggle.
+  const edge = await sidebar.evaluate(
+    (el) => el.closest('.bg-panel')!.getBoundingClientRect().right
+  )
+  await page.mouse.click(edge + 4, 500)
   await expect(sidebar).toBeHidden()
-  await page.getByRole('button', { name: 'Expand the sidebar' }).click()
-  await expect(sidebar).toBeVisible()
 })
 
 test('the phone drawer lists the experts by name', async ({ page }, testInfo) => {

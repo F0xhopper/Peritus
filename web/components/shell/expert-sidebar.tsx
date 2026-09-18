@@ -6,6 +6,7 @@ import {
   MessageSquare,
   MoreHorizontal,
   Network,
+  PanelLeftClose,
   Plus,
   Search,
   SlidersHorizontal,
@@ -99,7 +100,7 @@ export function ExpertSidebar({
   return (
     <div className={cn('relative flex h-full min-h-0 flex-col bg-panel', className)}>
       {collapsible && <SidebarRail collapsed={false} />}
-      {showSearch && <SearchTrigger />}
+      {showSearch && <SearchTrigger collapsible={collapsible} />}
       {selected ? (
         <ExpertForm
           expert={selected}
@@ -340,16 +341,17 @@ function HomeForm({
  * say ⌘ or Ctrl — and is hidden on a coarse pointer, where there is no keyboard
  * to press it on.
  */
-function SearchTrigger() {
-  const { openPalette } = useShell()
-  const shortcut = useSyncExternalStore(
+function SearchTrigger({ collapsible }: { collapsible: boolean }) {
+  const { openPalette, toggleSidebar } = useShell()
+  const mac = useSyncExternalStore(
     noopSubscribe,
-    () => (/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'),
+    () => /Mac|iPhone|iPad/.test(navigator.platform),
     () => null
   )
+  const shortcut = mac === null ? null : mac ? '⌘K' : 'Ctrl K'
 
   return (
-    <div className="shrink-0 px-2 pt-2">
+    <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
       <button
         type="button"
         onClick={openPalette}
@@ -366,6 +368,26 @@ function SearchTrigger() {
           </kbd>
         )}
       </button>
+      {/* The visible way to fold the column away. The edge strip does the
+          same, but nobody finds a control that is invisible until hovered. */}
+      {collapsible && (
+        <Tooltip
+          side="bottom"
+          content={mac === false ? 'Collapse sidebar (Ctrl \\)' : 'Collapse sidebar (⌘\\)'}
+        >
+          <button
+            type="button"
+            onClick={toggleSidebar}
+            aria-label="Collapse the sidebar"
+            className={cn(
+              'grid size-(--row-h) shrink-0 place-items-center rounded-row text-fg-3',
+              'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg'
+            )}
+          >
+            <PanelLeftClose className="size-4" />
+          </button>
+        </Tooltip>
+      )}
     </div>
   )
 }
@@ -389,12 +411,21 @@ function SidebarRail({ collapsed }: { collapsed: boolean }) {
     <button
       type="button"
       onClick={toggleSidebar}
-      aria-label={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
+      // Hidden from assistive tech and the tab order: the labelled buttons in
+      // the search row and the top bar are the accessible controls; this is a
+      // bigger mouse target for the same action.
+      aria-hidden="true"
+      tabIndex={-1}
       title={collapsed ? 'Expand the sidebar' : 'Collapse the sidebar'}
       className={cn(
         'group absolute inset-y-0 z-20 hidden w-3 lg:block',
         // The cursor says which way it goes before anything is clicked.
-        collapsed ? 'fixed left-rail cursor-e-resize' : '-right-1.5 cursor-w-resize'
+        // Centred on the boundary in both states, so the hairline lands on the
+        // edge itself: collapsed, `left-rail` put the strip's *start* there and
+        // drew the line 6px into the page.
+        collapsed
+          ? 'fixed left-[calc(var(--spacing-rail)-0.375rem)] cursor-e-resize'
+          : '-right-1.5 cursor-w-resize'
       )}
     >
       <span

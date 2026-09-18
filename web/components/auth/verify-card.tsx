@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ClientApiError, apiSend, apiVoid, messageFor } from '@/lib/api/client'
 import { authHref } from '@/lib/auth/links'
+import { useEnterApp } from '@/hooks/use-enter-app'
 
 /**
  * Enter an emailed code: a sign-in code (`type="email"`), or the code that
@@ -43,6 +44,7 @@ export function VerifyCard({
 }) {
   const [code, setCode] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const { entering, enter } = useEnterApp()
   const [notice, setNotice] = useState<string | null>(null)
   const [cooldownKey, setCooldownKey] = useState(0)
   const [cooldownFrom, setCooldownFrom] = useState(RESEND_COOLDOWN)
@@ -61,9 +63,7 @@ export function VerifyCard({
 
     try {
       await apiSend('/api/auth/verify', 'POST', { email, token: value, type })
-      // A full navigation, not `router.push`: the session cookies were just
-      // set on this response, and `proxy.ts` has to see them on the way in.
-      window.location.assign(next)
+      enter(next)
       return
     } catch (error) {
       if (error instanceof ClientApiError && error.status === 429) {
@@ -142,7 +142,7 @@ export function VerifyCard({
             variant="primary"
             size="lg"
             className="mt-4 w-full"
-            loading={submitting}
+            loading={submitting || entering}
             disabled={code.length !== CODE_LENGTH}
           >
             {copy.action}

@@ -265,8 +265,11 @@ export function LedgerPage({
                 onClick={() => setAdding(true)}
               >
                 <Plus className="size-3.5" />
-                Add
-                <span className="hidden sm:inline">&nbsp;a source</span>
+                {/* One text node for the flex gap to sit beside, or "Add" and
+                    "a source" were two flex items and read "Add  a source". */}
+                <span>
+                  Add<span className="hidden sm:inline"> a source</span>
+                </span>
               </Button>
             )}
 

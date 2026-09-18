@@ -1,6 +1,6 @@
 'use client'
 
-import { Menu, MoreHorizontal, Search } from 'lucide-react'
+import { Menu, MoreHorizontal, PanelLeftOpen, Search } from 'lucide-react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
@@ -60,9 +60,9 @@ export function TopBar({
   titleSlot,
   hideSearch,
 }: TopBarProps) {
-  const { openNav, openPalette, navTriggerRef, sidebarCollapsed } = useShell()
-  // Both of these live in the sidebar from `lg`. Folded away, they come back
-  // here, or a collapsed shell would have no navigation and no search at all.
+  const { openNav, openPalette, navTriggerRef, sidebarCollapsed, toggleSidebar } = useShell()
+  // Search lives in the sidebar from `lg`. Folded away, it comes back here, or
+  // a collapsed shell would have no search at all.
   const railOnly = sidebarCollapsed ? '' : 'lg:hidden'
 
   return (
@@ -79,11 +79,29 @@ export function TopBar({
         className={cn(
           'grid size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3',
           'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
-          railOnly
+          'lg:hidden'
         )}
       >
         <Menu className="size-4" />
       </button>
+
+      {/* From `lg` the folded sidebar comes back in place — the same column
+          the button in its search row put away — rather than as a drawer
+          over the page. */}
+      {sidebarCollapsed && (
+        <button
+          type="button"
+          onClick={toggleSidebar}
+          aria-label="Expand the sidebar"
+          title="Expand the sidebar"
+          className={cn(
+            'hidden size-(--icon-btn) shrink-0 place-items-center rounded-row text-fg-3 lg:grid',
+            'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg'
+          )}
+        >
+          <PanelLeftOpen className="size-4" />
+        </button>
+      )}
 
       {/* On the expert's own Overview the crumb is text, not a link to the page
           it is already on — a self-link is a dead end a keyboard user has to

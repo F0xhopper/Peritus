@@ -357,6 +357,18 @@
     overflow-anchor: none;
   }
 
+  /* No crossfade until the document has loaded (`ShellBody` sets the flag on
+     `load`). A first load streams the route's skeleton and then its content,
+     and React runs that reveal as a view transition too: straight after
+     sign-in the whole window — skeleton cards, the real cards, the sidebar's
+     chat list before and after it groups by day — sat ghosted on top of
+     itself. A first paint should simply appear. */
+  :root:not([data-vt])::view-transition-group(*),
+  :root:not([data-vt])::view-transition-old(*),
+  :root:not([data-vt])::view-transition-new(*) {
+    animation: none;
+  }
+
   /* The route-change crossfade. 150ms, opacity only. */
   ::view-transition-group(.vt-fade) {
     animation-duration: 150ms;

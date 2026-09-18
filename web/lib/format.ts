@@ -178,9 +178,56 @@ export function chatTitle(title: string | null | undefined): string {
 export function firstSentence(text: string | null | undefined): string | null {
   const trimmed = text?.trim()
   if (!trimmed) return null
-  const match = /^.+?[.!?](?=\s|$)/.exec(trimmed)
-  const sentence = match ? match[0] : trimmed
+  const sentence = trimmed.slice(0, sentenceEnd(trimmed))
   return sentence.length > 220 ? `${sentence.slice(0, 217).trimEnd()}…` : sentence
+}
+
+/**
+ * Titles and abbreviations whose full stop does not end a sentence. Personas
+ * are written "Dr. Marisol Cheng is…", and a naive split turned that whole bio
+ * into "Dr.".
+ */
+const ABBREVIATIONS = new Set([
+  'dr',
+  'mr',
+  'mrs',
+  'ms',
+  'mx',
+  'prof',
+  'st',
+  'sr',
+  'jr',
+  'rev',
+  'fr',
+  'gen',
+  'col',
+  'capt',
+  'e.g',
+  'i.e',
+  'etc',
+  'vs',
+  'cf',
+  'ca',
+  'c',
+  'no',
+  'vol',
+  'ed',
+  'al',
+])
+
+/** Index just past the first sentence's terminator, or the text's length. */
+function sentenceEnd(text: string): number {
+  const terminator = /[.!?](?=\s|$)/g
+  for (let match = terminator.exec(text); match; match = terminator.exec(text)) {
+    const end = match.index + 1
+    if (match[0] === '.') {
+      const word = /(\S+)\.$/.exec(text.slice(0, end))?.[1].toLowerCase() ?? ''
+      // A title, an abbreviation, or a single initial ("J. S. Bach").
+      if (ABBREVIATIONS.has(word) || /^\p{L}$/u.test(word)) continue
+    }
+    return end
+  }
+  return text.length
 }
 
 /** Cut at a word boundary, with an ellipsis. */

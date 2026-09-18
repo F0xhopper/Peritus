@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  firstSentence,
   formatBytes,
   formatClock,
   formatCredits,
@@ -248,5 +249,28 @@ describe('formatInt', () => {
 
   it('keeps a negative sign outside the grouping', () => {
     expect(formatInt(-1234)).toBe('-1,234')
+  })
+})
+
+describe('firstSentence', () => {
+  it('does not stop at a title', () => {
+    expect(firstSentence('Dr. Marisol Cheng studies epigenetics. She reads widely.')).toBe(
+      'Dr. Marisol Cheng studies epigenetics.'
+    )
+  })
+
+  it('does not stop at an initial or an abbreviation', () => {
+    expect(firstSentence('A reader of J. S. Bach, e.g. the cantatas. More.')).toBe(
+      'A reader of J. S. Bach, e.g. the cantatas.'
+    )
+  })
+
+  it('ends on a question or exclamation mark', () => {
+    expect(firstSentence('Why bees? Because.')).toBe('Why bees?')
+  })
+
+  it('keeps text with no terminator whole', () => {
+    expect(firstSentence('  Dr. Cheng  ')).toBe('Dr. Cheng')
+    expect(firstSentence('')).toBeNull()
   })
 })

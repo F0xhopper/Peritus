@@ -20,6 +20,7 @@ import {
   FieldSeparator,
 } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { useEnterApp } from '@/hooks/use-enter-app'
 import { ClientApiError, apiSend, messageFor } from '@/lib/api/client'
 import { authHref } from '@/lib/auth/links'
 import { passwordSchema } from '@/lib/auth/password'
@@ -61,6 +62,7 @@ export function SignupForm({
   const router = useRouter()
   const [notice, setNotice] = useState<string | null>(initialError)
   const [retryAfter, setRetryAfter] = useState<number | null>(null)
+  const { entering, enter } = useEnterApp()
 
   const form = useForm<Values>({
     resolver: zodResolver(schema),
@@ -81,7 +83,7 @@ export function SignupForm({
         'Could not create the account. Try again.'
       )
       if (!result.confirmation_required) {
-        window.location.assign(next)
+        enter(next)
         return
       }
       router.push(authHref('/login/verify', { email: values.email, next, type: 'signup' }))
@@ -167,7 +169,7 @@ export function SignupForm({
                   variant="primary"
                   size="lg"
                   className="w-full"
-                  loading={form.formState.isSubmitting}
+                  loading={form.formState.isSubmitting || entering}
                   disabled={!loginAvailable}
                 >
                   Create account

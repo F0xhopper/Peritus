@@ -4,7 +4,7 @@ import { displayName } from '@/lib/persona'
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
-  return { title: `Graph — ${displayName(await getExpert(slug))}` }
+  return { title: `Concepts — ${displayName(await getExpert(slug))}` }
 }
 
 /** The API's own bounds: `GRAPH_NODES_DEFAULT` / `GRAPH_NODES_MAX`. */

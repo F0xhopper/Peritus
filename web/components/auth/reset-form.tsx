@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { ClientApiError, apiSend, errorCode, messageFor } from '@/lib/api/client'
 import { authHref } from '@/lib/auth/links'
+import { useEnterApp } from '@/hooks/use-enter-app'
 import { passwordSchema } from '@/lib/auth/password'
 
 /**
@@ -26,6 +27,7 @@ export function ResetForm({ email, next }: { email: string; next: string }) {
   const [notice, setNotice] = useState<string | null>(null)
   const [retryAfter, setRetryAfter] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const { entering, enter } = useEnterApp()
   const [spent, setSpent] = useState(false)
 
   const submit = async (event: React.FormEvent) => {
@@ -45,7 +47,7 @@ export function ResetForm({ email, next }: { email: string; next: string }) {
     setSubmitting(true)
     try {
       await apiSend('/api/auth/password/reset', 'POST', { email, token: code, password })
-      window.location.assign(next)
+      enter(next)
       return
     } catch (error) {
       if (error instanceof ClientApiError && error.status === 429) {
@@ -102,7 +104,7 @@ export function ResetForm({ email, next }: { email: string; next: string }) {
               variant="primary"
               size="lg"
               className="w-full"
-              loading={submitting}
+              loading={submitting || entering}
             >
               Set password and sign in
             </Button>
