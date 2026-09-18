@@ -1,5 +1,5 @@
 import type { MapResponse } from '@/lib/api/types'
-import { conceptRadius, type BrainLayout } from '@/lib/brain/layout'
+import { ORBIT, conceptRadius, hash, type BrainLayout } from '@/lib/brain/layout'
 import { pulseDuration, type Pulse } from '@/lib/brain/motion'
 import type { Hit } from '@/lib/brain/paint'
 import type { BrainSelection, Lit } from '@/lib/brain/selection'
@@ -193,4 +193,83 @@ export function idlePulse(
   const from: [number, number] = [layout.sources[j].x, layout.sources[j].y]
   const to: [number, number] = [layout.concepts[i * 2], layout.concepts[i * 2 + 1]]
   return { from, to, start: now, duration: pulseDuration(from, to) }
+}
+
+/**
+ * A source that has just landed on the orbit: one pulse inward to each key
+ * concept it covers and each concept drawn from it.
+ */
+export function arrivalPulses(
+  map: MapResponse,
+  layout: BrainLayout,
+  arrived: Set<number>,
+  now: number
+): Pulse[] {
+  const lit: Lit = {
+    sources: arrived,
+    concepts: new Set(),
+    keyConcepts: new Set(),
+    gaps: new Set(),
+  }
+  for (const source of map.sources) {
+    if (!arrived.has(source.id)) continue
+    for (const tag of source.tags) lit.keyConcepts.add(tag.key_concept)
+  }
+  for (const concept of map.concepts) {
+    if (concept.source_ids.some((id) => arrived.has(id))) lit.concepts.add(concept.id)
+  }
+  return selectionPulses(map, layout, lit, now)
+}
+
+export type BurstEffect =
+  | { key: string; kind: 'judged'; passed: boolean }
+  | { key: string; kind: 'read'; sourceIds: number[] }
+
+/**
+ * The build log's one-off effects.
+ *
+ * - A candidate judged: a speck just outside the orbit at an angle hashed from
+ *   its key. Kept, it drifts onto the orbit; dropped, it drifts away and fades.
+ *   It is *not yet a source* — composition caps can still drop it.
+ * - A graph batch read some sources: each pulses inward to its key concepts.
+ */
+export function burstPulses(
+  map: MapResponse,
+  layout: BrainLayout,
+  bursts: BurstEffect[],
+  now: number
+): Pulse[] {
+  const out: Pulse[] = []
+  const index = new Map(map.sources.map((source, i) => [source.id, i]))
+  bursts.forEach((burst, order) => {
+    if (burst.kind === 'judged') {
+      const angle = hash(stringHash(burst.key), 3) * Math.PI * 2
+      const at = (r: number): [number, number] => [Math.cos(angle) * r, Math.sin(angle) * r]
+      out.push({
+        from: at(ORBIT + 70),
+        to: at(burst.passed ? ORBIT : ORBIT + 150),
+        start: now + order * 90,
+        duration: 900,
+      })
+      return
+    }
+    for (const id of burst.sourceIds) {
+      const i = index.get(id)
+      if (i === undefined) continue
+      const from: [number, number] = [layout.sources[i].x, layout.sources[i].y]
+      for (const tag of map.sources[i].tags) {
+        const key = layout.keyConcepts[tag.key_concept]
+        if (!key) continue
+        const to: [number, number] = [key.x, key.y]
+        out.push({ from, to, start: now, duration: pulseDuration(from, to) })
+      }
+    }
+  })
+  return out
+}
+
+function stringHash(text: string): number {
+  let h = 0
+  for (let i = 0; i < text.length; i += 1) h = (Math.imul(h, 31) + text.charCodeAt(i)) | 0
+  return h
 }

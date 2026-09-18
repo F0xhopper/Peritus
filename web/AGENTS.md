@@ -322,6 +322,13 @@ and a **List** of the same selection (`docs/plans/expert-brain.md`). The old
   the canvas is `--warn` on a disputed concept.
 - **Claims are not in the map payload.** A concept's claims come from
   `/map/concepts/{id}` when its panel opens.
+- **The build page grows the same map** (`components/brain/build-brain.tsx`)
+  from a second fold over the build log, `lib/brain/grow.ts`, run inside
+  `reduceBuildEvent`. It is flat and read-only while the build runs and never
+  draws concepts before the graph is ready. The log stays the page's record.
+- **The map's code is loaded with `next/dynamic`.** Imported directly it delayed
+  the List's hydration enough that a tap on a row landed before anything
+  listened.
 
 ## Testing
 

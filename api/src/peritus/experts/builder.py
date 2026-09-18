@@ -55,6 +55,7 @@ from typing import Any
 import asyncpg
 from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
+from peritus.audit.expert_map import map_tags
 from peritus.billing.domain import discovery_budget_usd
 from peritus.billing.metering import current_meter
 from peritus.core.config import settings
@@ -511,6 +512,13 @@ class ExpertBuilder:
         all_chunks_for_graph: list[tuple[TextChunk, int]] = []
         ingested_total = 0
 
+        # The id, tier and graded tags let a client place the source on the
+        # expert's map as it arrives (docs/plans/expert-brain-interactive.md, G0):
+        # without them a kept source has no angle on the orbit. Additive — older
+        # clients ignore keys they do not know.
+        db_id_of = {id(vs): db_id for vs, db_id in zip(passed, source_db_ids, strict=False)}
+        concept_index = {c: i for i, c in enumerate(key_concepts)}
+
         async def _on_ingested(vsource: ValidatedSource, chunk_ids: list[int]) -> None:
             nonlocal ingested_total
             ingested_total += len(chunk_ids)
@@ -521,6 +529,10 @@ class ExpertBuilder:
                     "title": vsource.title,
                     "chunks": len(chunk_ids),
                     "total_chunks": ingested_total,
+                    "source_id": db_id_of.get(id(vsource)),
+                    "tier": vsource.source_tier,
+                    "kind": str(vsource.source_type),
+                    "tags": map_tags(vsource, concept_index),
                 },
             )
 
@@ -810,9 +822,19 @@ class ExpertBuilder:
         chunks_only = [c for c, _ in chunks_for_graph]
         ids_only = [i for _, i in chunks_for_graph]
 
-        async def _on_graph_batch(labels: list[str], edge_count: int) -> None:
+        # Which sources each batch read, so a client can pulse them as they are
+        # read (expert-brain-interactive.md, G0). One query for the whole stage.
+        source_of = await self._chunk_sources(ids_only)
+
+        async def _on_graph_batch(labels: list[str], edge_count: int, chunk_ids: list[int]) -> None:
             await _emit_event(
-                on_event, {"type": "graph_batch_done", "labels": labels, "edges": edge_count}
+                on_event,
+                {
+                    "type": "graph_batch_done",
+                    "labels": labels,
+                    "edges": edge_count,
+                    "source_ids": sorted({source_of[c] for c in chunk_ids if c in source_of}),
+                },
             )
 
         node_count = edge_count = 0
@@ -866,6 +888,23 @@ class ExpertBuilder:
                 },
             )
         return node_count, edge_count, False
+
+    async def _chunk_sources(self, chunk_ids: list[int]) -> dict[int, int]:
+        """Chunk id → source id, for the graph stage's progress events. Never raises."""
+        if not chunk_ids:
+            return {}
+        try:
+            async with self._pool.acquire() as conn:
+                rows = await conn.fetch(
+                    "SELECT id, source_id FROM source_chunks WHERE id = ANY($1::int[])",
+                    chunk_ids,
+                )
+            return {r["id"]: r["source_id"] for r in rows}
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Could not map graph chunks to sources: %s", exc)
+            return {}
 
     async def _assign_key_concepts(self, expert_id: int) -> None:
         """Place every concept node in its line of the syllabus. Never raises.

@@ -1,7 +1,8 @@
 # The brain you add to — and a build that grows it
 
 **Date:** 2026-09-18
-**Status:** proposed, nothing built. Companion to
+**Status:** G0–G4 implemented on branch `feat/expert-brain` (2026-09-18), not
+pushed; G5 and G6 not built. See *Implementation status* at the end. Companion to
 [expert-brain.md](expert-brain.md); read that first — the layers, the layout,
 the motion rule and the `/map` API are all defined there and not repeated here.
 **Questions answered:** is the brain a picture *of* the expert, or the place an
@@ -358,3 +359,43 @@ from migration 034 onward whether or not this is ever built.
    it on a real phone beside the idle-loop check in expert-brain.md phase 6.
 4. **Should the landing be on the List view too?** Proposed: the toast and the
    new row only — the table is the still form of this page.
+
+## Implementation status (2026-09-18)
+
+Branch `feat/expert-brain`, not pushed. No tests were added for this plan, by
+request; it was checked by hand against the mock API (a `grow` scenario builds
+ten placed sources) and the existing suites still pass.
+
+- **G0.** `source_ingested` carries `source_id`, `tier`, `kind` and `tags`
+  (`audit/expert_map.map_tags`, the same rule `/map` uses); `graph_batch_done`
+  carries `source_ids` (one chunk→source query per graph stage; the extractor's
+  batch callback now passes the batch's chunk ids). Key-concept assignment
+  already ran before `graph_ready` and in `_extend_graph`, and `/map` already
+  dropped nodes with no resolving chunk (expert-brain.md phase 0–1).
+- **G1.** `web/lib/brain/grow.ts`, folded inside `reduceBuildEvent`, so the
+  build page's state carries `grow`. The fold keeps its own event log for
+  replay.
+- **G2.** Add a source from the toolbar, a gap (title and author filled in), a
+  key concept's panel (says which prompted it), or a file dropped on the map.
+  The dialog promises nothing about where the source lands. A source being read
+  is a breathing hollow square at the foot, filled once embedded; when the
+  ingest ends the page re-reads the map, the new source lands at its angle with
+  pulses inward, and a toast says what changed ("Added. Covers 2 key concepts,
+  14 passages. Fills …"). Each ingest is tailed by its own keyed watcher:
+  `useBuildEvents` stops for good at a terminal event, so a second add from the
+  same page was never watched. Removal's confirm says what it costs (passages,
+  concepts that leave the map, a named text missing again). **Not done:** the
+  square travelling along the orbit to its angle (it appears there), the
+  removal fade (the map re-reads), and the gap closing "hollow to solid" in
+  place (the gap disappears and the source appears beside it).
+- **G3.** `components/brain/build-brain.tsx` on the build page: a panel above the
+  log from `lg`, a 280px square without labels above the timeline below it.
+  Flat and still during the build, tilts at the end; read-only; candidate
+  specks (at most six drawn), sources pulsing as a graph batch reads them; the
+  real `/map` replaces the grown one once it is computed. A mid-build page load
+  or reconnect animates nothing it replays.
+- **G4.** "Replay" on a finished build whose log has G0 fields: the stored
+  events folded again, about twenty seconds for a long log.
+- **G5, G6** need decisions this plan leaves open (how finding a text is
+  charged; extending the syllabus is its own plan) and were not started.
+

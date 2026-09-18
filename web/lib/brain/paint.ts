@@ -50,6 +50,8 @@ export interface BrainPaintState {
   now: number
   /** How many concept labels may be drawn besides the forced ones. */
   labelBudget: number
+  /** False: only the hovered and selected thing is named (the small build form). */
+  labels?: boolean
   /** A pre-rendered soft glow for the spine, or null (tests). Never `shadowBlur`. */
   glow: CanvasImageSource | null
 }
@@ -347,6 +349,17 @@ function paintOrbitItems(context: CanvasRenderingContext2D, state: BrainPaintSta
     const size = px(place.size, view, 5) * (1 + near * 0.15)
     const isLit = lit?.sources.has(source.id) ?? false
     const alpha = Math.min(1, 0.85 * (1 + near * 0.15)) * dimmed(lit, isLit)
+    if (source.pending) {
+      // Being read in: hollow, breathing slowly, at the foot of the orbit.
+      context.globalAlpha = 0.45 + 0.35 * Math.sin(state.now / 450)
+      context.setLineDash([3, 2])
+      context.strokeStyle = colours.fg2
+      context.lineWidth = 1.2
+      roundedSquare(context, x, y, size)
+      context.stroke()
+      context.setLineDash([])
+      return
+    }
     context.globalAlpha = alpha
     roundedSquare(context, x, y, size)
     if (source.tier === 'primary') {
@@ -466,6 +479,11 @@ function paintLabels(context: CanvasRenderingContext2D, state: BrainPaintState):
     const [x, y, r] = hitScreen(state, hit)
     context.globalAlpha = 1
     place(label, x, y + r + 4, colours.fg, true, 12)
+  }
+
+  if (state.labels === false) {
+    context.globalAlpha = 1
+    return
   }
 
   // Facet names, small caps on each sector's bisector just outside the orbit,

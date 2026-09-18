@@ -60,6 +60,73 @@ export async function buildScript() {
 }
 
 /**
+ * The same build, grown in full: a plan with facets and named texts, candidates
+ * judged, ten sources placed on the orbit one by one, and extraction reading
+ * them — every field the brain growing needs (expert-brain-interactive.md, G0).
+ * Only under the `grow` scenario, so the counts other specs assert on stand.
+ */
+export async function growScript() {
+  const base = await buildScript()
+  const map = await fixture('map')
+  const keyConcepts = map.syllabus.key_concepts.map((k) => k.label)
+  const out = []
+  for (const event of base) {
+    if (event.type === 'plan_ready') {
+      out.push({
+        ...event,
+        key_concepts: keyConcepts,
+        facets: (map.syllabus.facets ?? []).map((f) => ({
+          name: f.name,
+          concepts: f.concepts.map((i) => keyConcepts[i]),
+        })),
+        concept_primary_texts: [
+          {
+            concept: keyConcepts[4],
+            title: 'Tools for Varroa Management',
+            author: 'Honey Bee Health Coalition',
+          },
+          {
+            concept: keyConcepts[1],
+            title: 'Amitraz resistance in field populations',
+            author: 'Okonkwo, A.',
+          },
+        ],
+        must_have_works: [{ title: 'The Biology of the Honey Bee', author: 'Mark L. Winston' }],
+      })
+    } else if (event.type === 'source_validated') {
+      for (let i = 0; i < 8; i += 1) {
+        out.push({ ...event, title: `Candidate ${i}`, passed: i % 3 !== 0 })
+      }
+    } else if (event.type === 'source_ingested') {
+      let total = 0
+      for (const source of map.sources) {
+        total += source.passage_count
+        out.push({
+          type: 'source_ingested',
+          title: source.title,
+          chunks: source.passage_count,
+          total_chunks: total,
+          source_id: source.id,
+          tier: source.tier,
+          kind: source.kind,
+          tags: source.tags,
+        })
+      }
+    } else if (event.type === 'graph_batch_done') {
+      for (let i = 0; i < map.sources.length; i += 3) {
+        out.push({
+          ...event,
+          source_ids: map.sources.slice(i, i + 3).map((s) => s.id),
+        })
+      }
+    } else {
+      out.push(event)
+    }
+  }
+  return out
+}
+
+/**
  * Register a build for a slug, without starting it.
  *
  * The events are materialised up front so a reconnect with `after=<seq>` is
@@ -67,7 +134,7 @@ export async function buildScript() {
  * whole point of the log being durable server-side.
  */
 export async function startBuild(slug, topic) {
-  const script = await buildScript()
+  const script = state.scenario === 'grow' ? await growScript() : await buildScript()
   const created = { ...script[0], slug, topic: topic ?? slug }
   const events = [created, ...script.slice(1)]
   state.builds.set(slug, { events, delivered: 0, jobId: created.job_id })

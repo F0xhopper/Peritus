@@ -3,7 +3,7 @@
 import { Download, Network, Plus, X } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useCallback, useMemo, useRef, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 
 import type { BrainCanvasHandle } from '@/components/brain/brain-canvas'
 import { ListView } from '@/components/knowledge/list-view'
@@ -19,6 +19,7 @@ import { MenuContent, MenuItem, MenuLabel, MenuRoot, MenuTrigger } from '@/compo
 import { Notice } from '@/components/ui/notice'
 import { Segmented } from '@/components/ui/segmented'
 import { useBuildEvents } from '@/hooks/use-build-events'
+import { toast } from 'sonner'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useStartChat } from '@/hooks/use-start-chat'
 import { canManage } from '@/lib/access'
@@ -34,6 +35,7 @@ import {
   type BrainSelection,
 } from '@/lib/brain/selection'
 import { keyConceptLabel } from '@/lib/brain/paint'
+import { additionSummary, removalCost } from '@/lib/brain/grow'
 import type { CorpusReport, ExpertWithCatalog, MapResponse, SourceSort } from '@/lib/api/types'
 
 export type KnowledgeView = 'map' | 'list'
@@ -97,7 +99,21 @@ export function KnowledgePage({
 
   const [query, setQuery] = useState('')
   const [adding, setAdding] = useState(false)
-  const [ingestJob, setIngestJob] = useState<number | null>(null)
+  const [addPrefill, setAddPrefill] = useState<AddPrefill | null>(null)
+  const openAdd = (prefill: AddPrefill | null = null) => {
+    setAddPrefill(prefill)
+    setAdding(true)
+  }
+  // A source being read in: drawn as a breathing square at the foot of the
+  // orbit, filled once its passages are embedded, and replaced by the real one
+  // when the ingest finishes (expert-brain-interactive.md, G2).
+  const [ingest, setIngest] = useState<{
+    jobId: number
+    title: string
+    embedded: boolean
+    before: MapResponse
+  } | null>(null)
+  const landingFrom = useRef<MapResponse | null>(null)
 
   const viewParam = params.get('view')
   const view: KnowledgeView | null = viewParam === 'map' || viewParam === 'list' ? viewParam : null
@@ -155,14 +171,36 @@ export function KnowledgePage({
 
   const setView = (next: KnowledgeView) => writeParams({ view: next }, 'push')
 
-  // Waits for the worker to finish an ingest, then refreshes so the new source
-  // appears — the same durable event stream the build page tails.
-  useBuildEvents(ingestJob !== null ? expert.name : null, {
-    onTerminal: () => {
-      setIngestJob(null)
-      router.refresh()
-    },
-  })
+  // The map the canvas draws: the expert's, plus a source still being read.
+  const drawnMap = useMemo<MapResponse>(() => {
+    if (!ingest) return map
+    return {
+      ...map,
+      sources: [
+        ...map.sources,
+        {
+          id: -ingest.jobId,
+          title: ingest.title,
+          author: null,
+          kind: 'upload',
+          tier: ingest.embedded ? 'secondary' : null,
+          passage_count: 0,
+          tags: [],
+          pending: !ingest.embedded,
+        },
+      ],
+    }
+  }, [map, ingest])
+
+  // After an ingest the page re-reads the map; when it lands, say what changed.
+  // Worth having in both motion modes, and more than the product said before.
+  useEffect(() => {
+    const from = landingFrom.current
+    if (!from || from === map) return
+    landingFrom.current = null
+    const summary = additionSummary(from, map)
+    if (summary) toast.success(summary)
+  }, [map])
 
   // ── search ────────────────────────────────────────────────────────────────
 
@@ -238,6 +276,7 @@ export function KnowledgePage({
               }
             : undefined
         }
+        removalCost={removalCost(map, panelFor.id)}
         onSelect={(next) => select(next, { focus: true })}
       />
     ) : panelFor.kind === 'concept' ? (
@@ -266,6 +305,14 @@ export function KnowledgePage({
             ? () => navigate({ expand: String(panelFor.index), view: 'map' })
             : null
         }
+        onAdd={
+          owner
+            ? () =>
+                openAdd({
+                  context: `Prompted by ${map.syllabus.key_concepts[panelFor.index]?.label}. Peritus reads what you add and decides what it covers.`,
+                })
+            : null
+        }
         onSelect={(next) => select(next, { focus: true })}
       />
     ) : (
@@ -273,7 +320,15 @@ export function KnowledgePage({
         index={panelFor.index}
         map={map}
         owner={owner}
-        onAdd={() => setAdding(true)}
+        onAdd={() => {
+          const gap = map.syllabus.gaps[panelFor.index]
+          openAdd({
+            title: gap?.title,
+            context: gap
+              ? `For the missing text: ${gap.title}${gap.author ? ` (${gap.author})` : ''}. Peritus reads what you add and decides what it covers.`
+              : undefined,
+          })
+        }}
         onSelect={(next) => select(next, { focus: true })}
       />
     )
@@ -403,7 +458,7 @@ export function KnowledgePage({
             variant="secondary"
             size="action"
             aria-label="Add a source"
-            onClick={() => setAdding(true)}
+            onClick={() => openAdd()}
           >
             <Plus className="size-3.5" />
             <span>
@@ -432,7 +487,25 @@ export function KnowledgePage({
         </p>
       </div>
 
-      {ingestJob !== null && (
+      {ingest && (
+        <IngestWatcher
+          key={ingest.jobId}
+          slug={expert.name}
+          onEmbedded={() =>
+            setIngest((current) =>
+              current && !current.embedded ? { ...current, embedded: true } : current
+            )
+          }
+          onFinished={(failure) => {
+            if (failure) toast.error(failure)
+            else landingFrom.current = ingest.before
+            setIngest(null)
+            router.refresh()
+          }}
+        />
+      )}
+
+      {ingest !== null && (
         <div className="shrink-0 px-3 pt-3 md:px-4">
           <Notice tone="info" title="Reading a new source">
             Peritus is reading and indexing it. It appears here when it is done.
@@ -461,7 +534,8 @@ export function KnowledgePage({
         ) : (
           <>
             <BrainCanvas
-              map={map}
+              map={drawnMap}
+              onDropFile={owner ? (file) => openAdd({ file }) : undefined}
               expert={expert}
               selection={selection}
               lit={lit}
@@ -531,7 +605,8 @@ export function KnowledgePage({
           slug={expert.name}
           open={adding}
           onOpenChange={setAdding}
-          onQueued={(jobId) => setIngestJob(jobId)}
+          prefill={addPrefill}
+          onQueued={(jobId, title) => setIngest({ jobId, title, embedded: false, before: map })}
         />
       )}
     </div>
@@ -572,4 +647,39 @@ function ViewToggle({
       />
     </>
   )
+}
+
+type AddPrefill = { title?: string; context?: string; file?: File | null }
+
+/**
+ * Tails one ingest job. Keyed by the job, because `useBuildEvents` stops for
+ * good at a terminal event: a second source added from the same page would
+ * otherwise never be watched.
+ */
+function IngestWatcher({
+  slug,
+  onEmbedded,
+  onFinished,
+}: {
+  slug: string
+  onEmbedded: () => void
+  onFinished: (failure: string | null) => void
+}) {
+  const { state } = useBuildEvents(slug, {
+    refreshOnTerminal: false,
+    onTerminal: (final) => {
+      onFinished(
+        final.terminal?.kind === 'done'
+          ? null
+          : (final.terminal?.message ?? 'That source could not be read.')
+      )
+    },
+  })
+  const embedded = state.rows.some(
+    (row) => (row.raw as { type?: string })?.type === 'upload_embedded'
+  )
+  useEffect(() => {
+    if (embedded) onEmbedded()
+  }, [embedded, onEmbedded])
+  return null
 }

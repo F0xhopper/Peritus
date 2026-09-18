@@ -6,6 +6,7 @@ import {
   type StageName,
 } from '@/lib/api/types'
 import { describeChannelStatus } from '@/lib/selection'
+import { initialGrowState, reduceGrow, type GrowState } from '@/lib/brain/grow'
 
 /**
  * Build events in, a renderable log out.
@@ -117,6 +118,8 @@ export interface BuildState {
   retries: { attempt: number; maxAttempts: number; message: string }[]
   /** True while the build is retrying after a recoverable failure. */
   retrying: boolean
+  /** The brain as the log has grown it so far. */
+  grow: GrowState
 }
 
 export function initialBuildState(): BuildState {
@@ -140,6 +143,7 @@ export function initialBuildState(): BuildState {
     warnings: [],
     retries: [],
     retrying: false,
+    grow: initialGrowState(),
   }
 }
 
@@ -202,6 +206,15 @@ function markStage(
  * a `fetch_progress` per download, and the log is the hottest list in the app.
  */
 export function reduceBuildEvent(state: BuildState, seq: number, event: BuildEvent): BuildState {
+  const next = reduceLog(state, seq, event)
+  // The brain growing is a second fold over the same log (lib/brain/grow.ts),
+  // so the build page, a single added source and a replay all read one reducer.
+  const grow = reduceGrow(state.grow, seq, event)
+  if (grow === state.grow) return next
+  return { ...next, grow }
+}
+
+function reduceLog(state: BuildState, seq: number, event: BuildEvent): BuildState {
   const type = event.type
   const next: BuildState = {
     ...state,

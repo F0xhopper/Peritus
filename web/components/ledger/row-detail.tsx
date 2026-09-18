@@ -41,6 +41,7 @@ export function RowDetail({
   onAsk,
   asking = false,
   onDeleted,
+  removalCost,
 }: {
   source: LedgerSource
   slug: string
@@ -51,6 +52,8 @@ export function RowDetail({
   asking?: boolean
   /** Present only for the owner. Without it there is no Remove button. */
   onDeleted?: () => void
+  /** What removing it takes off the map, in sentences, said before it happens. */
+  removalCost?: string[]
 }) {
   const [confirming, setConfirming] = useState(false)
 
@@ -229,6 +232,13 @@ export function RowDetail({
         }
       >
         <p className="text-sm text-fg-3">{source.title}</p>
+        {removalCost && removalCost.length > 0 && (
+          <ul className="mt-2 space-y-1 text-sm text-fg-2">
+            {removalCost.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+        )}
       </Dialog>
     </div>
   )

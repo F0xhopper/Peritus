@@ -111,7 +111,8 @@ _SYSTEM = (
 )
 
 
-BatchCallback = Callable[[list[str], int], Coroutine[Any, Any, None]]
+#: ``(node labels, edge count, the batch's chunk ids)`` as each batch lands.
+BatchCallback = Callable[[list[str], int, list[int]], Coroutine[Any, Any, None]]
 
 
 #: Concepts an orphaned claim is attached to, at most — the ones sharing the most
@@ -221,7 +222,7 @@ async def extract_graph_from_chunks(
         parsed[i] = data
         if on_batch:
             labels = [n["label"] for n in data.get("nodes", []) if n.get("label")]
-            await on_batch(labels, len(data.get("edges", [])))
+            await on_batch(labels, len(data.get("edges", [])), list(batches[i][1]))
 
     await gather_claude_calls(
         [_extract_params(topic, batch_chunks) for batch_chunks, _ in batches],

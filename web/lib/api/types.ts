@@ -646,6 +646,12 @@ export interface SourceIngestedEvent extends BuildEventBase {
   title: string
   chunks: number
   total_chunks: number
+  /** From G0 of expert-brain-interactive.md: where the source goes on the map.
+   *  Absent from older logs. */
+  source_id?: number | null
+  tier?: string | null
+  kind?: string
+  tags?: { key_concept: number; depth: ConceptDepth }[]
 }
 
 export interface StageDegradedEvent extends BuildEventBase {
@@ -1195,6 +1201,9 @@ export interface MapSource {
   tier: string | null
   passage_count: number
   tags: { key_concept: number; depth: ConceptDepth }[]
+  /** Client-only: a source being read in, not yet on the orbit — drawn hollow
+   *  at the foot until its ingest finishes. */
+  pending?: boolean
 }
 
 export interface MapConcept {

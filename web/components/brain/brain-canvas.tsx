@@ -29,6 +29,8 @@ import {
 } from '@/lib/brain/motion'
 import { paintBrain, readBrainColours, type Hit } from '@/lib/brain/paint'
 import {
+  arrivalPulses,
+  burstPulses,
   entrancePulses,
   hitFor,
   hitKey,
@@ -38,6 +40,7 @@ import {
   mapSummary,
   selectionFor,
   selectionPulses,
+  type BurstEffect,
 } from '@/lib/brain/scene'
 import type { BrainSelection, Lit } from '@/lib/brain/selection'
 
@@ -82,7 +85,12 @@ const FIRE_EVERY_MS = 800
 /** Room around the orbit when fitting, for labels and the floating controls. */
 const FIT_MARGIN = 58
 
+/** A one-off effect, fired once per `key`. */
+export type Burst = BurstEffect
+
 interface Live {
+  still: boolean
+  labels: boolean
   map: MapResponse
   layout: BrainLayout | null
   lit: Lit | null
@@ -99,6 +107,11 @@ export function BrainCanvas({
   cited = false,
   onSelect,
   handleRef,
+  still = false,
+  interactive = true,
+  labels = true,
+  bursts,
+  onDropFile,
   className,
 }: {
   map: MapResponse
@@ -109,6 +122,21 @@ export function BrainCanvas({
   cited?: boolean
   onSelect: (selection: BrainSelection | null) => void
   handleRef?: React.RefObject<BrainCanvasHandle | null>
+  /**
+   * Flat and unturned, with no idle firing: the build page while a build runs
+   * (expert-brain-interactive.md). Growth is the motion; turning the scene as
+   * well would have arriving sources chase a moving target. Going false tilts
+   * the map into its idle orbit, once.
+   */
+  still?: boolean
+  /** False: hover names things, clicks select nothing (a build in progress). */
+  interactive?: boolean
+  /** False: no labels but the one under the pointer (the 280px build form). */
+  labels?: boolean
+  /** One-off effects from the event log: candidates judged, sources being read. */
+  bursts?: Burst[]
+  /** A file dropped on the map (fine pointer only) — the owner adding a source. */
+  onDropFile?: (file: File) => void
   className?: string
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -126,7 +154,16 @@ export function BrainCanvas({
   const [sized, setSized] = useState(false)
   const [labelBudget, setLabelBudget] = useState(8)
 
-  const live = useRef<Live>({ map: drawn, layout, lit, selection, reducedMotion, labelBudget })
+  const live = useRef<Live>({
+    map: drawn,
+    layout,
+    lit,
+    selection,
+    reducedMotion,
+    labelBudget,
+    still,
+    labels,
+  })
   const size = useRef({ width: 0, height: 0, dpr: 1 })
   const zoomState = useRef({ k: 1, x: 0, y: 0 })
   const fitScale = useRef(1)
@@ -178,7 +215,8 @@ export function BrainCanvas({
         hovered: hovered.current,
         pulses: pulses.current,
         now,
-        labelBudget: state.labelBudget,
+        labelBudget: state.labels ? state.labelBudget : 0,
+        labels: state.labels,
         glow: glowSprite(glow, colours.fg),
       })
       // The nucleus is DOM (the avatar already resolves picture, drawing and
@@ -225,7 +263,8 @@ export function BrainCanvas({
         size.current.width > 0 &&
         (gesture.current ||
           pulses.current.length > 0 ||
-          (!state.reducedMotion && isMoving(motion.current)))
+          (!state.reducedMotion && isMoving(motion.current)) ||
+          (!state.reducedMotion && state.map.sources.some((source) => source.pending)))
       // A frame the throttle skipped is still owed. Stopping here dropped the
       // layout's first paint under reduced motion, where nothing else re-arms
       // the loop: the map stayed blank until something was touched.
@@ -236,15 +275,15 @@ export function BrainCanvas({
   }, [paint])
 
   useEffect(() => {
-    live.current = { map: drawn, layout, lit, selection, reducedMotion, labelBudget }
+    live.current = { map: drawn, layout, lit, selection, reducedMotion, labelBudget, still, labels }
     requestDraw()
-  }, [drawn, layout, lit, selection, reducedMotion, labelBudget, requestDraw])
+  }, [drawn, layout, lit, selection, reducedMotion, labelBudget, still, labels, requestDraw])
 
   // ── engagement ────────────────────────────────────────────────────────────
 
   const scheduleIdle = useCallback(() => {
     if (idleTimer.current) clearTimeout(idleTimer.current)
-    if (live.current.reducedMotion) return
+    if (live.current.reducedMotion || live.current.still) return
     idleTimer.current = setTimeout(() => {
       idleTimer.current = null
       // Nothing open: back to the idle orbit. Something open: stay still.
@@ -263,11 +302,23 @@ export function BrainCanvas({
 
   // Reduced motion is flat from the first frame; otherwise every visit opens
   // on the same idle frame.
+  const wasStill = useRef(still)
   useEffect(() => {
-    motion.current = initialMotion(performance.now(), reducedMotion)
-    if (reducedMotion) pulses.current = []
+    const now = performance.now()
+    if (reducedMotion) {
+      motion.current = initialMotion(now, true)
+      pulses.current = []
+    } else if (still) {
+      motion.current = initialMotion(now, true)
+    } else if (wasStill.current) {
+      // The build has finished: tilt into the idle orbit, once.
+      motion.current = disengage(motion.current, now)
+    } else {
+      motion.current = initialMotion(now, false)
+    }
+    wasStill.current = still
     requestDraw()
-  }, [reducedMotion, requestDraw])
+  }, [reducedMotion, still, requestDraw])
 
   // A selection engages and fires one pulse down each lit dendrite — once, not
   // looping. Clearing it starts the idle countdown.
@@ -392,17 +443,57 @@ export function BrainCanvas({
   // On first load pulses run inward — orbit to cloud to ring — once. It is the
   // one moment the picture says what it is. From a cited answer they run from
   // the cited sources instead.
+  const previousSources = useRef<Set<number> | null>(null)
   useEffect(() => {
-    if (!scene || entered.current) return
-    entered.current = true
-    if (!live.current.reducedMotion) {
-      pulses.current =
-        cited && lit
-          ? selectionPulses(scene.map, scene.layout, lit, performance.now())
-          : entrancePulses(scene.map, scene.layout, performance.now())
+    if (!scene) return
+    const now = performance.now()
+    const reduced = live.current.reducedMotion
+    if (!entered.current) {
+      entered.current = true
+      // While a build is growing the map there is no entrance: the growth is.
+      if (!reduced && !live.current.still) {
+        pulses.current =
+          cited && lit
+            ? selectionPulses(scene.map, scene.layout, lit, now)
+            : entrancePulses(scene.map, scene.layout, now)
+      }
+    } else if (!reduced && previousSources.current) {
+      // A source that has just arrived — ingested in a build, or added by its
+      // owner — sends one pulse inward down each of its dendrites.
+      const known = previousSources.current
+      const arrived = scene.map.sources.filter((source) => !source.pending && !known.has(source.id))
+      if (arrived.length) {
+        pulses.current = [
+          ...pulses.current,
+          ...arrivalPulses(scene.map, scene.layout, new Set(arrived.map((s) => s.id)), now),
+        ]
+      }
     }
+    previousSources.current = new Set(
+      scene.map.sources.filter((source) => !source.pending).map((source) => source.id)
+    )
     requestDraw()
   }, [scene, lit, cited, requestDraw])
+
+  // One-off effects from the build log, each fired once.
+  const firedBursts = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    if (!scene) return
+    // The first frame already holds everything before it — a replayed prefix
+    // on a reconnect or a mid-build page load — so those fire nothing.
+    if (firedBursts.current === null) {
+      firedBursts.current = new Set((bursts ?? []).map((burst) => burst.key))
+      return
+    }
+    if (!bursts?.length || live.current.reducedMotion) return
+    const now = performance.now()
+    const fired = firedBursts.current
+    const fresh = bursts.filter((burst) => !fired.has(burst.key))
+    if (!fresh.length) return
+    for (const burst of fresh) fired.add(burst.key)
+    pulses.current = [...pulses.current, ...burstPulses(scene.map, scene.layout, fresh, now)]
+    requestDraw()
+  }, [bursts, scene, requestDraw])
 
   // ── pan, pinch, wheel ─────────────────────────────────────────────────────
 
@@ -481,7 +572,27 @@ export function BrainCanvas({
   )
 
   return (
-    <div ref={wrapperRef} className={cn('relative h-full w-full overflow-hidden', className)}>
+    <div
+      ref={wrapperRef}
+      className={cn('relative h-full w-full overflow-hidden', className)}
+      onDragOver={
+        onDropFile
+          ? (event) => {
+              if (event.dataTransfer.types.includes('Files')) event.preventDefault()
+            }
+          : undefined
+      }
+      onDrop={
+        onDropFile
+          ? (event) => {
+              const file = event.dataTransfer.files[0]
+              if (!file) return
+              event.preventDefault()
+              onDropFile(file)
+            }
+          : undefined
+      }
+    >
       <canvas
         ref={canvasRef}
         role="img"
@@ -493,7 +604,9 @@ export function BrainCanvas({
           const hit = hitAt(event.clientX, event.clientY)
           if (hitKey(hit) !== hitKey(hovered.current)) {
             hovered.current = hit
-            if (canvasRef.current) canvasRef.current.style.cursor = hit ? 'pointer' : ''
+            if (canvasRef.current) {
+              canvasRef.current.style.cursor = hit && interactive ? 'pointer' : ''
+            }
             requestDraw()
           }
         }}
@@ -505,6 +618,7 @@ export function BrainCanvas({
           }
         }}
         onClick={(event) => {
+          if (!interactive) return
           const hit = hitAt(event.clientX, event.clientY)
           onSelect(hit ? selectionFor(live.current.map, hit) : null)
         }}

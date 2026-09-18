@@ -171,6 +171,23 @@ def _map_source(row: dict[str, Any], index_of: dict[str, int]) -> dict[str, Any]
     }
 
 
+def map_tags(source: ValidatedSource, index_of: dict[str, int]) -> list[dict[str, Any]]:
+    """A validated source's tags as the map draws them: ``[{key_concept, depth}]``.
+
+    The same rule as :func:`_map_source` over a stored row, for the build's
+    ``source_ingested`` event, which fires before anything reads the row back.
+    """
+    row = {
+        "concept_depths": source.concept_depths or None,
+        "covered_concepts": source.covered_concepts,
+    }
+    return [
+        {"key_concept": index_of[concept], "depth": depth}
+        for concept, depth in _tags(row)
+        if concept in index_of
+    ]
+
+
 def _tags(row: dict[str, Any]) -> list[tuple[str, str]]:
     """Every graded tag, mentions included; a pre-grading source's flat tags as ``treats``."""
     depths = row.get("concept_depths")

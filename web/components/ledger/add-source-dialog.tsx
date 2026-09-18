@@ -42,12 +42,20 @@ export function AddSourceDialog({
   open,
   onOpenChange,
   onQueued,
+  prefill,
 }: {
   slug: string
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called with the job id to tail once the ingest is queued. */
   onQueued: (jobId: number, title: string) => void
+  /**
+   * Where the owner came from (expert-brain-interactive.md, G2): a gap fills in
+   * the named text's title, a key concept says which prompted it, a file
+   * dropped on the map arrives already taken. It never promises where the
+   * source will land — the tagger reads the document and decides.
+   */
+  prefill?: { title?: string; context?: string; file?: File | null } | null
 }) {
   const [tab, setTab] = useState<Tab>('file')
   const [busy, setBusy] = useState(false)
@@ -91,6 +99,19 @@ export function AddSourceDialog({
     setFile(candidate)
     if (!title) setTitle(candidate.name.replace(/\.[^.]+$/, ''))
   }
+
+  // Applied once per opening, during render rather than in an effect: the
+  // fields follow the prop (web/AGENTS.md, "adjust state during render").
+  const [appliedFor, setAppliedFor] = useState<typeof prefill>(null)
+  if (open && prefill && prefill !== appliedFor) {
+    setAppliedFor(prefill)
+    if (prefill.title) setTitle(prefill.title)
+    if (prefill.file) {
+      setTab('file')
+      takeFile(prefill.file)
+    }
+  }
+  if (!open && appliedFor !== null) setAppliedFor(null)
 
   const uploadFile = () => {
     if (!file) return
@@ -225,6 +246,7 @@ export function AddSourceDialog({
         </>
       }
     >
+      {prefill?.context && <p className="mb-3 text-xs text-fg-3">{prefill.context}</p>}
       <div role="tablist" aria-label="Source kind" className="flex gap-0.5 rounded-row bg-bg p-0.5">
         {(
           [

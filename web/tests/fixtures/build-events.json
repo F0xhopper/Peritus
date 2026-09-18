@@ -7,9 +7,21 @@
     "tier": "standard",
     "topic": "Varroa mite control in temperate beekeeping"
   },
-  "build_started": { "type": "build_started", "attempt": 1, "max_attempts": 3 },
-  "execution_mode": { "type": "execution_mode", "mode": "background", "batched": true },
-  "stage_plan": { "type": "stage", "stage": 0, "name": "plan" },
+  "build_started": {
+    "type": "build_started",
+    "attempt": 1,
+    "max_attempts": 3
+  },
+  "execution_mode": {
+    "type": "execution_mode",
+    "mode": "background",
+    "batched": true
+  },
+  "stage_plan": {
+    "type": "stage",
+    "stage": 0,
+    "name": "plan"
+  },
   "plan_ready": {
     "type": "plan_ready",
     "key_concepts": [
@@ -36,7 +48,11 @@
     "fetchers": ["wikipedia", "arxiv", "openalex", "pubmed", "web", "pdf"],
     "active": ["openalex", "pubmed", "web", "pdf"]
   },
-  "round_started": { "type": "round_started", "round": 1, "reason": "coverage short" },
+  "round_started": {
+    "type": "round_started",
+    "round": 1,
+    "reason": "coverage short"
+  },
   "fetcher_done": {
     "type": "fetcher_done",
     "round": 0,
@@ -69,7 +85,12 @@
     "ranked": 41,
     "budget": 30
   },
-  "fetch_progress": { "type": "fetch_progress", "round": 0, "fetched": 18, "budget": 30 },
+  "fetch_progress": {
+    "type": "fetch_progress",
+    "round": 0,
+    "fetched": 18,
+    "budget": 30
+  },
   "fetch_done": {
     "type": "fetch_done",
     "round": 0,
@@ -118,13 +139,28 @@
     "reversed": true,
     "review_model": "claude-sonnet-5"
   },
-  "validate_done": { "type": "validate_done", "round": 0, "passed": 21, "dropped": 9 },
+  "validate_done": {
+    "type": "validate_done",
+    "round": 0,
+    "passed": 21,
+    "dropped": 9
+  },
   "coverage_report": {
     "type": "coverage_report",
     "round": 0,
     "concepts": [
-      { "concept": "varroa biology", "met": true, "sources": 4, "shortfall": 0 },
-      { "concept": "acaricide resistance", "met": false, "sources": 1, "shortfall": 1 }
+      {
+        "concept": "varroa biology",
+        "met": true,
+        "sources": 4,
+        "shortfall": 0
+      },
+      {
+        "concept": "acaricide resistance",
+        "met": false,
+        "sources": 1,
+        "shortfall": 1
+      }
     ]
   },
   "feedback_queries": {
@@ -136,7 +172,11 @@
       "flumethrin cross resistance"
     ]
   },
-  "snowball_done": { "type": "snowball_done", "round": 1, "candidates": 6 },
+  "snowball_done": {
+    "type": "snowball_done",
+    "round": 1,
+    "candidates": 6
+  },
   "discovery_done": {
     "type": "discovery_done",
     "rounds": 2,
@@ -147,12 +187,30 @@
     "type": "corpus_warning",
     "message": "Two concepts are covered by a single source each."
   },
-  "stage_chunk": { "type": "stage", "stage": 3, "name": "chunk", "total": 21 },
+  "stage_chunk": {
+    "type": "stage",
+    "stage": 3,
+    "name": "chunk",
+    "total": 21
+  },
   "source_ingested": {
     "type": "source_ingested",
     "title": "Varroa destructor and honeybee viral loads: a five-year cohort",
     "chunks": 34,
-    "total_chunks": 34
+    "total_chunks": 34,
+    "source_id": 804,
+    "tier": "primary",
+    "kind": "openalex",
+    "tags": [
+      {
+        "key_concept": 0,
+        "depth": "sets_out"
+      },
+      {
+        "key_concept": 3,
+        "depth": "treats"
+      }
+    ]
   },
   "chat_ready": {
     "type": "chat_ready",
@@ -160,25 +218,56 @@
     "chunks": 412,
     "graph_expanded": false
   },
-  "stage_graph": { "type": "stage", "stage": 4, "name": "graph", "total_batches": 9 },
+  "stage_graph": {
+    "type": "stage",
+    "stage": 4,
+    "name": "graph",
+    "total_batches": 9
+  },
   "graph_batch_done": {
     "type": "graph_batch_done",
     "labels": ["varroa destructor", "deformed wing virus", "amitraz"],
-    "edges": 14
+    "edges": 14,
+    "source_ids": [804]
   },
-  "stage_resolve": { "type": "stage", "stage": 4, "name": "resolve" },
-  "resolve_progress": { "type": "resolve_progress", "merged": 7 },
-  "entities_resolved": { "type": "entities_resolved", "merged": 12 },
-  "stage_reconcile": { "type": "stage", "stage": 4, "name": "reconcile" },
-  "claims_reconciled": { "type": "claims_reconciled", "concepts": 63, "relations": 214 },
+  "stage_resolve": {
+    "type": "stage",
+    "stage": 4,
+    "name": "resolve"
+  },
+  "resolve_progress": {
+    "type": "resolve_progress",
+    "merged": 7
+  },
+  "entities_resolved": {
+    "type": "entities_resolved",
+    "merged": 12
+  },
+  "stage_reconcile": {
+    "type": "stage",
+    "stage": 4,
+    "name": "reconcile"
+  },
+  "claims_reconciled": {
+    "type": "claims_reconciled",
+    "concepts": 63,
+    "relations": 214
+  },
   "graph_ready": {
     "type": "graph_ready",
     "nodes": 187,
     "edges": 214,
     "graph_expanded": true
   },
-  "stage_persona": { "type": "stage", "stage": 5, "name": "persona" },
-  "persona_ready": { "type": "persona_ready", "name": "Dr. Marta Belen" },
+  "stage_persona": {
+    "type": "stage",
+    "stage": 5,
+    "name": "persona"
+  },
+  "persona_ready": {
+    "type": "persona_ready",
+    "name": "Dr. Marta Belen"
+  },
   "stage_degraded": {
     "type": "stage_degraded",
     "stage": "graph",
@@ -200,7 +289,10 @@
     "persona_name": "Dr. Marta Belen",
     "avg_quality": 7.9
   },
-  "error": { "type": "error", "message": "No sources survived validation." },
+  "error": {
+    "type": "error",
+    "message": "No sources survived validation."
+  },
   "error_capped": {
     "type": "error",
     "message": "Build exceeded its spend cap: $3.20 of $3.00.",
@@ -208,13 +300,22 @@
     "spent_usd": 3.2012,
     "cap_usd": 3.0
   },
-  "cancelled": { "type": "cancelled", "message": "Build cancelled" },
+  "cancelled": {
+    "type": "cancelled",
+    "message": "Build cancelled"
+  },
   "plan_ready_selection": {
     "type": "plan_ready",
     "key_concepts": ["varroa biology", "acaricide resistance"],
     "fetcher_plans": {
-      "openalex": { "queries": ["varroa destructor acaricide resistance"], "weight": 1.5 },
-      "gutenberg": { "queries": ["apiculture"], "weight": 0.5 }
+      "openalex": {
+        "queries": ["varroa destructor acaricide resistance"],
+        "weight": 1.5
+      },
+      "gutenberg": {
+        "queries": ["apiculture"],
+        "weight": 0.5
+      }
     },
     "must_have_works": [
       {
@@ -316,7 +417,12 @@
     "content_duplicates": 1,
     "budget": 30,
     "estimated_ingest_usd": 0.74,
-    "outcomes": { "fetched": 24, "failed": 3, "below_floor": 15, "content_duplicate": 1 }
+    "outcomes": {
+      "fetched": 24,
+      "failed": 3,
+      "below_floor": 15,
+      "content_duplicate": 1
+    }
   },
   "canonical_resolved": {
     "type": "canonical_resolved",
@@ -364,7 +470,9 @@
         "kind": "paper",
         "public_domain": false,
         "routes_tried": ["gutenberg", "internet_archive", "exa"],
-        "route_errors": { "gutenberg": "Gutendex timed out after 10s" },
+        "route_errors": {
+          "gutenberg": "Gutendex timed out after 10s"
+        },
         "candidates": []
       }
     ]
@@ -373,7 +481,10 @@
     "type": "composition_capped",
     "round": 0,
     "dropped": [
-      { "title": "Varroa mite (encyclopedia entry)", "reason": "tertiary (over share)" },
+      {
+        "title": "Varroa mite (encyclopedia entry)",
+        "reason": "tertiary (over share)"
+      },
       {
         "title": "Mite counts in spring colonies",
         "reason": "abstract only (under 800 characters)"
@@ -413,11 +524,16 @@
       "tertiary_share": 0.105,
       "abstract_only_share": 0.158,
       "junk_fetched": 2,
-      "concept_shares": { "varroa biology": 0.58, "acaricide resistance": 0.26 },
+      "concept_shares": {
+        "varroa biology": 0.58,
+        "acaricide resistance": 0.26
+      },
       "concepts_without_primary": ["acaricide resistance"],
       "must_have": []
     },
-    "failed_channels": { "pdf": "rate_limited" }
+    "failed_channels": {
+      "pdf": "rate_limited"
+    }
   },
   "plan_ready_primary_texts": {
     "type": "plan_ready",
@@ -507,10 +623,17 @@
     "content_duplicates": 0,
     "budget": 30,
     "estimated_ingest_usd": 0.68,
-    "outcomes": { "fetched": 22, "failed": 1, "not_english": 2, "below_floor": 15 }
+    "outcomes": {
+      "fetched": 22,
+      "failed": 1,
+      "not_english": 2,
+      "below_floor": 15
+    }
   },
   "unknown_future_event": {
     "type": "some_event_this_build_has_never_heard_of",
-    "payload": { "anything": true }
+    "payload": {
+      "anything": true
+    }
   }
 }

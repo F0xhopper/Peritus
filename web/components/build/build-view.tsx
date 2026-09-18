@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
 
+import { BuildBrain } from '@/components/brain/build-brain'
 import { BuildLog } from '@/components/build/build-log'
 import { CostPanel } from '@/components/build/cost-panel'
 import { StageTimeline } from '@/components/build/stage-timeline'
@@ -174,6 +175,20 @@ export function BuildView({
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 p-3 md:p-4">
         <StageTimeline stages={state.stages} activeStage={state.activeStage} />
+
+        {/* The brain growing (expert-brain-interactive.md, G3): above the
+            timeline below `lg`, where it is a small square; a panel above the
+            log from `lg`. The log stays the page's record either way. */}
+        {!noJob && (
+          <div className="order-first lg:order-none">
+            <BuildBrain
+              expert={expert}
+              grow={state.grow}
+              finished={terminal !== null}
+              stage={state.activeStage ? (STAGE_LABEL[state.activeStage] ?? null) : null}
+            />
+          </div>
+        )}
 
         {noJob &&
           (expert.status === 'queued' || expert.status === 'building' ? (

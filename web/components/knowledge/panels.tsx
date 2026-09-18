@@ -95,6 +95,7 @@ export function SourcePanel({
   asking,
   onAsk,
   onDeleted,
+  removalCost,
   onSelect,
 }: {
   sourceId: number
@@ -106,6 +107,8 @@ export function SourcePanel({
   asking: boolean
   onAsk: (title: string) => void
   onDeleted?: () => void
+  /** What removing it takes off the map, said in the confirm before it happens. */
+  removalCost?: string[]
   onSelect: (selection: BrainSelection) => void
 }) {
   const mapSource = map?.sources.find((source) => source.id === sourceId) ?? null
@@ -127,6 +130,7 @@ export function SourcePanel({
           asking={asking}
           onAsk={onAsk}
           onDeleted={onDeleted}
+          removalCost={removalCost}
         />
       ) : (
         mapSource && (
@@ -417,6 +421,7 @@ export function KeyConceptPanel({
   onShowInList,
   onShowOnMap,
   onExpand,
+  onAdd,
   onSelect,
 }: {
   index: number
@@ -427,6 +432,8 @@ export function KeyConceptPanel({
   onShowInList: () => void
   onShowOnMap: () => void
   onExpand: (() => void) | null
+  /** The owner's: add a source from where the need is. */
+  onAdd?: (() => void) | null
   onSelect: (selection: BrainSelection) => void
 }) {
   const concept = map.syllabus.key_concepts[index]
@@ -508,6 +515,12 @@ export function KeyConceptPanel({
           <Button variant="ghost" size="sm" onClick={onExpand}>
             <Expand className="size-3" />
             Every concept here
+          </Button>
+        )}
+        {onAdd && (
+          <Button variant="ghost" size="sm" onClick={onAdd}>
+            <Plus className="size-3" />
+            Add a source
           </Button>
         )}
         <Button
