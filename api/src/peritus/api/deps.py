@@ -29,6 +29,7 @@ from typing import Annotated
 import asyncpg
 from fastapi import Depends, HTTPException
 
+from peritus.accounts.repository import AccountRepository
 from peritus.api.auth import AuthUser, require_user
 from peritus.audit.service import AuditService
 from peritus.billing.repository import BillingRepository
@@ -93,6 +94,10 @@ def picture_repo(pool: Pool) -> ExpertPictureRepository:
     return ExpertPictureRepository(pool)
 
 
+def account_repo(pool: Pool) -> AccountRepository:
+    return AccountRepository(pool)
+
+
 def billing_repo(pool: Pool) -> BillingRepository:
     return BillingRepository(pool)
 
@@ -109,6 +114,7 @@ Conversations = Annotated[ConversationRepository, Depends(conversation_repo)]
 Uploads = Annotated[UploadRepository, Depends(upload_repo)]
 Shares = Annotated[ShareRepository, Depends(share_repo)]
 Pictures = Annotated[ExpertPictureRepository, Depends(picture_repo)]
+Accounts = Annotated[AccountRepository, Depends(account_repo)]
 Billing = Annotated[BillingRepository, Depends(billing_repo)]
 Entitlements = Annotated[EntitlementService, Depends(entitlements)]
 

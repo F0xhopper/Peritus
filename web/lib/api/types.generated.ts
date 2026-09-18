@@ -28,6 +28,216 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/auth/account': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Account */
+    get: operations['get_account_auth_account_get']
+    put?: never
+    post?: never
+    /**
+     * Delete Account
+     * @description Delete the account and everything it owns. Irreversible.
+     *
+     *     The person types their email as the confirmation. The operator account is
+     *     refused: it owns the legacy experts every admin sees, and deleting it would
+     *     take the bootstrap with it.
+     */
+    delete: operations['delete_account_auth_account_delete']
+    options?: never
+    head?: never
+    /**
+     * Update Account
+     * @description Change the display name. An empty string clears it.
+     */
+    patch: operations['update_account_auth_account_patch']
+    trace?: never
+  }
+  '/auth/account/email': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Change Email
+     * @description Start moving the account to a new address.
+     *
+     *     Nothing changes until a code sent to the new address is entered. With
+     *     Supabase's "secure email change" on, the current address is sent one too,
+     *     and both must be entered.
+     */
+    post: operations['change_email_auth_account_email_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/account/email/verify': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Verify Email Change
+     * @description Enter a code from the email change.
+     *
+     *     Either code works in either order; GoTrue answers with a new session once the
+     *     change is complete, and with a message and no session while the other
+     *     address's code is still outstanding.
+     */
+    post: operations['verify_email_change_auth_account_email_verify_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/account/identities/authorize': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Link Identity
+     * @description The URL that adds a sign-in method (Google) to this account.
+     *
+     *     Requires "manual linking" on in the Supabase project; when it is off GoTrue
+     *     says so and this answers 409 ``manual_linking_disabled``.
+     */
+    get: operations['link_identity_auth_account_identities_authorize_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/account/identities/{identity_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /**
+     * Unlink Identity
+     * @description Remove a sign-in method. The last one cannot be removed.
+     */
+    delete: operations['unlink_identity_auth_account_identities__identity_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/account/password': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Change Password
+     * @description Set a password, or change the one the account has.
+     *
+     *     Changing needs the current password (OWASP ASVS 2.1.6): a session left open
+     *     on a shared computer must not be enough to lock its owner out. It is checked
+     *     with a password grant, whose extra session is revoked straight away. Setting
+     *     a first password — for an account that has only ever used Google or a code —
+     *     needs only the session.
+     *
+     *     Supabase may still demand reauthentication (its "secure password change"
+     *     for sessions over a day old). That comes back as 409
+     *     ``reauthentication_needed`` with the code already emailed; the client
+     *     resubmits with it as ``nonce`` (and can ask ``/reauthenticate`` to resend).
+     *
+     *     Afterwards every *other* session is signed out.
+     */
+    post: operations['change_password_auth_account_password_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/account/reauthenticate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Reauthenticate
+     * @description Email a code that authorises a sensitive change.
+     */
+    post: operations['reauthenticate_auth_account_reauthenticate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/account/sessions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Sessions */
+    get: operations['list_sessions_auth_account_sessions_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/account/sessions/{session_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /**
+     * Revoke Session
+     * @description Sign one other device out. This device signs out through ``/auth/logout``.
+     */
+    delete: operations['revoke_session_auth_account_sessions__session_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/auth/logout': {
     parameters: {
       query?: never
@@ -39,7 +249,10 @@ export interface paths {
     put?: never
     /**
      * Logout
-     * @description Revoke the caller's Supabase session so the refresh token can't be reused.
+     * @description Revoke the caller's Supabase sessions so their refresh tokens can't be reused.
+     *
+     *     ``global`` (the default, which older clients rely on) signs out every
+     *     device; ``local`` only this one; ``others`` every device but this one.
      *
      *     Best-effort: clients also drop their local session. A missing/expired token is
      *     treated as already-logged-out (204) rather than an error.
@@ -129,6 +342,74 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/auth/password/forgot': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Forgot Password
+     * @description Email a password-reset code.
+     *
+     *     Always 204 (except a rate limit): an error for an unknown address — or a
+     *     delivery failure that only happens for a known one — would say who has an
+     *     account. Failures are logged instead.
+     */
+    post: operations['forgot_password_auth_password_forgot_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/password/login': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Password Login
+     * @description Sign in with an email and a password.
+     */
+    post: operations['password_login_auth_password_login_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/password/reset': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Reset Password
+     * @description Trade a reset code and a new password for a signed-in session.
+     *
+     *     Two GoTrue calls: the code is verified (``type=recovery``), which yields a
+     *     session, and that session sets the password. If the second fails the first
+     *     has still consumed the code — so the error says to ask for a new one.
+     */
+    post: operations['reset_password_auth_password_reset_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/auth/refresh': {
     parameters: {
       query?: never
@@ -150,6 +431,46 @@ export interface paths {
      *     still perfectly valid.
      */
     post: operations['refresh_auth_refresh_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/resend': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Resend Confirmation
+     * @description Send the sign-up confirmation code again. Silent about unknown emails.
+     */
+    post: operations['resend_confirmation_auth_resend_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/auth/signup': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /**
+     * Signup
+     * @description Create a password account. A code is emailed to confirm the address.
+     */
+    post: operations['signup_auth_signup_post']
     delete?: never
     options?: never
     head?: never
@@ -1187,6 +1508,41 @@ export interface paths {
 export type webhooks = Record<string, never>
 export interface components {
   schemas: {
+    /** AccountDeleteRequest */
+    AccountDeleteRequest: {
+      /** Confirm Email */
+      confirm_email: string
+    }
+    /** AccountOut */
+    AccountOut: {
+      /** Avatar Url */
+      avatar_url?: string | null
+      /** Created At */
+      created_at?: string | null
+      /** Email */
+      email?: string | null
+      /** Email Confirmed */
+      email_confirmed: boolean
+      /** Has Password */
+      has_password?: boolean | null
+      /** Id */
+      id: string
+      /** Identities */
+      identities: components['schemas']['Identity'][]
+      /** Is Admin */
+      is_admin: boolean
+      /** Last Sign In At */
+      last_sign_in_at?: string | null
+      /** Name */
+      name?: string | null
+      /** New Email */
+      new_email?: string | null
+    }
+    /** AccountUpdate */
+    AccountUpdate: {
+      /** Name */
+      name: string
+    }
     /** AddUrlRequest */
     AddUrlRequest: {
       /** Author */
@@ -1524,6 +1880,37 @@ export interface components {
        */
       tiers: components['schemas']['TierPriceOut'][]
     }
+    /** DeleteAccountOut */
+    DeleteAccountOut: {
+      /** Conversations Deleted */
+      conversations_deleted: number
+      /** Experts Deleted */
+      experts_deleted: number
+    }
+    /**
+     * EmailChangeResult
+     * @description ``complete`` with a fresh session once the new address is confirmed;
+     *     otherwise ``message`` says which code is still outstanding.
+     */
+    EmailChangeResult: {
+      /** Complete */
+      complete: boolean
+      /** Message */
+      message?: string | null
+      session?: components['schemas']['Session'] | null
+    }
+    /** EmailChangeVerify */
+    EmailChangeVerify: {
+      /** Email */
+      email: string
+      /** Token */
+      token: string
+    }
+    /** EmailRequest */
+    EmailRequest: {
+      /** Email */
+      email: string
+    }
     /**
      * ExpertAccess
      * @description The caller's relationship to an expert they can read (migration 031).
@@ -1813,6 +2200,22 @@ export interface components {
       /** Detail */
       detail?: components['schemas']['ValidationError'][]
     }
+    /**
+     * Identity
+     * @description One way of signing in to the account: ``email`` or ``google``.
+     */
+    Identity: {
+      /** Created At */
+      created_at?: string | null
+      /** Email */
+      email?: string | null
+      /** Id */
+      id: string
+      /** Last Sign In At */
+      last_sign_in_at?: string | null
+      /** Provider */
+      provider: string
+    }
     /** LedgerEntryOut */
     LedgerEntryOut: {
       /** Cost Usd */
@@ -1836,6 +2239,11 @@ export interface components {
       source: string
       /** Tier */
       tier?: string | null
+    }
+    /** LinkIdentityOut */
+    LinkIdentityOut: {
+      /** Url */
+      url: string
     }
     /** MeResponse */
     MeResponse: {
@@ -1919,6 +2327,31 @@ export interface components {
       /** Whole Available */
       whole_available: boolean
     }
+    /** PasswordChangeRequest */
+    PasswordChangeRequest: {
+      /** Current Password */
+      current_password?: string | null
+      /** Nonce */
+      nonce?: string | null
+      /** Password */
+      password: string
+    }
+    /** PasswordLoginRequest */
+    PasswordLoginRequest: {
+      /** Email */
+      email: string
+      /** Password */
+      password: string
+    }
+    /** PasswordResetRequest */
+    PasswordResetRequest: {
+      /** Email */
+      email: string
+      /** Password */
+      password: string
+      /** Token */
+      token: string
+    }
     /** PlanOut */
     PlanOut: {
       /** Allowed Tiers */
@@ -1966,6 +2399,24 @@ export interface components {
        */
       token_type: string
       user: components['schemas']['SessionUser']
+    }
+    /** SessionOut */
+    SessionOut: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Current */
+      current: boolean
+      /** Id */
+      id: string
+      /** Ip */
+      ip?: string | null
+      /** Last Active At */
+      last_active_at?: string | null
+      /** User Agent */
+      user_agent?: string | null
     }
     /** SessionUser */
     SessionUser: {
@@ -2086,6 +2537,28 @@ export interface components {
       /** Topic */
       topic: string
     }
+    /** SignupRequest */
+    SignupRequest: {
+      /** Email */
+      email: string
+      /** Name */
+      name?: string | null
+      /** Password */
+      password: string
+    }
+    /**
+     * SignupResponse
+     * @description What a sign-up produced.
+     *
+     *     ``session`` is set only when the project auto-confirms email. Otherwise a
+     *     code is on its way — and it says exactly this for an address that already
+     *     has an account, so sign-up cannot be used to find out who is registered.
+     */
+    SignupResponse: {
+      /** Confirmation Required */
+      confirmation_required: boolean
+      session?: components['schemas']['Session'] | null
+    }
     /**
      * SourceDecision
      * @description Which half of the ledger to return.
@@ -2187,6 +2660,12 @@ export interface components {
       email: string
       /** Token */
       token: string
+      /**
+       * Type
+       * @default email
+       * @enum {string}
+       */
+      type: 'email' | 'signup'
     }
   }
   responses: never
@@ -2232,7 +2711,254 @@ export interface operations {
       }
     }
   }
-  logout_auth_logout_post: {
+  get_account_auth_account_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AccountOut']
+        }
+      }
+    }
+  }
+  delete_account_auth_account_delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AccountDeleteRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['DeleteAccountOut']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_account_auth_account_patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AccountUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AccountOut']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  change_email_auth_account_email_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EmailRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': {
+            [key: string]: unknown
+          }
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  verify_email_change_auth_account_email_verify_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EmailChangeVerify']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['EmailChangeResult']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  link_identity_auth_account_identities_authorize_get: {
+    parameters: {
+      query: {
+        provider: string
+        code_challenge: string
+        redirect_to: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LinkIdentityOut']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  unlink_identity_auth_account_identities__identity_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        identity_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  change_password_auth_account_password_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PasswordChangeRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  reauthenticate_auth_account_reauthenticate_post: {
     parameters: {
       query?: never
       header?: never
@@ -2247,6 +2973,84 @@ export interface operations {
           [name: string]: unknown
         }
         content?: never
+      }
+    }
+  }
+  list_sessions_auth_account_sessions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SessionOut'][]
+        }
+      }
+    }
+  }
+  revoke_session_auth_account_sessions__session_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  logout_auth_logout_post: {
+    parameters: {
+      query?: {
+        scope?: 'global' | 'local' | 'others'
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
       }
     }
   }
@@ -2369,6 +3173,103 @@ export interface operations {
       }
     }
   }
+  forgot_password_auth_password_forgot_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EmailRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  password_login_auth_password_login_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PasswordLoginRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Session']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  reset_password_auth_password_reset_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['PasswordResetRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['Session']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   refresh_auth_refresh_post: {
     parameters: {
       query?: never
@@ -2389,6 +3290,70 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['Session']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  resend_confirmation_auth_resend_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['EmailRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  signup_auth_signup_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SignupRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      202: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SignupResponse']
         }
       }
       /** @description Validation Error */

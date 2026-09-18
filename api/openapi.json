@@ -1,6 +1,143 @@
 {
   "components": {
     "schemas": {
+      "AccountDeleteRequest": {
+        "properties": {
+          "confirm_email": {
+            "title": "Confirm Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confirm_email"
+        ],
+        "title": "AccountDeleteRequest",
+        "type": "object"
+      },
+      "AccountOut": {
+        "properties": {
+          "avatar_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avatar Url"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "email_confirmed": {
+            "title": "Email Confirmed",
+            "type": "boolean"
+          },
+          "has_password": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Has Password"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "identities": {
+            "items": {
+              "$ref": "#/components/schemas/Identity"
+            },
+            "title": "Identities",
+            "type": "array"
+          },
+          "is_admin": {
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "last_sign_in_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sign In At"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "new_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "New Email"
+          }
+        },
+        "required": [
+          "id",
+          "is_admin",
+          "email_confirmed",
+          "identities"
+        ],
+        "title": "AccountOut",
+        "type": "object"
+      },
+      "AccountUpdate": {
+        "properties": {
+          "name": {
+            "maxLength": 120,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "AccountUpdate",
+        "type": "object"
+      },
       "AddUrlRequest": {
         "properties": {
           "author": {
@@ -826,6 +963,92 @@
         "title": "CreditStateOut",
         "type": "object"
       },
+      "DeleteAccountOut": {
+        "properties": {
+          "conversations_deleted": {
+            "title": "Conversations Deleted",
+            "type": "integer"
+          },
+          "experts_deleted": {
+            "title": "Experts Deleted",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "experts_deleted",
+          "conversations_deleted"
+        ],
+        "title": "DeleteAccountOut",
+        "type": "object"
+      },
+      "EmailChangeResult": {
+        "description": "``complete`` with a fresh session once the new address is confirmed;\notherwise ``message`` says which code is still outstanding.",
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Session"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "complete"
+        ],
+        "title": "EmailChangeResult",
+        "type": "object"
+      },
+      "EmailChangeVerify": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "token"
+        ],
+        "title": "EmailChangeVerify",
+        "type": "object"
+      },
+      "EmailRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "EmailRequest",
+        "type": "object"
+      },
       "ExpertAccess": {
         "description": "The caller's relationship to an expert they can read (migration 031).\n\nEchoed on every expert response so a client can hide the controls a viewer\ncannot use. It is a rendering hint only \u2014 every mutating route re-checks\nownership itself.",
         "enum": [
@@ -1401,6 +1624,60 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "Identity": {
+        "description": "One way of signing in to the account: ``email`` or ``google``.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_sign_in_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sign In At"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider"
+        ],
+        "title": "Identity",
+        "type": "object"
+      },
       "LedgerEntryOut": {
         "properties": {
           "cost_usd": {
@@ -1477,6 +1754,19 @@
           "created_at"
         ],
         "title": "LedgerEntryOut",
+        "type": "object"
+      },
+      "LinkIdentityOut": {
+        "properties": {
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "LinkIdentityOut",
         "type": "object"
       },
       "MeResponse": {
@@ -1707,6 +1997,88 @@
         "title": "PassageWindowOut",
         "type": "object"
       },
+      "PasswordChangeRequest": {
+        "properties": {
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Password"
+          },
+          "nonce": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nonce"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "password"
+        ],
+        "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "PasswordLoginRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "PasswordLoginRequest",
+        "type": "object"
+      },
+      "PasswordResetRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "token",
+          "password"
+        ],
+        "title": "PasswordResetRequest",
+        "type": "object"
+      },
       "PlanOut": {
         "properties": {
           "allowed_tiers": {
@@ -1827,6 +2199,64 @@
           "user"
         ],
         "title": "Session",
+        "type": "object"
+      },
+      "SessionOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current": {
+            "title": "Current",
+            "type": "boolean"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "last_active_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Active At"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          }
+        },
+        "required": [
+          "id",
+          "current",
+          "created_at"
+        ],
+        "title": "SessionOut",
         "type": "object"
       },
       "SessionUser": {
@@ -2063,6 +2493,60 @@
           "created_at"
         ],
         "title": "SharedExpertOut",
+        "type": "object"
+      },
+      "SignupRequest": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "password": {
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "SignupRequest",
+        "type": "object"
+      },
+      "SignupResponse": {
+        "description": "What a sign-up produced.\n\n``session`` is set only when the project auto-confirms email. Otherwise a\ncode is on its way \u2014 and it says exactly this for an address that already\nhas an account, so sign-up cannot be used to find out who is registered.",
+        "properties": {
+          "confirmation_required": {
+            "title": "Confirmation Required",
+            "type": "boolean"
+          },
+          "session": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Session"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "confirmation_required"
+        ],
+        "title": "SignupResponse",
         "type": "object"
       },
       "SourceDecision": {
@@ -2303,6 +2787,15 @@
           "token": {
             "title": "Token",
             "type": "string"
+          },
+          "type": {
+            "default": "email",
+            "enum": [
+              "email",
+              "signup"
+            ],
+            "title": "Type",
+            "type": "string"
           }
         },
         "required": [
@@ -2375,13 +2868,490 @@
         ]
       }
     },
-    "/auth/logout": {
+    "/auth/account": {
+      "delete": {
+        "description": "Delete the account and everything it owns. Irreversible.\n\nThe person types their email as the confirmation. The operator account is\nrefused: it owns the legacy experts every admin sees, and deleting it would\ntake the bootstrap with it.",
+        "operationId": "delete_account_auth_account_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDeleteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteAccountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Account",
+        "tags": [
+          "account"
+        ]
+      },
+      "get": {
+        "operationId": "get_account_auth_account_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Account",
+        "tags": [
+          "account"
+        ]
+      },
+      "patch": {
+        "description": "Change the display name. An empty string clears it.",
+        "operationId": "update_account_auth_account_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update Account",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/email": {
       "post": {
-        "description": "Revoke the caller's Supabase session so the refresh token can't be reused.\n\nBest-effort: clients also drop their local session. A missing/expired token is\ntreated as already-logged-out (204) rather than an error.",
-        "operationId": "logout_auth_logout_post",
+        "description": "Start moving the account to a new address.\n\nNothing changes until a code sent to the new address is entered. With\nSupabase's \"secure email change\" on, the current address is sent one too,\nand both must be entered.",
+        "operationId": "change_email_auth_account_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Change Email Auth Account Email Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change Email",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/email/verify": {
+      "post": {
+        "description": "Enter a code from the email change.\n\nEither code works in either order; GoTrue answers with a new session once the\nchange is complete, and with a message and no session while the other\naddress's code is still outstanding.",
+        "operationId": "verify_email_change_auth_account_email_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailChangeVerify"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Verify Email Change",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/identities/authorize": {
+      "get": {
+        "description": "The URL that adds a sign-in method (Google) to this account.\n\nRequires \"manual linking\" on in the Supabase project; when it is off GoTrue\nsays so and this answers 409 ``manual_linking_disabled``.",
+        "operationId": "link_identity_auth_account_identities_authorize_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code_challenge",
+            "required": true,
+            "schema": {
+              "title": "Code Challenge",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_to",
+            "required": true,
+            "schema": {
+              "title": "Redirect To",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkIdentityOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Link Identity",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/identities/{identity_id}": {
+      "delete": {
+        "description": "Remove a sign-in method. The last one cannot be removed.",
+        "operationId": "unlink_identity_auth_account_identities__identity_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "identity_id",
+            "required": true,
+            "schema": {
+              "title": "Identity Id",
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "204": {
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Unlink Identity",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/password": {
+      "post": {
+        "description": "Set a password, or change the one the account has.\n\nChanging needs the current password (OWASP ASVS 2.1.6): a session left open\non a shared computer must not be enough to lock its owner out. It is checked\nwith a password grant, whose extra session is revoked straight away. Setting\na first password \u2014 for an account that has only ever used Google or a code \u2014\nneeds only the session.\n\nSupabase may still demand reauthentication (its \"secure password change\"\nfor sessions over a day old). That comes back as 409\n``reauthentication_needed`` with the code already emailed; the client\nresubmits with it as ``nonce`` (and can ask ``/reauthenticate`` to resend).\n\nAfterwards every *other* session is signed out.",
+        "operationId": "change_password_auth_account_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change Password",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/reauthenticate": {
+      "post": {
+        "description": "Email a code that authorises a sensitive change.",
+        "operationId": "reauthenticate_auth_account_reauthenticate_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Reauthenticate",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/sessions": {
+      "get": {
+        "operationId": "list_sessions_auth_account_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SessionOut"
+                  },
+                  "title": "Response List Sessions Auth Account Sessions Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Sessions",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/account/sessions/{session_id}": {
+      "delete": {
+        "description": "Sign one other device out. This device signs out through ``/auth/logout``.",
+        "operationId": "revoke_session_auth_account_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Session",
+        "tags": [
+          "account"
+        ]
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "description": "Revoke the caller's Supabase sessions so their refresh tokens can't be reused.\n\n``global`` (the default, which older clients rely on) signs out every\ndevice; ``local`` only this one; ``others`` every device but this one.\n\nBest-effort: clients also drop their local session. A missing/expired token is\ntreated as already-logged-out (204) rather than an error.",
+        "operationId": "logout_auth_logout_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "default": "global",
+              "enum": [
+                "global",
+                "local",
+                "others"
+              ],
+              "title": "Scope",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -2560,6 +3530,125 @@
         ]
       }
     },
+    "/auth/password/forgot": {
+      "post": {
+        "description": "Email a password-reset code.\n\nAlways 204 (except a rate limit): an error for an unknown address \u2014 or a\ndelivery failure that only happens for a known one \u2014 would say who has an\naccount. Failures are logged instead.",
+        "operationId": "forgot_password_auth_password_forgot_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Forgot Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/password/login": {
+      "post": {
+        "description": "Sign in with an email and a password.",
+        "operationId": "password_login_auth_password_login_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Password Login",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/password/reset": {
+      "post": {
+        "description": "Trade a reset code and a new password for a signed-in session.\n\nTwo GoTrue calls: the code is verified (``type=recovery``), which yields a\nsession, and that session sets the password. If the second fails the first\nhas still consumed the code \u2014 so the error says to ask for a new one.",
+        "operationId": "reset_password_auth_password_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Session"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/auth/refresh": {
       "post": {
         "description": "Exchange a refresh token for a new session.\n\nTransport failures are reported as 503, never 500. The distinction is the\nclient's only way to tell \"this refresh token is dead, log out\" from \"we\ncould not reach the auth server, try again\" \u2014 and clients act on it by\nerasing the stored session. A DNS blip here once surfaced as an unhandled\n500 and logged a user out mid-build, discarding a refresh token that was\nstill perfectly valid.",
@@ -2597,6 +3686,83 @@
           }
         },
         "summary": "Refresh",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/resend": {
+      "post": {
+        "description": "Send the sign-up confirmation code again. Silent about unknown emails.",
+        "operationId": "resend_confirmation_auth_resend_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resend Confirmation",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/auth/signup": {
+      "post": {
+        "description": "Create a password account. A code is emailed to confirm the address.",
+        "operationId": "signup_auth_signup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Signup",
         "tags": [
           "auth"
         ]
