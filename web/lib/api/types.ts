@@ -50,6 +50,53 @@ export interface Me {
   is_admin: boolean
 }
 
+/** One way into the account. `provider` is `email` or `google`. */
+export interface Identity {
+  id: string
+  provider: string
+  email: string | null
+  created_at: string | null
+  last_sign_in_at: string | null
+}
+
+/** The signed-in person's own account, for Settings. */
+export interface Account {
+  id: string
+  email: string | null
+  /** An address change waiting for its confirmation code. */
+  new_email: string | null
+  name: string | null
+  avatar_url: string | null
+  is_admin: boolean
+  /** null: this server cannot tell (no Supabase `auth` schema, local dev). */
+  has_password: boolean | null
+  email_confirmed: boolean
+  identities: Identity[]
+  created_at: string | null
+  last_sign_in_at: string | null
+}
+
+/** One signed-in device. `current` is the one making the request. */
+export interface SignInSession {
+  id: string
+  current: boolean
+  created_at: string
+  last_active_at: string | null
+  /** The browser or app, as it was when the session began. */
+  user_agent: string | null
+}
+
+export interface EmailChangeResult {
+  complete: boolean
+  session: Session | null
+  message: string | null
+}
+
+export interface SignupResult {
+  confirmation_required: boolean
+  session: Session | null
+}
+
 export interface Session {
   access_token: string
   refresh_token: string

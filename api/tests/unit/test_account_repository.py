@@ -97,7 +97,7 @@ async def test_sessions_are_the_callers_live_ones_newest_first(auth_schema):
     repo = AccountRepository(auth_schema)
     sessions = await repo.list_sessions(LEAVER)
     assert [s.id for s in sessions] == [S2, S1]
-    assert sessions[1].ip == "10.0.0.1"
+    assert sessions[1].user_agent == "Old"
     assert await repo.list_sessions(STAYER) == []
 
 

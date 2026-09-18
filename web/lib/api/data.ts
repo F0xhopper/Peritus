@@ -8,6 +8,7 @@ import { ApiError, NotAuthenticatedError, isNextControlFlow } from '@/lib/api/er
 import { proxyJson } from '@/lib/api/proxy'
 import { ACCESS_COOKIE, REFRESH_COOKIE } from '@/lib/auth/cookies'
 import type {
+  Account,
   BuildStatus,
   BuildUsage,
   ConversationDetail,
@@ -22,6 +23,7 @@ import type {
   PassageWindow,
   SharedExpert,
   ShareState,
+  SignInSession,
   SourceDecision,
   SourceSort,
 } from '@/lib/api/types'
@@ -83,6 +85,34 @@ async function optional<T>(fetcher: () => Promise<T>): Promise<T | null> {
 
 export function getMe(next?: string) {
   return safely(() => proxyJson<Me>('/auth/me'), { next })
+}
+
+/**
+ * The full account for Settings. `null` when this server cannot manage accounts
+ * (dev mode, no Supabase: 503), so the page falls back to what `getMe` knows.
+ */
+export async function getAccount(next?: string): Promise<Account | null> {
+  try {
+    return await safely(() => proxyJson<Account>('/auth/account'), { next, notFoundOn404: false })
+  } catch (error) {
+    if (isNextControlFlow(error)) throw error
+    if (error instanceof ApiError && error.status === 503) return null
+    throw error
+  }
+}
+
+/** Signed-in devices, or `null` where the server cannot list them. */
+export async function getSessions(next?: string): Promise<SignInSession[] | null> {
+  try {
+    return await safely(() => proxyJson<SignInSession[]>('/auth/account/sessions'), {
+      next,
+      notFoundOn404: false,
+    })
+  } catch (error) {
+    if (isNextControlFlow(error)) throw error
+    if (error instanceof ApiError && error.status >= 500) return null
+    throw error
+  }
 }
 
 export function getBilling(next?: string) {

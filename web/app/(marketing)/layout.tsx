@@ -30,9 +30,15 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
             </Link>
             <Link
               href="/login"
-              className="inline-flex h-(--row-h) items-center rounded-row bg-accent px-3 font-medium text-accent-fg transition-[filter] duration-(--dur-1) hover:brightness-110"
+              className="inline-flex h-(--row-h) items-center rounded-row px-2.5 text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
             >
               Sign in
+            </Link>
+            <Link
+              href="/signup"
+              className="inline-flex h-(--row-h) items-center rounded-row bg-accent px-3 font-medium text-accent-fg transition-[filter] duration-(--dur-1) hover:brightness-110"
+            >
+              Sign up
             </Link>
           </nav>
         </div>

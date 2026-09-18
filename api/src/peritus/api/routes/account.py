@@ -9,13 +9,13 @@ query on the verified token's ``sub``, never on an id from the request.
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from peritus.accounts.repository import AuthSchemaUnavailable
 from peritus.api.auth import AuthUser
 from peritus.api.deps import Accounts, CurrentUser
 from peritus.api.ratelimit import auth_rate_limit
-from peritus.api.routes.auth import coded_error, gotrue_error
+from peritus.api.routes.auth import client_agent, coded_error, gotrue_error
 from peritus.api.schemas.auth import (
     AccountDeleteRequest,
     AccountOut,
@@ -239,7 +239,9 @@ async def change_email(req: EmailRequest, user: CurrentUser) -> dict:
     response_model=EmailChangeResult,
     dependencies=[Depends(auth_rate_limit)],
 )
-async def verify_email_change(req: EmailChangeVerify, user: CurrentUser) -> EmailChangeResult:
+async def verify_email_change(
+    req: EmailChangeVerify, user: CurrentUser, request: Request
+) -> EmailChangeResult:
     """Enter a code from the email change.
 
     Either code works in either order; GoTrue answers with a new session once the
@@ -248,7 +250,9 @@ async def verify_email_change(req: EmailChangeVerify, user: CurrentUser) -> Emai
     """
     _token(user)
     try:
-        result = await supabase_auth.verify_otp(req.email, req.token, type="email_change")
+        result = await supabase_auth.verify_otp(
+            req.email, req.token, type="email_change", user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         if exc.status == 429 or exc.status >= 500:
             raise gotrue_error(exc) from exc
@@ -331,7 +335,6 @@ async def list_sessions(user: CurrentUser, accounts: Accounts) -> list[SessionOu
             created_at=row.created_at,
             last_active_at=row.last_active_at,
             user_agent=row.user_agent,
-            ip=row.ip,
         )
         for row in rows
     ]

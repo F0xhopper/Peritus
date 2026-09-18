@@ -61,7 +61,9 @@ Codes: `insufficient_credits`, `tier_not_in_plan`. Each carries a renderable rem
 **`null` is not zero.** Any count the system did not record comes back as `null` with a reason.
 Clients must render that as a gap, never coerce it to `0`.
 
-**Rate limits.** `/auth/otp` and `/auth/verify` are throttled per IP (`AUTH_RATE_LIMIT` /
+**Rate limits.** The unauthenticated auth endpoints (`/auth/otp`, `/auth/verify`,
+`/auth/password/*`, `/auth/signup`, `/auth/resend`, the OAuth pair) and the account steps that
+send email are throttled per IP (`AUTH_RATE_LIMIT` /
 `AUTH_RATE_WINDOW`, default 10 per 60s). Both chat endpoints are throttled per user
 (`CHAT_RATE_LIMIT` / `CHAT_RATE_WINDOW`, default 20 per 60s) — chat is free to the user but not to
 the operator.
@@ -86,14 +88,42 @@ Public: these endpoints *are* the login flow.
 |---|---|---|
 | `GET` | `/auth/status` | Whether this server requires login |
 | `POST` | `/auth/otp` | Send an email one-time code |
-| `POST` | `/auth/verify` | Exchange a code for a session |
+| `POST` | `/auth/verify` | Exchange a code for a session. `type`: `email` (sign-in) or `signup` (confirm a new account) |
+| `POST` | `/auth/password/login` | Sign in with email and password. 403 `email_not_confirmed` resends the confirmation code |
+| `POST` | `/auth/signup` | Create a password account. 202 `{confirmation_required}`, the same for an existing email |
+| `POST` | `/auth/resend` | Resend the sign-up confirmation code. Always 204 |
+| `POST` | `/auth/password/forgot` | Email a password-reset code. Always 204 |
+| `POST` | `/auth/password/reset` | Reset code + new password → a session; other sessions revoked |
 | `GET` | `/auth/oauth/authorize` | Begin the Google SSO (PKCE) flow |
 | `POST` | `/auth/oauth/exchange` | Exchange an OAuth code for a session |
 | `POST` | `/auth/refresh` | Rotate a refresh token for a new session |
-| `POST` | `/auth/logout` | Revoke the caller's session server-side |
+| `POST` | `/auth/logout` | Revoke sessions server-side. `?scope=global` (default), `local` or `others` |
 | `GET` | `/auth/me` | The current authenticated user |
 
 Sign-out revokes server-side, so a leaked refresh token cannot be replayed.
+
+**No endpoint here says whether an email has an account.** Sign-up, resend and forgot-password
+answer the same for a stranger as for a member, and a wrong password reads the same as an unknown
+email. Errors the client branches on carry `detail: {code, message}`.
+
+## Account — `/auth/account`
+
+The signed-in caller's own account. Sessions and deletion read the Supabase `auth` schema
+directly and answer 503 on a database without it (local development).
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/auth/account` | Profile, identities, `has_password`, pending `new_email` |
+| `PATCH` | `/auth/account` | Set the display name |
+| `DELETE` | `/auth/account` | Delete the account and everything it owns. Body `{confirm_email}`; refused for the operator |
+| `POST` | `/auth/account/password` | Set or change the password. Changing needs `current_password`; 409 `reauthentication_needed` emails a code to resubmit as `nonce`. Signs other sessions out |
+| `POST` | `/auth/account/reauthenticate` | Email that code again |
+| `POST` | `/auth/account/email` | Start an email change; a code goes to the new address |
+| `POST` | `/auth/account/email/verify` | Enter a change code → `{complete, session}` |
+| `GET` | `/auth/account/identities/authorize` | PKCE URL that links Google to this account |
+| `DELETE` | `/auth/account/identities/{id}` | Unlink a sign-in method (never the last) |
+| `GET` | `/auth/account/sessions` | Signed-in devices; `current` marks the caller's |
+| `DELETE` | `/auth/account/sessions/{id}` | Sign one other device out |
 
 ## Experts
 

@@ -2411,8 +2411,6 @@ export interface components {
       current: boolean
       /** Id */
       id: string
-      /** Ip */
-      ip?: string | null
       /** Last Active At */
       last_active_at?: string | null
       /** User Agent */

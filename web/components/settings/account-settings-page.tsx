@@ -5,13 +5,20 @@ import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useState, useSyncExternalStore } from 'react'
 
+import { DeleteSection } from '@/components/settings/account/delete-section'
+import { EmailSection } from '@/components/settings/account/email-section'
+import { MethodsSection } from '@/components/settings/account/methods-section'
+import { PasswordSection } from '@/components/settings/account/password-section'
+import { ProfileSection } from '@/components/settings/account/profile-section'
+import { SessionsSection } from '@/components/settings/account/sessions-section'
 import { CreditLedger } from '@/components/settings/credit-ledger'
 import { TopBar } from '@/components/shell/top-bar'
 import { Button } from '@/components/ui/button'
+import { Notice } from '@/components/ui/notice'
 import { Segmented } from '@/components/ui/segmented'
 import { cn } from '@/lib/cn'
 import { formatNumber, humanise } from '@/lib/format'
-import type { CreditState, LedgerEntry, Me } from '@/lib/api/types'
+import type { Account, CreditState, LedgerEntry, Me, SignInSession } from '@/lib/api/types'
 import { apiVoid } from '@/lib/api/client'
 
 /**
@@ -22,17 +29,28 @@ import { apiVoid } from '@/lib/api/client'
  * balance, and a greyed-out "Upgrade" would be a promise the product cannot
  * keep: there is no checkout, so the only remedy anywhere in this app is to ask
  * (web-production.md, rule 3).
+ *
+ * **The account sections need `account`**, which is `null` on a server with no
+ * Supabase (dev mode). Then the page shows what `/auth/me` knows and the one
+ * sign-out button, as it always did.
  */
 const REQUEST_EMAIL = 'credits@peritus.app'
 
 export function AccountSettingsPage({
   me,
+  account,
+  sessions,
   credits,
   ledger,
+  flash,
 }: {
   me: Me
+  account: Account | null
+  sessions: SignInSession[] | null
   credits: CreditState | null
   ledger: LedgerEntry[]
+  /** From the Google link round trip: `?linked=google` or `?auth_error=…`. */
+  flash: { tone: 'ok' | 'bad'; message: string } | null
 }) {
   const { theme, setTheme } = useTheme()
   // The saved theme lives in localStorage, which the server cannot read: it
@@ -70,10 +88,16 @@ export function AccountSettingsPage({
         <div className="mx-auto w-full max-w-[560px] px-4 pt-5 pb-10 md:px-6">
           <h1 className="text-title font-medium text-fg">Settings</h1>
 
-          <section className="mt-8">
+          {flash && (
+            <Notice tone={flash.tone} className="mt-6">
+              {flash.message}
+            </Notice>
+          )}
+
+          <section className="mt-8" aria-label="Account">
             <h2 className="text-lg font-medium text-fg">Account</h2>
             <dl className="mt-3 space-y-2 text-sm">
-              <Row label="Email">{me.email ?? '—'}</Row>
+              {!account && <Row label="Email">{me.email ?? '—'}</Row>}
               <Row label="Account id">
                 <span className="font-mono text-xs">{me.id}</span>
               </Row>
@@ -89,6 +113,16 @@ export function AccountSettingsPage({
               )}
             </dl>
           </section>
+
+          {account && (
+            <>
+              <ProfileSection account={account} />
+              <EmailSection account={account} />
+              <PasswordSection account={account} />
+              <MethodsSection account={account} />
+              <SessionsSection sessions={sessions} />
+            </>
+          )}
 
           <section className="mt-10">
             <h2 className="text-lg font-medium text-fg">Appearance</h2>
@@ -185,15 +219,24 @@ export function AccountSettingsPage({
             </section>
           )}
 
-          <section className="mt-12 border-t border-border-soft pt-6">
-            <Button variant="outline" size="md" loading={signingOut} onClick={() => void signOut()}>
-              <LogOut className="size-3.5" />
-              Sign out everywhere
-            </Button>
-            <p className="mt-1.5 text-xs text-fg-3">
-              Revokes every session for this account, on every device.
-            </p>
-          </section>
+          {account ? (
+            <DeleteSection account={account} />
+          ) : (
+            <section className="mt-12 border-t border-border-soft pt-6">
+              <Button
+                variant="outline"
+                size="md"
+                loading={signingOut}
+                onClick={() => void signOut()}
+              >
+                <LogOut className="size-3.5" />
+                Sign out everywhere
+              </Button>
+              <p className="mt-1.5 text-xs text-fg-3">
+                Revokes every session for this account, on every device.
+              </p>
+            </section>
+          )}
 
           <p className="mt-10 text-xs text-fg-3">
             <Link href="/privacy" className="transition-colors hover:text-fg-3">

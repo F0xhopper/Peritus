@@ -171,8 +171,9 @@ class SessionOut(BaseModel):
     current: bool
     created_at: datetime
     last_active_at: datetime | None = None
+    # The device's browser or app, as it was when the session began. No IP: the
+    # address GoTrue records is this server's, never the person's.
     user_agent: str | None = None
-    ip: str | None = None
 
 
 class LinkIdentityOut(BaseModel):

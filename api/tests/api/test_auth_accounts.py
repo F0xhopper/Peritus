@@ -8,7 +8,7 @@ it should.
 """
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 import pytest
 
@@ -75,8 +75,8 @@ class FakeAccounts:
         self._check()
         now = datetime(2026, 9, 18, tzinfo=UTC)
         return [
-            SignInSession(SESSION_ID, now, now, "Mozilla/5.0 (Macintosh)", "203.0.113.1"),
-            SignInSession(OTHER_SESSION, now, None, None, None),
+            SignInSession(SESSION_ID, now, now, "Mozilla/5.0 (Macintosh)"),
+            SignInSession(OTHER_SESSION, now, None, None),
         ]
 
     async def delete_session(self, user_id: str, session_id: str) -> bool:
@@ -131,10 +131,11 @@ async def test_password_login_returns_session(app):
             "POST",
             "/auth/password/login",
             json={"email": " User@Example.com ", "password": "hunter22"},
+            headers={"User-Agent": "peritus-test/1"},
         )
     assert resp.status_code == 200
     assert resp.json()["access_token"] == "at"
-    login.assert_awaited_once_with("user@example.com", "hunter22")
+    login.assert_awaited_once_with("user@example.com", "hunter22", user_agent="peritus-test/1")
 
 
 @pytest.mark.parametrize("code", ["invalid_credentials", "user_not_found", None])
@@ -197,7 +198,9 @@ async def test_signup_awaits_confirmation(app):
         )
     assert resp.status_code == 202
     assert resp.json() == {"confirmation_required": True, "session": None}
-    signup.assert_awaited_once_with("new@example.com", "correct horse", data={"full_name": "Ada"})
+    signup.assert_awaited_once_with(
+        "new@example.com", "correct horse", data={"full_name": "Ada"}, user_agent=ANY
+    )
 
 
 async def test_signup_auto_confirmed_returns_session(app):
@@ -283,7 +286,7 @@ async def test_verify_accepts_signup_type(app):
             json={"email": "new@example.com", "token": "123456", "type": "signup"},
         )
     assert resp.status_code == 200
-    verify.assert_awaited_once_with("new@example.com", "123456", type="signup")
+    verify.assert_awaited_once_with("new@example.com", "123456", type="signup", user_agent=ANY)
 
 
 async def test_verify_refuses_other_types(app):
@@ -336,7 +339,7 @@ async def test_reset_verifies_sets_password_and_signs_out_others(app):
         )
     assert resp.status_code == 200
     assert resp.json()["access_token"] == "at"
-    verify.assert_awaited_once_with("a@example.com", "123456", type="recovery")
+    verify.assert_awaited_once_with("a@example.com", "123456", type="recovery", user_agent=ANY)
     update.assert_awaited_once_with("at", {"password": "new password"})
     logout.assert_awaited_once_with("at", scope="others")
 
@@ -544,7 +547,7 @@ async def test_email_change_pending_then_complete(app):
             json={"email": "n@x.org", "token": "222222"},
         )
     assert second.json()["complete"] is True
-    verify.assert_awaited_once_with("n@x.org", "222222", type="email_change")
+    verify.assert_awaited_once_with("n@x.org", "222222", type="email_change", user_agent=ANY)
 
 
 # ── identities ───────────────────────────────────────────────────────────────
@@ -685,3 +688,28 @@ async def test_operator_cannot_delete_itself(app):
     )
     assert resp.status_code == 403
     assert accounts.deleted == []
+
+
+async def test_the_callers_user_agent_labels_the_session_not_this_servers():
+    """Production recorded `python-httpx` on every session; GoTrue must see the
+    person's own agent instead."""
+    seen = {}
+
+    class Client:
+        is_closed = False
+
+        async def request(self, method, path, json=None, params=None, headers=None):
+            seen.update(headers or {})
+
+            class Resp:
+                status_code = 200
+                content = b"{}"
+
+                def json(self):
+                    return {}
+
+            return Resp()
+
+    with patch.object(supabase_auth, "_get_client", return_value=Client()):
+        await supabase_auth.password_login("a@x.org", "pw", user_agent="Mozilla/5.0 Firefox/140")
+    assert seen["User-Agent"] == "Mozilla/5.0 Firefox/140"

@@ -15,7 +15,7 @@ import time
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Security, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from peritus.api.auth import AuthUser, require_user
@@ -79,6 +79,15 @@ def gotrue_error(exc: SupabaseAuthError) -> HTTPException:
     return HTTPException(status_code, message)
 
 
+def client_agent(request: Request) -> str | None:
+    """The person's own User-Agent, to stamp on a session this request creates.
+
+    The web server forwards the browser's; the CLI and TUI send their own. It
+    only ever labels the caller's own session, so there is nothing to trust.
+    """
+    return request.headers.get("user-agent")
+
+
 def _require_auth_configured() -> None:
     if not settings.AUTH_ENABLED:
         raise HTTPException(
@@ -115,12 +124,14 @@ async def send_otp(req: OtpRequest) -> None:
 
 
 @router.post("/verify", response_model=Session, dependencies=[Depends(auth_rate_limit)])
-async def verify_otp(req: VerifyRequest) -> dict:
+async def verify_otp(req: VerifyRequest, request: Request) -> dict:
     _require_auth_configured()
     started = time.monotonic()
     logger.info("OTP verify attempt: email=%s", req.email)
     try:
-        session = await supabase_auth.verify_otp(req.email, req.token, type=req.type)
+        session = await supabase_auth.verify_otp(
+            req.email, req.token, type=req.type, user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         logger.warning(
             "OTP verify failed: email=%s status=%s elapsed=%.2fs error=%s",
@@ -139,11 +150,13 @@ async def verify_otp(req: VerifyRequest) -> dict:
 
 
 @router.post("/password/login", response_model=Session, dependencies=[Depends(auth_rate_limit)])
-async def password_login(req: PasswordLoginRequest) -> dict:
+async def password_login(req: PasswordLoginRequest, request: Request) -> dict:
     """Sign in with an email and a password."""
     _require_auth_configured()
     try:
-        session = await supabase_auth.password_login(req.email, req.password)
+        session = await supabase_auth.password_login(
+            req.email, req.password, user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         if exc.code == "email_not_confirmed":
             # Right password, unconfirmed address. Send a fresh code so the page
@@ -175,7 +188,7 @@ async def password_login(req: PasswordLoginRequest) -> dict:
     status_code=202,
     dependencies=[Depends(auth_rate_limit)],
 )
-async def signup(req: SignupRequest) -> SignupResponse:
+async def signup(req: SignupRequest, request: Request) -> SignupResponse:
     """Create a password account. A code is emailed to confirm the address."""
     _require_auth_configured()
     if not settings.AUTH_ALLOW_SIGNUP:
@@ -184,7 +197,9 @@ async def signup(req: SignupRequest) -> SignupResponse:
         )
     data = {"full_name": req.name.strip()} if req.name and req.name.strip() else None
     try:
-        result = await supabase_auth.signup(req.email, req.password, data=data)
+        result = await supabase_auth.signup(
+            req.email, req.password, data=data, user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         if exc.code == "signup_disabled":
             raise coded_error(
@@ -236,7 +251,7 @@ async def forgot_password(req: EmailRequest) -> None:
 
 
 @router.post("/password/reset", response_model=Session, dependencies=[Depends(auth_rate_limit)])
-async def reset_password(req: PasswordResetRequest) -> dict:
+async def reset_password(req: PasswordResetRequest, request: Request) -> dict:
     """Trade a reset code and a new password for a signed-in session.
 
     Two GoTrue calls: the code is verified (``type=recovery``), which yields a
@@ -245,7 +260,9 @@ async def reset_password(req: PasswordResetRequest) -> dict:
     """
     _require_auth_configured()
     try:
-        session = await supabase_auth.verify_otp(req.email, req.token, type="recovery")
+        session = await supabase_auth.verify_otp(
+            req.email, req.token, type="recovery", user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         if exc.status == 429 or exc.status >= 500:
             raise gotrue_error(exc) from exc
@@ -293,12 +310,14 @@ async def oauth_authorize(provider: str, code_challenge: str, redirect_to: str) 
 
 
 @router.post("/oauth/exchange", response_model=Session, dependencies=[Depends(auth_rate_limit)])
-async def oauth_exchange(req: OAuthExchangeRequest) -> dict:
+async def oauth_exchange(req: OAuthExchangeRequest, request: Request) -> dict:
     """Trade an OAuth PKCE code for a session after the provider redirect."""
     _require_auth_configured()
     started = time.monotonic()
     try:
-        session = await supabase_auth.exchange_code(req.auth_code, req.code_verifier)
+        session = await supabase_auth.exchange_code(
+            req.auth_code, req.code_verifier, user_agent=client_agent(request)
+        )
     except SupabaseAuthError as exc:
         logger.warning(
             "OAuth exchange failed: status=%s elapsed=%.2fs error=%s",

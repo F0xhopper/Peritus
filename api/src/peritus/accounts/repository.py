@@ -32,7 +32,6 @@ class SignInSession:
     created_at: datetime
     last_active_at: datetime | None
     user_agent: str | None
-    ip: str | None
 
 
 @dataclass(frozen=True)
@@ -78,8 +77,7 @@ class AccountRepository:
                 SELECT id::text AS id,
                        created_at,
                        coalesce(refreshed_at, updated_at) AS last_active_at,
-                       user_agent,
-                       host(ip) AS ip
+                       user_agent
                 FROM auth.sessions
                 WHERE user_id = $1::uuid
                   AND (not_after IS NULL OR not_after > now())
@@ -94,7 +92,6 @@ class AccountRepository:
                 created_at=r["created_at"],
                 last_active_at=r["last_active_at"],
                 user_agent=r["user_agent"],
-                ip=r["ip"],
             )
             for r in rows
         ]

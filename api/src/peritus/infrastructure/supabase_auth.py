@@ -28,13 +28,19 @@ class SupabaseAuthError(PeritusError):
         self.code = code
 
 
-def _base_headers(access_token: str | None = None) -> dict[str, str]:
+def _base_headers(access_token: str | None = None, user_agent: str | None = None) -> dict[str, str]:
     headers = {
         "apikey": settings.SUPABASE_ANON_KEY,
         "Content-Type": "application/json",
     }
     if access_token:
         headers["Authorization"] = f"Bearer {access_token}"
+    # GoTrue stamps a new session with the User-Agent of the request that made
+    # it. Every request here comes from this server, so without passing the
+    # person's own on, every session in the account page would read
+    # "python-httpx" — which is exactly what production recorded.
+    if user_agent:
+        headers["User-Agent"] = user_agent[:512]
     return headers
 
 
@@ -68,9 +74,10 @@ async def _request(
     *,
     params: dict | None = None,
     access_token: str | None = None,
+    user_agent: str | None = None,
 ) -> dict:
     resp = await _get_client().request(
-        method, path, json=json, params=params, headers=_base_headers(access_token)
+        method, path, json=json, params=params, headers=_base_headers(access_token, user_agent)
     )
     if resp.status_code >= 400:
         detail, code = _extract_error(resp)
@@ -84,8 +91,11 @@ async def _post(
     *,
     params: dict | None = None,
     access_token: str | None = None,
+    user_agent: str | None = None,
 ) -> dict:
-    return await _request("POST", path, json, params=params, access_token=access_token)
+    return await _request(
+        "POST", path, json, params=params, access_token=access_token, user_agent=user_agent
+    )
 
 
 def _extract_error(resp: httpx.Response) -> tuple[str, str | None]:
@@ -113,7 +123,9 @@ async def request_otp(email: str, *, create_user: bool = True) -> None:
     await _post("/otp", {"email": email, "create_user": create_user})
 
 
-async def verify_otp(email: str, token: str, *, type: str = "email") -> dict:
+async def verify_otp(
+    email: str, token: str, *, type: str = "email", user_agent: str | None = None
+) -> dict:
     """Exchange an emailed code for a session (POST /auth/v1/verify).
 
     ``type`` is the email the code came in: ``email`` (a sign-in code),
@@ -121,19 +133,24 @@ async def verify_otp(email: str, token: str, *, type: str = "email") -> dict:
     reset) or ``email_change`` (confirming a new address, where ``email`` is the
     *new* one).
     """
-    return await _post("/verify", {"type": type, "email": email, "token": token})
+    return await _post(
+        "/verify", {"type": type, "email": email, "token": token}, user_agent=user_agent
+    )
 
 
-async def password_login(email: str, password: str) -> dict:
+async def password_login(email: str, password: str, *, user_agent: str | None = None) -> dict:
     """Sign in with a password (grant_type=password)."""
     return await _post(
         "/token",
         {"email": email, "password": password},
         params={"grant_type": "password"},
+        user_agent=user_agent,
     )
 
 
-async def signup(email: str, password: str, *, data: dict | None = None) -> dict:
+async def signup(
+    email: str, password: str, *, data: dict | None = None, user_agent: str | None = None
+) -> dict:
     """Create a password account (POST /auth/v1/signup).
 
     With email confirmation on, GoTrue answers with the user and no session and
@@ -141,7 +158,11 @@ async def signup(email: str, password: str, *, data: dict | None = None) -> dict
     obfuscated user of the same shape and sends nothing, so the caller cannot
     tell the two apart — which is the point.
     """
-    return await _post("/signup", {"email": email, "password": password, "data": data or {}})
+    return await _post(
+        "/signup",
+        {"email": email, "password": password, "data": data or {}},
+        user_agent=user_agent,
+    )
 
 
 async def resend_signup(email: str) -> None:
@@ -221,12 +242,15 @@ def authorize_url(*, provider: str, redirect_to: str, code_challenge: str) -> st
     return f"{settings.SUPABASE_AUTH_URL}/authorize?{query}"
 
 
-async def exchange_code(auth_code: str, code_verifier: str) -> dict:
+async def exchange_code(
+    auth_code: str, code_verifier: str, *, user_agent: str | None = None
+) -> dict:
     """Trade a PKCE auth code for a session (grant_type=pkce)."""
     return await _post(
         "/token",
         {"auth_code": auth_code, "code_verifier": code_verifier},
         params={"grant_type": "pkce"},
+        user_agent=user_agent,
     )
 
 

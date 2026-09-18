@@ -2216,17 +2216,6 @@
             "title": "Id",
             "type": "string"
           },
-          "ip": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ip"
-          },
           "last_active_at": {
             "anyOf": [
               {

@@ -18,7 +18,15 @@ import { resetApi, signIn } from './helpers'
 const SLUG = 'varroa-mite-control-in-temperate-beekeeping'
 
 /** Every route a signed-out visitor can reach, and the signed-in shell. */
-const PUBLIC_PAGES = ['/', '/login', '/privacy', '/terms']
+const PUBLIC_PAGES = [
+  '/',
+  '/login',
+  '/signup',
+  '/login/code',
+  '/login/forgot',
+  '/privacy',
+  '/terms',
+]
 /**
  * Open a page and give hydration a beat to finish.
  *

@@ -3,16 +3,21 @@ import { describe, expect, it } from 'vitest'
 import schema from '../../api/openapi.json'
 import type { components } from '@/lib/api/types.generated'
 import type {
+  Account,
   Citation,
   ConversationDetail,
   ConversationSummary,
   ExpertSummary,
   ExpertWithCatalog,
   LedgerEntry,
+  EmailChangeResult,
+  Identity,
   Me,
   ShareAccept,
   ShareState,
   SharedExpert,
+  SignInSession,
+  SignupResult,
   SourceRow,
 } from '@/lib/api/types'
 
@@ -70,6 +75,11 @@ type _ShareAccept = Assert<Matches<Schemas['ShareAcceptOut'], ShareAccept>>
 type _SharedExpert = Assert<Matches<Schemas['SharedExpertOut'], SharedExpert>>
 type _Ledger = Assert<Matches<Schemas['LedgerEntryOut'], LedgerEntry>>
 type _Me = Assert<Matches<Schemas['MeResponse'], Me>>
+type _Account = Assert<Matches<Schemas['AccountOut'], Account>>
+type _Identity = Assert<Matches<Schemas['Identity'], Identity>>
+type _SignInSession = Assert<Matches<Schemas['SessionOut'], SignInSession>>
+type _EmailChange = Assert<Matches<Schemas['EmailChangeResult'], EmailChangeResult>>
+type _Signup = Assert<Matches<Schemas['SignupResponse'], SignupResult>>
 
 describe('the committed schema is the one this app was built against', () => {
   it('carries every route the web client has a handler for', () => {
@@ -89,6 +99,19 @@ describe('the committed schema is the one this app was built against', () => {
       '/billing/me',
       '/auth/otp',
       '/auth/verify',
+      '/auth/password/login',
+      '/auth/password/forgot',
+      '/auth/password/reset',
+      '/auth/signup',
+      '/auth/resend',
+      '/auth/account',
+      '/auth/account/password',
+      '/auth/account/email',
+      '/auth/account/email/verify',
+      '/auth/account/sessions',
+      '/auth/account/sessions/{session_id}',
+      '/auth/account/identities/authorize',
+      '/auth/account/identities/{identity_id}',
     ]) {
       expect(paths).toContain(path)
     }
