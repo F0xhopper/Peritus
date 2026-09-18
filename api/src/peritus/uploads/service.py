@@ -20,6 +20,7 @@ from peritus.core.exceptions import IngestionError
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.graph.extractor import extract_graph_from_chunks
+from peritus.graph.key_concepts import assign_key_concepts
 from peritus.graph.reconciler import reconcile_claims
 from peritus.graph.repository import GraphRepository
 from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
@@ -282,6 +283,15 @@ async def _extend_graph(
     edges += await repo.insert_relations(expert.id, relations)
 
     await repo.recompute_edge_evidence(expert.id)
+
+    # The new concepts take their place in the syllabus, or the map would draw
+    # every one of them in the unassigned arc until the next rebuild.
+    try:
+        await assign_key_concepts(
+            repo, expert.id, list(expert.key_concepts or []), embed_in_batches
+        )
+    except Exception:
+        logger.exception("Key-concept assignment failed after upload for expert %d", expert.id)
     return nodes, edges
 
 

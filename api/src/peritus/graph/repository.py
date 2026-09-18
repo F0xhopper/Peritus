@@ -444,6 +444,94 @@ class GraphRepository:
 
         return [dict(r) for r in node_rows], [_edge_dict(r) for r in edge_rows]
 
+    # ── the key-concept join (docs/plans/expert-brain.md, phase 0) ──────────
+
+    async def key_concept_similarities(
+        self, expert_id: int, vectors: list[list[float]], key_concepts: list[str]
+    ) -> list[tuple[int, list[float], set[int]]]:
+        """``(node id, cosine to each key concept, key concepts its sources set out)``.
+
+        Cosine is computed in Postgres against the stored node embeddings, so
+        nothing 3,072-wide crosses the wire per node. The vectors travel as
+        pgvector's text form: asyncpg's vector codec does not cover arrays.
+        A node with no embedding is left out and so stays unassigned.
+        """
+        if not vectors:
+            return []
+        literals = ["[" + ",".join(repr(float(x)) for x in vector) + "]" for vector in vectors]
+        index_of = {concept: i for i, concept in enumerate(key_concepts)}
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT n.id,
+                       ARRAY(
+                           SELECT 1 - (n.embedding <=> k.v::vector)
+                           FROM unnest($2::text[]) WITH ORDINALITY AS k(v, i)
+                           ORDER BY k.i
+                       ) AS sims,
+                       ARRAY(
+                           SELECT DISTINCT sc.source_id
+                           FROM source_chunks sc
+                           WHERE sc.id = ANY(n.chunk_ids)
+                       ) AS source_ids
+                FROM expert_nodes n
+                WHERE n.expert_id = $1
+                  AND n.node_type = 'concept'
+                  AND n.embedding IS NOT NULL
+                """,
+                expert_id,
+                literals,
+            )
+            depth_rows = await conn.fetch(
+                """
+                SELECT id, concept_depths
+                FROM sources
+                WHERE expert_id = $1 AND passed AND concept_depths IS NOT NULL
+                """,
+                expert_id,
+            )
+        sets_out: dict[int, set[int]] = {}
+        for r in depth_rows:
+            depths = _json(r["concept_depths"])
+            if not isinstance(depths, dict):
+                continue
+            sets_out[r["id"]] = {
+                index_of[c] for c, d in depths.items() if d == "sets_out" and c in index_of
+            }
+        return [
+            (
+                r["id"],
+                [float(s) for s in r["sims"]],
+                set().union(*(sets_out.get(s, set()) for s in r["source_ids"] or [])),
+            )
+            for r in rows
+        ]
+
+    async def write_key_concepts(
+        self, expert_id: int, assignments: list[tuple[int, int | None, float | None]]
+    ) -> None:
+        """Store each concept node's key concept, clearing every other node's.
+
+        Cleared first so a node that lost its embedding, or a graph whose plan
+        has no key concepts any more, never keeps an assignment from before.
+        """
+        async with self._pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                """
+                UPDATE expert_nodes SET key_concept_idx = NULL, key_concept_sim = NULL
+                WHERE expert_id = $1
+                """,
+                expert_id,
+            )
+            if assignments:
+                await conn.executemany(
+                    """
+                    UPDATE expert_nodes SET key_concept_idx = $3, key_concept_sim = $4
+                    WHERE id = $2 AND expert_id = $1
+                    """,
+                    [(expert_id, node_id, index, sim) for node_id, index, sim in assignments],
+                )
+
     # ── reconciliation pass ──────────────────────────────────────────────────
 
     async def claims_by_concept(
@@ -637,3 +725,13 @@ def _edge_dict(row: asyncpg.Record) -> dict:
     elif raw is None:
         edge["properties"] = {}
     return edge
+
+
+def _json(raw: object) -> object:
+    """A JSONB value, whichever form the pool handed it over in (see ``_edge_dict``)."""
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+    return raw

@@ -87,6 +87,11 @@ AUDITS_PAGE_MAX = 100
 GRAPH_NODES_DEFAULT = 400
 GRAPH_NODES_MAX = 1500
 
+# `?expand=` on the map names a key concept by index. The largest plan has
+# fourteen (ExpertConfig.max_key_concepts, Pro); an index past the plan's end
+# expands nothing rather than failing.
+MAP_EXPAND_MAX = 31
+
 # Runaway guard on exports. An export must be complete or refuse to be an
 # export, so this sits far above any real corpus and the route reports a
 # truncation rather than emitting a silently partial file.

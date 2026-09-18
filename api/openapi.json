@@ -5543,6 +5543,133 @@
         ]
       }
     },
+    "/experts/{slug}/map": {
+      "get": {
+        "description": "The expert's map: its syllabus, the concepts its sources share, and the sources.\n\nFour layers for one drawing (docs/plans/expert-brain.md): key concepts by\nfacet, with live coverage and the status of each one's named text; the\nconcept nodes at least two kept sources discuss (topped up on a thin\ncorpus), each placed in a key concept; the kept sources with their graded\ntags; and the named texts the build never found. Claims are not included \u2014\nthey arrive per concept from ``/map/concepts/{id}``.\n\n``expand`` adds every concept in that key concept's sector.\n\nCheck ``computed``: while the graph is still being extracted it is ``false``\nand ``concepts`` is empty, but the syllabus and the sources are returned.",
+        "operationId": "expert_map_experts__slug__map_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 31,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Expand"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Expert Map Experts  Slug  Map Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Expert Map",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/experts/{slug}/map/concepts/{node_id}": {
+      "get": {
+        "description": "One concept: its description, the sources that discuss it, and its claims.\n\nEach claim carries the kept sources whose passages state it (with a passage\nid the reader can open) and its relations to other claims, with the\n``point`` of a disagreement or the ``condition`` of a qualification.\nDisputed claims come first.",
+        "operationId": "expert_map_concept_experts__slug__map_concepts__node_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Expert Map Concept Experts  Slug  Map Concepts  Node Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Expert Map Concept",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
     "/experts/{slug}/picture": {
       "delete": {
         "description": "Remove the found picture; the expert falls back to its recipe or sigil.\n\nDistinct from picking a sigil style in the avatar picker, which writes a\nrecipe that Reset would then undo \u2014 bringing the picture straight back. This\nis how an owner says \"not this, and not any\".",

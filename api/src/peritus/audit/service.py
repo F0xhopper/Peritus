@@ -25,6 +25,7 @@ from peritus.audit.domain import (
     round_or_none,
     safe_mean,
 )
+from peritus.audit.expert_map import build_concept_detail, build_map
 from peritus.audit.repository import AuditRepository, AuditScope
 from peritus.audit.screening import UNPERSISTED, DiscoveryFunnel, derive_discovery_funnel
 from peritus.core.logging import get_logger
@@ -633,6 +634,44 @@ class AuditService:
             "total_edges": expert.edge_count,
             "truncated": len(nodes) < expert.node_count,
         }
+
+    # ── the expert's map (docs/plans/expert-brain.md) ───────────────────────
+
+    async def expert_map(self, expert: Expert, expand: int | None = None) -> dict[str, Any]:
+        """Syllabus, concepts and sources in one payload for the Knowledge page.
+
+        The syllabus ring and the source orbit need no graph, so an expert that
+        is still extracting concepts gets both, with ``computed: false`` and an
+        empty cloud — the same gate as :meth:`graph`, without hiding what is
+        already true.
+        """
+        plan = await self._repo.research_plan(expert.id)
+        sources = await self._repo.map_sources(expert.id)
+        concepts: list[dict[str, Any]] | None = None
+        links: list[dict[str, Any]] = []
+        claims = 0
+        if expert.graph_expanded:
+            concepts, claims = await self._repo.map_concepts(expert.id)
+            links = await self._repo.map_links(
+                expert.id, [c["id"] for c in concepts if c["source_ids"]]
+            )
+        return build_map(
+            expert,
+            plan,
+            sources,
+            concepts,
+            links,
+            claims,
+            expert.config.coverage_target(),
+            expand=expand,
+        )
+
+    async def map_concept(self, expert: Expert, node_id: int) -> dict[str, Any] | None:
+        """One concept's panel, or None when it is not a concept of this expert."""
+        detail = await self._repo.map_concept(expert.id, node_id)
+        if detail is None:
+            return None
+        return build_concept_detail(detail, len(expert.key_concepts or []))
 
     # ── answer-level retrieval trail ────────────────────────────────────────
 

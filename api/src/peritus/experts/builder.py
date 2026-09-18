@@ -142,6 +142,7 @@ from peritus.experts.picture import PictureSkipped, find_picture
 from peritus.experts.picture_repository import ExpertPictureRepository
 from peritus.experts.repository import ExpertRepository
 from peritus.graph.extractor import extract_graph_from_chunks
+from peritus.graph.key_concepts import assign_key_concepts
 from peritus.graph.repository import GraphRepository
 from peritus.infrastructure.anthropic_batch import (
     BuildExecution,
@@ -846,6 +847,7 @@ class ExpertBuilder:
             # Edge ordering is evidence counted off the corpus, not a weight the
             # model asserted, so it is computed here once the graph is final.
             await self._graph_repo.recompute_edge_evidence(expert.id)
+            await self._assign_key_concepts(expert.id)
             return node_count, edge_count, True
         except asyncio.CancelledError:
             raise  # cancellation/shutdown is the worker's business, not a degrade
@@ -864,6 +866,28 @@ class ExpertBuilder:
                 },
             )
         return node_count, edge_count, False
+
+    async def _assign_key_concepts(self, expert_id: int) -> None:
+        """Place every concept node in its line of the syllabus. Never raises.
+
+        The expert's map reads this to put a concept in its sector
+        (docs/plans/expert-brain.md). Nothing answers from it, so a failure
+        leaves the nodes unassigned — drawn in the neutral arc — rather than
+        failing a graph that retrieval already uses. The key concepts are
+        re-read because the plan stage wrote them after ``expert`` was loaded.
+        """
+        try:
+            fresh = await self._repo.get_by_id(expert_id)
+            await assign_key_concepts(
+                self._graph_repo,
+                expert_id,
+                list(fresh.key_concepts) if fresh else [],
+                embed_in_batches,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Key-concept assignment failed for expert %d: %s", expert_id, exc)
 
     # ── the expert's picture ────────────────────────────────────────────────
 

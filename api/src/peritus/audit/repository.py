@@ -23,6 +23,8 @@ from typing import Any
 
 import asyncpg
 
+from peritus.audit.domain import decode_json_field
+
 # Ordering options for the corpus report. A whitelist mapping, never client
 # text interpolated into SQL: the key is validated by the request schema and
 # only these fixed fragments can reach the query.
@@ -745,6 +747,193 @@ class AuditRepository:
                 else []
             )
         return [dict(r) for r in nodes], [dict(r) for r in edges]
+
+    # ── the expert's map (docs/plans/expert-brain.md) ───────────────────────
+
+    async def research_plan(self, expert_id: int) -> dict[str, Any] | None:
+        """The stored research plan (migration 029), or None for an older expert."""
+        async with self._pool.acquire() as conn:
+            raw = await conn.fetchval("SELECT research_plan FROM experts WHERE id = $1", expert_id)
+        plan = decode_json_field(raw, None)
+        return plan if isinstance(plan, dict) else None
+
+    async def map_sources(self, expert_id: int) -> list[dict[str, Any]]:
+        """Every kept source with what coverage and the map need from it."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""
+                SELECT s.id, s.title, s.author, s.url, s.source_type, s.source_tier,
+                       s.substance, s.quality_score, s.relevance_score,
+                       s.covered_concepts, s.concept_depths,
+                       COALESCE(c.chunk_count, 0) AS passage_count
+                FROM sources s
+                {_CHUNK_COUNT_LATERAL}
+                WHERE s.expert_id = $1 AND s.passed
+                ORDER BY s.id
+                """,
+                expert_id,
+            )
+        out = []
+        for r in rows:
+            row = dict(r)
+            row["covered_concepts"] = decode_json_field(row["covered_concepts"], [])
+            row["concept_depths"] = decode_json_field(row["concept_depths"], None)
+            out.append(row)
+        return out
+
+    async def map_concepts(self, expert_id: int) -> tuple[list[dict[str, Any]], int]:
+        """Every concept node with its kept sources, degree and disputes; and the claim count.
+
+        A concept's sources are read off its passages (``chunk_ids`` →
+        ``source_chunks.source_id``), kept sources only — a dropped source's
+        chunks are gone, but a row written before that rule must not show up.
+        Its disputes are the ``contradicts`` edges between claims *about* it,
+        which is where the reconciler writes them; a concept node is never an
+        endpoint of one (graph/domain.py).
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT n.id, n.label, n.key_concept_idx,
+                       ARRAY(
+                           SELECT DISTINCT sc.source_id
+                           FROM source_chunks sc
+                           JOIN sources s ON s.id = sc.source_id AND s.passed
+                           WHERE sc.id = ANY(n.chunk_ids)
+                           ORDER BY sc.source_id
+                       ) AS source_ids,
+                       (SELECT count(*)::int FROM expert_edges e
+                         WHERE e.expert_id = n.expert_id
+                           AND (e.from_node_id = n.id OR e.to_node_id = n.id)) AS degree,
+                       (SELECT count(DISTINCT d.id)::int FROM expert_edges d
+                         JOIN expert_edges a
+                           ON a.expert_id = d.expert_id AND a.edge_type = 'about'
+                          AND a.to_node_id = n.id
+                          AND (a.from_node_id = d.from_node_id OR a.from_node_id = d.to_node_id)
+                         WHERE d.expert_id = n.expert_id AND d.edge_type = 'contradicts') AS disputes
+                FROM expert_nodes n
+                WHERE n.expert_id = $1 AND n.node_type = 'concept'
+                ORDER BY n.id
+                """,
+                expert_id,
+            )
+            claims = await conn.fetchval(
+                "SELECT count(*)::int FROM expert_nodes WHERE expert_id = $1 AND node_type = 'claim'",
+                expert_id,
+            )
+        return [dict(r) for r in rows], int(claims or 0)
+
+    async def map_links(self, expert_id: int, node_ids: list[int]) -> list[dict[str, Any]]:
+        """``part_of`` between the concepts the map returns — the only concept→concept edge."""
+        if not node_ids:
+            return []
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT from_node_id, to_node_id
+                FROM expert_edges
+                WHERE expert_id = $1 AND edge_type = 'part_of'
+                  AND from_node_id = ANY($2::int[]) AND to_node_id = ANY($2::int[])
+                ORDER BY id
+                """,
+                expert_id,
+                node_ids,
+            )
+        return [dict(r) for r in rows]
+
+    async def map_concept(self, expert_id: int, node_id: int) -> dict[str, Any] | None:
+        """One concept for the map's panel: itself, its sources, its claims and relations."""
+        async with self._pool.acquire() as conn:
+            node = await conn.fetchrow(
+                """
+                SELECT id, label, description, key_concept_idx, chunk_ids
+                FROM expert_nodes
+                WHERE expert_id = $1 AND id = $2 AND node_type = 'concept'
+                """,
+                expert_id,
+                node_id,
+            )
+            if node is None:
+                return None
+            sources = await conn.fetch(
+                """
+                SELECT s.id, s.title, s.author, s.source_type, s.source_tier,
+                       count(*)::int AS passages, min(sc.id) AS chunk_id
+                FROM source_chunks sc
+                JOIN sources s ON s.id = sc.source_id AND s.passed
+                WHERE sc.id = ANY($1::int[])
+                GROUP BY s.id
+                ORDER BY count(*) DESC, s.id
+                """,
+                list(node["chunk_ids"] or []),
+            )
+            claims = await conn.fetch(
+                """
+                SELECT c.id, c.label, c.description,
+                       ARRAY(
+                           SELECT jsonb_build_object('source_id', x.source_id, 'chunk_id', x.chunk_id)
+                           FROM (
+                               SELECT sc.source_id, min(sc.id) AS chunk_id
+                               FROM source_chunks sc
+                               JOIN sources s ON s.id = sc.source_id AND s.passed
+                               WHERE sc.id = ANY(c.chunk_ids)
+                               GROUP BY sc.source_id
+                               ORDER BY sc.source_id
+                           ) x
+                       ) AS cited
+                FROM expert_edges a
+                JOIN expert_nodes c ON c.id = a.from_node_id AND c.node_type = 'claim'
+                WHERE a.expert_id = $1 AND a.edge_type = 'about' AND a.to_node_id = $2
+                ORDER BY c.id
+                """,
+                expert_id,
+                node_id,
+            )
+            claim_ids = [r["id"] for r in claims]
+            relations = (
+                await conn.fetch(
+                    """
+                    SELECT e.from_node_id, e.to_node_id, e.edge_type, e.properties,
+                           f.label AS from_label, t.label AS to_label
+                    FROM expert_edges e
+                    JOIN expert_nodes f ON f.id = e.from_node_id
+                    JOIN expert_nodes t ON t.id = e.to_node_id
+                    WHERE e.expert_id = $1
+                      AND e.edge_type IN ('contradicts', 'qualifies', 'supports')
+                      AND (e.from_node_id = ANY($2::int[]) OR e.to_node_id = ANY($2::int[]))
+                    ORDER BY e.id
+                    """,
+                    expert_id,
+                    claim_ids,
+                )
+                if claim_ids
+                else []
+            )
+            part_of = await conn.fetch(
+                """
+                SELECT e.from_node_id, e.to_node_id, o.id AS other_id, o.label AS other_label
+                FROM expert_edges e
+                JOIN expert_nodes o
+                  ON o.id = CASE WHEN e.from_node_id = $2 THEN e.to_node_id ELSE e.from_node_id END
+                WHERE e.expert_id = $1 AND e.edge_type = 'part_of'
+                  AND (e.from_node_id = $2 OR e.to_node_id = $2)
+                ORDER BY e.id
+                """,
+                expert_id,
+                node_id,
+            )
+        return {
+            "node": dict(node),
+            "sources": [dict(r) for r in sources],
+            "claims": [
+                {**dict(r), "cited": [decode_json_field(c, {}) for c in r["cited"] or []]}
+                for r in claims
+            ],
+            "relations": [
+                {**dict(r), "properties": decode_json_field(r["properties"], {})} for r in relations
+            ],
+            "part_of": [dict(r) for r in part_of],
+        }
 
     async def chunks_with_sources(
         self, chunk_ids: list[int], excerpt_chars: int

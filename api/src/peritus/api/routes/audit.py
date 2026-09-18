@@ -23,6 +23,7 @@ from peritus.api.schemas.audit import (
     EXPORT_MAX_ROWS,
     GRAPH_NODES_DEFAULT,
     GRAPH_NODES_MAX,
+    MAP_EXPAND_MAX,
     SOURCES_PAGE_DEFAULT,
     SOURCES_PAGE_MAX,
     ExportFormat,
@@ -195,6 +196,48 @@ async def graph(
     while the concept graph is still being extracted.
     """
     return await audits.graph(expert, node_limit=limit)
+
+
+@router.get("/{slug}/map")
+async def expert_map(
+    expert: ReadableExpert,
+    audits: Audits,
+    expand: int | None = Query(None, ge=0, le=MAP_EXPAND_MAX),
+) -> dict[str, Any]:
+    """The expert's map: its syllabus, the concepts its sources share, and the sources.
+
+    Four layers for one drawing (docs/plans/expert-brain.md): key concepts by
+    facet, with live coverage and the status of each one's named text; the
+    concept nodes at least two kept sources discuss (topped up on a thin
+    corpus), each placed in a key concept; the kept sources with their graded
+    tags; and the named texts the build never found. Claims are not included —
+    they arrive per concept from ``/map/concepts/{id}``.
+
+    ``expand`` adds every concept in that key concept's sector.
+
+    Check ``computed``: while the graph is still being extracted it is ``false``
+    and ``concepts`` is empty, but the syllabus and the sources are returned.
+    """
+    return await audits.expert_map(expert, expand=expand)
+
+
+@router.get("/{slug}/map/concepts/{node_id}")
+async def expert_map_concept(
+    node_id: int,
+    expert: ReadableExpert,
+    audits: Audits,
+) -> dict[str, Any]:
+    """One concept: its description, the sources that discuss it, and its claims.
+
+    Each claim carries the kept sources whose passages state it (with a passage
+    id the reader can open) and its relations to other claims, with the
+    ``point`` of a disagreement or the ``condition`` of a qualification.
+    Disputed claims come first.
+    """
+    detail = await audits.map_concept(expert, node_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="No such concept in this expert.")
+    return detail
 
 
 @router.get("/{slug}/answer-audits")

@@ -13,6 +13,7 @@ from peritus.cli.credits import app as credits_app
 from peritus.cli.display import console, suite_view
 from peritus.cli.experts import _experts_with_concepts
 from peritus.cli.experts import app as experts_app
+from peritus.cli.graph import app as graph_app
 from peritus.core.config import settings
 from peritus.core.logging import setup_logging
 
@@ -85,6 +86,7 @@ app.command("whoami")(whoami_command)
 app.add_typer(experts_app, name="experts")
 app.add_typer(catalog_app, name="catalog")
 app.add_typer(credits_app, name="credits")
+app.add_typer(graph_app, name="graph")
 
 
 @app.command("suite")

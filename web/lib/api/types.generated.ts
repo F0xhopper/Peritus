@@ -1136,6 +1136,63 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/experts/{slug}/map': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Expert Map
+     * @description The expert's map: its syllabus, the concepts its sources share, and the sources.
+     *
+     *     Four layers for one drawing (docs/plans/expert-brain.md): key concepts by
+     *     facet, with live coverage and the status of each one's named text; the
+     *     concept nodes at least two kept sources discuss (topped up on a thin
+     *     corpus), each placed in a key concept; the kept sources with their graded
+     *     tags; and the named texts the build never found. Claims are not included —
+     *     they arrive per concept from ``/map/concepts/{id}``.
+     *
+     *     ``expand`` adds every concept in that key concept's sector.
+     *
+     *     Check ``computed``: while the graph is still being extracted it is ``false``
+     *     and ``concepts`` is empty, but the syllabus and the sources are returned.
+     */
+    get: operations['expert_map_experts__slug__map_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/experts/{slug}/map/concepts/{node_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Expert Map Concept
+     * @description One concept: its description, the sources that discuss it, and its claims.
+     *
+     *     Each claim carries the kept sources whose passages state it (with a passage
+     *     id the reader can open) and its relations to other claims, with the
+     *     ``point`` of a disagreement or the ``condition`` of a qualification.
+     *     Disputed claims come first.
+     */
+    get: operations['expert_map_concept_experts__slug__map_concepts__node_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/experts/{slug}/picture': {
     parameters: {
       query?: never
@@ -4384,6 +4441,75 @@ export interface operations {
       }
       header?: never
       path: {
+        slug: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': {
+            [key: string]: unknown
+          }
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  expert_map_experts__slug__map_get: {
+    parameters: {
+      query?: {
+        expand?: number | null
+      }
+      header?: never
+      path: {
+        slug: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': {
+            [key: string]: unknown
+          }
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  expert_map_concept_experts__slug__map_concepts__node_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        node_id: number
         slug: string
       }
       cookie?: never

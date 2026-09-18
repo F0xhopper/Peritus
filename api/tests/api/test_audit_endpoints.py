@@ -79,6 +79,8 @@ ENDPOINTS = [
     "/experts/stoicism/coverage",
     "/experts/stoicism/contradictions",
     "/experts/stoicism/answer-audits",
+    "/experts/stoicism/map",
+    "/experts/stoicism/map/concepts/1",
 ]
 
 
@@ -337,3 +339,46 @@ async def test_malformed_audit_id_404s_rather_than_500s(client, app):
     with _wired(app, service):
         resp = await client.get("/experts/stoicism/answer-audits/not-a-uuid")
     assert resp.status_code == 404
+
+
+# ── the expert's map ──
+
+
+@pytest.mark.asyncio
+async def test_the_map_is_served_with_its_sector_expansion(client, app):
+    service = AsyncMock()
+    service.expert_map = AsyncMock(return_value={"computed": True})
+    with _wired(app, service):
+        resp = await client.get("/experts/stoicism/map?expand=2")
+    assert resp.status_code == 200
+    assert service.expert_map.await_args.kwargs["expand"] == 2
+
+
+@pytest.mark.parametrize("query", ["expand=-1", "expand=32", "expand=x"])
+@pytest.mark.asyncio
+async def test_the_map_bounds_its_expansion(client, query, app):
+    with _wired(app):
+        resp = await client.get(f"/experts/stoicism/map?{query}")
+    assert resp.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_viewer_reads_the_map(api_app):
+    """A share-link viewer reads everything on the map; nothing in it is owner-only."""
+    app = api_app(user="11111111-1111-1111-1111-111111111111")
+    service = AsyncMock()
+    service.expert_map = AsyncMock(return_value={"computed": True, "sources": []})
+    with _wired(app, service):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            resp = await c.get("/experts/stoicism/map")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_concept_that_is_not_this_experts_404s(client, app):
+    service = AsyncMock()
+    service.map_concept = AsyncMock(return_value=None)
+    with _wired(app, service):
+        resp = await client.get("/experts/stoicism/map/concepts/99")
+    assert resp.status_code == 404
+    assert service.map_concept.await_args.args[1] == 99
