@@ -3,7 +3,15 @@ import { createServer } from 'node:http'
 import { handleAccount, logoutOthers, resetAccount } from './account.mjs'
 import { body, json, noContent, slugify } from './http.mjs'
 import { newToken, seed, shareState, sharedCard } from './seed.mjs'
-import { PICTURE_BYTES, PICTURE_SHA, bigMap, fixture, pictureMeta, state } from './state.mjs'
+import {
+  PICTURE_BYTES,
+  PICTURE_SHA,
+  bigGraph,
+  bigMap,
+  fixture,
+  pictureMeta,
+  state,
+} from './state.mjs'
 import { startBuild, streamBuild, streamChat } from './streams.mjs'
 
 /**
@@ -550,6 +558,22 @@ async function handle(req, res) {
     const sourceMatch = /^\/sources\/(\d+)$/.exec(rest)
     if (sourceMatch && method === 'DELETE') return noContent(res)
 
+    if (rest === '/graph' && method === 'GET') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      if (!expert.graph_expanded) return json(res, 200, await fixture('graph-not-computed'))
+      const graph =
+        state.scenario === 'big-graph' ? bigGraph(await fixture('graph')) : await fixture('graph')
+      const limit = Number(url.searchParams.get('limit') || 400)
+      const nodes = graph.nodes.slice(0, limit)
+      const ids = new Set(nodes.map((node) => node.id))
+      return json(res, 200, {
+        ...graph,
+        expert: { name: expert.name, topic: expert.topic },
+        nodes,
+        edges: graph.edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)),
+        truncated: nodes.length < graph.total_nodes,
+      })
+    }
     if (rest === '/map' && method === 'GET') {
       if (!expert) return json(res, 404, { detail: 'Expert not found' })
       if (!expert.graph_expanded) {

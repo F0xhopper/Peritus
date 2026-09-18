@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Select } from '@/components/ui/select'
 import { hostOf } from '@/lib/format'
+import { isFiltering, passesFilter, type SourceFilter } from '@/lib/brain/overview'
 import type { CorpusReport, LedgerSource, SourceSort } from '@/lib/api/types'
 
 /**
@@ -29,6 +30,7 @@ export function ListView({
   page,
   pageSize,
   conceptFilter,
+  sourceFilter,
   filter,
   selectedId,
   pending,
@@ -42,6 +44,8 @@ export function ListView({
   pageSize: number
   /** A key concept's label: only the sources that cover it. */
   conceptFilter: string | null
+  /** The Overview's kind and tier filter; its chip is in the page's toolbar. */
+  sourceFilter: SourceFilter
   /** The page's search text, which narrows the rows here. */
   filter: string
   selectedId: number | null
@@ -59,11 +63,14 @@ export function ListView({
     const needle = filter.trim().toLowerCase()
     return report.sources.filter((source) => {
       if (concept && !source.covered_concepts.some((c) => c.toLowerCase() === concept)) return false
+      if (!passesFilter({ type: source.source_type, tier: source.source_tier }, sourceFilter)) {
+        return false
+      }
       if (!needle) return true
       const host = source.url ? (hostOf(source.url) ?? '') : ''
       return `${source.title} ${source.author ?? ''} ${host}`.toLowerCase().includes(needle)
     })
-  }, [report.sources, conceptFilter, filter])
+  }, [report.sources, conceptFilter, sourceFilter, filter])
 
   // A selected row is scrolled to, or the panel describes a row the reader
   // cannot see: a cited source is rarely in the first screenful.
@@ -79,24 +86,31 @@ export function ListView({
 
   return (
     <div className="space-y-3 p-3 md:p-4">
-      {conceptFilter && (
+      {(conceptFilter || isFiltering(sourceFilter)) && (
         // The count is the filtered one: it used to read "16 sources" over a
-        // table of six.
+        // table of six. Both filters narrow the loaded page, so past one page
+        // the sentence says so rather than implying it counted them all.
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
           <span className="text-fg-3">
-            {rows.length} of {total} {total === 1 ? 'source' : 'sources'} cover
+            {rows.length} of{' '}
+            {lastPage > 1
+              ? `the ${report.sources.length} sources on this page`
+              : `${total} ${total === 1 ? 'source' : 'sources'}`}{' '}
+            {conceptFilter ? 'cover' : 'match'}
           </span>
-          <span className="inline-flex items-center gap-1 rounded-chip bg-expert-soft py-0.5 pr-1 pl-2 text-xs text-expert">
-            {conceptFilter}
-            <button
-              type="button"
-              onClick={onClearConcept}
-              aria-label="Show every source"
-              className="grid size-4 place-items-center rounded-chip transition-colors duration-(--dur-1) hover:bg-expert/20"
-            >
-              <X className="size-3" />
-            </button>
-          </span>
+          {conceptFilter && (
+            <span className="inline-flex items-center gap-1 rounded-chip bg-expert-soft py-0.5 pr-1 pl-2 text-xs text-expert">
+              {conceptFilter}
+              <button
+                type="button"
+                onClick={onClearConcept}
+                aria-label="Stop narrowing by this key concept"
+                className="grid size-4 place-items-center rounded-chip transition-colors duration-(--dur-1) hover:bg-expert/20"
+              >
+                <X className="size-3" />
+              </button>
+            </span>
+          )}
         </div>
       )}
 

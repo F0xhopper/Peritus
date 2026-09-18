@@ -1280,6 +1280,35 @@ export interface MapConceptDetail {
   part_of: { id: number; label: string; relation: 'whole' | 'part' }[]
 }
 
+// ── graph ───────────────────────────────────────────────────────────────────
+
+export interface GraphNode {
+  id: number
+  label: string
+  node_type: string
+  degree: number
+}
+
+export interface GraphEdge {
+  id: number
+  source: number
+  target: number
+  edge_type: string
+  evidence: number
+}
+
+export interface GraphResponse {
+  expert: { name: string; topic: string; [k: string]: unknown }
+  /** False while the concept graph is still being extracted. Never render an
+   *  empty canvas in that state — say the graph is still building. */
+  computed: boolean
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  total_nodes: number
+  total_edges: number
+  truncated: boolean
+}
+
 // ── misc ────────────────────────────────────────────────────────────────────
 
 export interface GrantCreditsBody {

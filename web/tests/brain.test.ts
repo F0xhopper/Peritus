@@ -21,6 +21,8 @@ import {
 } from '@/lib/brain/motion'
 import {
   DIM,
+  REGION_ALPHA,
+  REGION_PASSES,
   conceptAlpha,
   keyConceptLabel,
   paintBrain,
@@ -242,6 +244,9 @@ function recordingContext() {
       if (key === 'fillText') return (text: string) => texts.push(text)
       if (key === 'measureText') return (text: string) => ({ width: text.length * 6 })
       if (key === 'createLinearGradient') return () => ({ addColorStop: () => undefined })
+      // Tagged, so a test can tell a facet's wash from every other fill.
+      if (key === 'createRadialGradient')
+        return () => ({ wash: true, addColorStop: () => undefined })
       return () => undefined
     },
     set(target, key, value) {
@@ -282,6 +287,16 @@ function state(overrides: Partial<BrainPaintState> = {}): BrainPaintState {
   }
 }
 
+/** Each region's alpha: its passes summed, facet by facet, to four places. */
+function regionAlphas(washes: { alpha: number }[]): number[] {
+  const regions: number[] = []
+  for (let i = 0; i < washes.length; i += REGION_PASSES) {
+    const total = washes.slice(i, i + REGION_PASSES).reduce((sum, wash) => sum + wash.alpha, 0)
+    regions.push(Math.round(total * 10_000) / 10_000)
+  }
+  return regions
+}
+
 describe('painting', () => {
   it('labels every key concept, without its trailing parenthetical', () => {
     const { context, texts } = recordingContext()
@@ -293,6 +308,38 @@ describe('painting', () => {
       'Being, essence, and existence'
     )
     expect(texts).toContain('BIOLOGY')
+  })
+
+  it("washes each facet's sector faintly, and never in a hue", () => {
+    const { context, fills } = recordingContext()
+    paintBrain(context, state())
+    const washes = fills.filter((fill) => (fill.style as { wash?: boolean })?.wash)
+    // Laid down in passes, each narrower than the last, so its sides are
+    // feathered: a region, not a slice of a pie.
+    expect(layout.facets.length).toBe(2)
+    expect(washes).toHaveLength(layout.facets.length * REGION_PASSES)
+    // Together the passes come to the region's alpha, and that is faint enough
+    // to sit behind everything.
+    expect(regionAlphas(washes)).toEqual([REGION_ALPHA.rest, REGION_ALPHA.rest])
+    expect(REGION_ALPHA.rest).toBeLessThan(0.1)
+    // And it is the first thing drawn, so nothing is ever painted under it.
+    expect(fills.findIndex((fill) => (fill.style as { wash?: boolean })?.wash)).toBe(0)
+  })
+
+  it('lifts the region of whatever is lit and lets the others fall away', () => {
+    const { context, fills } = recordingContext()
+    // Source 812 sets out acaricide resistance and nothing else: Control, not Biology.
+    const lit = litBy(map, { kind: 'source', id: 812 })
+    paintBrain(context, state({ lit }))
+    const washes = fills.filter((fill) => (fill.style as { wash?: boolean })?.wash)
+    expect(regionAlphas(washes)).toEqual([REGION_ALPHA.unlit, REGION_ALPHA.lit])
+  })
+
+  it('draws no region for a syllabus with no facets to tell apart', () => {
+    const { context, fills } = recordingContext()
+    const bare: MapResponse = { ...map, syllabus: { ...map.syllabus, facets: null } }
+    paintBrain(context, state({ map: bare, layout: computeLayout(bare) }))
+    expect(fills.some((fill) => (fill.style as { wash?: boolean })?.wash)).toBe(false)
   })
 
   it('uses warn only for a dispute — the one status on the canvas', () => {

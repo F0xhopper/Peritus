@@ -1,5 +1,13 @@
 import type { MapResponse } from '@/lib/api/types'
-import { CLOUD_IN, ORBIT, RING, conceptRadius, type BrainLayout } from '@/lib/brain/layout'
+import {
+  CLOUD_IN,
+  ORBIT,
+  REGION_IN,
+  REGION_OUT,
+  RING,
+  conceptRadius,
+  type BrainLayout,
+} from '@/lib/brain/layout'
 import { nearness, project, type Pulse, type View } from '@/lib/brain/motion'
 import type { Lit } from '@/lib/brain/selection'
 
@@ -78,6 +86,7 @@ export function paintBrain(context: CanvasRenderingContext2D, state: BrainPaintS
   context.setTransform(dpr, 0, 0, dpr, 0, 0)
   context.clearRect(0, 0, width, height)
 
+  paintRegions(context, state)
   paintOrbits(context, state)
   paintDendrites(context, state)
   paintPulses(context, state)
@@ -97,6 +106,78 @@ function dimmed(lit: Lit | null, isLit: boolean): number {
 /** A layout size in screen pixels, never smaller than `min`. */
 function px(size: number, view: View, min: number): number {
   return Math.max(min, size * view.k)
+}
+
+// ── regions ─────────────────────────────────────────────────────────────────
+
+/** A facet's region at rest, when one of its key concepts is lit, and when not. */
+export const REGION_ALPHA = { rest: 0.07, lit: 0.1, unlit: 0.02 } as const
+/**
+ * A region's sides are feathered: it is laid down in this many passes, each a
+ * little narrower than the last, so the wash ramps up over {@link REGION_FEATHER}
+ * of its extent instead of starting at a ruled line. With straight sides it read
+ * as a slice of a pie — a boundary, which is the one thing it must not be.
+ */
+export const REGION_PASSES = 7
+const REGION_FEATHER = 0.16
+
+/**
+ * Each facet's sector of the map, as a faint wash behind everything.
+ *
+ * The syllabus's grouping was on the map only as angle — which key concepts
+ * are neighbours on the ring — and nobody reads an angle. The wash says "this
+ * part of the map is Metaphysics" at a glance.
+ *
+ * **A region, never a container.** Nesting the concepts inside circles was
+ * considered and refused: a concept's key concept is an assignment hand-checked
+ * at 79% right, which is why the cloud only *leans* a concept toward it
+ * (`ANGULAR_PULL`), and two fifths of a real expert's drawn concepts have no key
+ * concept at all. A circle drawn round them would turn "leans toward" into
+ * "belongs to". So the wash has no outline, fades out at both edges, and stops
+ * short of the orbit, where a source sits between the facets it serves.
+ *
+ * Drawn in layout units under the view's own transform — rotate, squash, zoom,
+ * the order `project` applies them — so it tilts and turns with the map and
+ * needs no sampling of arcs. Monochrome, like the rest: it is `--fg`, faintly.
+ */
+function paintRegions(context: CanvasRenderingContext2D, state: BrainPaintState): void {
+  const { layout, view, colours, lit } = state
+  if (layout.facets.length === 0) return
+
+  context.save()
+  context.translate(view.x, view.y)
+  context.scale(view.k, view.k * view.tilt)
+  context.rotate(view.rotation)
+
+  const wash = context.createRadialGradient(0, 0, REGION_IN, 0, 0, REGION_OUT)
+  wash.addColorStop(0, 'transparent')
+  wash.addColorStop(0.14, colours.fg)
+  wash.addColorStop(0.8, colours.fg)
+  wash.addColorStop(1, 'transparent')
+  context.fillStyle = wash
+
+  for (const facet of layout.facets) {
+    const isLit = lit !== null && facet.members.some((index) => lit.keyConcepts.has(index))
+    const alpha = lit === null ? REGION_ALPHA.rest : isLit ? REGION_ALPHA.lit : REGION_ALPHA.unlit
+    // Each pass carries its share, so where all of them overlap — everywhere
+    // but the feathered sides — they add up to `alpha`.
+    context.globalAlpha = alpha / REGION_PASSES
+    // The feather straddles the sector's edge: half of it reaches into the gap
+    // between facets, half eats into the sector. Capped, so two facets' washes
+    // never meet across a gap however wide the sectors are.
+    const feather = Math.min(0.2, (facet.end - facet.start) * REGION_FEATHER)
+    for (let pass = 0; pass < REGION_PASSES; pass += 1) {
+      const inset = feather * (pass / (REGION_PASSES - 1) - 0.5)
+      context.beginPath()
+      context.arc(0, 0, REGION_OUT, facet.start + inset, facet.end - inset)
+      context.arc(0, 0, REGION_IN, facet.end - inset, facet.start + inset, true)
+      context.closePath()
+      context.fill()
+    }
+  }
+
+  context.restore()
+  context.globalAlpha = 1
 }
 
 // ── orbits ──────────────────────────────────────────────────────────────────

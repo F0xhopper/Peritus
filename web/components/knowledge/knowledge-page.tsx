@@ -1,12 +1,26 @@
 'use client'
 
-import { Download, Network, Plus, X } from 'lucide-react'
+import {
+  Download,
+  Maximize,
+  Minus,
+  Network,
+  PanelRightClose,
+  PanelRightOpen,
+  Plus,
+  X,
+} from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from 'react'
 
 import type { BrainCanvasHandle } from '@/components/brain/brain-canvas'
+import type { GraphCanvasHandle } from '@/components/graph/graph-canvas'
+import { NodeDetail } from '@/components/graph/node-detail'
+import { GraphLimit } from '@/components/knowledge/graph-limit'
+import { KindIcon, MarkGlyph, type MapMark } from '@/components/knowledge/kind-icon'
 import { ListView } from '@/components/knowledge/list-view'
+import { KnowledgeOverview, type OverviewPreview } from '@/components/knowledge/overview'
 import { ConceptPanel, GapPanel, KeyConceptPanel, SourcePanel } from '@/components/knowledge/panels'
 import { AddSourceDialog } from '@/components/ledger/add-source-dialog'
 import { ContextSlot } from '@/components/shell/context-panel'
@@ -21,6 +35,7 @@ import { Segmented } from '@/components/ui/segmented'
 import { useBuildEvents } from '@/hooks/use-build-events'
 import { toast } from 'sonner'
 import { useMediaQuery } from '@/hooks/use-media-query'
+import { useExpertGraph } from '@/hooks/use-expert-graph'
 import { useStartChat } from '@/hooks/use-start-chat'
 import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
@@ -36,9 +51,20 @@ import {
 } from '@/lib/brain/selection'
 import { keyConceptLabel } from '@/lib/brain/paint'
 import { additionSummary, removalCost } from '@/lib/brain/grow'
-import type { CorpusReport, ExpertWithCatalog, MapResponse, SourceSort } from '@/lib/api/types'
+import { describeFilter, litByFilter, parseTier, type SourceFilter } from '@/lib/brain/overview'
+import { parseGraphLimit } from '@/lib/graph/limits'
+import { parseSourceKindId } from '@/lib/source-kind'
+import type {
+  CorpusReport,
+  ExpertWithCatalog,
+  GraphNode,
+  MapResponse,
+  SourceSort,
+} from '@/lib/api/types'
 
-export type KnowledgeView = 'map' | 'list'
+export type KnowledgeView = 'map' | 'flow' | 'graph' | 'list'
+
+const VIEWS: readonly KnowledgeView[] = ['map', 'flow', 'graph', 'list']
 
 /**
  * The map's code — d3, the painter, the worker — is loaded only where the Map
@@ -51,8 +77,24 @@ const BrainCanvas = dynamic(
 )
 
 /**
- * The Knowledge page: one expert's syllabus, concepts and sources, as a Map and
- * as a List (docs/plans/expert-brain.md, phase 5). It replaced the Sources and
+ * The Flow view is client-only for a different reason: its rows are sized by
+ * the pointer and its columns by the container, and the server knows neither.
+ */
+const FlowView = dynamic(
+  () => import('@/components/knowledge/flow-view').then((module) => module.FlowView),
+  { ssr: false }
+)
+
+/** And the Graph view's — d3-force, the quadtree, its worker — only where it is opened. */
+const GraphTab = dynamic(
+  () => import('@/components/knowledge/graph-tab').then((module) => module.GraphTab),
+  { ssr: false }
+)
+
+/**
+ * The Knowledge page: one expert's syllabus, concepts and sources, as a Map, a
+ * Flow and a List, beside an Overview of all three
+ * (docs/plans/expert-brain.md, phase 5). It replaced the Sources and
  * Concepts pages, which did not connect: the concept panel's only bridge to
  * the sources matched a node label against a key concept, which happened for no
  * node in any expert.
@@ -116,7 +158,7 @@ export function KnowledgePage({
   const landingFrom = useRef<MapResponse | null>(null)
 
   const viewParam = params.get('view')
-  const view: KnowledgeView | null = viewParam === 'map' || viewParam === 'list' ? viewParam : null
+  const view: KnowledgeView | null = VIEWS.find((name) => name === viewParam) ?? null
   // Behaviour only — which view a panel's "Show in …" offers, whether a
   // selection pans the map. What renders is decided in CSS below.
   const wideAndFine = useMediaQuery('(min-width: 1024px) and (pointer: fine)')
@@ -125,14 +167,39 @@ export function KnowledgePage({
   const selection = selectionFromParams(params, map)
   const selected = selectionKey(selection)
   const citedParam = params.get('cited')
+  const kindParam = params.get('kind')
+  const tierParam = params.get('tier')
+  const filter = useMemo<SourceFilter>(
+    () => ({ kind: parseSourceKindId(kindParam), tier: parseTier(tierParam) }),
+    [kindParam, tierParam]
+  )
+  // What resting on a row of the Overview would light, before it is chosen.
+  const [preview, setPreview] = useState<OverviewPreview | null>(null)
+  const previewKey = !preview
+    ? null
+    : preview.kind === 'filter'
+      ? `filter:${preview.filter.kind}:${preview.filter.tier}`
+      : selectionKey(preview)
+
+  const citedLit = useMemo(() => {
+    const ids = parseCited(citedParam)
+    return ids.length ? litByCitations(map, ids) : null
+  }, [map, citedParam])
+  // One thing is lit at a time, and the more deliberate act wins: something
+  // selected, then an answer's citations, then what the pointer rests on in the
+  // Overview, then the standing filter.
   const lit = useMemo(() => {
     if (selection) return litBy(map, selection)
-    const cited = parseCited(citedParam)
-    return cited.length ? litByCitations(map, cited) : null
-    // `selected` is the selection's identity; the object is new every render.
+    if (citedLit) return citedLit
+    if (preview) {
+      return preview.kind === 'filter' ? litByFilter(map, preview.filter) : litBy(map, preview)
+    }
+    return litByFilter(map, filter)
+    // `selected` and `previewKey` are identities; the objects are new every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [map, selected, citedParam])
-  const cited = !selection && citedParam !== null && lit !== null
+  }, [map, selected, citedLit, previewKey, filter])
+  const cited = !selection && citedLit !== null
+  const [overviewOpen, setOverviewOpen] = useState(true)
 
   // ── the URL ───────────────────────────────────────────────────────────────
 
@@ -162,14 +229,54 @@ export function KnowledgePage({
   }
 
   const select = (next: BrainSelection | null, options: { focus?: boolean } = {}) => {
+    // The row that was being previewed may be about to leave the page — at `xl`
+    // the Overview gives its column to the panel — and a row that unmounts under
+    // the pointer never says the pointer left.
+    setPreview(null)
+    // One thing is open at a time: a node of the Graph, or a selection.
+    if (next) setGraphNode(null)
     writeParams({ ...selectionParams(next, map), cited: null })
     if (next) {
       openContext()
       if (options.focus && shown === 'map') canvas.current?.focus(next)
+      // A concept chosen from the search or a panel is centred on the Graph too,
+      // where the Graph draws it.
+      if (shown === 'graph' && next.kind === 'concept') graphCanvas.current?.focusNode(next.id)
     }
   }
 
   const setView = (next: KnowledgeView) => writeParams({ view: next }, 'push')
+
+  // ── the graph ─────────────────────────────────────────────────────────────
+
+  // Fetched when the Graph view is first opened, never before: up to fifteen
+  // hundred nodes that the other three views do not draw.
+  const limit = parseGraphLimit(params.get('limit'))
+  const graphState = useExpertGraph(expert.name, limit, view === 'graph')
+  const graphCanvas = useRef<GraphCanvasHandle | null>(null)
+  /**
+   * The Graph's own selection, beside the page's. A node there is a concept
+   * **or a claim**, and the page's selection — and the map's concept endpoint
+   * behind its panel — knows only concepts. So the Graph keeps its original
+   * panel (`NodeDetail`), and whichever of the two was opened last is the one
+   * that shows.
+   */
+  const [graphNode, setGraphNode] = useState<GraphNode | null>(null)
+  const selectGraphNode = (node: GraphNode | null, options: { focus?: boolean } = {}) => {
+    setGraphNode(node)
+    if (!node) return
+    setPreview(null)
+    writeParams({ ...selectionParams(null, map), cited: null })
+    openContext()
+    if (options.focus) graphCanvas.current?.focusNode(node.id)
+  }
+  // The concepts the page has lit, which are the Graph's node ids too.
+  const graphLit = lit?.concepts ?? null
+
+  const setFilter = (next: SourceFilter) => {
+    setPreview(null)
+    writeParams({ kind: next.kind, tier: next.tier })
+  }
 
   // The map the canvas draws: the expert's, plus a source still being read.
   const drawnMap = useMemo<MapResponse>(() => {
@@ -204,46 +311,67 @@ export function KnowledgePage({
 
   // ── search ────────────────────────────────────────────────────────────────
 
+  const graphNodes = shown === 'graph' ? (graphState.graph?.nodes ?? null) : null
   const findMatches = useCallback(
-    (text: string): { selection: BrainSelection; label: string; kind: string }[] => {
+    (text: string): SearchMatch[] => {
       const needle = text.trim().toLowerCase()
       if (!needle) return []
       const keys = map.syllabus.key_concepts
         .filter((k) => k.label.toLowerCase().includes(needle))
         .slice(0, 3)
         .map((k) => ({
+          key: `key:${k.index}`,
           selection: { kind: 'keyConcept', index: k.index } as BrainSelection,
           label: k.label,
           kind: 'Key concept',
         }))
-      const concepts = map.concepts
-        .filter((c) => c.label.toLowerCase().includes(needle))
-        .sort((a, b) => b.source_ids.length - a.source_ids.length)
-        .slice(0, 5)
-        .map((c) => ({
-          selection: { kind: 'concept', id: c.id } as BrainSelection,
-          label: c.label,
-          kind: 'Concept',
-        }))
+      // On the Graph the concepts are the Graph's own nodes — more of them than
+      // the Map draws, and claims among them — and choosing one opens it there.
+      const concepts: SearchMatch[] = graphNodes
+        ? graphNodes
+            .filter((node) => node.label.toLowerCase().includes(needle))
+            .slice(0, 6)
+            .map((node) => ({
+              key: `graph:${node.id}`,
+              selection: { kind: 'concept', id: node.id } as BrainSelection,
+              label: node.label,
+              kind: node.node_type === 'claim' ? 'Claim' : 'Concept',
+              node,
+            }))
+        : map.concepts
+            .filter((c) => c.label.toLowerCase().includes(needle))
+            .sort((a, b) => b.source_ids.length - a.source_ids.length)
+            .slice(0, 5)
+            .map((c) => ({
+              key: `concept:${c.id}`,
+              selection: { kind: 'concept', id: c.id } as BrainSelection,
+              label: c.label,
+              kind: 'Concept',
+            }))
       const sources = map.sources
         .filter((s) => `${s.title} ${s.author ?? ''}`.toLowerCase().includes(needle))
         .slice(0, 4)
         .map((s) => ({
+          key: `source:${s.id}`,
           selection: { kind: 'source', id: s.id } as BrainSelection,
           label: s.title,
           kind: 'Source',
+          type: s.kind,
         }))
       return [...keys, ...concepts, ...sources]
     },
-    [map]
+    [map, graphNodes]
   )
   const matches = useMemo(() => findMatches(query), [findMatches, query])
   const [searchOpen, setSearchOpen] = useState(false)
 
-  const choose = (next: BrainSelection) => {
-    select(next, { focus: true })
+  const choose = (match: SearchMatch) => {
+    if (match.node) selectGraphNode(match.node, { focus: true })
+    else select(match.selection, { focus: true })
     setSearchOpen(false)
-    if (shown === 'map') setQuery('')
+    // In the List the text goes on narrowing the rows; elsewhere it has done
+    // its job.
+    if (shown !== 'list') setQuery('')
   }
 
   // ── panel ─────────────────────────────────────────────────────────────────
@@ -292,7 +420,7 @@ export function KnowledgePage({
       <KeyConceptPanel
         index={panelFor.index}
         map={map}
-        view={shown}
+        view={shown === 'list' ? 'list' : 'map'}
         asking={startingChat}
         onAsk={ask}
         onShowInList={() => writeParams({ view: 'list' }, 'push')}
@@ -334,6 +462,39 @@ export function KnowledgePage({
     )
   ) : null
 
+  const graphPanel =
+    shown === 'graph' && graphNode && graphState.graph ? (
+      <NodeDetail
+        node={graphNode}
+        edges={graphState.graph.edges}
+        nodes={graphState.graph.nodes}
+        slug={expert.name}
+        keyConcepts={expert.key_concepts}
+        onFocus={(node) => selectGraphNode(node, { focus: true })}
+        onAsk={ask}
+        asking={startingChat}
+        onShowOnMap={
+          map.concepts.some((concept) => concept.id === graphNode.id)
+            ? () => {
+                const id = graphNode.id
+                writeParams({ view: 'map' }, 'push')
+                select({ kind: 'concept', id })
+                canvas.current?.focus({ kind: 'concept', id })
+              }
+            : null
+        }
+        limitControl={
+          <GraphLimit
+            id="graph-limit-sheet"
+            limit={limit}
+            pending={graphState.pending}
+            onLimit={(next) => writeParams({ limit: String(next) })}
+            className="bg-transparent px-0 lg:hidden"
+          />
+        }
+      />
+    ) : null
+
   const panelTitle =
     selection?.kind === 'source'
       ? 'Source'
@@ -345,10 +506,23 @@ export function KnowledgePage({
 
   // ── layout ────────────────────────────────────────────────────────────────
 
-  const mapClass =
-    view === 'map' ? 'block' : view === 'list' ? 'hidden' : 'hidden pointer-fine:lg:block'
-  const listClass =
-    view === 'list' ? 'block' : view === 'map' ? 'hidden' : 'block pointer-fine:lg:hidden'
+  const mapClass = view === 'map' ? 'block' : view ? 'hidden' : 'hidden pointer-fine:lg:block'
+  const listClass = view === 'list' ? 'block' : view ? 'hidden' : 'block pointer-fine:lg:hidden'
+  // Nothing found yet: no syllabus, no sources, no concepts.
+  const nothingYet = !map.computed && map.sources.length === 0
+  const hasOverview = map.sources.length > 0 || map.syllabus.key_concepts.length > 0
+  const filterLabel = describeFilter(filter)
+  const overview = (compact: boolean) => (
+    <KnowledgeOverview
+      map={map}
+      selection={selection}
+      filter={filter}
+      compact={compact}
+      onSelect={(next) => select(next, { focus: true })}
+      onFilter={setFilter}
+      onPreview={compact ? undefined : setPreview}
+    />
+  )
   const conceptFilter =
     selection?.kind === 'keyConcept'
       ? (map.syllabus.key_concepts[selection.index]?.label ?? null)
@@ -407,7 +581,10 @@ export function KnowledgePage({
         <h1 className="sr-only">Knowledge</h1>
         <ViewToggle view={view} onChange={setView} />
 
-        <div className="relative order-last w-full sm:order-none sm:w-64">
+        {/* It gives way before the row wraps: with the panel open beside it the
+            toolbar is 760px, and a second row pushed the map down on every
+            selection. */}
+        <div className="relative order-last w-full sm:order-none sm:w-auto sm:max-w-64 sm:min-w-40 sm:flex-1">
           <Input
             value={query}
             onChange={(event) => {
@@ -425,7 +602,7 @@ export function KnowledgePage({
               // the previous query's results.
               if (event.key === 'Enter') {
                 const first = findMatches(event.currentTarget.value)[0]
-                if (first) choose(first.selection)
+                if (first) choose(first)
               }
               if (event.key === 'Escape') setSearchOpen(false)
             }}
@@ -437,13 +614,21 @@ export function KnowledgePage({
           {searchOpen && matches.length > 0 && (
             <ul className="absolute top-full right-0 left-0 z-20 mt-1 overflow-hidden rounded-card border border-border bg-raised shadow-lg shadow-black/25">
               {matches.map((match) => (
-                <li key={selectionKey(match.selection)}>
+                <li key={match.key}>
                   <button
                     type="button"
                     onMouseDown={(event) => event.preventDefault()}
-                    onClick={() => choose(match.selection)}
+                    onClick={() => choose(match)}
                     className="flex h-(--row-h) w-full items-center gap-2 px-2 text-left text-sm text-fg-2 transition-colors duration-(--dur-1) hover:bg-border hover:text-fg"
                   >
+                    {match.selection.kind === 'source' ? (
+                      <KindIcon type={match.type} className="text-fg-3" />
+                    ) : (
+                      <MarkGlyph
+                        mark={match.selection.kind === 'keyConcept' ? 'keyConcept' : 'concept'}
+                        className="mx-px text-fg-3"
+                      />
+                    )}
                     <span className="min-w-0 flex-1 truncate">{match.label}</span>
                     <span className="shrink-0 text-xs text-fg-3">{match.kind}</span>
                   </button>
@@ -467,15 +652,30 @@ export function KnowledgePage({
           </Button>
         )}
 
+        {filterLabel && (
+          <span className="inline-flex h-(--row-h) items-center gap-1 rounded-row bg-expert-soft pr-1 pl-2.5 text-xs text-expert">
+            {filter.kind && <KindIcon kind={filter.kind} className="size-3" />}
+            {filterLabel}
+            <button
+              type="button"
+              onClick={() => setFilter({ kind: null, tier: null })}
+              aria-label="Show every source"
+              className="grid size-(--icon-btn-sm) place-items-center rounded-chip transition-colors duration-(--dur-1) hover:bg-expert/20 pointer-fine:size-5"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        )}
+
         <p className="ml-auto text-xs text-fg-3">
           {formatNumber(totalSources)} {totalSources === 1 ? 'source' : 'sources'}
           {map.computed && map.totals.concepts !== null && (
             <span
               className={
-                view === 'map'
-                  ? undefined
-                  : view === 'list'
-                    ? 'hidden'
+                view === 'list' || view === 'graph'
+                  ? 'hidden'
+                  : view
+                    ? undefined
                     : 'hidden pointer-fine:lg:inline'
               }
             >
@@ -485,6 +685,26 @@ export function KnowledgePage({
             </span>
           )}
         </p>
+
+        {hasOverview && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label={overviewOpen ? 'Hide the overview' : 'Show the overview'}
+            aria-pressed={overviewOpen}
+            onClick={() => {
+              setPreview(null)
+              setOverviewOpen((open) => !open)
+            }}
+            className="hidden lg:inline-flex"
+          >
+            {overviewOpen ? (
+              <PanelRightClose className="size-3.5" />
+            ) : (
+              <PanelRightOpen className="size-3.5" />
+            )}
+          </Button>
+        )}
       </div>
 
       {ingest && (
@@ -513,91 +733,171 @@ export function KnowledgePage({
         </div>
       )}
 
-      <div className={cn('relative min-h-0 flex-1', mapClass)}>
-        {view === 'list' ? null : !map.computed && map.sources.length === 0 ? (
-          <div className="grid h-full place-items-center p-4">
-            <div className="w-full max-w-sm text-center">
-              <Empty icon={Network}>
-                Nothing to map yet. The syllabus and the sources appear here as the build finds
-                them, and concepts once they are extracted.
-              </Empty>
-              <Button
-                variant="outline"
-                size="md"
-                className="mt-3"
-                onClick={() => router.push(`/experts/${expert.name}/build`)}
-              >
-                Watch the build
-              </Button>
-            </div>
+      <div className="flex min-h-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <div className={cn('relative min-h-0 flex-1', mapClass)}>
+            {/* Only where the Map can show: asked for, or the CSS-decided default. */}
+            {view !== null && view !== 'map' ? null : nothingYet ? (
+              <NothingYet onWatch={() => router.push(`/experts/${expert.name}/build`)} />
+            ) : (
+              <>
+                <BrainCanvas
+                  map={drawnMap}
+                  onDropFile={owner ? (file) => openAdd({ file }) : undefined}
+                  expert={expert}
+                  selection={selection}
+                  lit={lit}
+                  cited={cited}
+                  onSelect={(next) => select(next)}
+                  handleRef={canvas}
+                />
+                {!map.computed && (
+                  <p className="pointer-events-none absolute right-3 bottom-14 left-3 mx-auto w-fit max-w-full rounded-row bg-panel/90 px-2 py-1 text-center text-xs text-fg-3">
+                    Concepts are still being extracted. This expert may already be answering
+                    questions.
+                  </p>
+                )}
+                {cited && <CitedChip onClear={() => writeParams({ cited: null })} />}
+                {expandedLabel && (
+                  <div className="absolute top-3 right-3 flex items-center gap-1 rounded-row bg-panel/90 py-1 pr-1 pl-2 text-xs text-fg-2">
+                    Every concept in {expandedLabel}
+                    <button
+                      type="button"
+                      aria-label="Show the shared concepts only"
+                      onClick={() => navigate({ expand: null })}
+                      className="grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3 hover:bg-raised hover:text-fg"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </div>
+                )}
+                <MapLegend disputed={map.concepts.some((concept) => concept.disputes > 0)} />
+                <div className="absolute right-3 bottom-3 flex items-center gap-0.5 rounded-row bg-panel/90 p-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Zoom out"
+                    onClick={() => canvas.current?.zoomBy(1 / 1.5)}
+                  >
+                    <Minus className="size-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Zoom in"
+                    onClick={() => canvas.current?.zoomBy(1.5)}
+                  >
+                    <Plus className="size-3.5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Fit the whole map"
+                    onClick={() => canvas.current?.reset()}
+                  >
+                    <Maximize className="size-3.5" />
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
-        ) : (
-          <>
-            <BrainCanvas
-              map={drawnMap}
-              onDropFile={owner ? (file) => openAdd({ file }) : undefined}
-              expert={expert}
-              selection={selection}
-              lit={lit}
-              cited={cited}
-              onSelect={(next) => select(next)}
-              handleRef={canvas}
+
+          {view === 'graph' && (
+            <div className="relative min-h-0 flex-1">
+              <GraphTab
+                graph={graphState.graph}
+                error={graphState.error}
+                pending={graphState.pending}
+                limit={limit}
+                selectedId={graphNode?.id ?? null}
+                lit={graphLit}
+                onLimit={(next) => writeParams({ limit: String(next) })}
+                onSelect={(node) => selectGraphNode(node)}
+                onWatchBuild={() => router.push(`/experts/${expert.name}/build`)}
+                handleRef={graphCanvas}
+              />
+            </div>
+          )}
+
+          {view === 'flow' && (
+            <div className="relative min-h-0 flex-1">
+              {nothingYet ? (
+                <NothingYet onWatch={() => router.push(`/experts/${expert.name}/build`)} />
+              ) : (
+                <>
+                  <FlowView
+                    map={map}
+                    selection={selection}
+                    lit={lit}
+                    onSelect={(next) => select(next)}
+                  />
+                  {cited && <CitedChip bottom onClear={() => writeParams({ cited: null })} />}
+                </>
+              )}
+            </div>
+          )}
+
+          <div className={cn('scroll-col min-h-0 flex-1', listClass)}>
+            {/* Below `lg` there is no column to stand in, so the Overview folds
+                above the sources it summarises. */}
+            {hasOverview && (
+              <div className="px-3 pt-3 md:px-4 md:pt-4 lg:hidden">
+                <div className="rounded-card bg-panel p-3">{overview(true)}</div>
+              </div>
+            )}
+            <ListView
+              report={report}
+              sort={sort}
+              page={page}
+              pageSize={pageSize}
+              conceptFilter={conceptFilter}
+              sourceFilter={filter}
+              filter={shown === 'list' ? query : ''}
+              selectedId={selection?.kind === 'source' ? selection.id : null}
+              pending={pending}
+              onSelect={(source) => select({ kind: 'source', id: source.id })}
+              onClearConcept={() => writeParams({ concept: null })}
+              onNavigate={navigate}
             />
-            {!map.computed && (
-              <p className="pointer-events-none absolute right-3 bottom-3 left-3 mx-auto w-fit max-w-full rounded-row bg-panel/90 px-2 py-1 text-center text-xs text-fg-3">
-                Concepts are still being extracted. This expert may already be answering questions.
-              </p>
+          </div>
+        </div>
+
+        {/* The Overview stands where a selection's panel opens. From `xl` that
+            panel is an inline column of the same width, so the two swap and
+            the view between them keeps its size; at `lg` the panel is an
+            overlay and simply covers it. */}
+        {hasOverview && overviewOpen && (
+          <div
+            className={cn(
+              'scroll-col hidden w-72 shrink-0 bg-panel p-3 lg:block xl:w-context',
+              (panel || graphPanel) && 'xl:hidden'
             )}
-            {cited && (
-              <div className="absolute top-3 left-3 flex items-center gap-1 rounded-row bg-panel/90 py-1 pr-1 pl-2 text-xs text-fg-2">
-                The sources one answer cited
-                <button
-                  type="button"
-                  aria-label="Stop showing the answer's sources"
-                  onClick={() => writeParams({ cited: null })}
-                  className="grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3 hover:bg-raised hover:text-fg"
-                >
-                  <X className="size-3" />
-                </button>
-              </div>
-            )}
-            {expandedLabel && (
-              <div className="absolute top-3 right-3 flex items-center gap-1 rounded-row bg-panel/90 py-1 pr-1 pl-2 text-xs text-fg-2">
-                Every concept in {expandedLabel}
-                <button
-                  type="button"
-                  aria-label="Show the shared concepts only"
-                  onClick={() => navigate({ expand: null })}
-                  className="grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3 hover:bg-raised hover:text-fg"
-                >
-                  <X className="size-3" />
-                </button>
-              </div>
-            )}
-          </>
+          >
+            {overview(false)}
+          </div>
         )}
       </div>
 
-      <div className={cn('scroll-col min-h-0 flex-1', listClass)}>
-        <ListView
-          report={report}
-          sort={sort}
-          page={page}
-          pageSize={pageSize}
-          conceptFilter={conceptFilter}
-          filter={shown === 'list' ? query : ''}
-          selectedId={selection?.kind === 'source' ? selection.id : null}
-          pending={pending}
-          onSelect={(source) => select({ kind: 'source', id: source.id })}
-          onClearConcept={() => writeParams({ concept: null })}
-          onNavigate={navigate}
-        />
-      </div>
-
-      {panel && (
-        <ContextSlot title={panelTitle} snapPoints={[0.45, 0.92]} open onClose={() => select(null)}>
-          {panel}
+      {graphPanel ? (
+        <ContextSlot
+          title={graphNode?.node_type === 'claim' ? 'Claim' : 'Concept'}
+          snapPoints={[0.4, 0.92]}
+          open
+          onClose={() => setGraphNode(null)}
+        >
+          {graphPanel}
         </ContextSlot>
+      ) : (
+        panel && (
+          <ContextSlot
+            title={panelTitle}
+            snapPoints={[0.45, 0.92]}
+            open
+            onClose={() => select(null)}
+          >
+            {panel}
+          </ContextSlot>
+        )
       )}
 
       {owner && (
@@ -613,8 +913,82 @@ export function KnowledgePage({
   )
 }
 
+function NothingYet({ onWatch }: { onWatch: () => void }) {
+  return (
+    <div className="grid h-full place-items-center p-4">
+      <div className="w-full max-w-sm text-center">
+        <Empty icon={Network}>
+          Nothing to map yet. The syllabus and the sources appear here as the build finds them, and
+          concepts once they are extracted.
+        </Empty>
+        <Button variant="outline" size="md" className="mt-3" onClick={onWatch}>
+          Watch the build
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function CitedChip({ onClear, bottom = false }: { onClear: () => void; bottom?: boolean }) {
+  return (
+    <div
+      className={cn(
+        'absolute left-3 flex items-center gap-1 rounded-row bg-panel/90 py-1 pr-1 pl-2 text-xs text-fg-2',
+        // The Flow's column titles are pinned to its top edge.
+        bottom ? 'bottom-3' : 'top-3'
+      )}
+    >
+      The sources one answer cited
+      <button
+        type="button"
+        aria-label="Stop showing the answer's sources"
+        onClick={onClear}
+        className="grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3 hover:bg-raised hover:text-fg"
+      >
+        <X className="size-3" />
+      </button>
+    </div>
+  )
+}
+
 /**
- * Map | List. With no `?view=` the active option depends on the device, which
+ * What the map's marks mean. It used to be learned by clicking: nothing on the
+ * page said that a square was a source, that a filled one was a primary text,
+ * or that the one orange ring was a dispute. Hidden below `sm`, where the map
+ * is a secondary view and the row would cover a third of it.
+ */
+const LEGEND: { mark: MapMark; label: string }[] = [
+  { mark: 'keyConcept', label: 'Key concept' },
+  { mark: 'concept', label: 'Concept' },
+  { mark: 'primary', label: 'Primary source' },
+  { mark: 'secondary', label: 'Secondary' },
+  { mark: 'gap', label: 'Missing text' },
+]
+
+function MapLegend({ disputed }: { disputed: boolean }) {
+  return (
+    <ul
+      aria-label="What the map's marks mean"
+      className="pointer-events-none absolute bottom-3 left-3 hidden max-w-[calc(100%-9rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-row bg-panel/90 px-2 py-1.5 text-label text-fg-3 sm:flex"
+    >
+      {LEGEND.map((item) => (
+        <li key={item.mark} className="inline-flex items-center gap-1">
+          <MarkGlyph mark={item.mark} className="size-2.5" />
+          {item.label}
+        </li>
+      ))}
+      {disputed && (
+        <li className="inline-flex items-center gap-1">
+          <MarkGlyph mark="disputed" className="size-2.5" />
+          In dispute
+        </li>
+      )}
+    </ul>
+  )
+}
+
+/**
+ * Map | Flow | Graph | List. With no `?view=` the active option depends on the device, which
  * only CSS knows at first paint — so both forms are rendered and one is hidden.
  */
 function ViewToggle({
@@ -626,6 +1000,8 @@ function ViewToggle({
 }) {
   const options = [
     { value: 'map' as const, label: 'Map' },
+    { value: 'flow' as const, label: 'Flow' },
+    { value: 'graph' as const, label: 'Graph' },
     { value: 'list' as const, label: 'List' },
   ]
   if (view) return <Segmented label="View" options={options} value={view} onChange={onChange} />
@@ -650,6 +1026,18 @@ function ViewToggle({
 }
 
 type AddPrefill = { title?: string; context?: string; file?: File | null }
+
+/** One row of the search's results. */
+interface SearchMatch {
+  key: string
+  selection: BrainSelection
+  label: string
+  kind: string
+  /** A source's fetcher key, for its icon. */
+  type?: string
+  /** A node of the Graph: chosen, it opens there rather than as a selection. */
+  node?: GraphNode
+}
 
 /**
  * Tails one ingest job. Keyed by the job, because `useBuildEvents` stops for

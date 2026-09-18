@@ -19,6 +19,40 @@ export async function fixture(name) {
 }
 
 /**
+ * The graph fixture blown up to the size a real corpus reaches.
+ *
+ * The captured fixture has six concepts. A real expert has a thousand, and the
+ * Graph view caps at four hundred — a scale at which the layout worker, the
+ * quadtree and the paint loop behave differently from six nodes in a row. The
+ * shape is deterministic (a ring with chords) so a test can assert on it, and
+ * the first six nodes stay exactly as the fixture has them, so every existing
+ * assertion about labels and contradictions still holds.
+ */
+export function bigGraph(base) {
+  const NODES = 400
+  const nodes = [...base.nodes]
+  for (let i = nodes.length; i < NODES; i += 1) {
+    nodes.push({
+      id: 1000 + i,
+      label: `synthetic concept ${i}`,
+      node_type: 'concept',
+      degree: 1 + (i % 7),
+    })
+  }
+  const edges = [...base.edges]
+  for (let i = 0; i < NODES; i += 1) {
+    edges.push({
+      id: 5000 + i,
+      source: nodes[i].id,
+      target: nodes[(i + 1) % NODES].id,
+      edge_type: 'related_to',
+      evidence: 1 + (i % 3),
+    })
+  }
+  return { ...base, nodes, edges, total_nodes: 1125, total_edges: edges.length }
+}
+
+/**
  * The map fixture blown up to the size a real expert reaches.
  *
  * The captured fixture has twenty-two concepts and ten sources. Thomism draws

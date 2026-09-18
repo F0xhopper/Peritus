@@ -4,6 +4,7 @@ import { BookOpen, Expand, List, Map as MapIcon, MessageSquare, Plus } from 'luc
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 
+import { KindIcon, MarkGlyph } from '@/components/knowledge/kind-icon'
 import { RowDetail } from '@/components/ledger/row-detail'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -67,10 +68,13 @@ function RowButton({
   onClick,
   children,
   meta,
+  icon,
 }: {
   onClick: () => void
   children: React.ReactNode
   meta?: React.ReactNode
+  /** What the row leads to, as a mark: a source's kind, a concept's dot. */
+  icon?: React.ReactNode
 }) {
   return (
     <button
@@ -78,6 +82,7 @@ function RowButton({
       onClick={onClick}
       className="flex min-h-(--row-h) w-full items-center gap-2 rounded-row px-1 text-left text-xs text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg pointer-fine:min-h-7"
     >
+      {icon}
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {meta !== undefined && <span className="shrink-0 text-fg-3">{meta}</span>}
     </button>
@@ -136,7 +141,8 @@ export function SourcePanel({
         mapSource && (
           <div>
             <h3 className="font-medium text-fg">{mapSource.title}</h3>
-            <p className="mt-0.5 text-xs text-fg-3">
+            <p className="mt-0.5 flex items-center gap-1.5 text-xs text-fg-3">
+              <KindIcon type={mapSource.kind} className="size-3" />
               {[
                 mapSource.author,
                 sourceKind(mapSource.kind),
@@ -156,6 +162,7 @@ export function SourcePanel({
               key={tag.key_concept}
               onClick={() => onSelect({ kind: 'keyConcept', index: tag.key_concept })}
               meta={DEPTH_WORD[tag.depth]}
+              icon={<MarkGlyph mark="keyConcept" className="size-2.5 text-fg-3" />}
             >
               {map.syllabus.key_concepts[tag.key_concept]?.label}
             </RowButton>
@@ -295,6 +302,12 @@ export function ConceptPanel({
                 key={source.id}
                 onClick={() => onSelect({ kind: 'source', id: source.id })}
                 meta={`${source.passages} ${source.passages === 1 ? 'passage' : 'passages'}`}
+                icon={
+                  <KindIcon
+                    type={map?.sources.find((s) => s.id === source.id)?.kind}
+                    className="size-3 text-fg-3"
+                  />
+                }
               >
                 {source.title}
               </RowButton>

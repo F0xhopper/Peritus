@@ -5,6 +5,8 @@ import chatEvents from './fixtures/chat-events.json' with { type: 'json' }
 import corpusReport from './fixtures/corpus-report.json' with { type: 'json' }
 import denials from './fixtures/denial.json' with { type: 'json' }
 import expert from './fixtures/expert.json' with { type: 'json' }
+import graph from './fixtures/graph.json' with { type: 'json' }
+import graphPending from './fixtures/graph-not-computed.json' with { type: 'json' }
 import expertMap from './fixtures/map.json' with { type: 'json' }
 import mapConcept from './fixtures/map-concept.json' with { type: 'json' }
 import mapPending from './fixtures/map-not-computed.json' with { type: 'json' }
@@ -16,6 +18,7 @@ import {
   type CreditState,
   type EntitlementDenial,
   type ExpertWithCatalog,
+  type GraphResponse,
   type MapConceptDetail,
   type MapResponse,
   type ScreeningFlow,
@@ -39,6 +42,8 @@ import {
 const expertFixture: ExpertWithCatalog = expert as ExpertWithCatalog
 const billingFixture: CreditState = billing as CreditState
 const reportFixture: CorpusReport = corpusReport as CorpusReport
+const graphFixture: GraphResponse = graph as GraphResponse
+const graphPendingFixture: GraphResponse = graphPending as GraphResponse
 const mapFixture: MapResponse = expertMap as MapResponse
 const mapPendingFixture: MapResponse = mapPending as MapResponse
 const mapConceptFixture: MapConceptDetail = mapConcept as MapConceptDetail
@@ -283,6 +288,50 @@ describe('chat events', () => {
     }
     for (const passage of audit.passages) {
       expect(['cited', 'considered']).toContain(passage.disposition)
+    }
+  })
+})
+
+describe('graph', () => {
+  it('gives every edge endpoints that exist among the nodes', () => {
+    const ids = new Set(graphFixture.nodes.map((node) => node.id))
+    for (const edge of graphFixture.edges) {
+      expect(ids.has(edge.source), `edge ${edge.id} source`).toBe(true)
+      expect(ids.has(edge.target), `edge ${edge.id} target`).toBe(true)
+    }
+  })
+
+  it('reports truncation against the true total', () => {
+    expect(graphFixture.truncated).toBe(true)
+    expect(graphFixture.total_nodes).toBeGreaterThan(graphFixture.nodes.length)
+  })
+
+  it('puts claims, not concepts, on both ends of a contradiction', () => {
+    // Two concepts can differ; only two propositions can be incompatible.
+    const byId = new Map(graphFixture.nodes.map((node) => [node.id, node]))
+    for (const edge of graphFixture.edges.filter((e) => e.edge_type === 'contradicts')) {
+      expect(byId.get(edge.source)!.node_type).toBe('claim')
+      expect(byId.get(edge.target)!.node_type).toBe('claim')
+    }
+  })
+
+  it('pairs computed:false with an empty graph, which means "not yet"', () => {
+    expect(graphPendingFixture.computed).toBe(false)
+    expect(graphPendingFixture.nodes).toEqual([])
+    // Rendering this as "no concepts found" would be the worst available lie.
+    expect(graphPendingFixture.edges).toEqual([])
+  })
+
+  it('names its concepts by the ids the map uses, which is what lets the page light them', () => {
+    // The Graph view dims whatever the Knowledge page has not lit, by id. That
+    // only means anything if a concept is the same row in both payloads.
+    const onMap = new Set(mapFixture.concepts.map((concept) => concept.id))
+    const concepts = graphFixture.nodes.filter((node) => node.node_type === 'concept')
+    expect(concepts.length).toBeGreaterThan(0)
+    for (const node of concepts) expect(onMap.has(node.id), node.label).toBe(true)
+    // A claim is on the graph only: no other view of the page draws one.
+    for (const node of graphFixture.nodes.filter((n) => n.node_type === 'claim')) {
+      expect(onMap.has(node.id)).toBe(false)
     }
   })
 })

@@ -42,6 +42,72 @@ export function sourceKind(type: string | null | undefined): string {
   return KIND[type] ?? type.replace(/[_-]+/g, ' ').replace(/^./, (c) => c.toUpperCase())
 }
 
+/**
+ * The kind as an identity, for anything that groups or filters by it.
+ *
+ * Several fetchers are one kind to a reader — OpenAlex and PubMed both find
+ * papers, Exa and the web search both find web pages — so a filter or an icon
+ * keyed on the fetcher would show "Web page" twice. This is the id the
+ * Knowledge page's `?kind=` carries and the icon is chosen by; `other` is any
+ * fetcher added to the API before it is added here.
+ */
+export type SourceKindId =
+  | 'paper'
+  | 'preprint'
+  | 'encyclopedia'
+  | 'web'
+  | 'discussion'
+  | 'video'
+  | 'book'
+  | 'pdf'
+  | 'expert'
+  | 'upload'
+  | 'other'
+
+const KIND_ID: Record<string, SourceKindId> = {
+  openalex: 'paper',
+  pubmed: 'paper',
+  arxiv: 'preprint',
+  wikipedia: 'encyclopedia',
+  exa: 'web',
+  web: 'web',
+  reddit: 'discussion',
+  youtube: 'video',
+  gutenberg: 'book',
+  pdf: 'pdf',
+  thought_leader: 'expert',
+  upload: 'upload',
+}
+
+const KIND_LABEL: Record<SourceKindId, string> = {
+  paper: 'Paper',
+  preprint: 'Preprint',
+  encyclopedia: 'Encyclopedia',
+  web: 'Web page',
+  discussion: 'Discussion',
+  video: 'Video',
+  book: 'Book',
+  pdf: 'PDF',
+  expert: 'Expert writing',
+  upload: 'Your upload',
+  other: 'Other',
+}
+
+export function sourceKindId(type: string | null | undefined): SourceKindId {
+  return (type && KIND_ID[type]) || 'other'
+}
+
+export function sourceKindLabel(id: SourceKindId): string {
+  return KIND_LABEL[id]
+}
+
+/** `?kind=` from a URL someone may have edited: a known id, or nothing. */
+export function parseSourceKindId(raw: string | null | undefined): SourceKindId | null {
+  // `hasOwn`, not `in`: "toString" is *in* every object, and `?kind=toString`
+  // would have been a kind.
+  return raw && Object.hasOwn(KIND_LABEL, raw) ? (raw as SourceKindId) : null
+}
+
 export function sourceProvider(type: string | null | undefined): string {
   if (!type) return '—'
   return PROVIDER[type] ?? sourceKind(type)

@@ -78,6 +78,10 @@ export interface BrainCanvasHandle {
   focus: (selection: BrainSelection) => void
   /** Flatten and hold still — a keypress in the search counts as engaging. */
   engage: () => void
+  /** Zoom about the centre of the view: the page's + and − buttons. */
+  zoomBy: (factor: number) => void
+  /** Back to the whole map, centred — and the view is the map's again to refit. */
+  reset: () => void
 }
 
 /** How long before idle firing picks another dendrite. */
@@ -567,8 +571,26 @@ export function BrainCanvas({
         focused.current = { x, y, k }
         centreOn(focused.current, state.reducedMotion ? 0 : 320)
       },
+      zoomBy: (factor: number) => {
+        const canvas = canvasRef.current
+        const behaviour = zoomBehaviour.current
+        if (!canvas || !behaviour) return
+        engageNow()
+        // The reader's own zoom, like a wheel: a resize no longer refits it.
+        userMoved.current = true
+        focused.current = null
+        const target = select(canvas)
+        if (live.current.reducedMotion) target.call(behaviour.scaleBy, factor)
+        else target.transition().duration(200).call(behaviour.scaleBy, factor)
+      },
+      reset: () => {
+        engageNow()
+        userMoved.current = false
+        focused.current = null
+        fit()
+      },
     }),
-    [engageNow, centreOn]
+    [engageNow, centreOn, fit]
   )
 
   return (

@@ -86,9 +86,8 @@ These come from `web-production.md` and are enforced in code, not in copy.
   A hidden, occluded or mid-view-transition document simply does not run the
   callback, so `if (frame.current) return` wedged the graph canvas permanently:
   the simulation kept ticking, every repaint request was swallowed, and the page
-  showed a live node count over an empty canvas. `brain-canvas.tsx` (which
-  replaced the graph canvas) cancels and re-arms, and repaints on
-  `visibilitychange`.
+  showed a live node count over an empty canvas. `graph-canvas.tsx` and
+  `brain-canvas.tsx` both cancel and re-arm, and repaint on `visibilitychange`.
 - **Adjust state during render, not in an effect**, when it has to follow a prop
   (the dialogs that reset on open). `react-hooks/set-state-in-effect` catches the
   wrong form.
@@ -110,6 +109,12 @@ These come from `web-production.md` and are enforced in code, not in copy.
   the document with its built-in "This page couldn't load" screen. The guard
   swallows exactly that error, and is installed at module scope because the
   router captures `replaceState` before any effect of ours could run.
+- **A font-size token must be registered in `lib/cn.ts`.** tailwind-merge only
+  knows Tailwind's own sizes, so it took `text-label`, `text-stat` and the rest
+  for _colours_: `cn('text-label uppercase', 'text-fg-3')` kept the colour and
+  silently dropped the size, and every label, table header and stat value styled
+  through `cn` rendered at whatever size it inherited. `tests/knowledge-overview`
+  asserts the five that exist.
 - **`md:` is not "desktop".** An iPad is wide _and_ touch, so a width-only
   breakpoint hands a tablet the mouse-sized control. Density overrides that
   exist for a pointer use `pointer-fine:md:`; sizes that must grow for a thumb
@@ -231,7 +236,7 @@ An owner shares an expert with a token link (`/share/{token}`); the design is in
 
 - **Every management control goes through `canManage(expert)`** (`lib/access.ts`),
   which reads `expert.access`. A viewer — someone who opened a share link — gets the
-  Overview, Knowledge (Map and List), build log and composer, and none of: the avatar picker,
+  Overview, Knowledge (every view), build log and composer, and none of: the avatar picker,
   Settings (the route 404s), Share, Rebuild, Cancel, Cost, Add a source, Remove source,
   Delete. Their one action on the expert is "Remove from my experts". A new control
   that changes an expert must check it too; the API would refuse it anyway, and a
@@ -299,19 +304,86 @@ nowhere a 20px tile is only a navigational mark.
 
 ## The Knowledge page
 
-Sources and Concepts are one page, `/experts/[slug]/knowledge`, with a **Map**
-and a **List** of the same selection (`docs/plans/expert-brain.md`). The old
-`/sources` and `/graph` routes redirect to it with their parameters;
-`/sources/[id]/read` is unchanged. Rules:
+Sources and Concepts are one page, `/experts/[slug]/knowledge`, with a **Map**, a
+**Flow**, a **Graph** and a **List**, beside an **Overview** of all of it
+(`docs/plans/expert-brain.md`). Each answers a different question: the Map is the
+syllabus's picture, the Flow is what stands behind each key concept, the Graph is
+how the ideas themselves hold together, the List is the sources. The old
+`/sources` and `/graph` routes redirect to it with their parameters
+(`/graph?limit=` → `?view=graph&limit=`); `/sources/[id]/read` is unchanged. Rules:
 
 - **The selection is URL state** (`?source=`, `?node=`, `?concept=` — a key
   concept by label, which also narrows the List — and `?gap=`), written with
   `history.replaceState`, not the router: Next keeps `useSearchParams` in step,
   and a router push would re-fetch the expert, the list and the map per click.
   Sort, page and `?expand=` need the server and go through `router.push`.
-- **No `?view=` means both views are in the HTML**: the Map from `lg` with a fine
-  pointer, the List otherwise, toggled by `pointer-fine:lg:` classes. The canvas
-  starts no worker and paints nothing while it has no size.
+- **No `?view=` means both default views are in the HTML**: the Map from `lg`
+  with a fine pointer, the List otherwise, toggled by `pointer-fine:lg:` classes.
+  The canvas starts no worker and paints nothing while it has no size. The Flow
+  is only ever asked for (`?view=flow`), so it has no first paint to get wrong.
+- **The Overview is the page's resting state, and every row of it is a control**
+  (`components/knowledge/overview.tsx`, folded from the map payload — it costs no
+  request). A key concept or a missing text selects; a kind or a tier filters;
+  resting on a row lights what it would touch. It stands where a selection's
+  panel opens: a right-hand column from `lg`, which **yields to the inline panel
+  at `xl`** (`xl:hidden` while one is open — same slot, same width, so the view
+  between them keeps its size), and folded above the List below `lg`, where there
+  is no column. Both forms are in the HTML; `compact` is a prop, not a query.
+- **One thing is lit at a time, and the more deliberate act wins:** a selection,
+  then an answer's `?cited=`, then the Overview row under the pointer, then the
+  standing filter. All four are a `Lit`, so the Map and the Flow need no case for
+  any of them.
+- **The kind and tier filter is URL state** (`?kind=`, `?tier=`,
+  `lib/brain/overview.ts`), written like the selection. It narrows the List's
+  _loaded page_ client-side, as `?concept=` does, and the count says "on this
+  page" when there is more than one. Its chip is in the toolbar, in every view.
+- **A kind is what a reader would call it, never the fetcher** (`SourceKindId` in
+  `lib/source-kind.ts`): OpenAlex and PubMed are both Paper, Exa and the web
+  search both Web page. `KindIcon` draws it, one icon per kind, wherever a source
+  is listed; a fetcher added to the API lands in `other` until it is added there.
+  Read a `?kind=` with `parseSourceKindId`, which uses `hasOwn` — `in` accepted
+  `?kind=toString`.
+- **The Flow is the relations, legibly** (`lib/brain/flow.ts`, pure and
+  deterministic like the radial layout, and asserted the same way): sources, the
+  syllabus and concepts as three columns, one band per key concept, each source
+  in the band of the key concept it covers most deeply. Tags and sector
+  membership are always drawn, weighted by depth; **concept-to-source arcs are
+  drawn only for the thing in hand** — all of them at once is the hairball the
+  view exists to replace. It is DOM, so it is also the keyboard- and
+  screen-reader-navigable form of the Map. Rows are 26px under a mouse and 44px
+  under a thumb and the columns follow the container, which is why it loads with
+  `ssr: false`; below 640px it scrolls inside its own box.
+- **The Graph is the concept graph the product had before the Map**, restored
+  from `0377eee^` (`components/graph/*`, `lib/graph/*`) after it had been folded
+  into the Map: every concept _and claim_ as a node, every relation as a link,
+  laid out by force in a worker. It is the only view that draws claims, which is
+  why **it keeps its own panel** (`NodeDetail`) and its own selection beside the
+  page's: `?node=` and `ConceptPanel` go through `/map/concepts/{id}`, which
+  knows only concepts. Whichever of the two was opened last is the one that
+  shows; opening one closes the other. A concept the Map also draws offers
+  "Show on map". Its data is **fetched in the browser when the view is first
+  opened** (`useExpertGraph`) — up to 1,500 nodes that three views never draw,
+  and a view switch is a `pushState` with no server round trip to carry it. The
+  node limit is URL state (`?limit=`, stops in `lib/graph/limits.ts`, a plain
+  module because the `/graph` redirect parses it on the server). Concept ids are
+  the Map's ids, so the page's `lit.concepts` dims the Graph too
+  (`PaintState.lit`). In this view the page's search finds the Graph's nodes.
+  **`computed: false` is never an empty canvas.**
+- **The map explains itself**: a legend of its marks (`MarkGlyph`, kept in step
+  with `paintOrbitItems`) and zoom/fit buttons through `BrainCanvasHandle`.
+- **A facet is a region of the map, never a container** (`paintRegions`). Each
+  facet's sector gets a faint `--fg` wash behind everything, so the syllabus's
+  grouping is visible and not just an angle. Nesting the concepts inside circles
+  (a Venn of the syllabus) was considered and refused, and should stay refused:
+  a concept's key concept is an assignment hand-checked at 79% right — which is
+  why the cloud only _leans_ a concept toward it — and two fifths of a real
+  expert's drawn concepts have no key concept at all. A circle drawn round them
+  turns "leans toward" into "belongs to". So the wash has no outline, its sides
+  are feathered (`REGION_PASSES`; with ruled sides it read as a slice of a pie),
+  it fades at both radial edges, and it **stops short of the orbit**, where a
+  source sits between the facets it serves. It lifts with whatever is lit and
+  falls away otherwise. No facets, or one, means no regions. Measured at a steady
+  60fps idle in software raster at 2x, so it is not cached as a sprite.
 - **The layout never moves; the view does.** `lib/brain/layout.ts` is pure and
   deterministic (asserted byte for byte). Idle, the map is drawn tilted and turns
   once in eight minutes; any pointer movement, touch, wheel, search keypress or
@@ -319,7 +391,9 @@ and a **List** of the same selection (`docs/plans/expert-brain.md`). The old
   open (`lib/brain/motion.ts`). Under reduced motion it never tilts, turns or
   fires — `knowledge.spec` compares two screenshots a second apart.
 - **Monochrome.** Facets are position, tier is shape and fill; the only hue on
-  the canvas is `--warn` on a disputed concept.
+  the canvas is `--warn` on a disputed concept. The Overview and the Flow keep
+  to it: coverage is one ink in two shades (sets out / treats), and "short of
+  target" is always said in words beside the bar, never by the bar's colour.
 - **Claims are not in the map payload.** A concept's claims come from
   `/map/concepts/{id}` when its panel opens.
 - **The build page grows the same map** (`components/brain/build-brain.tsx`)

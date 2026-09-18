@@ -2,6 +2,7 @@
 
 import { ArrowDown, ChevronRight } from 'lucide-react'
 
+import { KindIcon } from '@/components/knowledge/kind-icon'
 import { DateText } from '@/components/ui/relative-time'
 import { cn } from '@/lib/cn'
 import { sourceKind, sourceProvider } from '@/lib/source-kind'
@@ -25,6 +26,10 @@ import type { LedgerSource, SourceSort } from '@/lib/api/types'
  *
  * **A row opens a record, and now says so**: the cursor, a trailing chevron and
  * an accessible name. The detail panel used to be discoverable by accident.
+ *
+ * **Every row leads with its kind, as an icon.** Forty titles in one grey are
+ * one block; the icon column is what lets an eye run down it and find the three
+ * books among the web pages. The Kind column still says it in a word.
  */
 
 export interface Column {
@@ -179,9 +184,15 @@ function Cell({ column, source }: { column: string; source: LedgerSource }) {
   switch (column) {
     case 'title':
       return (
-        <span className="block truncate text-fg-2" title={source.title}>
-          {source.title}
-          {source.author && <span className="ml-1.5 text-xs text-fg-3">{source.author}</span>}
+        <span className="flex items-center gap-2">
+          <KindIcon
+            type={source.source_type}
+            className="text-fg-3 transition-colors duration-(--dur-1) group-hover:text-fg-2"
+          />
+          <span className="block min-w-0 truncate text-fg-2" title={source.title}>
+            {source.title}
+            {source.author && <span className="ml-1.5 text-xs text-fg-3">{source.author}</span>}
+          </span>
         </span>
       )
 

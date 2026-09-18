@@ -7,6 +7,8 @@ import {
   CLOUD_OUT,
   FOOT,
   ORBIT,
+  REGION_IN,
+  REGION_OUT,
   RING,
   angleDelta,
   computeLayout,
@@ -62,6 +64,46 @@ describe('the rings', () => {
     const runs = order.map((place) => facetOf(place.index)).filter((f, i, all) => f !== all[i - 1])
     expect(runs).toHaveLength(2)
     expect(layout.facets.map((facet) => facet.name)).toEqual(['Biology', 'Control'])
+  })
+
+  it("gives each facet a sector that holds its own key concepts and no one else's", () => {
+    const turn = Math.PI * 2
+    /** How far clockwise `angle` is past `start`, in [0, 2π). */
+    const past = (start: number, angle: number) => (((angle - start) % turn) + turn) % turn
+    for (const facet of layout.facets) {
+      // `end` is never normalised, so an arc from one to the other goes the short way.
+      expect(facet.end).toBeGreaterThan(facet.start)
+      expect(facet.end - facet.start).toBeLessThan(turn)
+      const extent = facet.end - facet.start
+      for (const place of layout.keyConcepts) {
+        const inside = past(facet.start, place.angle) < extent
+        expect(inside).toBe(facet.members.includes(place.index))
+      }
+    }
+    // Biology is [0, 3], Control [1, 2, 4].
+    expect(layout.facets.map((facet) => [...facet.members].sort())).toEqual([
+      [0, 3],
+      [1, 2, 4],
+    ])
+  })
+
+  it('parts neighbouring sectors, and keeps them clear of the foot', () => {
+    const [biology, control] = layout.facets
+    // A real gap between the two, not a shared edge: the wash must read as two regions.
+    expect(control.start - biology.end).toBeGreaterThan(0.2)
+    // The foot belongs to what has no key concept, so no facet's region may cover it.
+    const turn = Math.PI * 2
+    for (const facet of layout.facets) {
+      const toFoot = (((FOOT - facet.start) % turn) + turn) % turn
+      expect(toFoot).toBeGreaterThan(facet.end - facet.start)
+    }
+  })
+
+  it('stops a region short of the orbit, where a source sits between facets', () => {
+    expect(REGION_IN).toBeLessThan(RING)
+    expect(REGION_OUT).toBeGreaterThan(CLOUD_OUT)
+    // The largest source is 20 across, centred on the orbit.
+    expect(REGION_OUT).toBeLessThan(ORBIT - 10)
   })
 
   it('reserves the foot for what belongs to no key concept', () => {

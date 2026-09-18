@@ -396,6 +396,23 @@
     animation: peritus-caret 1s step-end infinite;
   }
 
+  /* The Flow view's links. Drawn in once, left to right — the one moment the
+     diagram says which way it reads — and after that they only ever fade
+     between lit and dim. `pathLength="1"` on the path makes the dash units the
+     whole line. Reduced motion gets the finished picture at once. */
+  .flow-link {
+    transition:
+      opacity var(--dur-1) var(--ease-out),
+      stroke var(--dur-1) var(--ease-out);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .flow-link {
+      stroke-dasharray: 1;
+      stroke-dashoffset: 1;
+      animation: peritus-flow-draw 640ms var(--ease-out) 80ms forwards;
+    }
+  }
+
   /* Pinned bottom elements clear the home indicator. */
   .pb-safe {
     padding-bottom: max(env(safe-area-inset-bottom), 0px);
@@ -467,6 +484,12 @@
   to {
     transform: scale(1.8);
     opacity: 0;
+  }
+}
+
+@keyframes peritus-flow-draw {
+  to {
+    stroke-dashoffset: 0;
   }
 }
 

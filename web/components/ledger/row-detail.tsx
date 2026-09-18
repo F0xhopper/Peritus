@@ -5,6 +5,7 @@ import { useState } from 'react'
 
 import Link from 'next/link'
 
+import { KindIcon } from '@/components/knowledge/kind-icon'
 import { DateText } from '@/components/ui/relative-time'
 import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
@@ -83,7 +84,12 @@ export function RowDetail({
       </div>
 
       <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-        <Field label="Kind">{sourceKind(source.source_type)}</Field>
+        <Field label="Kind">
+          <span className="inline-flex items-center gap-1.5">
+            <KindIcon type={source.source_type} className="size-3 text-fg-3" />
+            {sourceKind(source.source_type)}
+          </span>
+        </Field>
         <Field label="Found via">{sourceProvider(source.source_type)}</Field>
         {source.source_tier && <Field label="Tier">{humanise(source.source_tier)} source</Field>}
         {source.difficulty !== null && (

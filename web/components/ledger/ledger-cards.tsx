@@ -2,6 +2,7 @@
 
 import { ChevronRight } from 'lucide-react'
 
+import { KindIcon } from '@/components/knowledge/kind-icon'
 import { cn } from '@/lib/cn'
 import { sourceKind } from '@/lib/source-kind'
 import { hostOf } from '@/lib/format'
@@ -40,13 +41,18 @@ export function LedgerCards({
               selectedId === source.id ? 'ring-1 ring-fg-3 ring-inset' : 'hover:bg-raised'
             )}
           >
-            <span className="flex items-start gap-2">
+            <span className="flex items-start gap-2.5">
+              {/* The kind, before the title: what a thumb-scrolled list is
+                  sorted by at a glance. */}
+              <span className="mt-px grid size-7 shrink-0 place-items-center rounded-chip bg-raised text-fg-3">
+                <KindIcon type={source.source_type} />
+              </span>
               <span className="min-w-0 flex-1 text-sm text-fg-2">{source.title}</span>
               {/* The card opens a record; the chevron is what says so. */}
               <ChevronRight aria-hidden="true" className="mt-0.5 size-3.5 shrink-0 text-fg-4" />
             </span>
 
-            <p className="mt-1 text-xs text-fg-3">
+            <p className="mt-1 pl-[2.375rem] text-xs text-fg-3">
               {sourceKind(source.source_type)}
               {source.url && <> · {hostOf(source.url)}</>}
               {source.passage_count > 0 && <> · {source.passage_count} passages</>}

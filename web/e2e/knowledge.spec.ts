@@ -23,6 +23,8 @@ import {
 const SLUG = 'varroa-mite-control-in-temperate-beekeeping'
 const BUILDING = 'measurement-error-in-nutritional-epidemiology'
 const MAP = `/experts/${SLUG}/knowledge?view=map`
+const FLOW = `/experts/${SLUG}/knowledge?view=flow`
+const GRAPH = `/experts/${SLUG}/knowledge?view=graph`
 const LIST = `/experts/${SLUG}/knowledge?view=list`
 
 test.beforeEach(async ({ page }) => {
@@ -43,6 +45,20 @@ function painted(canvas: Locator): Promise<number> {
     for (let i = 3; i < data.length; i += 4) if (data[i] !== 0) count++
     return count
   })
+}
+
+/**
+ * The Overview, in whichever of its two forms is showing: the column beside the
+ * views from `lg`, or folded above the List below it. Both are in the HTML.
+ */
+function overview(page: Page): Locator {
+  return page.getByRole('region', { name: 'Overview' }).filter({ visible: true })
+}
+
+/** Below `lg` the Overview's sections start folded, so the sources stay in reach. */
+async function unfold(page: Page, section: string) {
+  const header = overview(page).getByRole('button', { name: new RegExp(`^${section}`) })
+  if ((await header.getAttribute('aria-expanded')) === 'false') await header.click()
 }
 
 async function choose(page: Page, text: string, option: RegExp) {
@@ -180,8 +196,12 @@ test('the old pages still lead here, with what they asked for', async ({ page })
   await expect(page).toHaveURL(/\/knowledge\?.*source=812/)
   await expect(page).toHaveURL(/view=list/)
 
+  // The concept graph is a view of its own again, and the old link means what
+  // it always did — at the size it asked for.
   await page.goto(`/experts/${SLUG}/graph?limit=200`)
-  await expect(page).toHaveURL(/\/knowledge\?view=map$/)
+  await expect(page).toHaveURL(/\/knowledge\?view=graph&limit=200$/)
+  await page.goto(`/experts/${SLUG}/graph?limit=7`)
+  await expect(page).toHaveURL(/\/knowledge\?view=graph$/)
 })
 
 test('an answer shows its cited sources on the map', async ({ page }) => {
@@ -224,4 +244,249 @@ test('idle is alive and engaged is still; reduced motion is always still', async
     await page.waitForTimeout(700)
     expect((await canvas.screenshot()).equals(still), 'the engaged map kept moving').toBe(true)
   }
+})
+
+// ── the overview ────────────────────────────────────────────────────────────
+
+test('the overview says what the expert has read and how well it covers the syllabus', async ({
+  page,
+}, testInfo) => {
+  await page.goto(LIST)
+
+  const region = overview(page)
+  await expect(region).toHaveCount(1)
+  // Headline numbers, folded from the map: ten sources, 187 concepts.
+  await expect(region.getByText('Passages')).toBeVisible()
+  await expect(region.locator('dd').filter({ hasText: /^187$/ })).toBeVisible()
+
+  await unfold(page, 'Syllabus')
+  // Three of five key concepts meet their target, and the two that do not say
+  // so in words — never by the bar's colour alone.
+  await expect(region.getByText('3 of 5 on target')).toBeVisible()
+  await expect(
+    region.getByRole('button', { name: /monitoring thresholds.*2 · short/ })
+  ).toBeVisible()
+
+  await unfold(page, 'Missing texts')
+  await expect(region.getByRole('button', { name: /Tools for Varroa Management/ })).toBeVisible()
+  await expectResponsive(page, isTouchProject(testInfo.project.name))
+})
+
+test('a kind filters the list, is a link, and clears from the toolbar', async ({ page }) => {
+  await page.goto(LIST)
+  await expect(
+    visibleContent(page)
+      .getByText(/Amitraz resistance in field/)
+      .first()
+  ).toBeVisible()
+
+  await unfold(page, 'Sources')
+  const webPages = overview(page).getByRole('button', { name: /^Web page/ })
+  await webPages.click()
+  await expect(page).toHaveURL(/kind=web/)
+  await expect(webPages).toHaveAttribute('aria-pressed', 'true')
+  // The list's two loaded rows are both papers.
+  await expect(visibleContent(page).getByText('No sources match this filter.')).toBeVisible()
+
+  // Loaded from the URL alone, it is the same page.
+  await page.goto(`${LIST}&kind=paper`)
+  await expect(
+    visibleContent(page)
+      .getByText(/Amitraz resistance in field/)
+      .first()
+  ).toBeVisible()
+  await expect(content(page).getByText(/2 of 21 sources match/)).toBeVisible()
+
+  await page.getByRole('button', { name: 'Show every source' }).click()
+  await expect(page).not.toHaveURL(/kind=/)
+})
+
+test('a key concept chosen in the overview opens on the map', async ({ page }, testInfo) => {
+  test.skip(isTouchProject(testInfo.project.name), 'below `lg` the overview stands above the List')
+  await page.goto(MAP)
+  const canvas = page.getByRole('img', { name: /Map of this expert's knowledge/ })
+  await expect.poll(() => painted(canvas), { timeout: 20_000 }).toBeGreaterThan(2_000)
+
+  await overview(page)
+    .getByRole('button', { name: /^acaricide resistance/ })
+    .click()
+  await expect(page).toHaveURL(/concept=acaricide/)
+  await expect(
+    panel(page, 'Key concept').getByRole('heading', { name: 'acaricide resistance' })
+  ).toBeVisible({ timeout: 15_000 })
+})
+
+test('the map can be zoomed and refitted from its own controls', async ({ page }) => {
+  await page.goto(MAP)
+  const canvas = page.getByRole('img', { name: /Map of this expert's knowledge/ })
+  await expect.poll(() => painted(canvas), { timeout: 20_000 }).toBeGreaterThan(2_000)
+
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  await page.getByRole('button', { name: 'Fit the whole map' }).click()
+  // Still a picture, not a blank canvas: the loop re-armed after each.
+  await expect.poll(() => painted(canvas), { timeout: 10_000 }).toBeGreaterThan(2_000)
+  // The marks are explained where the map is wide enough to spare the room.
+  if (page.viewportSize()!.width >= 640) {
+    await expect(page.getByRole('list', { name: /What the map's marks mean/ })).toBeVisible()
+  }
+})
+
+// ── the flow ────────────────────────────────────────────────────────────────
+
+test('the flow draws sources, syllabus and concepts, and the links between them', async ({
+  page,
+}, testInfo) => {
+  await page.goto(FLOW)
+
+  const acaricide = content(page).getByRole('button', { name: /^acaricide resistance/ })
+  await expect(acaricide.filter({ visible: true }).first()).toBeVisible({ timeout: 15_000 })
+  await expect(
+    content(page).getByRole('button', { name: /^Amitraz resistance in field/ })
+  ).toBeVisible()
+  await expect(content(page).getByRole('button', { name: /^amitraz/ })).toBeVisible()
+  // A missing text stands where it would have been read.
+  await expect(
+    content(page).getByRole('button', { name: /^Missing\s*Tools for Varroa Management/ })
+  ).toBeVisible()
+
+  // One link per tag and one per concept shown: the fixture has fifteen tags.
+  expect(await page.locator('path.flow-link').count()).toBeGreaterThan(15)
+  // The diagram scrolls inside its own box; the page never does.
+  await expectResponsive(page, isTouchProject(testInfo.project.name))
+})
+
+test('a concept chosen in the flow opens with the sources that say it', async ({ page }) => {
+  await page.goto(FLOW)
+  const amitraz = content(page).getByRole('button', { name: /^amitraz/ })
+  await expect(amitraz).toBeVisible({ timeout: 15_000 })
+  await amitraz.click()
+
+  await expect(page).toHaveURL(/node=\d+/)
+  await expect(page).toHaveURL(/view=flow/)
+  const concept = panel(page, 'Concept')
+  await expect(concept.getByRole('heading', { name: 'amitraz' })).toBeVisible({ timeout: 15_000 })
+  await expect(concept.getByText('Said by')).toBeVisible()
+})
+
+test('a folded sector opens in place', async ({ page }) => {
+  await page.goto(FLOW)
+  const more = content(page).getByRole('button', { name: '+1 more' })
+  await expect(more).toBeVisible({ timeout: 15_000 })
+  const before = await page.locator('path.flow-link').count()
+  await more.click()
+  await expect(content(page).getByRole('button', { name: 'Show fewer' })).toBeVisible()
+  expect(await page.locator('path.flow-link').count()).toBe(before + 1)
+})
+
+// ── the graph ───────────────────────────────────────────────────────────────
+
+/**
+ * The Graph view: the concept graph the product had before the Map, back as a
+ * view of this page. Its important behaviour is negative — **`computed: false`
+ * is never an empty canvas** — and its canvas is held to the same rule as the
+ * Map's: a test asserts that pixels were painted.
+ */
+function graphCanvas(page: Page): Locator {
+  return page.getByRole('img', { name: /^Graph of \d+ concepts and claims/ })
+}
+
+test('the graph draws its concepts and claims on a canvas', async ({ page }, testInfo) => {
+  await page.goto(GRAPH)
+
+  const canvas = graphCanvas(page)
+  await expect(canvas).toBeVisible({ timeout: 15_000 })
+  await expect(canvas).toHaveAttribute('aria-label', /Graph of 6 concepts and claims/)
+  // The Map is not mounted behind it: one view, one canvas.
+  await expect(page.locator('canvas')).toHaveCount(1)
+  await expect
+    .poll(() => painted(canvas), { message: 'the graph never painted a pixel', timeout: 20_000 })
+    .toBeGreaterThan(500)
+
+  // What is shown, against what exists — the Graph's own count, with its links.
+  // (The toolbar's "n of 187 concepts" is the Map's, and is hidden here.)
+  await expect(content(page).getByText(/6 of 187 concepts · \d+ links/)).toBeVisible()
+  await expect(content(page).getByText('busiest first')).toBeVisible()
+  await expectResponsive(page, isTouchProject(testInfo.project.name))
+})
+
+test('a graph the size of a real expert still draws', async ({ page }) => {
+  // Four hundred nodes, which is the default cap. The fixture has six, and six
+  // exercise neither the worker's tick budget nor the paint loop's early-outs.
+  await useScenario(page, 'big-graph')
+  await page.goto(GRAPH)
+
+  await expect(content(page).getByText(/400 of 1,125 concepts/)).toBeVisible({ timeout: 15_000 })
+  await expect
+    .poll(() => painted(graphCanvas(page)), {
+      message: 'a 400-node graph painted nothing',
+      timeout: 30_000,
+    })
+    .toBeGreaterThan(5_000)
+})
+
+test('an un-extracted graph says so instead of showing an empty canvas', async ({ page }) => {
+  await page.goto(`/experts/${BUILDING}/knowledge?view=graph`)
+
+  await expect(content(page).getByText(/concept graph is still being extracted/)).toBeVisible({
+    timeout: 15_000,
+  })
+  // No canvas at all — an empty one would read as "no concepts found".
+  await expect(page.locator('canvas')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Watch the build' })).toBeVisible()
+})
+
+test('the node limit is URL state and re-fetches', async ({ page }, testInfo) => {
+  test.skip(isTouchProject(testInfo.project.name), "the slider is in the node's sheet below lg")
+  await page.goto(GRAPH)
+  await expect(graphCanvas(page)).toBeVisible({ timeout: 15_000 })
+
+  // Driven by keyboard: the accessible path, and the one a range input reports
+  // reliably. One step down from the 400 default.
+  const slider = page.getByLabel('Nodes')
+  await slider.focus()
+  await slider.press('ArrowLeft')
+  await expect(page).toHaveURL(/limit=200/, { timeout: 15_000 })
+  await expect(page).toHaveURL(/view=graph/)
+  await expect(content(page).getByText(/6 of 187 concepts · \d+ links/)).toBeVisible()
+})
+
+test("the page's search finds a node of the graph and opens it there", async ({ page }) => {
+  await page.goto(GRAPH)
+  await expect(graphCanvas(page)).toBeVisible({ timeout: 15_000 })
+  await choose(page, 'amitraz', /^amitraz\s*Concept/)
+
+  // The Graph's own panel — its links — and not the Map's concept panel.
+  const node = panel(page, 'Concept')
+  await expect(node.getByRole('heading', { name: 'amitraz' })).toBeVisible({ timeout: 15_000 })
+  await expect(node.getByText(/Concept · \d+ links?/)).toBeVisible()
+  // A node of the Graph is not the page's selection: it may be a claim.
+  await expect(page).not.toHaveURL(/node=/)
+})
+
+test('a contradiction is labelled as a judgement about this corpus', async ({ page }) => {
+  await page.goto(GRAPH)
+  await expect(graphCanvas(page)).toBeVisible({ timeout: 15_000 })
+  // A claim: drawn on the Graph and nowhere else on the page.
+  await choose(page, 'Mechanical control alone', /^Mechanical control alone.*Claim$/)
+
+  const claim = panel(page, 'Claim')
+  // "Judged to disagree", never "contradictions in the literature".
+  await expect(claim.getByText('Judged to disagree')).toBeVisible({ timeout: 15_000 })
+  await expect(claim.getByRole('button', { name: 'Show on map' })).toHaveCount(0)
+})
+
+test('a concept on the graph leads across to the same concept on the map', async ({
+  page,
+}, testInfo) => {
+  test.skip(isTouchProject(testInfo.project.name), 'the panel is a modal sheet on touch')
+  await page.goto(GRAPH)
+  await expect(graphCanvas(page)).toBeVisible({ timeout: 15_000 })
+  await choose(page, 'amitraz', /^amitraz\s*Concept/)
+
+  await panel(page, 'Concept').getByRole('button', { name: 'Show on map' }).click()
+  await expect(page).toHaveURL(/view=map/)
+  await expect(page).toHaveURL(/node=5003/)
+  // Now the Map's panel, with what the sources say.
+  await expect(panel(page, 'Concept').getByText('Said by')).toBeVisible({ timeout: 15_000 })
 })

@@ -45,6 +45,14 @@ export const CLOUD_OUT = 325
 export const ORBIT = 385
 /** Where a facet's name sits: on its sector's bisector, just outside the orbit. */
 const FACET_LABEL = ORBIT + 16
+/**
+ * A facet's region, radially: from just inside the ring, so its key concepts'
+ * discs stand wholly within it, to just past the cloud. It stops short of the
+ * orbit on purpose — a source is tagged with key concepts from several facets
+ * and sits *between* them, so no facet's region may claim it.
+ */
+export const REGION_IN = RING - 28
+export const REGION_OUT = CLOUD_OUT + 26
 /** Straight down, in canvas coordinates (y grows downward). */
 export const FOOT = Math.PI / 2
 /** The neutral arc's width, when anything needs it. */
@@ -81,6 +89,16 @@ export interface FacetPlace {
   /** The first and last key-concept angles of the sector. */
   from: number
   to: number
+  /**
+   * The sector's own edges: half a slot beyond its first and last key concept,
+   * so neighbouring sectors are parted by exactly the facet gap. `end` is
+   * `start` plus the clockwise extent — never normalised, always the larger —
+   * so an arc drawn from one to the other cannot go the long way round.
+   */
+  start: number
+  end: number
+  /** Its key concepts, by index: the region lights when any of them does. */
+  members: number[]
 }
 
 export interface OrbitPlace {
@@ -205,6 +223,9 @@ function ringAngles(
         name: group.name,
         from: normalise(start + (first + 0.5) * slot),
         to: normalise(start + (cursor - 0.5) * slot),
+        start: start + first * slot,
+        end: start + cursor * slot,
+        members: [...group.members],
       })
     }
   })
