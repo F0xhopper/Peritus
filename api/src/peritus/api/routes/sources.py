@@ -12,22 +12,36 @@ reader could add documents to would be an expert nobody could trust.
 Ingest is durable: the payload is stored, a job is queued, and a worker does the
 work. Progress rides the existing ``/experts/{slug}/build/events`` SSE stream, so
 clients get upload progress without a second event transport.
+
+One route here is **read-scoped and the odd one out**: ``/passages`` serves the
+text around a cited passage. It belongs beside the sources it reads rather than
+in the audit routes — it is what an answer's evidence *says*, not an account of
+how the corpus was assembled — and it is gated like every other read of a
+corpus, because a share grant that lets someone chat has to let them read what
+the chat cites.
 """
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from typing import Any
 
-from peritus.api.deps import CurrentUser, Jobs, OwnedExpert, Uploads
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+
+from peritus.api.deps import CurrentUser, Jobs, OwnedExpert, ReadableExpert, Uploads
 from peritus.api.schemas.sources import (
     MAX_TEXT_BYTES,
     MAX_UPLOAD_BYTES,
     TITLE_MAX_CHARS,
     AddUrlRequest,
+    PassageOut,
+    PassageSourceOut,
+    PassageWindowOut,
     SourceOut,
     UploadAcceptedOut,
 )
+from peritus.audit.domain import decode_json_field
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
+from peritus.ingestion.chunker import last_sentence
 from peritus.jobs.domain import JobType
 from peritus.jobs.repository import JobRepository
 from peritus.uploads.domain import UploadKind
@@ -212,3 +226,117 @@ async def delete_source(expert: OwnedExpert, source_id: int, uploads: Uploads) -
     if not removed:
         raise HTTPException(status_code=404, detail="Source not found")
     logger.info("Deleted source %d from expert %d", source_id, expert.id)
+
+
+# The kinds whose text we may reproduce in full. A licence column would be
+# better, and nothing writes one: `fulltext.py` sees an open-access flag and
+# does not persist it. Until something does, the kind — plus an `oa_` full-text
+# method, which *is* recorded and means an open-access copy was resolved — is
+# the honest gate, and it is deliberately conservative. An upload is the
+# owner's own document: whole for them, a window for anyone they shared with,
+# because the rights warning at upload was shown to the uploader alone.
+_WHOLE_TEXT_TYPES = frozenset({"gutenberg", "wikipedia", "arxiv"})
+
+#: Wide enough for the whole of any source in the corpus (165 chunks is the
+#: largest, and the fetch ceiling holds it there). Page when that stops being
+#: true, not before.
+_WHOLE_WINDOW = 500
+_OWNER_ONLY_WHOLE_TYPES = frozenset({"upload"})
+
+
+def _whole_text_allowed(source: dict[str, object], is_owner: bool) -> bool:
+    source_type = str(source.get("source_type") or "")
+    method = str(source.get("full_text_method") or "")
+    if method == "abstract":
+        # There is nothing beyond the window to read.
+        return False
+    if source_type in _OWNER_ONLY_WHOLE_TYPES:
+        return is_owner
+    return source_type in _WHOLE_TEXT_TYPES or method.startswith("oa_")
+
+
+@router.get("/{slug}/sources/{source_id}/passages", response_model=PassageWindowOut)
+async def source_passages(
+    expert: ReadableExpert,
+    source_id: int,
+    user: CurrentUser,
+    uploads: Uploads,
+    around: int | None = Query(
+        None, description="The chunk id a citation points at; the first chunk when omitted."
+    ),
+    before: int = Query(2, ge=0, le=20),
+    after: int = Query(2, ge=0, le=20),
+    whole: bool = Query(False, description="Ask for the whole source; the server decides."),
+) -> PassageWindowOut:
+    """The cited passage in context — the paragraphs either side of it.
+
+    A quote with a bibliography entry is a claim; the quote with the paragraph
+    before and after it is the evidence, and it is where a citation that does
+    not support its sentence becomes obvious.
+
+    **This is the text the expert read, not the original.** No original is kept
+    (`source_uploads.content` is cleared once ingestion succeeds) and the
+    extraction can drop a great deal — a table of contents, page chrome — so a
+    client showing this must say which one it is showing.
+
+    ``whole=true`` is a request, not an instruction: the server returns the
+    whole text only for the kinds it may reproduce, and a window otherwise,
+    with ``scope`` saying which happened.
+    """
+    source, rows = await uploads.passage_window(
+        expert.id,
+        source_id,
+        # No citation to centre on — the Sources page opens a source at its
+        # beginning, which is the first chunk rather than an arbitrary one.
+        around=around,
+        # The whole source, when it is allowed, is a window wide enough to hold
+        # it: the largest source in the corpus is 165 chunks.
+        before=_WHOLE_WINDOW if whole else before,
+        after=_WHOLE_WINDOW if whole else after,
+    )
+    if source is None:
+        raise HTTPException(status_code=404, detail="That source is not part of this expert.")
+    if not rows:
+        # A citation from before a re-ingest: the source is here, that chunk is
+        # not. Not an error the reader caused, and not something to invent a
+        # passage for.
+        raise HTTPException(status_code=404, detail="That passage is no longer in this source.")
+
+    allowed = _whole_text_allowed(source, is_owner=expert.owner_id == user.id)
+    whole_scope = whole and allowed
+    return PassageWindowOut(
+        source=PassageSourceOut.model_validate(source),
+        scope="whole" if whole_scope else "window",
+        whole_available=allowed,
+        cited=around,
+        passages=[_passage(row, previous=rows[i - 1] if i else None) for i, row in enumerate(rows)],
+    )
+
+
+def _passage(row: dict[str, Any], previous: dict[str, Any] | None) -> PassageOut:
+    """One chunk, with the overlap sentence the chunker added taken back off.
+
+    Each chunk after the first opens with the last sentence of the one before
+    it, so that a referent survives the cut (`ingestion/chunker.py`). Read as
+    running prose that sentence appears twice, so it is dropped — from the
+    *later* chunk, and only when it really is the earlier one's tail.
+
+    The chunker's own rule decides what counts as that tail, rather than a
+    second implementation of it here: a one-sentence paragraph carried whole is
+    a repeated paragraph, not overlap, and `last_sentence` already says so.
+    """
+    meta = decode_json_field(row.get("chunk_meta"), {}) or {}
+    text = str(row["text"])
+    if previous is not None:
+        tail = last_sentence(str(previous["text"]))
+        if tail and text.startswith(tail):
+            text = text[len(tail) :].lstrip()
+    section = meta.get("section")
+    paragraph_n = meta.get("paragraph_n")
+    return PassageOut(
+        chunk_id=int(row["id"]),
+        sequence_n=int(row["sequence_n"]),
+        section=str(section) if section else None,
+        paragraph_n=int(paragraph_n) if isinstance(paragraph_n, int) else None,
+        text=text,
+    )

@@ -2,6 +2,7 @@ import { expect, test } from '@playwright/test'
 
 import {
   askQuestion,
+  clickUntil,
   fillField,
   content,
   expectResponsive,
@@ -280,6 +281,36 @@ test('a stored answer keeps its passage, its trail and its disagreement', async 
   await expect(panel.getByText(/Passage 1 of/)).toBeVisible()
 })
 
+test('a citation shows the passage in its source, and opens the whole of it', async ({ page }) => {
+  await page.goto('/chats/2f2b8a4e-1c9d-4f8a-9b1e-7c0d2a5f6e31')
+  await waitForHydration(page)
+
+  // Citation 2 is the five-year cohort, read through an open-access copy — so
+  // its whole text may be shown. (Citation 1's source is abstract-only, which
+  // the panel flags and which has nothing more to read.)
+  await content(page)
+    .getByRole('button', { name: /^Citation 2:/ })
+    .first()
+    .click()
+  const panel = page
+    .getByRole('complementary', { name: 'Cited passage' })
+    .or(page.getByRole('dialog', { name: 'Cited passage' }))
+
+  // The paragraphs either side of the quote, from the same source — the
+  // difference between quoting the evidence and showing it.
+  const context = panel.getByRole('region', { name: 'The passage in its source' })
+  await expect(context).toBeVisible({ timeout: 15_000 })
+  await expect(context.getByText(/Neighbouring paragraph/).first()).toBeVisible()
+  // And what it is: the extraction, not the original.
+  await expect(context.getByText(/the text the expert read, as extracted/)).toBeVisible()
+
+  await context.getByRole('link', { name: 'Read the whole source' }).click()
+  await page.waitForURL(/\/sources\/804\/read\?at=8804/)
+  await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
+  await expect(content(page).getByText(/the text the expert read, as extracted/)).toBeVisible()
+  await expect(content(page).getByText(/Removal reduced mite load by 43%/)).toBeVisible()
+})
+
 test('a busy conversation says so and counts down instead of retrying blindly', async ({
   page,
 }) => {
@@ -299,9 +330,8 @@ test('renaming a chat is optimistic and persists', async ({ page }) => {
 
   // The title is server-rendered, so it is clickable before React has attached
   // its handler — a click that early is lost and the field never opens.
-  await waitForHydration(page)
-  await page.getByTitle('Click to rename').click()
   const field = page.getByLabel('Chat title')
+  await clickUntil(page.getByTitle('Click to rename'), field)
   await fillField(field, 'Drone brood removal, revisited')
   await field.press('Enter')
 

@@ -313,6 +313,10 @@ def used_citations(passages: list[Passage], cited: set[int]) -> list[dict]:
             "label": p.citation,
             "source_id": p.source_id,
             "text": _excerpt(p.text),
+            # Which chunk the passage is, so the reader can be shown what
+            # surrounds it. Matching a citation to an audit step by position
+            # would be a guess, and `audit_trail` refuses to make it.
+            "chunk_id": p.chunk_id,
             "disputed": p.disputed,
             "dispute_points": p.dispute_points,
         }

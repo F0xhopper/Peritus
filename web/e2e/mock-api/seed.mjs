@@ -105,6 +105,7 @@ export async function seed() {
             label: 'Drone brood removal as mechanical control: a randomised trial',
             text: 'Removal reduced mite load by 43% relative to untreated controls over one season, with no effect on colony weight at the end of the season.',
             source_id: 812,
+            chunk_id: 9001,
             disputed: true,
             dispute_points: [
               'Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years.',
@@ -115,6 +116,7 @@ export async function seed() {
             label: 'Varroa destructor and honeybee viral loads: a five-year cohort',
             text: 'Mechanical control alone did not prevent viral amplification in high-pressure years; DWV titres rose in five of the eight study apiaries.',
             source_id: 804,
+            chunk_id: 8804,
             disputed: true,
             dispute_points: [
               'Whether mechanical control alone holds mite load below the treatment threshold in high-pressure years.',

@@ -227,6 +227,46 @@ export async function fillField(field: Locator, value: string) {
 }
 
 /**
+ * Fill a field and wait for what typing into it is supposed to produce.
+ *
+ * For a field whose *rendering* depends on React state — a search box that
+ * filters a list — the assertion that follows is the only proof the value
+ * reached the component. A fill that lands a hydration early leaves the DOM
+ * holding the text and React holding nothing, and the symptom is an empty
+ * result list ten seconds later, which reads like a broken feature rather than
+ * a race. Typing again is cheap; the retry only runs when the first attempt
+ * produced nothing.
+ */
+export async function fillUntil(field: Locator, value: string, produces: Locator) {
+  await fillField(field, value)
+  try {
+    await expect(produces).toBeVisible({ timeout: 3_000 })
+  } catch {
+    await field.fill(value)
+    await expect(produces).toBeVisible({ timeout: 10_000 })
+  }
+}
+
+/**
+ * Click something and wait for what clicking it is supposed to produce.
+ *
+ * The click twin of `fillUntil`, and the same cause: a control that is in the
+ * server's HTML but whose island has not hydrated swallows the first click
+ * silently — no handler, no error, nothing on screen. The chat title's rename
+ * field is the case that keeps finding this on the slower device profiles.
+ */
+export async function clickUntil(control: Locator, produces: Locator) {
+  await waitForHydration(control.page())
+  await control.click()
+  try {
+    await expect(produces).toBeVisible({ timeout: 3_000 })
+  } catch {
+    await control.click()
+    await expect(produces).toBeVisible({ timeout: 10_000 })
+  }
+}
+
+/**
  * Type a question into the chat composer and send it.
  *
  * Send is disabled until the composer's *React state* holds a question, and

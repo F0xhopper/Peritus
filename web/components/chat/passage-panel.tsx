@@ -3,6 +3,7 @@
 import { ExternalLink, MessageSquare } from 'lucide-react'
 import Link from 'next/link'
 
+import { PassageContext } from '@/components/chat/passage-context'
 import { Button } from '@/components/ui/button'
 import { describeDifficulty, describeTextRead, sourceKind } from '@/lib/source-kind'
 import { hostOf, humanise } from '@/lib/format'
@@ -23,6 +24,11 @@ import type { Citation, LedgerSource } from '@/lib/api/types'
  * **The number is the one on the chip.** Chips are numbered per answer (1, 2,
  * 3 in order of first use) while `n` is the retrieval index, so heading this
  * panel with `n` meant clicking **2** and opening "Passage 7".
+ *
+ * **And the passage is shown in its source.** Where the citation says which
+ * chunk it is, the paragraphs either side of it load underneath — see
+ * `PassageContext`. That is the difference between quoting the evidence and
+ * showing it.
  */
 export function PassagePanel({
   citation,
@@ -48,17 +54,27 @@ export function PassagePanel({
           Passage {shown}
           {title && <span className="normal-case"> of {title}</span>}
         </p>
-        {citation.text ? (
-          // The cited span itself, washed in the expert's colour.
-          <blockquote className="mt-1.5 rounded-card bg-expert-soft p-2.5 text-fg-2">
-            {citation.text}
-          </blockquote>
-        ) : (
-          <p className="mt-1.5 text-xs text-fg-3">
-            This answer was saved before passages were kept with their citations, so the text is not
-            here. The source is below.
-          </p>
-        )}
+        {/* The evidence itself: the cited paragraph in the source where there
+            is one to fetch, and the citation's own excerpt until then. */}
+        <div className="mt-1.5">
+          {citation.chunk_id !== null && citation.chunk_id !== undefined && source ? (
+            <PassageContext
+              slug={slug}
+              sourceId={source.id}
+              chunkId={citation.chunk_id}
+              quote={citation.text}
+            />
+          ) : citation.text ? (
+            <blockquote className="rounded-card bg-expert-soft p-2.5 text-fg-2">
+              {citation.text}
+            </blockquote>
+          ) : (
+            <p className="text-xs text-fg-3">
+              This answer was saved before passages were kept with their citations, so the text is
+              not here. The source is below.
+            </p>
+          )}
+        </div>
         {siblings.length > 0 && (
           <p className="mt-1.5 text-xs text-fg-3">
             This source is also cited as{' '}

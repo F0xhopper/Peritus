@@ -443,6 +443,59 @@ async function handle(req, res) {
         expert: { name: expert.name, topic: expert.topic, tier: expert.tier },
       })
     }
+    // The passages around a cited chunk — the reader's window, and the whole
+    // source for the kinds the API may reproduce.
+    const passagesMatch = /^\/sources\/(\d+)\/passages$/.exec(rest)
+    if (passagesMatch && method === 'GET') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      const report = await fixture('corpus-report')
+      const sourceId = Number(passagesMatch[1])
+      const source = report.sources.find((row) => row.id === sourceId)
+      if (!source) return json(res, 404, { detail: 'That source is not part of this expert.' })
+
+      const around = Number(url.searchParams.get('around')) || 9001
+      const whole = url.searchParams.get('whole') === 'true'
+      // Same gate as `_whole_text_allowed` in routes/sources.py.
+      const method_ = source.full_text_method ?? ''
+      const wholeAvailable =
+        method_ !== 'abstract' &&
+        (['gutenberg', 'wikipedia', 'arxiv'].includes(source.source_type) ||
+          method_.startsWith('oa_'))
+      const scope = whole && wholeAvailable ? 'whole' : 'window'
+      const width = scope === 'whole' ? 3 : 1
+
+      const passages = []
+      for (let offset = -width; offset <= width; offset += 1) {
+        passages.push({
+          chunk_id: around + offset,
+          sequence_n: 11 + offset,
+          section: offset === -width ? 'Methods' : null,
+          paragraph_n: 12 + offset,
+          text:
+            offset === 0
+              ? 'Removal reduced mite load by 43% relative to untreated controls over one season, with no effect on colony weight at the end of the season.'
+              : `Neighbouring paragraph ${offset} of the same source, as extracted.`,
+        })
+      }
+
+      return json(res, 200, {
+        source: {
+          id: source.id,
+          title: source.title,
+          author: source.author ?? null,
+          url: source.url ?? null,
+          source_type: source.source_type,
+          full_text_method: source.full_text_method ?? null,
+          text_chars: source.text_chars ?? null,
+          passage_count: source.passage_count ?? passages.length,
+        },
+        scope,
+        whole_available: wholeAvailable,
+        cited: around,
+        passages,
+      })
+    }
+
     if (rest === '/corpus-report/export' && method === 'GET') {
       const format = url.searchParams.get('format') ?? 'csv'
       const bodies = {
@@ -551,7 +604,7 @@ async function handle(req, res) {
     if (!conversation) return json(res, 404, { detail: 'Conversation not found' })
 
     if (!conversationMatch[2]) {
-      if (method === 'GET') return json(res, 200, conversation)
+      if (method === 'GET') return json(res, 200, asDetail(conversation))
       if (method === 'PATCH') {
         conversation.title = JSON.parse((await body(req)).toString()).title
         return json(res, 200, summary(conversation))
@@ -573,6 +626,45 @@ async function handle(req, res) {
 function summary(conversation) {
   const { messages: _messages, ...rest } = conversation
   return rest
+}
+
+/**
+ * A conversation as the **API's response model** returns it, not as the seed
+ * happens to hold it.
+ *
+ * The mock used to hand back the stored object whole, so the suite tested a
+ * shape the real API never sent: when `Citation` dropped the passage text on
+ * the way out, every reopened chat lost its quote in production and the e2e
+ * stayed green. Projecting through the field list here is what makes that
+ * class of bug visible — keep it in step with
+ * `api/src/peritus/api/schemas/conversations.py`.
+ */
+const CITATION_FIELDS = [
+  'n',
+  'label',
+  'source_id',
+  'text',
+  'chunk_id',
+  'disputed',
+  'dispute_points',
+]
+
+function asDetail(conversation) {
+  return {
+    ...conversation,
+    messages: conversation.messages.map((message) => ({
+      ...message,
+      citations:
+        message.citations?.map((citation) =>
+          Object.fromEntries(
+            CITATION_FIELDS.filter((field) => field in citation).map((field) => [
+              field,
+              citation[field],
+            ])
+          )
+        ) ?? null,
+    })),
+  }
 }
 
 function session(email) {

@@ -343,6 +343,7 @@ export function LedgerPage({
           <RowDetail
             source={selected}
             slug={expert.name}
+            owner={owner}
             asking={startingChat}
             onAsk={(title) => void startChat(`What does “${title}” say?`)}
             onDeleted={

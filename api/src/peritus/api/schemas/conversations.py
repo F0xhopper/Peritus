@@ -5,11 +5,31 @@ from pydantic import BaseModel, Field, field_validator
 
 class Citation(BaseModel):
     """One cited passage, numbered to match the inline ``[n]`` markers — the
-    exact shape the SSE ``sources`` event emits and JSONB stores."""
+    exact shape the SSE ``sources`` event emits and JSONB stores.
+
+    That last clause was a promise the model broke. It declared three fields,
+    so every field the stream had added since — the passage text itself, the
+    dispute flags — was **discarded on the way out**: the row on disk kept them
+    (`conversation_repository` stores the dict untouched), the stream showed
+    them, and a reload lost them. The chat's cited-passage panel duly fell back
+    to "this answer was saved before passages were kept" for answers written
+    the same hour.
+
+    Anything `used_citations()` puts on a citation belongs here.
+    """
 
     n: int
     label: str
     source_id: int | None = None
+    #: The passage, trimmed by the API. Absent on answers stored before it was
+    #: sent, which is what the client's fallback is for.
+    text: str | None = None
+    #: The chunk this passage came from, so a reader can be shown what surrounds
+    #: it. Absent for the same reason as ``text``.
+    chunk_id: int | None = None
+    #: This passage is on one side of a disagreement in the corpus.
+    disputed: bool = False
+    dispute_points: list[str] = Field(default_factory=list)
 
 
 class ConversationMessageOut(BaseModel):

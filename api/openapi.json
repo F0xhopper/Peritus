@@ -491,8 +491,31 @@
         "type": "object"
       },
       "Citation": {
-        "description": "One cited passage, numbered to match the inline ``[n]`` markers \u2014 the\nexact shape the SSE ``sources`` event emits and JSONB stores.",
+        "description": "One cited passage, numbered to match the inline ``[n]`` markers \u2014 the\nexact shape the SSE ``sources`` event emits and JSONB stores.\n\nThat last clause was a promise the model broke. It declared three fields,\nso every field the stream had added since \u2014 the passage text itself, the\ndispute flags \u2014 was **discarded on the way out**: the row on disk kept them\n(`conversation_repository` stores the dict untouched), the stream showed\nthem, and a reload lost them. The chat's cited-passage panel duly fell back\nto \"this answer was saved before passages were kept\" for answers written\nthe same hour.\n\nAnything `used_citations()` puts on a citation belongs here.",
         "properties": {
+          "chunk_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chunk Id"
+          },
+          "dispute_points": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Dispute Points",
+            "type": "array"
+          },
+          "disputed": {
+            "default": false,
+            "title": "Disputed",
+            "type": "boolean"
+          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -511,6 +534,17 @@
               }
             ],
             "title": "Source Id"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
           }
         },
         "required": [
@@ -1506,6 +1540,171 @@
           "email"
         ],
         "title": "OtpRequest",
+        "type": "object"
+      },
+      "PassageOut": {
+        "description": "One chunk of a source, as a reader sees it.",
+        "properties": {
+          "chunk_id": {
+            "title": "Chunk Id",
+            "type": "integer"
+          },
+          "paragraph_n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Paragraph N"
+          },
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "sequence_n": {
+            "title": "Sequence N",
+            "type": "integer"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chunk_id",
+          "sequence_n",
+          "text"
+        ],
+        "title": "PassageOut",
+        "type": "object"
+      },
+      "PassageSourceOut": {
+        "description": "The source a window was read from \u2014 enough to caption it honestly.",
+        "properties": {
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "full_text_method": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Text Method"
+          },
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "passage_count": {
+            "title": "Passage Count",
+            "type": "integer"
+          },
+          "source_type": {
+            "title": "Source Type",
+            "type": "string"
+          },
+          "text_chars": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text Chars"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "source_type",
+          "passage_count"
+        ],
+        "title": "PassageSourceOut",
+        "type": "object"
+      },
+      "PassageWindowOut": {
+        "description": "A cited passage with what surrounds it \u2014 or the whole source.\n\n``scope`` is the server's decision, never the client's ask: ``whole`` only\nfor the kinds we may reproduce (see the route), ``window`` for everything\nelse. A client offers \"read the whole source\" when, and only when, a window\ncomes back saying the whole is available.",
+        "properties": {
+          "cited": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cited"
+          },
+          "passages": {
+            "items": {
+              "$ref": "#/components/schemas/PassageOut"
+            },
+            "title": "Passages",
+            "type": "array"
+          },
+          "scope": {
+            "enum": [
+              "window",
+              "whole"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/PassageSourceOut"
+          },
+          "whole_available": {
+            "title": "Whole Available",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source",
+          "scope",
+          "whole_available",
+          "passages"
+        ],
+        "title": "PassageWindowOut",
         "type": "object"
       },
       "PlanOut": {
@@ -4743,6 +4942,117 @@
           }
         ],
         "summary": "Delete Source",
+        "tags": [
+          "sources"
+        ]
+      }
+    },
+    "/experts/{slug}/sources/{source_id}/passages": {
+      "get": {
+        "description": "The cited passage in context \u2014 the paragraphs either side of it.\n\nA quote with a bibliography entry is a claim; the quote with the paragraph\nbefore and after it is the evidence, and it is where a citation that does\nnot support its sentence becomes obvious.\n\n**This is the text the expert read, not the original.** No original is kept\n(`source_uploads.content` is cleared once ingestion succeeds) and the\nextraction can drop a great deal \u2014 a table of contents, page chrome \u2014 so a\nclient showing this must say which one it is showing.\n\n``whole=true`` is a request, not an instruction: the server returns the\nwhole text only for the kinds it may reproduce, and a window otherwise,\nwith ``scope`` saying which happened.",
+        "operationId": "source_passages_experts__slug__sources__source_id__passages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          },
+          {
+            "description": "The chunk id a citation points at; the first chunk when omitted.",
+            "in": "query",
+            "name": "around",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The chunk id a citation points at; the first chunk when omitted.",
+              "title": "Around"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before",
+            "required": false,
+            "schema": {
+              "default": 2,
+              "maximum": 20,
+              "minimum": 0,
+              "title": "Before",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after",
+            "required": false,
+            "schema": {
+              "default": 2,
+              "maximum": 20,
+              "minimum": 0,
+              "title": "After",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Ask for the whole source; the server decides.",
+            "in": "query",
+            "name": "whole",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Ask for the whole source; the server decides.",
+              "title": "Whole",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PassageWindowOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Source Passages",
         "tags": [
           "sources"
         ]

@@ -19,6 +19,7 @@ import type {
   GraphResponse,
   LedgerEntry,
   Me,
+  PassageWindow,
   SharedExpert,
   ShareState,
   SourceDecision,
@@ -182,6 +183,31 @@ export function getCorpusReport(slug: string, query: CorpusQuery = {}) {
   })
   return safely(
     () => proxyJson<CorpusReport>(`/experts/${encodeURIComponent(slug)}/corpus-report?${params}`),
+    { next: `/experts/${slug}/sources` }
+  )
+}
+
+/**
+ * A source's text — the window around a cited passage, or the whole of it.
+ *
+ * `whole` is a request and the API answers with what it may reproduce, so the
+ * page reads `scope` rather than assuming it got what it asked for.
+ */
+export function getPassages(
+  slug: string,
+  sourceId: number,
+  query: { around?: number | null; before?: number; after?: number; whole?: boolean } = {}
+) {
+  const params = new URLSearchParams()
+  if (query.around != null) params.set('around', String(query.around))
+  if (query.before !== undefined) params.set('before', String(query.before))
+  if (query.after !== undefined) params.set('after', String(query.after))
+  if (query.whole) params.set('whole', 'true')
+  return safely(
+    () =>
+      proxyJson<PassageWindow>(
+        `/experts/${encodeURIComponent(slug)}/sources/${sourceId}/passages?${params}`
+      ),
     { next: `/experts/${slug}/sources` }
   )
 }

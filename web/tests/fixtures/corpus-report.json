@@ -15,8 +15,14 @@
     "passages_total": 412
   },
   "scores": {
-    "accepted": { "mean_quality": 7.9, "mean_relevance": 8.3 },
-    "rejected": { "mean_quality": 3.1, "mean_relevance": 4.4 }
+    "accepted": {
+      "mean_quality": 7.9,
+      "mean_relevance": 8.3
+    },
+    "rejected": {
+      "mean_quality": 3.1,
+      "mean_relevance": 4.4
+    }
   },
   "thresholds": {
     "quality_min": 5,
@@ -155,8 +161,11 @@
       "source_tier": "primary",
       "doi": "10.1234/varroa-cohort",
       "arxiv_id": null,
-      "identifiers": { "doi": "10.1234/varroa-cohort", "pmid": "31234567" },
-      "full_text_method": "europepmc_jats",
+      "identifiers": {
+        "doi": "10.1234/varroa-cohort",
+        "pmid": "31234567"
+      },
+      "full_text_method": "oa_pdf_url",
       "text_chars": 48210,
       "validator_model": "claude-haiku-4-5-20251001",
       "review_model": null,
@@ -190,7 +199,9 @@
       "source_tier": "primary",
       "doi": "10.1234/amitraz",
       "arxiv_id": null,
-      "identifiers": { "doi": "10.1234/amitraz" },
+      "identifiers": {
+        "doi": "10.1234/amitraz"
+      },
       "full_text_method": "abstract",
       "text_chars": 1840,
       "validator_model": "claude-sonnet-5",

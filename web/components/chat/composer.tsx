@@ -98,7 +98,7 @@ export function Composer({
   if (disabled) {
     return (
       <div className="pb-keyboard shrink-0 bg-bg px-3 pt-3 md:px-4">
-        <p className="mx-auto max-w-[720px] rounded-card bg-panel px-3 py-2.5 text-sm text-fg-3 xl:mx-0 xl:ml-12">
+        <p className="mx-auto max-w-[720px] rounded-card bg-panel px-3 py-2.5 text-sm text-fg-3">
           {disabledReason ?? 'This expert cannot answer yet.'}
         </p>
       </div>
@@ -116,9 +116,8 @@ export function Composer({
    */
   return (
     <div className="pb-keyboard shrink-0 bg-bg px-3 pt-2 md:px-4">
-      {/* Aligned with the transcript above it, including the `xl` gutter that
-          keeps both still when the passage panel opens. */}
-      <div className="mx-auto w-full max-w-[720px] xl:mx-0 xl:ml-12">
+      {/* One measure with the transcript above it. */}
+      <div className="mx-auto w-full max-w-[720px]">
         {about && (
           <div className="mb-1.5 flex items-center gap-1.5">
             <span className="inline-flex max-w-full items-center gap-1 rounded-chip bg-expert-soft px-2 py-0.5 text-xs text-expert">

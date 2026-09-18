@@ -1,6 +1,7 @@
 """Request/response models for user-supplied sources."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -80,3 +81,46 @@ class UploadAcceptedOut(BaseModel):
     job_id: int
     title: str
     kind: str
+
+
+class PassageOut(BaseModel):
+    """One chunk of a source, as a reader sees it."""
+
+    chunk_id: int
+    sequence_n: int
+    section: str | None = None
+    paragraph_n: int | None = None
+    text: str
+
+
+class PassageSourceOut(BaseModel):
+    """The source a window was read from — enough to caption it honestly."""
+
+    id: int
+    title: str
+    author: str | None = None
+    url: str | None = None
+    source_type: str
+    #: How the text was obtained. ``abstract`` means there is nothing else.
+    full_text_method: str | None = None
+    text_chars: int | None = None
+    passage_count: int
+
+
+class PassageWindowOut(BaseModel):
+    """A cited passage with what surrounds it — or the whole source.
+
+    ``scope`` is the server's decision, never the client's ask: ``whole`` only
+    for the kinds we may reproduce (see the route), ``window`` for everything
+    else. A client offers "read the whole source" when, and only when, a window
+    comes back saying the whole is available.
+    """
+
+    source: PassageSourceOut
+    scope: Literal["window", "whole"]
+    #: True when the whole text may be read — what the "read it all" action is
+    #: gated on, without a second request to find out.
+    whole_available: bool
+    #: The chunk the citation pointed at, echoed so the client can mark it.
+    cited: int | None = None
+    passages: list[PassageOut]
