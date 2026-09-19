@@ -26,16 +26,17 @@ const button = cva(
   [
     'relative inline-flex shrink-0 select-none items-center justify-center gap-1.5',
     'text-sm font-medium whitespace-nowrap',
-    'transition-[background-color,color,border-color,opacity,transform] duration-(--dur-1) ease-(--ease-out)',
+    'transition-[background-color,color,border-color,opacity,box-shadow,transform] duration-(--dur-1) ease-(--ease-out)',
     'active:scale-[0.98]',
     'disabled:pointer-events-none disabled:opacity-50 data-disabled:pointer-events-none data-disabled:opacity-50',
   ],
   {
     variants: {
       variant: {
-        // `opacity`, not `brightness`: near-white cannot get brighter, so the
-        // old hover was invisible in the dark theme.
-        primary: 'bg-accent text-accent-fg hover:opacity-90',
+        // A halo, not a change of fill: near-white cannot get brighter, and
+        // fading it (the old `opacity-90`) let the black ground through, so
+        // the white Ask button went grey under the pointer.
+        primary: 'bg-accent text-accent-fg hover:ring-4 hover:ring-accent/20',
         // A hairline on the quiet fill: on a black ground `--raised` alone is a
         // smudge, and the edge is what makes it a control.
         secondary: 'border border-border bg-raised text-fg hover:bg-border',
