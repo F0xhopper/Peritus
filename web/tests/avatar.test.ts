@@ -10,7 +10,7 @@ import {
   renderAvatarSvg,
   resolveRecipe,
 } from '@/lib/avatar'
-import { nameHash, personaInitials } from '@/lib/persona'
+import { displayName, expertIdentity, nameHash, personaInitials } from '@/lib/persona'
 
 /**
  * Avatar identity.
@@ -83,18 +83,18 @@ describe('personaInitials', () => {
 })
 
 describe('resolveRecipe', () => {
-  it('derives the monogram from the persona name when nothing is stored', () => {
-    expect(resolveRecipe(derived)).toEqual({ style: 'sigil', seed: 'Dr. Marta Belen' })
+  it('seeds the monogram from the slug, never the persona, which a rebuild rewrites', () => {
+    expect(resolveRecipe(derived)).toEqual({ style: 'sigil', seed: 'varroa-mite-control' })
   })
 
   it('seeds a persona-less expert from its slug', () => {
-    const building = { name: 'queued-topic', persona_name: null, avatar: null }
+    const building = { name: 'queued-topic', avatar: null }
     expect(resolveRecipe(building)).toEqual({ style: 'sigil', seed: 'queued-topic' })
   })
 
   it('seeds from the slug, not the topic, so two experts on one topic differ', () => {
-    const a = resolveRecipe({ name: 'beekeeping', topic: 'Beekeeping', persona_name: null })
-    const b = resolveRecipe({ name: 'beekeeping-2', topic: 'Beekeeping', persona_name: null })
+    const a = resolveRecipe({ name: 'beekeeping', topic: 'Beekeeping' })
+    const b = resolveRecipe({ name: 'beekeeping-2', topic: 'Beekeeping' })
     expect(a.seed).not.toBe(b.seed)
   })
 
@@ -113,7 +113,7 @@ describe('resolveRecipe', () => {
 
   it('fills in the derived seed when only a style is pinned', () => {
     const recipe = resolveRecipe({ ...derived, avatar: { style: 'rings', seed: null } })
-    expect(recipe).toEqual({ style: 'rings', seed: 'Dr. Marta Belen' })
+    expect(recipe).toEqual({ style: 'rings', seed: 'varroa-mite-control' })
   })
 
   it('degrades an unknown style to the monogram rather than rendering nothing', () => {
@@ -136,7 +136,7 @@ describe('resolveRecipe with a found picture', () => {
   const withPicture = { ...derived, picture: { version: '9f3a1c2b7d4e' } }
 
   it('shows the picture when the owner has chosen nothing', () => {
-    expect(resolveRecipe(withPicture)).toEqual({ style: 'picture', seed: 'Dr. Marta Belen' })
+    expect(resolveRecipe(withPicture)).toEqual({ style: 'picture', seed: 'varroa-mite-control' })
   })
 
   it('never overrides a recipe the owner pinned', () => {
@@ -269,5 +269,29 @@ describe('randomSeed', () => {
     const seeds = Array.from({ length: 50 }, () => randomSeed())
     for (const seed of seeds) expect(seed).toMatch(/^[a-z0-9]{1,10}$/)
     expect(new Set(seeds).size).toBeGreaterThan(45)
+  })
+})
+
+describe('displayName', () => {
+  it('names an expert by its subject, never its persona', () => {
+    expect(displayName(derived)).toBe('Varroa mite control')
+  })
+
+  it('capitalises a subject typed in lower case', () => {
+    expect(displayName({ name: 'thomism', topic: 'thomism' })).toBe('Thomism')
+  })
+
+  it('falls back to the slug, spaced out, when there is no topic', () => {
+    expect(displayName({ name: 'stoic-philosophy' })).toBe('Stoic philosophy')
+    expect(displayName({})).toBe('Expert')
+  })
+})
+
+describe('expertIdentity', () => {
+  it('takes the monogram from the subject and survives a new persona', () => {
+    const before = expertIdentity(derived)
+    expect(before.initials).toBe('VM')
+    const rebuilt = { ...derived, persona_name: 'Prof. Ian Holt' }
+    expect(expertIdentity(rebuilt)).toEqual(before)
   })
 })

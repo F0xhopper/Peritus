@@ -6,7 +6,7 @@ import { ViewTransition } from 'react'
 import { Avatar } from '@/components/identity/avatar'
 import { AvatarPicker } from '@/components/identity/avatar-picker'
 import { PictureCredit } from '@/components/identity/picture-credit'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import type { ExpertWithCatalog } from '@/lib/api/types'
 
 /**
@@ -46,7 +46,6 @@ export function OverviewHeader({ expert, owner }: { expert: ExpertWithCatalog; o
       </ViewTransition>
       <div className="min-w-0 flex-1">
         <h1 className="text-title font-medium text-fg">{name}</h1>
-        {subtitle(expert) && <p className="mt-1 text-sm text-fg-2">{subtitle(expert)}</p>}
         {expert.picture && !expert.avatar && (
           <PictureCredit picture={expert.picture} className="mt-1.5" />
         )}

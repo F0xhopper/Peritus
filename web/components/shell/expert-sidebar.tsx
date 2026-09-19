@@ -31,7 +31,7 @@ import { apiSend, apiVoid } from '@/lib/api/client'
 import { cn } from '@/lib/cn'
 import { chatTitle, formatInt } from '@/lib/format'
 import { groupChats } from '@/lib/chat-groups'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import { useActiveSlug } from '@/components/shell/rail'
 import { focusAskField } from '@/components/chat/new-chat-composer'
 import type { ConversationSummary, CreditState, ExpertSummary } from '@/lib/api/types'
@@ -154,13 +154,14 @@ function ExpertForm({
         >
           <Avatar expert={expert} size={32} />
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5">
-              <span className="truncate text-sm font-medium text-fg">{displayName(expert)}</span>
+            <span className="flex items-start gap-1.5">
+              {/* Two lines, not one: the name is the subject now, and a subject
+                  is often a phrase. */}
+              <span className="line-clamp-2 text-sm font-medium text-fg">
+                {displayName(expert)}
+              </span>
               <StatusDot state={dotState(expert.status, expert.readiness, expert.build_active)} />
             </span>
-            {subtitle(expert) && (
-              <span className="mt-0.5 block truncate text-xs text-fg-3">{subtitle(expert)}</span>
-            )}
           </span>
         </Link>
       </div>

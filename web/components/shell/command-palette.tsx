@@ -21,7 +21,7 @@ import { Sheet } from '@/components/shell/sheet'
 import { useShell } from '@/components/shell/shell-context'
 import { BaseDialog } from '@/components/ui/dialog'
 import { cn } from '@/lib/cn'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import { chatTitle, relativeTime } from '@/lib/format'
 import { useIsTabletUp } from '@/hooks/use-media-query'
 import type { ConversationSummary, ExpertSummary } from '@/lib/api/types'
@@ -123,7 +123,6 @@ export function CommandPalette({
       id: `expert:${expert.id}`,
       section: 'Experts',
       label: displayName(expert),
-      hint: subtitle(expert) ?? undefined,
       // The first nine have a direct key; the palette is where anyone finds out.
       shortcut: index < 9 ? `${mac ? '⌘' : 'Ctrl '}${index + 1}` : undefined,
       icon: (
@@ -139,7 +138,7 @@ export function CommandPalette({
       id: `chat:${conversation.id}`,
       section: 'Chats',
       label: chatTitle(conversation.title),
-      hint: `${conversation.expert_persona_name ?? conversation.expert_topic} · ${relativeTime(conversation.last_message_at)}`,
+      hint: `${displayName({ topic: conversation.expert_topic })} · ${relativeTime(conversation.last_message_at)}`,
       icon: <MessageSquare className="size-4 text-fg-3" />,
       run: go(`/chats/${conversation.id}`),
       haystack: `${conversation.title ?? ''} ${conversation.expert_topic}`.toLowerCase(),

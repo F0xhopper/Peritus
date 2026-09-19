@@ -38,7 +38,9 @@ test('home lists the experts and the credit state', async ({ page }, testInfo) =
   await expect(page.getByRole('heading', { name: 'Home', level: 1 })).toBeVisible()
   // Scoped to the centre column: the rail and the sidebar carry the same name
   // and are in the HTML at every width, hidden by CSS below `lg`.
-  await expect(content(page).getByText('Dr. Marta Belen').first()).toBeVisible()
+  await expect(
+    content(page).getByText('Varroa mite control in temperate beekeeping').first()
+  ).toBeVisible()
 
   if (isPhoneProject(testInfo.project.name)) {
     // On a phone the tiles are one line of text, so the expert cards — the
@@ -204,7 +206,9 @@ test('cancelling a build refunds and says so', async ({ page }) => {
 test('the overview reads correctly and gates chat on readiness', async ({ page }, testInfo) => {
   await page.goto('/experts/varroa-mite-control-in-temperate-beekeeping')
 
-  await expect(page.getByRole('heading', { name: 'Dr. Marta Belen', level: 1 })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Varroa mite control in temperate beekeeping', level: 1 })
+  ).toBeVisible()
   await expect(
     content(page).getByText('Varroa mite control in temperate beekeeping').first()
   ).toBeVisible()
@@ -217,7 +221,7 @@ test('the overview reads correctly and gates chat on readiness', async ({ page }
   await expect(content(page).getByRole('definition').filter({ hasText: /^21$/ })).toBeVisible()
 
   // Chat is offered, because readiness is past pending.
-  await expect(page.getByRole('heading', { name: /^Ask Dr\. Marta Belen$/ })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ask a question' })).toBeVisible()
   await expectResponsive(page, isTouchProject(testInfo.project.name))
 })
 

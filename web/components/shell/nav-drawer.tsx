@@ -13,7 +13,7 @@ import { cn } from '@/lib/cn'
 
 import { useActiveSlug } from '@/components/shell/rail'
 import { StatusDot, dotState, isBuilding } from '@/components/ui/status-dot'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import type { ConversationSummary, CreditState, ExpertSummary, Me } from '@/lib/api/types'
 
 /**
@@ -93,7 +93,7 @@ export function NavDrawer({
               active={expert.name === activeSlug}
               // The rail's own form, so the two navigations do not announce the
               // same expert differently.
-              label={[displayName(expert), subtitle(expert)].filter(Boolean).join(' — ')}
+              label={displayName(expert)}
               icon={
                 <span className="relative grid shrink-0 place-items-center">
                   <Avatar expert={expert} size={24} />

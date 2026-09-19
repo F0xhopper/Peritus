@@ -103,7 +103,7 @@ const ROWS: ReplayRow[] = [
     stage: 'graph',
     text: 'Graph ready — 187 concepts, 2 judged to disagree',
   },
-  { after: 380, kind: 'ok', stage: 'persona', text: 'Voice written — Dr. Marta Belén' },
+  { after: 380, kind: 'ok', stage: 'persona', text: 'Voice written' },
 ]
 
 export function BuildLogReplay({ className }: { className?: string }) {

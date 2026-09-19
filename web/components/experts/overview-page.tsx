@@ -80,9 +80,9 @@ export function OverviewPage({
   // status this notice never fired, so the page showed a topic, no About and a
   // heading reading "Ask Thomism", with nothing anywhere to say why.
   const degradedPersona = state === 'ready' && !expert.persona_name
-  // With no persona there is no one to address: "Ask Thomism" reads as a
-  // instruction to a subject, not an invitation.
-  const askHeading = expert.persona_name ? `Ask ${name}` : 'Ask a question'
+  // The name is the subject, and "Ask Thomism" reads as an order given to a
+  // subject, not an invitation.
+  const askHeading = 'Ask a question'
 
   const ask = (
     <section id="ask" className={cn('scroll-mt-16', askFirst ? 'mt-6' : 'mt-10')}>
@@ -260,7 +260,7 @@ export function OverviewPage({
           {degradedPersona && (
             <Notice tone="warn" title="No voice was written for this expert" className="mb-5">
               It answers from its sources as normal.
-              {owner && ' Rebuilding writes a name, a bio and a voice for it.'}
+              {owner && ' Rebuilding writes a bio and a voice for it.'}
             </Notice>
           )}
 

@@ -700,7 +700,9 @@ function reduceLog(state: BuildState, seq: number, event: BuildEvent): BuildStat
     case 'persona_ready': {
       next.personaName = str(event.name) || null
       next.stages = completeThrough(state.stages, 'persona')
-      push({ kind: 'ok', stage: 'persona', message: `Voice written — ${next.personaName}` })
+      // Not "— Dr. Marta Belen": the persona's name is not what the expert is
+      // called (lib/persona.ts), and the log would be the one place it showed.
+      push({ kind: 'ok', stage: 'persona', message: 'Voice written' })
       return next
     }
 

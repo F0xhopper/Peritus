@@ -4,6 +4,7 @@ import { Avatar } from '@/components/identity/avatar'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { cn } from '@/lib/cn'
 import { chatTitle } from '@/lib/format'
+import { displayName } from '@/lib/persona'
 
 import type { ConversationSummary, ExpertSummary } from '@/lib/api/types'
 
@@ -51,7 +52,7 @@ export function RecentChats({
                 {chatTitle(conversation.title)}
               </span>
               <span className="hidden shrink-0 truncate text-xs text-fg-3 sm:block sm:max-w-40">
-                {conversation.expert_persona_name ?? conversation.expert_topic}
+                {displayName(expert)}
               </span>
               <RelativeTime
                 iso={conversation.last_message_at}

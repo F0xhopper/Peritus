@@ -10,7 +10,7 @@ import { useShell } from '@/components/shell/shell-context'
 import { isBuilding } from '@/components/ui/status-dot'
 import { Tooltip } from '@/components/ui/tooltip'
 import { cn } from '@/lib/cn'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import type { ConversationSummary, ExpertSummary, Me } from '@/lib/api/types'
 
 /**
@@ -176,7 +176,6 @@ function RailAvatar({ expert, active }: { expert: ExpertSummary; active: boolean
       content={
         <span className="block">
           <span className="block text-fg">{displayName(expert)}</span>
-          {subtitle(expert) && <span className="mt-0.5 block text-fg-3">{subtitle(expert)}</span>}
         </span>
       }
     >
@@ -187,7 +186,7 @@ function RailAvatar({ expert, active }: { expert: ExpertSummary; active: boolean
         // description rather than a name. Without this the rail was a column of
         // links each announced as "link" — the app's whole top-level navigation
         // unusable without sight of it.
-        aria-label={[displayName(expert), subtitle(expert)].filter(Boolean).join(' — ')}
+        aria-label={displayName(expert)}
         aria-current={active ? 'page' : undefined}
         className={cn(
           'relative grid size-(--rail-item) place-items-center rounded-card',

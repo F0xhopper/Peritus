@@ -76,11 +76,12 @@ test('the shell keeps the expert while reading one of its chats', async ({ page 
   // have to resolve it from the chat — the rail included, which is the one
   // place that tells you *which* expert is answering.
   const rail = page.getByRole('navigation', { name: 'Experts' })
-  await expect(rail.getByRole('link', { name: /Dr\. Marta Belen/ }).first()).toHaveAttribute(
-    'aria-current',
-    'page'
-  )
-  await expect(page.getByRole('navigation', { name: /Dr\. Marta Belen pages/ })).toBeVisible()
+  await expect(
+    rail.getByRole('link', { name: /Varroa mite control in temperate beekeeping/ }).first()
+  ).toHaveAttribute('aria-current', 'page')
+  await expect(
+    page.getByRole('navigation', { name: /Varroa mite control in temperate beekeeping pages/ })
+  ).toBeVisible()
 })
 
 test('the sidebar folds away, and says so on the next load', async ({ page }, testInfo) => {
@@ -88,7 +89,9 @@ test('the sidebar folds away, and says so on the next load', async ({ page }, te
 
   await page.goto(`/experts/${SLUG}`)
   await waitForHydration(page)
-  const sidebar = page.getByRole('navigation', { name: /Dr\. Marta Belen pages/ })
+  const sidebar = page.getByRole('navigation', {
+    name: /Varroa mite control in temperate beekeeping pages/,
+  })
   await expect(sidebar).toBeVisible()
 
   // A visible button in the column's search row folds it away.

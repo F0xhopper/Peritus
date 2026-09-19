@@ -6,7 +6,7 @@ import { PictureCredit } from '@/components/identity/picture-credit'
 import { OpenSharedExpert } from '@/components/share/open-shared-expert'
 import { sharedPictureUrl, sharePath } from '@/lib/access'
 import { humanise, plural } from '@/lib/format'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import { sourceKind } from '@/lib/source-kind'
 import type { SharedExpert } from '@/lib/api/types'
 
@@ -29,7 +29,6 @@ export function SharedExpertCard({
   signedIn: boolean
 }) {
   const name = displayName(expert)
-  const about = subtitle(expert)
   const answerable = expert.readiness !== 'pending'
   const kinds = kindCounts(expert.source_type_counts)
   const shownAvatar = expert.avatar === null && expert.picture !== null
@@ -47,7 +46,6 @@ export function SharedExpertCard({
         />
         <div className="min-w-0 flex-1">
           <h1 className="text-title font-medium text-fg">{name}</h1>
-          {about && <p className="mt-1 text-sm text-fg-2">{about}</p>}
           {shownAvatar && expert.picture && (
             <PictureCredit picture={expert.picture} className="mt-1.5" />
           )}

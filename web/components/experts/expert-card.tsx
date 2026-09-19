@@ -31,7 +31,7 @@ import { useStartChat } from '@/hooks/use-start-chat'
 import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
 import { firstSentence, formatInt } from '@/lib/format'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import type { ExpertSummary } from '@/lib/api/types'
 import { useApiAction } from '@/hooks/use-api-action'
 import { apiVoid } from '@/lib/api/client'
@@ -117,8 +117,10 @@ export function ExpertCard({
               </span>
             </ViewTransition>
             <span className="min-w-0 flex-1">
+              {/* The subject is the name, and a subject is often a phrase, so it
+                  gets two lines before it is cut. */}
               <span className="flex min-w-0 items-center gap-1.5">
-                <span className="truncate text-lg leading-snug font-semibold text-fg">
+                <span className="line-clamp-2 text-lg leading-snug font-semibold text-fg">
                   {displayName(expert)}
                 </span>
                 {!owner && (
@@ -128,9 +130,6 @@ export function ExpertCard({
                   </span>
                 )}
               </span>
-              {subtitle(expert) && (
-                <span className="mt-1 block truncate text-sm text-fg-3">{subtitle(expert)}</span>
-              )}
             </span>
           </span>
 

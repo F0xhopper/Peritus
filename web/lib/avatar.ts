@@ -69,7 +69,6 @@ export function isAvatarStyle(value: unknown): value is AvatarStyle {
 }
 
 export interface AvatarSubject {
-  persona_name?: string | null
   name?: string
   topic?: string
   /** The API still carries a `hue` on older rows; it is ignored. */
@@ -85,8 +84,9 @@ export interface AvatarSubject {
  * owner pinned only a style.
  */
 export function resolveRecipe(subject: AvatarSubject): AvatarRecipe {
-  const persona = subject.persona_name?.trim()
-  const derivedSeed = persona || subject.name || subject.topic || 'expert'
+  // The slug, never the persona: a rebuild writes a new persona, and the
+  // drawing must not change with it.
+  const derivedSeed = subject.name || subject.topic || 'expert'
   const stored = subject.avatar
   const hasPicture = Boolean(subject.picture?.version)
 

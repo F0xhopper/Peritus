@@ -20,7 +20,7 @@ import { takePendingQuestion, useChatStream } from '@/hooks/use-chat-stream'
 import { auditsByMessageId } from '@/lib/chat-audits'
 import { cn } from '@/lib/cn'
 import { chatTitle } from '@/lib/format'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 import { useApiAction } from '@/hooks/use-api-action'
 import { apiSend, apiVoid, messageFor } from '@/lib/api/client'
 import type {
@@ -357,9 +357,8 @@ export function ChatView({
             'Waiting for the answer in flight to finish.'
           )
         }
-        // The long form only when it fits one line on a phone: "Ask Dr. Marta
-        // Belen about Varroa mite control in temperate beekeeping…" wrapped at
-        // 393px, so the empty composer was two lines tall before a word was
+        // The long form only when it fits one line on a phone: "Ask about
+        // Varroa mite control in temperate beekeeping…" wrapped at 393px, so the empty composer was two lines tall before a word was
         // typed. Measured in characters rather than by a media query, so the
         // server and the browser render the same string.
         placeholder={placeholderFor(expert)}
@@ -419,8 +418,7 @@ export function ChatView({
 const PLACEHOLDER_CHARS = 48
 
 function placeholderFor(expert: ExpertWithCatalog): string {
-  const name = displayName(expert)
-  const topic = subtitle(expert)
-  const long = topic ? `Ask ${name} about ${topic}…` : ''
-  return long && long.length <= PLACEHOLDER_CHARS ? long : `Ask ${name}…`
+  // "Ask Thomism…" reads as an order given to a subject; "Ask about" does not.
+  const long = `Ask about ${displayName(expert)}…`
+  return long.length <= PLACEHOLDER_CHARS ? long : 'Ask a question…'
 }

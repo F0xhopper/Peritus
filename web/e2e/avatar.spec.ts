@@ -26,13 +26,13 @@ test.beforeEach(async ({ page }) => {
 test('an expert is drawn the same way on every surface', async ({ page }) => {
   await page.goto('/experts')
 
-  // The derived default: initials from the persona name, with the honorific
-  // stripped. Visible-only, because the rail and the sidebar are both in the
+  // The derived default: initials from the subject, which is the expert's
+  // name — never the persona's, whose "Dr." would have made every tile DR. Visible-only, because the rail and the sidebar are both in the
   // HTML at every width and hidden by CSS.
   await expect(visible(page, '[data-avatar]').first()).toBeVisible()
 
-  // "Dr. Marta Belen" → MB, not DR.
-  await expect(visible(page, '[data-avatar]').filter({ hasText: 'MB' }).first()).toBeVisible()
+  // "Varroa mite control in temperate beekeeping" → VM.
+  await expect(visible(page, '[data-avatar]').filter({ hasText: 'VM' }).first()).toBeVisible()
   await expect(page.locator('[data-avatar]').filter({ hasText: 'DR' })).toHaveCount(0)
 
   // And none of them carries a colour of its own: there are no per-expert hues.

@@ -1,5 +1,14 @@
 /**
- * Per-expert visual identity, *derived* from the persona name.
+ * Per-expert naming and visual identity.
+ *
+ * **An expert is named by its subject.** The build still writes a persona — a
+ * name like "Dr. Marta Belen" and an About line — and the persona still sets
+ * how answers are written, but it is not shown as who the expert is. An invented
+ * doctor with an invented career sat badly beside a product whose one promise
+ * is that nothing it says is made up, borrowed an authority no one holds, and
+ * said nothing about the subject: every card needed the topic underneath to be
+ * readable. The subject is what people remember an expert by, and unlike the
+ * persona it survives a rebuild.
  *
  * This is the default half of the identity. The owner can override it — see
  * `lib/avatar.ts` and `experts.avatar` — but until they do, every expert's
@@ -7,8 +16,8 @@
  * expert has to look the same on every page, in every session, and in the TUI.
  * The hash is the same `h*31 + codepoint` the Rust client uses
  * (`cli/src/tui/widgets/avatar.rs`), and `personaInitials` is a direct port of
- * its `initials()` — including the honorific rule, because every persona is a
- * "Dr." and a wall of DR badges identifies nobody.
+ * its `initials()`, honorific rule included (harmless on a subject, and the TUI
+ * still labels an expert by its persona).
  *
  * **There are no per-expert colours.** Every expert is monochrome; what tells
  * experts apart is the avatar — the found picture, a generated drawing, or the
@@ -76,27 +85,15 @@ export function personaInitials(label: string | null | undefined): string {
   return letters || '?'
 }
 
-/** The persona name if there is one, else the topic, else the slug. */
-export function displayName(expert: {
-  persona_name?: string | null
-  topic?: string
-  name?: string
-}): string {
-  return expert.persona_name || expert.topic || expert.name || 'Expert'
-}
-
 /**
- * The line under a name: the topic, or null when the name already *is* the
- * topic. An expert with no persona is titled by its topic, and printing it
- * again underneath read "Thomism / Thomism" on every card, tooltip and header.
+ * The expert's name: its subject, as typed when it was built, with a capital
+ * first letter ("thomism" → "Thomism"). A row without a topic falls back to its
+ * slug, spaced out.
  */
-export function subtitle(expert: {
-  persona_name?: string | null
-  topic?: string
-  name?: string
-}): string | null {
-  const topic = expert.topic?.trim()
-  return topic && topic !== displayName(expert) ? topic : null
+export function displayName(expert: { topic?: string; name?: string }): string {
+  const label = expert.topic?.trim() || expert.name?.replace(/[-_]+/g, ' ').trim()
+  if (!label) return 'Expert'
+  return label.charAt(0).toLocaleUpperCase('en') + label.slice(1)
 }
 
 export interface ExpertIdentity {
@@ -105,14 +102,15 @@ export interface ExpertIdentity {
   seed: number
 }
 
-export function expertIdentity(expert: {
-  persona_name?: string | null
-  name?: string
-  topic?: string
-}): ExpertIdentity {
-  const label = expert.persona_name?.trim() || expert.name || expert.topic || 'expert'
+/**
+ * The monogram's letters come from the name people see — the subject — and its
+ * background marks from the slug, which never changes, so a rebuild leaves the
+ * tile exactly as it was.
+ */
+export function expertIdentity(expert: { name?: string; topic?: string }): ExpertIdentity {
+  const slug = expert.name || expert.topic || 'expert'
   return {
-    initials: personaInitials(label),
-    seed: nameHash(label) % 6,
+    initials: personaInitials(expert.topic?.trim() || slug),
+    seed: nameHash(slug) % 6,
   }
 }

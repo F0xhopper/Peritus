@@ -5,7 +5,7 @@ import { SharedExpertCard } from '@/components/share/shared-expert-card'
 import { getSharedExpert, hasSession } from '@/lib/api/data'
 import { appUrl } from '@/lib/api/server'
 import { sharedPictureUrl } from '@/lib/access'
-import { displayName, subtitle } from '@/lib/persona'
+import { displayName } from '@/lib/persona'
 
 /**
  * What someone sees when they open a share link.
@@ -30,8 +30,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!expert) return { title: 'This link is not active', robots, referrer: 'no-referrer' }
 
   const name = displayName(expert)
-  const about = subtitle(expert)
-  const title = about ? `${name} — ${about}` : name
+  const title = name
   const description =
     expert.persona_bio ??
     `An expert on ${expert.topic}, built from screened sources. Every answer cites the passages it came from.`

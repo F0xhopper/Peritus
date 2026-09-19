@@ -77,16 +77,24 @@ test('a rebuild warns that it starts the corpus over', async ({ page }, testInfo
 test('deleting an expert needs its name typed out', async ({ page }) => {
   await page.goto(`/experts/${SLUG}/settings`)
 
-  await page.getByRole('button', { name: /^Delete Dr\. Marta Belen$/ }).click()
+  await page
+    .getByRole('button', { name: /^Delete Varroa mite control in temperate beekeeping$/ })
+    .click()
   const confirm = page.getByRole('button', { name: 'Delete', exact: true })
   // Disabled until the name matches: this cannot be undone and cannot be
   // cheaply rebuilt.
   await expect(confirm).toBeDisabled()
 
-  await fillField(page.getByLabel(/Type Dr\. Marta Belen to confirm/), 'wrong name')
+  await fillField(
+    page.getByLabel(/Type Varroa mite control in temperate beekeeping to confirm/),
+    'wrong name'
+  )
   await expect(confirm).toBeDisabled()
 
-  await fillField(page.getByLabel(/Type Dr\. Marta Belen to confirm/), 'Dr. Marta Belen')
+  await fillField(
+    page.getByLabel(/Type Varroa mite control in temperate beekeeping to confirm/),
+    'Varroa mite control in temperate beekeeping'
+  )
   await expect(confirm).toBeEnabled()
   await confirm.click()
 
@@ -95,9 +103,13 @@ test('deleting an expert needs its name typed out', async ({ page }) => {
   // shell's own data has to be refetched, and the toast is the only place the
   // name may still appear.
   await expect
-    .poll(async () => page.getByRole('link', { name: /Dr\. Marta Belen/ }).count(), {
-      timeout: 15_000,
-    })
+    .poll(
+      async () =>
+        page.getByRole('link', { name: /Varroa mite control in temperate beekeeping/ }).count(),
+      {
+        timeout: 15_000,
+      }
+    )
     .toBe(0)
 })
 
@@ -129,7 +141,9 @@ test('the chats list groups by expert and undoes a delete', async ({ page }, tes
   await page.goto('/chats')
 
   await expect(page.getByRole('heading', { name: 'Chats', level: 1 })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Dr. Marta Belen' })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Varroa mite control in temperate beekeeping' })
+  ).toBeVisible()
 
   // Scoped to the page: from `lg` the sidebar beside it lists the same chats,
   // so an unscoped match finds two links with this name.
