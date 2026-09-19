@@ -173,13 +173,22 @@ test('a 402 renders the numbers and the one remedy, and keeps the form', async (
 
 test('cancelling a build refunds and says so', async ({ page }) => {
   await page.goto('/experts')
+  // Held open, or the mock's script is over in under four seconds and a press
+  // that has to be made twice finds no build left to cancel.
+  await useScenario(page, 'slow-build', 'cancel-me-please')
   await startBuild(page, 'Cancel me please', /\/experts\/cancel-me-please\/build/)
 
-  await page
-    .getByRole('button', { name: /^Cancel/ })
-    .first()
-    .click()
-  await expect(page.getByRole('heading', { name: 'Cancel this build?' })).toBeVisible()
+  // Until the dialog opens: the press lands a tenth of a second after a
+  // client-side navigation, while the page is still fetching its refresh, and
+  // the trace shows it opening nothing. Guarded on the dialog rather than
+  // `clickUntil`: once it is open, a second press would be aimed at a button
+  // behind its backdrop.
+  const cancel = page.getByRole('button', { name: /^Cancel/ }).first()
+  const asked = page.getByRole('heading', { name: 'Cancel this build?' })
+  await expect(async () => {
+    if (!(await asked.isVisible())) await cancel.click({ timeout: 3_000 })
+    await expect(asked).toBeVisible({ timeout: 3_000 })
+  }).toPass({ timeout: 30_000 })
 
   // Pressed until the refund is announced, and never once the dialog has gone.
   // A press ten milliseconds after the heading appears lands while the dialog

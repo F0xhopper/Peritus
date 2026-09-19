@@ -204,7 +204,15 @@ export async function streamBuild(req, res, slug, after, resumable = false) {
 
     // Fast enough that a test does not wait, slow enough that the log visibly
     // streams rather than arriving as one chunk.
-    await sleep(Number(process.env.MOCK_BUILD_INTERVAL_MS || 60))
+    //
+    // `slow-build` is for the test that cancels one. At 60ms an event the whole
+    // script is over in under four seconds, and a slow runner can spend that
+    // getting a single press heard — after which there is no build left to
+    // cancel, and the failure reads as a missing Cancel button.
+    const slow =
+      state.scenario === 'slow-build' &&
+      (state.scenarioSlug === null || state.scenarioSlug === slug)
+    await sleep(slow ? 600 : Number(process.env.MOCK_BUILD_INTERVAL_MS || 60))
 
     // The scenario that matters most: the connection dies mid-build and the
     // client has to resume from its cursor.
