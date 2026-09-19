@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useRef, useState } from 'react'
+import { startTransition, useCallback, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { seqFromId, streamSse } from '@/lib/api/sse'
@@ -88,8 +88,15 @@ export function useStartBuild(): StartBuildResult {
         // log still starts at seq 0 and `created` is still in it.
         for await (const frame of streamSse<BuildEvent>(res)) {
           if (frame.data.type === 'created' && typeof frame.data.slug === 'string') {
-            const seq = seqFromId(frame.id, 1)
-            router.push(`/experts/${encodeURIComponent(frame.data.slug)}/build?from=${seq}`)
+            const url = `/experts/${encodeURIComponent(frame.data.slug)}/build?from=${seqFromId(frame.id, 1)}`
+            // The push alone renders the build page but not the shell: the
+            // layout's expert list was fetched before this expert existed, so
+            // the rail would not show it building until a reload. The refresh
+            // is queued behind the push and re-renders the layout with it.
+            startTransition(() => {
+              router.push(url)
+              router.refresh()
+            })
             return
           }
         }
