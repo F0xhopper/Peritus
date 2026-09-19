@@ -209,9 +209,6 @@ test('the overview reads correctly and gates chat on readiness', async ({ page }
   await expect(
     page.getByRole('heading', { name: 'Varroa mite control in temperate beekeeping', level: 1 })
   ).toBeVisible()
-  await expect(
-    content(page).getByText('Varroa mite control in temperate beekeeping').first()
-  ).toBeVisible()
 
   // Properties, read off the real payload.
   // Status and readiness are one line now, not two rows saying the same thing.

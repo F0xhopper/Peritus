@@ -76,7 +76,7 @@ test('a signed-out visitor sees the card and is asked to sign in', async ({ page
   await page.goto(`/share/${FOREIGN_TOKEN}`)
 
   const main = content(page)
-  await expect(main.getByRole('heading', { level: 1, name: 'Fr. Reginald Hale' })).toBeVisible()
+  await expect(main.getByRole('heading', { level: 1, name: 'Thomism' })).toBeVisible()
   await expect(main.getByText('Your questions are private.', { exact: false })).toBeVisible()
 
   // Sign-in comes straight back here.
@@ -100,7 +100,7 @@ test('an inactive link says so, and says nothing else', async ({ page }) => {
   await expect(
     content(page).getByRole('heading', { name: 'This link is not active' })
   ).toBeVisible()
-  await expect(page.getByText('Fr. Reginald Hale')).toHaveCount(0)
+  await expect(page.getByText('Thomism')).toHaveCount(0)
 })
 
 test('a signed-in viewer opens the expert and meets no owner controls', async ({
@@ -114,7 +114,7 @@ test('a signed-in viewer opens the expert and meets no owner controls', async ({
   await page.waitForURL(`**/experts/${FOREIGN_SLUG}`)
 
   const main = content(page)
-  await expect(main.getByRole('heading', { level: 1, name: 'Fr. Reginald Hale' })).toBeVisible()
+  await expect(main.getByRole('heading', { level: 1, name: 'Thomism' })).toBeVisible()
   await expect(main.getByText(/Shared with you/)).toBeVisible()
   // Reading and asking, yes.
   await expect(visible(page, `[id="ask"]`)).toBeVisible()
@@ -153,6 +153,6 @@ test('a viewer can remove a shared expert from their workspace', async ({ page }
   await content(page).getByRole('button', { name: 'More actions' }).click()
   await page.getByRole('menuitem', { name: 'Remove from my experts' }).click()
   await page.waitForURL('**/experts')
-  await expect(page.getByText(/Removed Fr\. Reginald Hale/)).toBeVisible()
+  await expect(page.getByText(/Removed Thomism/)).toBeVisible()
   await expect(page.locator(`a[href="/experts/${FOREIGN_SLUG}"]`)).toHaveCount(0)
 })

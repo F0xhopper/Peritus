@@ -135,8 +135,8 @@ test('the phone drawer lists the experts by name', async ({ page }, testInfo) =>
 
   // Not a strip of unlabelled avatars: two monograms with the same initials
   // were the same grey square, and there is no tooltip on a touch device.
-  await expect(drawer.getByRole('link', { name: /Dr\. Aurelia Vance/ })).toBeVisible()
+  await expect(drawer.getByRole('link', { name: /Stoic philosophy/ })).toBeVisible()
   await expect(drawer.getByRole('link', { name: /^New expert/ })).toBeVisible()
-  await drawer.getByRole('link', { name: /Dr\. Aurelia Vance/ }).click()
+  await drawer.getByRole('link', { name: /Stoic philosophy/ }).click()
   await page.waitForURL('**/experts/stoic-philosophy')
 })
