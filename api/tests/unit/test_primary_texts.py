@@ -141,8 +141,12 @@ def test_apply_sections_records_what_happened():
     )
     assert recorded["sections_matched"] is True
     assert recorded["truncated"] is True
+    # Where the kept text came from: the front matter and the named question,
+    # so structural ingestion can tell what of the work is not yet held.
+    assert len(recorded["close_spans"]) == 2 and recorded["close_spans"][0][0] == 0
     plain, recorded = apply_sections("y" * 300, {}, 100)
-    assert plain == "y" * 100 and recorded == {"truncated": True}
+    assert plain == "y" * 100
+    assert recorded == {"truncated": True, "close_spans": [[0, 100]]}
 
 
 # ── works: scope, merging, routes, priority ─────────────────────────────────

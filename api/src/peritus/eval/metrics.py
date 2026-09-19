@@ -393,3 +393,83 @@ def spearman(xs: list[float], ys: list[float]) -> float:
     if var_x == 0 or var_y == 0:
         return 0.0
     return round(cov / (var_x * var_y) ** 0.5, 4)
+
+
+# ── Answer form (docs/plans/beating-closed-book.md 0.4) ─────────────────────
+#
+# Deterministic checks on what an answer does with its evidence, counted over
+# the head-to-head set. Each one is a failure a judge marked down, or a thing
+# only a corpus can give that the answers were not giving: in the 2026-09-19
+# run 4 of 12 opened on a `##` heading, 3 opened on the persona's routine, 4
+# talked about their own sources, and none quoted a passage or named a locus.
+
+_SUMMARY_HEADING = re.compile(
+    r"^#{1,6}\s*(?:summary|conclusion|in summary|in short|the (?:whole|short) (?:answer|story)"
+    r"|bottom line|putting it (?:all )?together|takeaways?|the whole .{0,40}in one line)\b",
+    re.IGNORECASE,
+)
+_MY_SOURCES = re.compile(
+    r"\bmy sources\b|\bthese (?:sources|passages)\b|\bthe passages (?:here|I have)\b"
+    r"|\bin (?:the|these) sources\b|\bthe sources (?:here|I have|don'?t)\b",
+    re.IGNORECASE,
+)
+# A place in a work: "q. 2, a. 3", "I-II, q. 94", "Book IV", "chapter 13",
+# "the question on …", "article 3", "section 4".
+_LOCUS = re.compile(
+    r"\bq{1,2}\.\s?\d+|\ba(?:rt)?\.\s?\d+\b|\b(?:book|chapter|question|article|section|"
+    r"part|lecture|canto|letter)\s+(?:\d+|[IVXLC]+)\b|\bthe (?:question|article|chapter) on\b",
+    re.IGNORECASE,
+)
+
+
+def _paragraph_words(text: str) -> list[str]:
+    return re.findall(r"[a-z']+", text.casefold())
+
+
+def persona_overlap(answer_text: str, persona: str | None, min_n: int = 5) -> int:
+    """Length in words of the longest run the answer shares with the persona.
+
+    A run of five or more is the persona's own phrasing arriving in the answer
+    ("the chronicler says, then what the ground says") — a routine, not a style.
+    Returns 0 below ``min_n``.
+    """
+    a, p = _paragraph_words(answer_text), _paragraph_words(persona or "")
+    if not a or not p:
+        return 0
+    grams: set[tuple[str, ...]] = set()
+    for i in range(len(p) - min_n + 1):
+        grams.add(tuple(p[i : i + min_n]))
+    best = 0
+    i = 0
+    while i <= len(a) - min_n:
+        if tuple(a[i : i + min_n]) in grams:
+            n = min_n
+            while i + n < len(a) and tuple(a[i + n - min_n + 1 : i + n + 1]) in grams:
+                n += 1
+            best = max(best, n)
+            i += n
+        else:
+            i += 1
+    return best
+
+
+def answer_form(answer_text: str, persona: str | None = None) -> dict[str, int | bool]:
+    """The deterministic form checks for one answer."""
+    lines = [ln for ln in answer_text.strip().splitlines() if ln.strip()]
+    first = lines[0].strip() if lines else ""
+    headings = [ln for ln in lines if ln.lstrip().startswith("#")]
+    quotes = 0
+    in_quote = False
+    for ln in answer_text.splitlines():
+        is_quote = ln.lstrip().startswith(">")
+        quotes += is_quote and not in_quote
+        in_quote = is_quote
+    return {
+        "first_line_heading": first.startswith("#"),
+        "persona_overlap": persona_overlap(answer_text, persona),
+        "summary_section": bool(headings) and bool(_SUMMARY_HEADING.match(headings[-1].strip())),
+        "my_sources_asides": len(_MY_SOURCES.findall(answer_text)),
+        "quotations": quotes,
+        "loci": len(_LOCUS.findall(answer_text)),
+        "chars": len(answer_text),
+    }

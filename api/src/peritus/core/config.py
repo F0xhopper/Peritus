@@ -167,6 +167,11 @@ class Settings(BaseSettings):
     # effort (low | medium | high | xhigh | max) and the tokens thinking may use
     # on top of the tier's answer length.
     CHAT_EFFORT: ChatEffort = "low"
+    # Effort for synthesis questions — the planner's `comparison`,
+    # `orientation` and `open_ended` types. Empty means CHAT_EFFORT. An
+    # experiment (docs/plans/beating-closed-book.md 2.6): medium was measured
+    # as no help on an explanation question, and synthesis is a different job.
+    CHAT_BROAD_EFFORT: ChatEffort | Literal[""] = ""
     CHAT_THINKING_HEADROOM_TOKENS: int = 4096
 
     CHAT_RATE_LIMIT: int = 20
@@ -237,6 +242,19 @@ class Settings(BaseSettings):
     MISTRAL_API_KEY: str = ""
     MISTRAL_OCR_MODEL: str = "mistral-ocr-latest"
 
+    # Structural ingestion (ingestion/structural.py): the part of a long work
+    # past its close-read ceiling is held embed-only — chunked, noted from its
+    # headings, embedded, never contextualised or graphed — within a per-tier
+    # character budget.
+    STRUCTURAL_INGEST_ENABLED: bool = True
+    # Section summaries (ingestion/summaries.py): a build summarises each run of
+    # chunks under one heading, and broad questions — comparison, orientation,
+    # open-ended — search those summaries and seat the best SECTION_ROUTE_K
+    # sections' passages, each from a different source.
+    SECTION_INDEX_ENABLED: bool = True
+    SECTION_ROUTE_K: int = 4
+    SECTION_ROUTE_PASSAGES: int = 2
+
     # Contextual retrieval
     CONTEXT_ENABLED: bool = True
     CONTEXT_MAX_CHARS: int = 3000
@@ -246,19 +264,45 @@ class Settings(BaseSettings):
     # otherwise fall back to scoring in small windows rather than one large, unreliable
     # LLM call over all candidates.
     RERANK_ENABLED: bool = True
-    RERANK_CANDIDATES: int = 50
+    # 75 since structural ingestion made corpora larger (plan 3.6). Checked
+    # 2026-09-19 that the filtered HNSW scan returns the full 4 × 75 = 300
+    # vector candidates on experts 41, 63 and 66 with iterative scan on; with
+    # each query's two best hits added, a rerank stays under Cohere's 100-
+    # document search unit.
+    RERANK_CANDIDATES: int = 75
     RERANK_WINDOW: int = 8
     COHERE_API_KEY: str = ""
     COHERE_RERANK_MODEL: str = "rerank-v3.5"
+    # What the reranker reads (search/service.py): each candidate with its
+    # contextual note in front, and optionally the question prefixed with the
+    # expert's topic. Measured 2026-09-19 with eval/retrieval.py (k=5, 26
+    # Thomism + 15 Anglo-Saxon questions): the note raised MRR 0.718 → 0.777
+    # and 0.800 → 0.822 at equal recall; the topic prefix added nothing on
+    # Thomism and cost Anglo-Saxon (a long topic string) recall 0.867 → 0.800,
+    # MRR 0.822 → 0.700. So the note is on and the prefix off.
+    RERANK_WITH_CONTEXT: bool = True
+    RERANK_TOPIC_PREFIX: bool = False
 
-    # Relevance gate on reranker scores (chat/agent.py). A passage scoring below
-    # the floor is padding: it is kept out of the prompt unless that would leave
-    # fewer than RELEVANCE_MIN_PASSAGES, and fewer than that many above the
-    # floor is what triggers the fallback-query retrieval pass. Calibrated on
-    # the audit trail, where cited passages averaged 0.31 and uncited 0.22 —
-    # recalibrate from `answer_audit_passages` when the sample is larger.
-    RELEVANCE_FLOOR: float = 0.15
+    # Relevance floor on reranker scores (chat/agent.py), relative to the
+    # question: a passage is kept when it scores at least RELEVANCE_RELATIVE ×
+    # the best passage's score, and never below RELEVANCE_FLOOR. The old floor
+    # was absolute (0.15), and top scores run 0.10–0.87 across questions — an
+    # evaluative or broad question has no passage that "answers" it, so every
+    # passage scores low and the prompt was cut to three. Derived from the 20
+    # audited answers in `answer_audit_passages` (2026-09-19): 90% of cited
+    # passages scored ≥ 0.55× their answer's top score, and the 10th percentile
+    # of cited passages was 0.098 absolute. At least max(RELEVANCE_MIN_PASSAGES,
+    # max_context_passages // 2) passages are kept whatever they score.
+    RELEVANCE_FLOOR: float = 0.04
+    RELEVANCE_RELATIVE: float = 0.5
     RELEVANCE_MIN_PASSAGES: int = 3
+    # When retrieval counts as weak, which is what runs the second pass: the
+    # best passage scores under RELEVANCE_WEAK_TOP, or fewer than
+    # RELEVANCE_MIN_STRONG passages clear the relative floor. Separate from
+    # what is kept: "is retrieval weak" and "what goes in the prompt" used to
+    # be one threshold, so the weaker the retrieval the smaller the prompt.
+    RELEVANCE_WEAK_TOP: float = 0.25
+    RELEVANCE_MIN_STRONG: int = 5
 
     # Neighbour expansion (chat/neighbours.py). The best NEIGHBOUR_ANCHORS
     # retrieved passages each bring the chunks either side of them, so an

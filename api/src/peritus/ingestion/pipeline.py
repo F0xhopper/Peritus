@@ -7,6 +7,7 @@ half price when enabled), then embeds and stores per source. The single-source
 """
 
 import json
+from collections import Counter
 from collections.abc import Awaitable, Callable
 
 import asyncpg
@@ -16,6 +17,8 @@ from peritus.core.logging import get_logger
 from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.ingestion.chunker import TextChunk, chunk_text
 from peritus.ingestion.contextualizer import ContextJob, contextualize_sources
+from peritus.ingestion.quality import chunk_rejection
+from peritus.ingestion.structural import annotate_loci
 from peritus.sources.domain import ValidatedSource
 
 logger = get_logger(__name__)
@@ -26,24 +29,54 @@ _MAX_EMBED_CHARS = 30_000  # ~8 000 tokens for text-embedding-3-large
 IngestedCallback = Callable[[ValidatedSource, list[int]], Awaitable[None]]
 
 
+def prepare_chunks(text: str, title: str, dropped: Counter | None = None) -> list[TextChunk]:
+    """Chunk a source, read its loci, and drop what is not prose.
+
+    The prose gate runs here, before anything is paid for: a chunk dropped now
+    is never contextualised, embedded, extracted or retrieved. Dropped chunks
+    keep their place in the sequence — the gap is real, and a neighbour on the
+    far side of it is not a continuation. ``dropped`` counts them by reason,
+    for the build summary.
+    """
+    chunks = chunk_text(text, title)
+    annotate_loci(chunks)
+    kept: list[TextChunk] = []
+    for chunk in chunks:
+        reason = chunk_rejection(chunk.text)
+        if reason is None:
+            kept.append(chunk)
+        elif dropped is not None:
+            dropped[reason] += 1
+    if len(kept) < len(chunks):
+        logger.info(
+            "Dropped %d of %d chunks of %r as not prose",
+            len(chunks) - len(kept),
+            len(chunks),
+            title,
+        )
+    return kept
+
+
 async def ingest_sources(
     sources: list[ValidatedSource],
     expert_id: int,
     source_db_ids: list[int],
     pool: asyncpg.Pool,
     on_ingested: IngestedCallback | None = None,
+    dropped: Counter | None = None,
 ) -> list[tuple[list[int], list[TextChunk]]]:
     """Chunk, contextualise, embed and store every validated source.
 
     Returns one ``(inserted_chunk_ids, text_chunks)`` pair per source, in
     order. A source that fails at any step yields ``([], [])`` — ingestion of
-    the other sources continues.
+    the other sources continues. ``dropped`` counts chunks the prose gate
+    removed, by reason.
     """
     # 1. Chunk everything up front (pure, cheap).
     per_source_chunks: list[list[TextChunk]] = []
     for source in sources:
         try:
-            chunks = chunk_text(source.text, source.title)
+            chunks = prepare_chunks(source.text, source.title, dropped)
         except Exception as exc:
             logger.warning("Chunking failed for %r: %s", source.title, exc)
             chunks = []
@@ -110,7 +143,7 @@ async def ingest_source(
     Unlike :func:`ingest_sources`, failures raise :class:`IngestionError`.
     """
     try:
-        chunks = chunk_text(source.text, source.title)
+        chunks = prepare_chunks(source.text, source.title)
         if not chunks:
             logger.warning("No chunks produced for source %r", source.title)
             return [], []

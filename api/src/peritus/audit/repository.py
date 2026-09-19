@@ -1017,13 +1017,13 @@ class AuditRepository:
                     coverage_satisfied, second_pass, retrieved_passages, duplicate_hits,
                     unique_passages, context_passages, cited_passages, context_cap,
                     sources_in_context, sources_cited, contradiction_traversed, answer_chars,
-                    dangling_citations
+                    dangling_citations, reranker
                 ) VALUES (
                     $1, $2::uuid, $3, $4::jsonb, $5::jsonb,
                     $6, $7, $8, $9,
                     $10, $11, $12, $13,
                     $14, $15, $16, $17,
-                    $18::integer[]
+                    $18::integer[], $19
                 )
                 RETURNING id
                 """,
@@ -1045,6 +1045,7 @@ class AuditRepository:
                 bool(header.get("contradiction_traversed")),
                 int(header.get("answer_chars") or 0),
                 [int(n) for n in header.get("dangling_citations") or []],
+                header.get("reranker"),
             )
             if passages:
                 await conn.executemany(

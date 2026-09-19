@@ -201,6 +201,7 @@ class GutenbergFetcher:
         if len(text) < 500:
             return None
         # The plan's sections, when it named some, rather than the book's opening.
+        whole = text
         text, selected = apply_sections(text, candidate.metadata, _MAX_CHARS)
         logger.info(
             "Gutenberg: fetched %r by %s (%d chars%s)",
@@ -220,6 +221,7 @@ class GutenbergFetcher:
                 **selected,
                 "gutenberg_id": book_id,
             },
+            full_text=whole if len(whole) > len(text) else "",
         )
 
 

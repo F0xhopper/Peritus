@@ -168,6 +168,17 @@ def weak_concepts_block(
                     if missing_texts.get(c.concept)
                     else ""
                 )
+                # Only for a practice or a research front (experts/coverage.py).
+                # Said in so many words for the same reason "primary: none" is:
+                # asked only for "more on varroa", a round finds a third virology
+                # paper, not the extension service's treatment calendar.
+                + (
+                    ", current material: none — find current practitioner guidance "
+                    "(extension services, professional bodies, standard handbooks, "
+                    "recent reviews), not old manuals or single research papers"
+                    if c.lacks_current
+                    else ""
+                )
             )
     if voiceless_figures:
         lines.append("")

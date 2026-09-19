@@ -46,26 +46,65 @@ _TOOL: ToolParam = {
 }
 
 
+#: Which reranker scored a ranking. The two scale their scores differently,
+#: and a relevance floor calibrated on one is applied to both — so an answer
+#: records which it was (``answer_audits.reranker``).
+RERANKER_COHERE = "cohere"
+RERANKER_LLM = "llm_window"
+RERANKER_NONE = "none"
+
+#: How many rankings the windowed-LLM fallback has produced since the process
+#: started. The fallback is silent by design — an answer still gets ranked —
+#: which is exactly why it needs counting: production reranked on a Cohere
+#: trial key (10 calls a minute), and past the limit every turn quietly moved
+#: to a reranker on another scale.
+fallback_count = 0
+
+
 async def rerank(
     query: str,
     documents: list[str],
     top_n: int,
 ) -> list[tuple[int, float]]:
     """Return ``[(doc_index, score), ...]`` for the top ``top_n`` documents."""
+    ranking, _ = await rerank_with_provider(query, documents, top_n)
+    return ranking
+
+
+async def rerank_with_provider(
+    query: str,
+    documents: list[str],
+    top_n: int,
+) -> tuple[list[tuple[int, float]], str]:
+    """:func:`rerank`, plus which reranker produced the ranking."""
+    global fallback_count
     n = len(documents)
     identity = [(i, 0.0) for i in range(min(n, top_n))]
     if not settings.RERANK_ENABLED or n <= 1:
-        return identity
+        return identity, RERANKER_NONE
 
     if settings.COHERE_API_KEY:
         cohere = await _cohere_rerank(query, documents, top_n)
         if cohere is not None:
-            return cohere
+            return cohere, RERANKER_COHERE
 
     if settings.ANTHROPIC_API_KEY:
-        return await _llm_windowed_rerank(query, documents, top_n)
+        fallback_count += 1
+        if settings.COHERE_API_KEY:
+            # Every time, not once: a key that has stopped working (a trial
+            # limit, a revoked key) must be visible in the logs of each turn it
+            # affects, not only in the first.
+            logger.warning(
+                "Cohere rerank unavailable; scored %d passages with the LLM fallback "
+                "(fallback #%d since start). Its scores are on a different scale.",
+                n,
+                fallback_count,
+            )
+        ranking = await _llm_windowed_rerank(query, documents, top_n)
+        scored = any(score > 0 for _, score in ranking)
+        return ranking, RERANKER_LLM if scored else RERANKER_NONE
 
-    return identity
+    return identity, RERANKER_NONE
 
 
 async def _cohere_rerank(

@@ -25,6 +25,13 @@ from peritus.experts.build.constants import (
 from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.sources.canonical import WORK_KINDS, title_key
 from peritus.sources.orientation import OrientationPack, build_orientation_pack
+from peritus.sources.subject import (
+    SUBJECT_CANON,
+    SUBJECT_KINDS,
+    SUBJECT_PRACTICE,
+    SUBJECT_RESEARCH_FRONT,
+    normalise_subject_kind,
+)
 
 logger = get_logger(__name__)
 
@@ -181,6 +188,24 @@ def _plan_tool(max_concepts: int) -> ToolParam:
                         "Legacy flat list of the concepts. Leave empty when facets are given."
                     ),
                 },
+                "subject_kind": {
+                    "type": "string",
+                    "enum": list(SUBJECT_KINDS),
+                    "description": (
+                        f"What kind of subject this is. {SUBJECT_CANON} = the texts are "
+                        "the subject: a thinker, a school, a scripture, a literature, a "
+                        "period of history read through its documents — old texts are "
+                        f"the point. {SUBJECT_PRACTICE} = a craft or how-to field (a "
+                        "trade, a hobby, a cuisine, husbandry, a sport, clinical or "
+                        "professional practice) — what is authoritative is what "
+                        "practitioners do now: extension services, professional "
+                        "bodies, standard handbooks, recent reviews. "
+                        f"{SUBJECT_RESEARCH_FRONT} = a fast-moving scientific or "
+                        "technical field whose recent literature is the field. When a "
+                        "topic is both, pick the one its questions will be: 'how do I' "
+                        f"is {SUBJECT_PRACTICE}, 'what did he argue' is {SUBJECT_CANON}."
+                    ),
+                },
                 "primary_source_definition": {
                     "type": "string",
                     "description": (
@@ -257,7 +282,12 @@ def _plan_tool(max_concepts: int) -> ToolParam:
                     ),
                 },
             },
-            "required": ["fetcher_plans", "facets", "primary_source_definition"],
+            "required": [
+                "fetcher_plans",
+                "facets",
+                "subject_kind",
+                "primary_source_definition",
+            ],
         },
     }
 
@@ -323,7 +353,16 @@ _PLAN_SYSTEM = (
     "Archive are searched. The corpus is in English, so name works as English editions "
     "cite them. For a long work named in must_have_works, leave sections empty unless "
     "one part matters most for the topic as a whole — the concept entries say which "
-    "parts each concept needs."
+    "parts each concept needs.\n\n"
+    "Say what kind of subject this is (subject_kind), because it decides what "
+    "authoritative means. What can be fetched whole and free is public-domain books "
+    "(a century old and more) and open-access research papers. For a canon that is "
+    "the right corpus. For a practice it is not: a nineteenth-century manual and two "
+    "narrow research papers cannot tell a reader how the craft is done today, so for "
+    "a practice plan queries that reach current practitioner guidance — extension "
+    "services, professional and trade bodies, standard handbooks, recent reviews — "
+    "and keep old manuals for the history. For a research front, weight the recent "
+    "literature and its reviews."
 )
 
 
@@ -382,8 +421,9 @@ async def _plan_research(topic: str, max_concepts: int = 8) -> dict:
     plan = _normalise_plan(raw_plan, topic, max_concepts)
     plan["orientation"] = orientation.record(plan.pop("orientation_note", ""))
     logger.info(
-        "Research plan for %r: facets=[%s] weights={%s} must_have=[%s] figures=[%s]",
+        "Research plan for %r: kind=%s facets=[%s] weights={%s} must_have=[%s] figures=[%s]",
         topic,
+        plan["subject_kind"],
         "; ".join(f"{f['name']}: {', '.join(f['concepts'])}" for f in plan["facets"]),
         ", ".join(f"{n}:{p['weight']:g}" for n, p in plan["fetcher_plans"].items()),
         "; ".join(w["title"] for w in plan["must_have_works"]),
@@ -455,6 +495,9 @@ def _normalise_plan(raw_plan: dict, topic: str, max_concepts: int = 8) -> dict:
     note = raw_plan.get("orientation_note")
     return {
         "fetcher_plans": fetcher_plans,
+        # Canon for anything missing or unknown — today's behaviour, so a failed
+        # plan or an old one changes nothing downstream (sources/subject.py).
+        "subject_kind": normalise_subject_kind(raw_plan.get("subject_kind")),
         "facets": facets,
         "key_concepts": key_concepts,
         "primary_source_definition": definition.strip() if isinstance(definition, str) else "",

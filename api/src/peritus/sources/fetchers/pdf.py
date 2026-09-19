@@ -112,6 +112,8 @@ class PdfFetcher:
         body = f"{candidate.title}\n\n{abstract}\n\n{text}" if abstract else text
         logger.info("PDF ingested: %r (%d chars, %s)", candidate.title, len(text), method)
         metadata = {**candidate.metadata, "full_text": True, "full_text_method": method}
+        if len(body) > _MAX_CHARS:
+            metadata["close_spans"] = [[0, _MAX_CHARS]]
         return RawSource(
             source_type=SourceType.PDF,
             url=candidate.url,
@@ -120,6 +122,7 @@ class PdfFetcher:
             text=body[:_MAX_CHARS],
             metadata=metadata,
             identifiers=candidate.identifiers,
+            full_text=body if len(body) > _MAX_CHARS else "",
         )
 
 

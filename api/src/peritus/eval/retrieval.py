@@ -298,6 +298,7 @@ async def run(
                 question=plan.standalone_question or item.question,
                 queries=plan.subqueries,
                 top_k=max(k, cfg.retrieval_top_k),
+                topic=expert.topic,
             )
         return [(r.text, r.source_id) for r in resp.results]
 

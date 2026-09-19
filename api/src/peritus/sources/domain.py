@@ -177,6 +177,12 @@ class RawSource:
     text: str
     metadata: dict = field(default_factory=dict)
     identifiers: Identifiers = field(default_factory=Identifiers)
+    #: The whole work, when ``text`` is only the part of it read closely (a
+    #: long work cut to its named sections or its ceiling). Empty otherwise.
+    #: ``metadata["close_spans"]`` says where in it ``text`` came from; the rest
+    #: may be held embed-only (ingestion/structural.py). In memory only — never
+    #: persisted, validated or previewed.
+    full_text: str = field(default="", repr=False)
 
     def __post_init__(self) -> None:
         self.title = clean_title(self.title)

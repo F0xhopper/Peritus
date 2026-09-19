@@ -285,6 +285,18 @@ _PRIMARY_TEXT_CHARS: dict[ExpertTier, dict[str, int]] = {
 }
 
 
+# Characters of long works held past their close-read ceiling, embed-only
+# (ingestion/structural.py), per build. Bounded by storage rather than money: a
+# held chunk costs ~$0.00003 to embed and ~29 KB of Postgres with its vector and
+# indexes, and the database is on a 500 MB plan — 1,000,000 characters is about
+# 1,100 chunks, ~32 MB. Spent on the tail sections nearest the key concepts.
+_STRUCTURAL_TAIL_CHARS: dict[ExpertTier, int] = {
+    ExpertTier.LITE: 250_000,
+    ExpertTier.STANDARD: 1_000_000,
+    ExpertTier.PRO: 3_000_000,
+}
+
+
 # Priority candidates skip the score floor and the queue. Past this share of a
 # round's money they stop doing so and compete on their scores, so a plan that
 # names many long texts cannot starve the rest of the corpus.

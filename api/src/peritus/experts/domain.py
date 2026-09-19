@@ -118,8 +118,15 @@ class ExpertConfig:
     def from_tier(cls, tier: ExpertTier) -> "ExpertConfig":
         return _TIER_DEFAULTS[tier]
 
-    def coverage_target(self) -> "CoverageTarget":
+    def coverage_target(self, subject_kind: str = "canon") -> "CoverageTarget":
+        """The tier's target, for the kind of subject the plan named.
+
+        ``subject_kind`` defaults to canon — the target as it always was. A
+        practice or a research front adds a current-material requirement per
+        concept (experts/coverage.py, sources/subject.py).
+        """
         from peritus.experts.coverage import CoverageTarget
+        from peritus.sources.subject import normalise_subject_kind
 
         return CoverageTarget(
             min_sources=self.coverage_min_sources,
@@ -128,6 +135,7 @@ class ExpertConfig:
             max_rounds=self.discovery_max_rounds,
             require_primary=self.coverage_require_primary,
             min_rounds=self.discovery_min_rounds,
+            subject_kind=normalise_subject_kind(subject_kind),
         )
 
 

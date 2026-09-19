@@ -876,6 +876,7 @@ class ArchiveTextFetcher:
                 "Internet Archive text for %s is mostly OCR noise — not using it", identifier
             )
             return None
+        whole = text
         text, selected = apply_sections(text, candidate.metadata, _MAX_CHARS)
         return RawSource(
             source_type=candidate.source_type,
@@ -891,6 +892,7 @@ class ArchiveTextFetcher:
                 "full_text_method": "archive_djvu_text",
             },
             identifiers=candidate.identifiers,
+            full_text=whole if len(whole) > len(text) else "",
         )
 
 

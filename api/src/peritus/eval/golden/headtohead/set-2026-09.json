@@ -1,0 +1,22 @@
+{
+  "description": "Head-to-head questions: the twelve of the 2026-09-19 baseline (docs/plans/beating-closed-book.md §2) plus five written from the subject to fill the classes. Classes: held (the corpus certainly holds it), edge (the named work holds it, past what was ingested), broad (synthesis, evaluation), multi_part, how_to.",
+  "items": [
+    {"expert_id": 63, "class": "held", "question": "What is the most tangible proof for God for a modern atheist?"},
+    {"expert_id": 63, "class": "edge", "question": "What will happen at the moment of death?"},
+    {"expert_id": 63, "class": "edge", "question": "Will we have bodies in the beatific vision?"},
+    {"expert_id": 63, "class": "held", "question": "What is natural law and how do we come to know it?"},
+    {"expert_id": 63, "class": "multi_part", "question": "Why does Aquinas say God is simple, and what is the strongest objection to that?"},
+    {"expert_id": 66, "class": "broad", "question": "Who was the most impactful king during this period and why?"},
+    {"expert_id": 66, "class": "held", "question": "What does the genetic evidence say about how many Anglo-Saxons actually migrated to Britain?"},
+    {"expert_id": 66, "class": "held", "question": "Was the Anglo-Saxon arrival an invasion or a gradual migration?"},
+    {"expert_id": 41, "class": "how_to", "question": "Why do bees swarm, and how do I stop my hive from swarming?"},
+    {"expert_id": 41, "class": "how_to", "question": "How do I get a colony through its first winter?"},
+    {"expert_id": 43, "class": "held", "question": "What is a perfect syllogism and why did Aristotle care about the distinction?"},
+    {"expert_id": 43, "class": "held", "question": "What is the square of opposition?"},
+    {"expert_id": 63, "class": "edge", "question": "What can the soul know once it is separated from the body?"},
+    {"expert_id": 63, "class": "edge", "question": "When is a war just, according to Aquinas?"},
+    {"expert_id": 66, "class": "broad", "question": "How did the separate Anglo-Saxon kingdoms come to be unified into England?"},
+    {"expert_id": 41, "class": "how_to", "question": "How do I check my hive for varroa mites and decide whether to treat?"},
+    {"expert_id": 43, "class": "multi_part", "question": "How does Aristotle's modal syllogistic differ from his assertoric syllogistic, and why do scholars think it is flawed?"}
+  ]
+}

@@ -3,6 +3,7 @@ parsing, and citation resolution. These are the invariants the product rests on.
 
 from peritus.chat.grounding import (
     ANSWER_FORMAT,
+    ANSWER_SHAPE,
     CITATION_TEXT_CHARS,
     GROUNDING_CONTRACT,
     build_grounded_context,
@@ -114,14 +115,17 @@ def test_system_prompt_falls_back_without_persona():
     assert "naval history" in prompt
 
 
-def test_system_prompt_asks_for_markdown_after_the_contract_and_before_the_persona():
-    # Every client renders Markdown, so the answer is asked to use it — but the
-    # layout rules can never sit above what counts as grounded.
+def test_system_prompt_puts_the_persona_between_the_contract_and_the_answer_rules():
+    # The contract first, what counts as grounded; then the persona; and the
+    # rules for how an answer opens and is laid out last, where they weigh most.
+    # With the persona last, its routines wrote a quarter of answers' openings.
     prompt = build_system_prompt("Speak like a pirate.", "naval history")
     assert ANSWER_FORMAT in prompt
     assert "GitHub-flavoured Markdown" in ANSWER_FORMAT
-    assert prompt.index(GROUNDING_CONTRACT) < prompt.index(ANSWER_FORMAT)
-    assert prompt.index(ANSWER_FORMAT) < prompt.index("Speak like a pirate.")
+    assert prompt.index(GROUNDING_CONTRACT) < prompt.index("Speak like a pirate.")
+    assert prompt.index("Speak like a pirate.") < prompt.index(ANSWER_SHAPE)
+    assert prompt.index(ANSWER_SHAPE) < prompt.index(ANSWER_FORMAT)
+    assert prompt.endswith(ANSWER_FORMAT)
 
 
 def test_passage_opens_with_its_contextual_note():
@@ -144,3 +148,21 @@ def test_passage_opens_with_its_contextual_note():
 def test_passage_without_a_note_has_no_note_line():
     block, _ = build_grounded_context([_enriched(1, text="Plain.")], max_passages=5)
     assert block == "[1] Source 1\nPlain."
+
+
+def test_persona_sentences_that_script_an_opening_are_removed():
+    from peritus.experts.build.persona import scripted_sentences, strip_scripted
+
+    style = (
+        "You teach the settlement as three kinds of evidence. You open almost every "
+        "explanation the same way: \"Let's see what the chronicler says, then what the "
+        'ground says." Sutton Hoo is your favourite lens.\n\n'
+        "You tell students: find the middle term first. You like worked examples."
+    )
+    assert len(scripted_sentences(style)) == 2
+    assert strip_scripted(style) == (
+        "You teach the settlement as three kinds of evidence. Sutton Hoo is your "
+        "favourite lens.\n\nYou like worked examples."
+    )
+    # Opening a hive is beekeeping, not a script.
+    assert strip_scripted("You open a hive from the back.") == "You open a hive from the back."

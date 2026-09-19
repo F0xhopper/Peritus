@@ -10,6 +10,7 @@ import pytest
 
 from peritus.experts.builder import ExpertBuilder
 from peritus.experts.domain import Expert, ExpertConfig, ExpertStatus, ExpertTier
+from peritus.search.domain import SearchResponse
 
 
 def _make_expert(tier: ExpertTier) -> Expert:
@@ -75,8 +76,7 @@ async def test_lite_chat_pipeline_top_k():
 
     expert = _make_expert(ExpertTier.LITE)
 
-    search_mock = AsyncMock()
-    search_mock.results = []
+    search_mock = SearchResponse(query="q", results=[], total=0)
     agent._search.batch_search = AsyncMock(return_value=search_mock)
     agent._graph.expand = AsyncMock(return_value=[])
     agent._plan = AsyncMock(return_value=QueryPlan(subqueries=["subquery"]))
@@ -101,8 +101,7 @@ async def test_pro_chat_pipeline_top_k():
 
     expert = _make_expert(ExpertTier.PRO)
 
-    search_mock = AsyncMock()
-    search_mock.results = []
+    search_mock = SearchResponse(query="q", results=[], total=0)
     agent._search.batch_search = AsyncMock(return_value=search_mock)
     agent._graph.expand = AsyncMock(return_value=[])
     agent._plan = AsyncMock(return_value=QueryPlan(subqueries=["subquery"]))
@@ -127,8 +126,7 @@ async def test_graph_hops_propagates():
     for tier, expected_hops in [(ExpertTier.STANDARD, 1), (ExpertTier.PRO, 1)]:
         expert = _make_expert(tier)
 
-        search_mock = AsyncMock()
-        search_mock.results = []
+        search_mock = SearchResponse(query="q", results=[], total=0)
         agent._search.batch_search = AsyncMock(return_value=search_mock)
         agent._graph.expand = AsyncMock(return_value=[])
         agent._plan = AsyncMock(return_value=QueryPlan(subqueries=["subquery"]))

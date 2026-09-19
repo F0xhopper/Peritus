@@ -530,7 +530,7 @@ async def test_a_round_retries_a_timed_out_channel_relaxes_a_thin_floor_and_writ
 
     scores = {"Summa": 9.0, "strong": 8.0, "middling": 5.5, "junk": 1.0}
 
-    async def _triage(topic, concepts, must_haves, candidates):
+    async def _triage(topic, concepts, must_haves, candidates, subject_kind="canon"):
         return [
             TriagedCandidate(c, scores[c.title], model_score=scores[c.title]) for c in candidates
         ]

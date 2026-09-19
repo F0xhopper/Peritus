@@ -31,6 +31,7 @@ from peritus.sources.domain import (
     SourceType,
     ValidatedSource,
 )
+from peritus.sources.subject import SUBJECT_CANON, is_current_material, wants_current
 
 # Tiers that count as evidence rather than restatement. A concept whose only
 # support is tertiary is covered by material *about* the subject, which is the
@@ -91,9 +92,22 @@ class CoverageTarget:
     # loop. The feedback round is the only stage that reads the corpus and
     # searches in the field's own vocabulary.
     min_rounds: int = 0
+    # What the research plan said this subject is (sources/subject.py). For a
+    # practice or a research front every concept also needs one source of
+    # *current* material: expert 41 met every LITE target on Langstroth's 1853
+    # manual and two virology papers, and lost every how-to question. A canon —
+    # the default, and every target built before the field — requires nothing
+    # new.
+    subject_kind: str = SUBJECT_CANON
+
+    @property
+    def require_current(self) -> bool:
+        return wants_current(self.subject_kind)
 
     def as_dict(self) -> dict:
         return {
+            "subject_kind": self.subject_kind,
+            "require_current": self.require_current,
             "min_sources": self.min_sources,
             "min_source_types": self.min_source_types,
             "require_non_tertiary": self.require_non_tertiary,
@@ -126,6 +140,11 @@ class ConceptCoverage:
     # Whether the concept has its primary source by the named-text gate, as
     # opposed to a primary-tier source merely being tagged with it.
     has_primary: bool = False
+    # Counting sources that are current practitioner material, and whether the
+    # target wanted one and there is none — what the feedback round is told to
+    # look for (experts/feedback.py).
+    current: int = 0
+    lacks_current: bool = False
 
     def as_dict(self) -> dict:
         return {
@@ -138,6 +157,8 @@ class ConceptCoverage:
             "named_text": self.named_text,
             "depth_counts": dict(self.depth_counts),
             "abstract_only": self.abstract_only,
+            "current": self.current,
+            "lacks_current": self.lacks_current,
             "met": self.met,
             "shortfall": self.shortfall,
         }
@@ -274,6 +295,7 @@ class _Tally:
     # Primary sources that set the concept out, as opposed to treating it.
     primary_sets_out: int = 0
     abstract_only: int = 0
+    current: int = 0
     types: set[SourceType] = field(default_factory=set)
     tiers: set[str] = field(default_factory=set)
     depths: dict[str, int] = field(default_factory=dict)
@@ -285,16 +307,19 @@ def compute_coverage(
     target: CoverageTarget,
     facets: list[dict] | None = None,
     named_texts: dict[str, str] | None = None,
+    today: int | None = None,
 ) -> CoverageReport:
     """Measure the accepted corpus against the target, concept by concept.
 
     ``facets`` is the plan's ``[{name, concepts}]``; ``named_texts`` maps a
     concept to the status of its named primary text (``found`` / ``partial`` /
     ``missing``; absent means ``none_named``). Both are optional so a build
-    planned before either existed is measured as it was.
+    planned before either existed is measured as it was. ``today`` is the year
+    "current" is measured from; tests pin it.
     """
     tallies: dict[str, _Tally] = {c: _Tally() for c in key_concepts}
     for source in passed:
+        current = target.require_current and is_current_material(source, target.subject_kind, today)
         for concept, depth in counting_tags(source):
             tally = tallies.get(concept)
             if tally is None:
@@ -303,6 +328,7 @@ def compute_coverage(
                 tally.abstract_only += 1
                 continue
             tally.sources += 1
+            tally.current += int(current)
             tally.depths[depth] = tally.depths.get(depth, 0) + 1
             if source.source_tier == "primary":
                 tally.primary += 1
@@ -359,11 +385,20 @@ def _score(
     missing_tier = 1 if target.require_non_tertiary and not (tally.tiers & NON_TERTIARY) else 0
     primary_met = has_primary(tally.primary, tally.primary_sets_out, named_text)
     missing_primary = 1 if target.require_primary and not primary_met else 0
+    missing_current = 1 if target.require_current and tally.current == 0 else 0
     # Weighted so "no sources at all" always outranks "has sources, wrong mix".
     # A concept with nothing is a hole in the syllabus; one with two blog posts
     # is a weakness, and the loop should close holes first. A missing primary
-    # source sits between the two: it is a gap in depth, not in breadth.
-    shortfall = missing_sources * 10 + missing_primary * 5 + missing_types * 3 + missing_tier * 2
+    # source sits between the two: it is a gap in depth, not in breadth. No
+    # current material, for a practice, sits just under it: the concept can be
+    # taught, but only as it was done a century ago.
+    shortfall = (
+        missing_sources * 10
+        + missing_primary * 5
+        + missing_current * 4
+        + missing_types * 3
+        + missing_tier * 2
+    )
     return ConceptCoverage(
         concept=concept,
         sources=tally.sources,
@@ -376,4 +411,6 @@ def _score(
         named_text=named_text,
         depth_counts=dict(tally.depths),
         has_primary=primary_met,
+        current=tally.current,
+        lacks_current=bool(missing_current),
     )

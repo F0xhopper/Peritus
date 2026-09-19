@@ -85,6 +85,7 @@ async def stream_expert_answer(
         ctx.plan,
         ctx.has_contradiction,
         ctx.contradiction_points,
+        ctx.evidence,
     )
     client = get_anthropic_client()
     answer_parts: list[str] = []
@@ -92,7 +93,11 @@ async def stream_expert_answer(
         model=settings.CLAUDE_MODEL,
         system=build_cached_system(expert.persona_style, expert.topic),
         messages=messages,
-        **composition_params(settings.CLAUDE_MODEL, expert.config.max_response_tokens),
+        **composition_params(
+            settings.CLAUDE_MODEL,
+            expert.config.max_response_tokens,
+            ctx.plan.question_type if ctx.plan else None,
+        ),
     ) as stream:
         async for text in stream.text_stream:
             answer_parts.append(text)

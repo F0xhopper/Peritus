@@ -322,3 +322,42 @@ def test_all_zero_ranking_is_not_a_relevance_judgement():
     # `rerank` returns this identity ranking when no reranker could run.
     _, scored = _apply_ranking([hit(0), hit(1)], [(0, 0.0), (1, 0.0)])
     assert scored is False
+
+
+def _result(i: int, context: str | None = None):
+    from peritus.search.domain import SearchResult, SourceRef
+
+    return SearchResult(
+        chunk_id=i,
+        expert_id=1,
+        source_id=1,
+        text=f"chunk {i}",
+        context_text=context,
+        score=0.01,
+        source_ref=SourceRef(source_id=1, title="T", source_type="web", quality_score=None),
+    )
+
+
+def test_the_reranker_reads_the_note_and_the_topic(monkeypatch):
+    from peritus.core.config import settings
+    from peritus.search.service import rerank_document, rerank_query
+
+    assert rerank_document(_result(1, "In ST I q.2 a.3,  the Five Ways.")) == (
+        "In ST I q.2 a.3, the Five Ways.\nchunk 1"
+    )
+    assert rerank_document(_result(1)) == "chunk 1"
+    monkeypatch.setattr(settings, "RERANK_TOPIC_PREFIX", True)
+    assert rerank_query("What happens at death?", "Thomism") == "Thomism: What happens at death?"
+    monkeypatch.setattr(settings, "RERANK_WITH_CONTEXT", False)
+    monkeypatch.setattr(settings, "RERANK_TOPIC_PREFIX", False)
+    assert rerank_document(_result(1, "note")) == "chunk 1"
+    assert rerank_query("q", "Thomism") == "q"
+
+
+def test_each_querys_best_hits_reach_the_reranker():
+    from peritus.search.service import _with_each_querys_best
+
+    merged = [_result(i) for i in range(10)]
+    head = merged[:3]
+    out = _with_each_querys_best(head, merged, [[0, 1], [8, 9, 7]], per_query_best=2)
+    assert [r.chunk_id for r in out] == [0, 1, 2, 8, 9]

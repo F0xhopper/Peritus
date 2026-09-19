@@ -46,6 +46,7 @@ import contextlib
 import json
 import math
 import time
+from collections import Counter
 from collections.abc import Callable, Coroutine
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -76,6 +77,7 @@ from peritus.experts.build.constants import (
     _PLAN_QUERY_FETCHERS,
     _PRIORITY_BUDGET_SHARE,
     _ROUND0_BUDGET_SHARE,
+    _STRUCTURAL_TAIL_CHARS,
     OUTCOME_BELOW_FLOOR,
     OUTCOME_BUDGET,
     OUTCOME_CAPPED,
@@ -133,6 +135,7 @@ from peritus.experts.build.selection import (
 )
 from peritus.experts.composition import (
     apply_composition_caps,
+    cap_narrow_source_shares,
     corpus_composition,
     top_concept_shares,
 )
@@ -156,6 +159,8 @@ from peritus.infrastructure.embeddings import embed_in_batches
 from peritus.infrastructure.wikimedia import WikimediaClient
 from peritus.ingestion.chunker import TextChunk
 from peritus.ingestion.pipeline import ingest_sources
+from peritus.ingestion.structural import StructuralReport, TailWork, ingest_tails
+from peritus.ingestion.summaries import build_section_index
 from peritus.search.readiness import Readiness, set_readiness
 from peritus.sources.canonical import (
     FOUND_SECTIONS,
@@ -174,6 +179,7 @@ from peritus.sources.dedup import (
     SeenSet,
     deduplicate_by_url,
     deduplicate_candidates,
+    deduplicate_editions,
     deduplicate_sources_by_content,
     normalise_url,
 )
@@ -208,6 +214,7 @@ from peritus.sources.fetchers.wikipedia import WikipediaFetcher
 from peritus.sources.fetchers.youtube import YoutubeFetcher
 from peritus.sources.language import is_expected_language
 from peritus.sources.snowball import snowball
+from peritus.sources.subject import subject_kind_of
 from peritus.sources.substance import substance_of
 from peritus.sources.triage import (
     MIN_TRIAGE_SCORE,
@@ -452,6 +459,7 @@ class ExpertBuilder:
             on_event,
             {
                 "type": "plan_ready",
+                "subject_kind": subject_kind_of(plan),
                 "key_concepts": key_concepts,
                 "facets": plan.get("facets", []),
                 "fetcher_plans": plan["fetcher_plans"],
@@ -502,6 +510,12 @@ class ExpertBuilder:
             )
             await _emit_event(on_event, warning)
 
+        # For a practice or a research front, no one narrow paper may be most
+        # of the corpus (two virology papers were 61% of the beekeeping
+        # expert). Cut before persisting, so the stored text is what is ingested.
+        share_cut = cap_narrow_source_shares(passed, subject_kind_of(plan))
+        if share_cut:
+            await _emit_event(on_event, {"type": "narrow_sources_capped", "sources": share_cut})
         source_db_ids = await self._persist_sources(expert.id, passed, dropped)
         await _quietly(
             "link the screening ledger to its sources",
@@ -542,12 +556,14 @@ class ExpertBuilder:
                 },
             )
 
+        dropped_chunks: Counter = Counter()
         ingested = await ingest_sources(
             passed,
             expert.id,
             source_db_ids,
             self._pool,
             on_ingested=_on_ingested,
+            dropped=dropped_chunks,
         )
         graph_skipped = 0
         for chunk_ids, raw_chunks in ingested:
@@ -567,6 +583,24 @@ class ExpertBuilder:
 
         if not all_chunk_ids:
             raise BuildError("No chunks were embedded — ingestion failed for all sources.")
+
+        # The rest of every long work, held embed-only within the tier's budget.
+        # Its chunks are retrievable and citable like any other, and are neither
+        # contextualised nor read for the graph, so they are not added to
+        # `all_chunks_for_graph`.
+        structural = await self._hold_tails(expert, passed, source_db_ids, ingested, key_concepts)
+        all_chunk_ids.extend(structural.chunk_ids)
+        await _quietly(
+            "record what ingestion dropped and held",
+            self._repo.update_build_summary(
+                expert.id,
+                {
+                    **outcome.summary(),
+                    "chunks_dropped": dict(dropped_chunks),
+                    "structural": structural.summary(),
+                },
+            ),
+        )
 
         # User-supplied sources survive `reset_build_state`, so on a rebuild their
         # chunks are already in the table and were never ingested by this run.
@@ -624,6 +658,66 @@ class ExpertBuilder:
             dropped_count=len(dropped),
             on_event=on_event,
         )
+
+    async def _section_index_stage(self, expert: Expert, on_event: EventCallback | None) -> None:
+        """Summarise the corpus's sections for broad-question routing; never raises.
+
+        Not a readiness stage: an expert without the index answers every
+        question on the ordinary path, so a failure is logged and nothing more.
+        """
+        if not settings.SECTION_INDEX_ENABLED:
+            return
+        try:
+            written = await build_section_index(self._pool, expert.id)
+        except Exception:
+            logger.warning("Section index failed for expert %d", expert.id, exc_info=True)
+            return
+        await _emit_event(on_event, {"type": "sections_indexed", "sections": written})
+
+    async def _hold_tails(
+        self,
+        expert: Expert,
+        passed: list[ValidatedSource],
+        source_db_ids: list[int],
+        ingested: list[tuple[list[int], list[TextChunk]]],
+        key_concepts: list[str],
+    ) -> StructuralReport:
+        """Hold what the close-read ceiling cut from long works — see ingestion/structural.py.
+
+        Best-effort: the close-read corpus is already stored and chat-ready in
+        all but name, and failing to hold more of it must not fail the build.
+        """
+        works = [
+            TailWork(
+                source_id=db_id,
+                title=vs.title,
+                full_text=vs.raw.full_text,
+                close_spans=[
+                    (int(a), int(b))
+                    for a, b in vs.raw.metadata.get("close_spans") or [(0, len(vs.raw.text))]
+                ],
+                next_seq=max((c.sequence_n for c in chunks), default=-1) + 1,
+            )
+            for vs, db_id, (_, chunks) in zip(passed, source_db_ids, ingested, strict=False)
+            if vs.raw.full_text and chunks
+        ]
+        budget = _STRUCTURAL_TAIL_CHARS.get(expert.tier, 0)
+        if not works or not settings.STRUCTURAL_INGEST_ENABLED or not budget:
+            return StructuralReport()
+        try:
+            report = await ingest_tails(
+                self._pool, expert.id, works, [expert.topic, *key_concepts], budget
+            )
+        except Exception:
+            logger.warning("Holding the rest of long works failed", exc_info=True)
+            return StructuralReport()
+        logger.info(
+            "Held %d structural chunk(s) from %d work(s), %d chars",
+            report.chunks,
+            report.works,
+            report.chars,
+        )
+        return report
 
     async def _resume(
         self,
@@ -725,7 +819,12 @@ class ExpertBuilder:
                 },
             )
 
-        # In any real build this finished minutes ago, during discovery. The
+        # The routing index broad questions search (ingestion/summaries.py).
+        # Degrades like the graph: an expert without it answers every question
+        # on the ordinary path.
+        await self._section_index_stage(expert, on_event)
+
+        # In any real build this finished minutes ago, during planning. The
         # await exists so `picture_ready` is in the durable log before `done`,
         # which is what a client replaying the log from seq 0 depends on.
         await self._await_picture()
@@ -1115,7 +1214,7 @@ class ExpertBuilder:
         own syllabus can always declare itself finished.
         """
         config = expert.config
-        target = config.coverage_target()
+        target = config.coverage_target(subject_kind_of(plan))
         key_concepts: list[str] = plan["key_concepts"]
         facets: list[dict] = plan.get("facets") or []
         figures: list[dict] = plan.get("figures") or []
@@ -1340,6 +1439,7 @@ class ExpertBuilder:
                 must_have,
                 named_texts=concept_named_texts(all_works, accepted_metadata),
                 figures=figure_outcomes(figures, all_works, accepted_metadata),
+                subject_kind=subject_kind_of(plan),
             ),
             channels={
                 name: status
@@ -1748,6 +1848,7 @@ class ExpertBuilder:
             plan["key_concepts"],
             must_have_titles,
             candidates,
+            subject_kind=subject_kind_of(plan),
         )
         if triaged and all(t.model_score is None for t in triaged):
             # Nothing scored at all. If the provider refused the calls (an empty
@@ -1817,6 +1918,10 @@ class ExpertBuilder:
         # preprint-versus-published case that identity misses when one side has
         # no DOI: two records, no shared id, the same document.
         sources, duplicates = deduplicate_sources_by_content(sources, seen)
+        # One edition per work: an excerpt of a text already fetched this round,
+        # or a second edition mostly in another language, is dropped the same way.
+        sources, editions = deduplicate_editions(sources)
+        duplicates += editions
         duplicate_urls = {source.url for source, _ in duplicates}
         for source, of_url in duplicates:
             # Visible as a drop with a reason, not silently gone. A source that
@@ -1827,7 +1932,9 @@ class ExpertBuilder:
                     raw=source,
                     quality_score=0.0,
                     relevance_score=0.0,
-                    drop_reason=f"duplicate of {of_url}",
+                    drop_reason=of_url
+                    if of_url.startswith(("an excerpt", "another edition"))
+                    else f"duplicate of {of_url}",
                 )
             )
         await _emit_event(
@@ -2544,6 +2651,7 @@ _LOGGED_EVENTS = frozenset(
         "build_resumed",
         "persona_ready",
         "stage_degraded",
+        "sections_indexed",
         "error",
         "cancelled",
         "done",

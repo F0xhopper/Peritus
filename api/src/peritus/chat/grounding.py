@@ -96,6 +96,13 @@ GROUNDING_CONTRACT = (
 ANSWER_SHAPE = (
     "HOW TO WRITE THE ANSWER\n"
     "\n"
+    "- Frame it from the question, not from the passages. Before looking at "
+    "what was retrieved, decide what a complete answer to this question would "
+    "cover — the parts an expert would consider essential. Then fill each part "
+    "from the passages. A part the passages do not reach is still part of the "
+    "answer: say briefly that this expert's sources do not cover it, or give "
+    "marked general background, rather than letting what happened to be "
+    "retrieved decide what the answer is about.\n"
     "- Lead with the answer. The first sentence carries the substance — the "
     "actual guidance, finding, or definition asked for. No preamble, no "
     "restating the question, no announcing what you are about to do.\n"
@@ -120,6 +127,20 @@ ANSWER_SHAPE = (
     "came from or whether it is primary or secondary — unless it changes what "
     "the asker should actually do or believe, and then one plain sentence "
     "inline, and move on.\n"
+    "- Show the text where it matters. Where a passage states a point exactly or "
+    "memorably — a definition, the crux of an argument, a decisive piece of "
+    "evidence — quote the sentence itself rather than paraphrasing it. That is "
+    "what a reader can get only from an expert holding the sources.\n"
+    "- Say where in a work a claim comes from when the passage's label says: "
+    "the label after its number names the work and, often, the part of it — "
+    "a question, chapter or section. Name that place in the prose where it "
+    'helps the reader find or weigh the claim ("in the question on the '
+    'existence of God"). Take it only from the label; a location recalled '
+    "from memory is an invented attribution.\n"
+    "- When more than one passage bears on the same point from different kinds "
+    "of evidence — a primary text and a modern reading of it, a chronicle and "
+    "the archaeology, a study and a practitioner's guide — say where they agree "
+    "or pull apart, in a clause, as part of explaining the subject.\n"
     "- Cite substantively, not defensively. A citation marks where a claim came "
     "from; it is not a per-sentence tax. A paragraph built on one passage takes "
     "one marker, not one per sentence. Never cite a definition, a transition, or "
@@ -184,7 +205,10 @@ ANSWER_FORMAT = (
     "row.\n"
     "- Put formulas, worked calculations, commands, and code in a fenced code "
     "block, and short literal values in `inline code`.\n"
-    "- Use a `>` blockquote only for a direct quotation from a passage.\n"
+    "- A quotation of a sentence or two from a passage goes in a `>` "
+    "blockquote with its citation; use one or two where a passage says the "
+    "thing best, never more than three, and never for anything that is not a "
+    "direct quotation from a passage.\n"
     "- Citation markers go at the end of the sentence or list item they "
     "support, before the full stop — like this [2]. Never put a citation in a "
     "heading or inside a bold label.\n"
@@ -209,6 +233,12 @@ def build_system_prompt(persona_style: str | None, topic: str) -> str:
     teaching method is for use, not for narration, so the block that introduces
     the persona says so — which also covers every persona already stored.
 
+    That guard was not enough while the persona came last: three thousand
+    characters placed after the rules, in the position that weighs most, beat
+    one sentence placed before them, and a quarter of answers opened with the
+    persona's routine. So the persona now sits between the contract and the
+    rules about how an answer reads and is laid out, and those rules come last.
+
     Byte-stable for a given ``(persona_style, topic)`` pair, which is what makes
     the prompt-cache breakpoint in ``chat/agent.py`` worth having.
     """
@@ -220,10 +250,6 @@ def build_system_prompt(persona_style: str | None, topic: str) -> str:
     return (
         f"{GROUNDING_CONTRACT}\n\n"
         "---\n"
-        f"{ANSWER_SHAPE}\n\n"
-        "---\n"
-        f"{ANSWER_FORMAT}\n\n"
-        "---\n"
         "WHO YOU ARE\n"
         "This is your voice and your way of teaching: what you emphasise, how "
         "you explain a hard idea, which examples you reach for. It shapes how "
@@ -233,7 +259,11 @@ def build_system_prompt(persona_style: str | None, topic: str) -> str:
         "the answer where it helps the asker; never announce it, never narrate "
         "which step you are on, and never let it delay the direct answer that "
         "comes first.\n"
-        f"{persona}"
+        f"{persona}\n\n"
+        "---\n"
+        f"{ANSWER_SHAPE}\n\n"
+        "---\n"
+        f"{ANSWER_FORMAT}"
     )
 
 

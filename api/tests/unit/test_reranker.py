@@ -55,3 +55,27 @@ async def test_falls_back_to_llm_when_cohere_fails(monkeypatch):
     out = await reranker.rerank("q", ["a", "b"], top_n=2)
 
     assert out == [(1, 0.9), (0, 0.1)]
+
+
+async def test_says_which_reranker_scored_and_counts_the_fallback(monkeypatch):
+    monkeypatch.setattr(settings, "RERANK_ENABLED", True)
+    monkeypatch.setattr(settings, "COHERE_API_KEY", "co-test")
+    monkeypatch.setattr(settings, "ANTHROPIC_API_KEY", "sk-test")
+
+    async def _cohere(query, documents, top_n):
+        return [(0, 0.7), (1, 0.2)]
+
+    async def _cohere_none(query, documents, top_n):
+        return None
+
+    async def _llm(query, documents, top_n):
+        return [(1, 0.9), (0, 0.1)]
+
+    monkeypatch.setattr(reranker, "_llm_windowed_rerank", _llm)
+    monkeypatch.setattr(reranker, "_cohere_rerank", _cohere)
+    assert (await reranker.rerank_with_provider("q", ["a", "b"], 2))[1] == "cohere"
+
+    monkeypatch.setattr(reranker, "_cohere_rerank", _cohere_none)
+    before = reranker.fallback_count
+    assert (await reranker.rerank_with_provider("q", ["a", "b"], 2))[1] == "llm_window"
+    assert reranker.fallback_count == before + 1

@@ -20,7 +20,7 @@ def _chunk(chunk_id: int, source_id: int, seq: int, score: float = 0.0) -> Enric
             chunk_id=chunk_id,
             expert_id=1,
             source_id=source_id,
-            text=f"text of {source_id}:{seq}",
+            text=f"This is the text of work {source_id} at position {seq}, which is prose.",
             context_text=None,
             score=score,
             sequence_n=seq,
@@ -127,15 +127,33 @@ async def test_the_best_passages_arrive_with_the_text_around_them():
     assert len(ctx.passages) <= ctx.trail.context_cap
 
 
-async def test_a_passage_kept_only_to_make_up_the_minimum_anchors_nothing():
-    # One passage clears the floor; two more are kept so there is something to
-    # reason from. Text around a passage the reranker called irrelevant is noise.
+async def test_anchors_are_chosen_by_rank_not_by_clearing_a_floor():
+    # Only 50 clears the relative floor; 20 and 30 are kept to make up the
+    # minimum. On a question where everything scores low the best passages
+    # still have context worth reading, so all three bring their neighbours.
     hits = [_chunk(50, 7, 50, 0.6), _chunk(20, 7, 20, 0.05), _chunk(30, 7, 30, 0.04)]
     agent = _agent(hits, [_chunk(i, 7, i) for i in range(0, 60)])
 
     ctx = await agent.gather_context(_expert(), "q")
 
-    assert [p.chunk_id for p in ctx.passages] == [49, 50, 51, 52, 20, 30]
+    assert [p.chunk_id for p in ctx.passages] == [49, 50, 51, 52, 19, 20, 21, 22, 29, 30, 31, 32]
+
+
+async def test_a_neighbour_that_is_not_prose_is_left_out():
+    hits = [_chunk(50, 7, 50, 0.6)]
+    junk = _chunk(51, 7, 51)
+    junk.result.text = (
+        "Da waes sefter for^yrnendre tide ymb fif hund wintra 7 tu 7 Cap. 23. hundnigontig "
+        "wintra from Cristes hidercyme ; Mauricius casere feng to rice 7 fset hsefde an 7 "
+        "twentig wintra. Se wses feorSa eac fiftegum from Augusto. Dses case sealde gerihte "
+        "Gregorius papa ond ealne eard bearn heora cynn ond eald ge wurdon swylce"
+    )
+    agent = _agent(hits, [_chunk(49, 7, 49), junk, _chunk(52, 7, 52)])
+
+    ctx = await agent.gather_context(_expert(), "q")
+
+    # 52 is two rows from anything held once 51 is gone, so it goes too.
+    assert [p.chunk_id for p in ctx.passages] == [49, 50]
 
 
 async def test_a_failed_neighbour_fetch_costs_the_answer_nothing():

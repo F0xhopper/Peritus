@@ -454,9 +454,27 @@ Stage notes, in pipeline order (`experts/builder.py`):
   returns the forecast and the metered cost side by side so the error is
   visible.
 - **Chunk + embed** runs all sources' contextualisation as one batch (half
-  price when the Batch API path is on). The moment chunks are stored, counts
-  are written and the expert flips to **chat-ready** — retrieval needs chunks,
-  not the graph.
+  price when the Batch API path is on). Before anything is paid for, a prose
+  gate (`ingestion/quality.py`) drops chunks that are not prose in the corpus
+  language — reference lists, page chrome, the Latin or Old English half of an
+  edition — and the build summary counts them (`chunks_dropped`). Each chunk's
+  locus ("I, q. 2, a. 3", "Book II, Chapter 3", "A.D. 878") is read from the
+  text into `chunk_meta.locus` and leads its citation label.
+- **The rest of long works is held embed-only** (`ingestion/structural.py`).
+  A long work is read closely only up to its ceiling (the named sections, or
+  its opening); the rest is cut into questions or chapters, the ones nearest
+  the key concepts are chosen within a per-tier budget
+  (`_STRUCTURAL_TAIL_CHARS`: 250k / 1M / 3M characters, bounded by database
+  size, not money), and those are chunked, given a note built from their
+  heading path, and embedded — never contextualised or sent to the graph.
+  `chunk_meta.ingest = "structural"`; the build summary's `structural` says
+  how much was held. The moment chunks are stored, counts are written and the
+  expert flips to **chat-ready** — retrieval needs chunks, not the graph.
+- **Section summaries** (`ingestion/summaries.py`) run after the graph, as
+  optional enrichment: one fast-model summary per run of chunks under one
+  heading, embedded into `corpus_sections`. Broad questions search them to
+  reach the right parts of different works; a failure is logged and the
+  expert answers every question on the ordinary path.
 - **Graph + persona are best-effort** (see §4).
 - On a rebuild, user-uploaded sources survive the reset and are fed back into
   the graph stage; the final counts include them.

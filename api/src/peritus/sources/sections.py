@@ -141,6 +141,10 @@ class Selection:
     sections_kept: int = 0
     # Why nothing matched, for the log; empty when something did.
     reason: str = ""
+    # Where in the full text the kept text came from, as ``(start, end)``
+    # offsets. What is outside them is what structural ingestion may still hold
+    # (ingestion/structural.py).
+    spans: tuple[tuple[int, int], ...] = ()
 
 
 def roman_to_int(value: str) -> int | None:
@@ -244,11 +248,14 @@ def find_sections(text: str) -> dict[str, list[_Section]]:
 
 def select_sections(text: str, hint: str, max_chars: int) -> Selection:
     """The named sections of ``text``, in order, within ``max_chars``."""
+    prefix = ((0, min(len(text), max_chars)),)
     if len(text) <= max_chars and not hint:
-        return Selection(text, False, reason="no sections hint")
+        return Selection(text, False, reason="no sections hint", spans=prefix)
     ranges = parse_hint(hint)
     if not ranges:
-        return Selection(text[:max_chars], False, reason="the hint names no numbered sections")
+        return Selection(
+            text[:max_chars], False, reason="the hint names no numbered sections", spans=prefix
+        )
 
     found = find_sections(text)
 
@@ -283,6 +290,7 @@ def select_sections(text: str, hint: str, max_chars: int) -> Selection:
             text[:max_chars],
             False,
             reason=f"no heading matched {sorted(ranges)} (headings found: {kinds})",
+            spans=prefix,
         )
 
     # A number can appear more than once (a table of contents, a second series);
@@ -299,6 +307,9 @@ def select_sections(text: str, hint: str, max_chars: int) -> Selection:
     )
     front = text[: min(_FRONT_MATTER_CHARS, first_heading, ordered[0].start)].strip()
     parts: list[str] = [front] if front else []
+    kept_spans: list[tuple[int, int]] = [
+        (0, min(_FRONT_MATTER_CHARS, first_heading, ordered[0].start))
+    ]
     used = len(front)
     kept = 0
     for section in ordered:
@@ -307,9 +318,10 @@ def select_sections(text: str, hint: str, max_chars: int) -> Selection:
         if room <= _MIN_SECTION_CHARS:
             break
         parts.append(body[:room])
+        kept_spans.append((section.start, min(section.end, section.start + room)))
         used += min(len(body), room) + 2
         kept += 1
-    return Selection("\n\n".join(parts), kept > 0, sections_kept=kept)
+    return Selection("\n\n".join(parts), kept > 0, sections_kept=kept, spans=tuple(kept_spans))
 
 
 def apply_sections(text: str, metadata: dict, default_max_chars: int) -> tuple[str, dict]:
@@ -322,12 +334,16 @@ def apply_sections(text: str, metadata: dict, default_max_chars: int) -> tuple[s
     max_chars = int(metadata.get("text_max_chars") or default_max_chars)
     hint = str(metadata.get("must_have_sections") or "")
     if not hint:
-        return text[:max_chars], {"truncated": len(text) > max_chars}
+        return text[:max_chars], {
+            "truncated": len(text) > max_chars,
+            "close_spans": [[0, min(len(text), max_chars)]],
+        }
     selection = select_sections(text, hint, max_chars)
     recorded: dict = {
         "sections_matched": selection.matched,
         "sections_kept": selection.sections_kept,
         "truncated": len(selection.text) < len(text),
+        "close_spans": [list(span) for span in selection.spans],
     }
     if not selection.matched:
         recorded["sections_reason"] = selection.reason

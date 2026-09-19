@@ -1,12 +1,13 @@
 import asyncio
 import json
+from collections.abc import Iterable
 
 import asyncpg
 
 from peritus.core.config import settings
 from peritus.infrastructure.database import halfvec_supported, iterative_scan_sql
 from peritus.infrastructure.embeddings import embed_query
-from peritus.infrastructure.reranker import rerank
+from peritus.infrastructure.reranker import RERANKER_NONE, rerank, rerank_with_provider
 from peritus.search.domain import SearchResponse, SearchResult, SourceRef
 
 _ITERATIVE_SCAN_SQL = iterative_scan_sql(local=True)
@@ -79,7 +80,7 @@ class SearchService:
 
         if rerank_on and len(results) > 1:
             results, scored = _apply_ranking(
-                results, await rerank(query, [r.text for r in results], top_n=top_k)
+                results, await rerank(query, [rerank_document(r) for r in results], top_n=top_k)
             )
         else:
             results, scored = results[:top_k], False
@@ -93,6 +94,7 @@ class SearchService:
         queries: list[str],
         top_k: int = 10,
         include_question: bool = True,
+        topic: str | None = None,
     ) -> SearchResponse:
         """Hybrid-search every query, fuse, and rerank against ``question``.
 
@@ -102,6 +104,17 @@ class SearchService:
         paraphrase; RRF-summing already rewards a chunk that the question and a
         subquery both find. It costs one embedding. A follow-up pass over the
         same question turns it off — the primary pass already searched it.
+
+        ``topic`` is the expert's subject, prefixed to the question the
+        reranker scores against (``RERANK_TOPIC_PREFIX``): "What will happen at
+        the moment of death?" says nothing about Aquinas, and the reranker
+        reads the question and nothing else.
+
+        The reranker scores every candidate, not only the ``top_k`` returned:
+        ``candidates`` carries the whole scored list and ``per_query`` each
+        query's own hits, so a caller can give a subquery that won nothing a
+        seat of its own. Each query's two best hits are always among the
+        candidates, however the fusion ranked them.
         """
         rerank_on = settings.RERANK_ENABLED and bool(settings.ANTHROPIC_API_KEY)
         fetch_k = max(settings.RERANK_CANDIDATES, top_k) if rerank_on else top_k
@@ -124,17 +137,36 @@ class SearchService:
             ]
         )
 
-        merged = _merge_hits([[_row_to_result(r) for r in hits] for hits in all_hits])
-        merged = merged[: max(fetch_k, top_k)]
+        per_query_hits = [[_row_to_result(r) for r in hits] for hits in all_hits]
+        per_query = {
+            q: [h.chunk_id for h in hits] for q, hits in zip(queries, per_query_hits, strict=True)
+        }
+        merged = _merge_hits(per_query_hits)
+        merged = _with_each_querys_best(
+            merged[: max(fetch_k, top_k)], merged, per_query.values(), per_query_best=2
+        )
 
+        reranker = RERANKER_NONE
         if rerank_on and len(merged) > 1:
-            merged, scored = _apply_ranking(
-                merged, await rerank(question, [r.text for r in merged], top_n=top_k)
+            ranking, reranker = await rerank_with_provider(
+                rerank_query(question, topic),
+                [rerank_document(r) for r in merged],
+                top_n=len(merged),
             )
+            candidates, scored = _apply_ranking(merged, ranking)
         else:
-            merged, scored = merged[:top_k], False
+            candidates, scored = merged, False
 
-        return SearchResponse(query=question, results=merged, total=len(merged), reranked=scored)
+        return SearchResponse(
+            query=question,
+            results=candidates[:top_k],
+            total=min(len(candidates), top_k),
+            reranked=scored,
+            reranker=reranker if scored else RERANKER_NONE,
+            candidates=candidates,
+            per_query=per_query,
+            query_embeddings=dict(zip(queries, embeddings, strict=True)),
+        )
 
     async def fetch_by_position(
         self,
@@ -167,6 +199,57 @@ class SearchService:
                 sql, expert_id, [p[0] for p in positions], [p[1] for p in positions]
             )
         return [_row_to_result(r) for r in rows]
+
+    async def best_in_spans(
+        self,
+        expert_id: int,
+        spans: list[tuple[int, int, int]],
+        query_embedding: list[float],
+        per_span: int,
+    ) -> list[list[SearchResult]]:
+        """The ``per_span`` chunks nearest the query inside each ``(source, lo, hi)``.
+
+        How a routed section contributes its passages: the section was found by
+        its summary, and the chunks in it are ranked by the question itself.
+        Unscored (0.0) like neighbours — nothing reranked them.
+        """
+        if not spans:
+            return []
+        dist_col, dist_param = _distance_expr()
+        sql = f"""
+            SELECT * FROM (
+                SELECT sc.id, sc.expert_id, sc.source_id, sc.text, sc.context_text,
+                       sc.sequence_n, sc.chunk_meta,
+                       s.title AS source_title, s.source_type, s.quality_score,
+                       0.0 AS rrf_score, span.i AS span_i,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY span.i ORDER BY {dist_col} <=> {dist_param}
+                       ) AS rn
+                FROM unnest($3::int[], $4::int[], $5::int[]) WITH ORDINALITY
+                         AS span(source_id, lo, hi, i)
+                JOIN source_chunks sc
+                  ON sc.source_id = span.source_id
+                 AND sc.sequence_n BETWEEN span.lo AND span.hi
+                JOIN sources s ON s.id = sc.source_id
+                WHERE sc.expert_id = $2 AND sc.embedding IS NOT NULL
+            ) ranked
+            WHERE rn <= $6
+            ORDER BY span_i, rn
+        """
+        async with self._pool.acquire(timeout=settings.DB_ACQUIRE_TIMEOUT) as conn:
+            rows = await conn.fetch(
+                sql,
+                query_embedding,
+                expert_id,
+                [s[0] for s in spans],
+                [s[1] for s in spans],
+                [s[2] for s in spans],
+                per_span,
+            )
+        out: list[list[SearchResult]] = [[] for _ in spans]
+        for r in rows:
+            out[int(r["span_i"]) - 1].append(_row_to_result(r))
+        return out
 
     async def _hybrid_search(
         self,
@@ -300,6 +383,51 @@ def _apply_ranking(
         hit.score = round(float(score), 4)
         ranked.append(hit)
     return ranked, any(score > 0 for _, score in ranking)
+
+
+def rerank_query(question: str, topic: str | None) -> str:
+    """The question as the reranker reads it — see ``batch_search``."""
+    if topic and settings.RERANK_TOPIC_PREFIX:
+        return f"{topic}: {question}"
+    return question
+
+
+def rerank_document(result: SearchResult) -> str:
+    """A candidate as the reranker reads it: its contextual note, then the chunk.
+
+    The note is generated per chunk at ingestion, embedded, keyword-indexed and
+    shown to the answering model, and was withheld from the one component that
+    decides what the answering model sees. A chunk from the middle of an
+    article carries no heading; the note says which article it is. The
+    reranker cuts each document at 1,500 characters, so the note comes first.
+    """
+    note = " ".join((result.context_text or "").split())
+    if note and settings.RERANK_WITH_CONTEXT:
+        return f"{note}\n{result.text}"
+    return result.text
+
+
+def _with_each_querys_best(
+    head: list[SearchResult],
+    merged: list[SearchResult],
+    per_query: Iterable[list[int]],
+    per_query_best: int,
+) -> list[SearchResult]:
+    """``head``, plus each query's best ``per_query_best`` hits that it lacks.
+
+    ``merged`` is cut to the reranker's candidate budget before reranking, and
+    a subquery whose hits all fused below the cut would reach the reranker with
+    nothing — so the part of the question it covers could never win a seat.
+    """
+    by_id = {r.chunk_id: r for r in merged}
+    held = {r.chunk_id for r in head}
+    out = list(head)
+    for ids in per_query:
+        for chunk_id in ids[:per_query_best]:
+            if chunk_id not in held and chunk_id in by_id:
+                held.add(chunk_id)
+                out.append(by_id[chunk_id])
+    return out
 
 
 def _with_question(question: str, queries: list[str]) -> list[str]:

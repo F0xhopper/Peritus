@@ -6,12 +6,15 @@ context. Both the non-streaming :meth:`respond` (Rich CLI) and the streaming SSE
 route consume it, so the two paths cannot drift.
 """
 
+import asyncio
 import math
 import re
+from collections import Counter
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, cast
 
+import anthropic
 import asyncpg
 from anthropic.types import MessageParam, TextBlockParam, ToolChoiceToolParam, ToolParam
 
@@ -28,6 +31,8 @@ from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
 from peritus.graph.retriever import EnrichedResult, GraphRetriever
 from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
+from peritus.ingestion.quality import is_prose, near_duplicate, shingles
+from peritus.ingestion.summaries import search_sections
 from peritus.search.service import SearchService
 
 logger = get_logger(__name__)
@@ -136,7 +141,7 @@ def _plan_tool(max_subqueries: int) -> ToolParam:
                     "type": "array",
                     "items": {"type": "string"},
                     "description": (
-                        "Up to two broader or differently-angled retrieval phrasings, "
+                        "One or two broader or differently-angled retrieval phrasings, "
                         "used only if the subqueries find little. Not paraphrases of "
                         "the subqueries: approach the question from a wider concept, "
                         "a neighbouring term of art, or the underlying mechanism."
@@ -186,7 +191,19 @@ def _plan_tool(max_subqueries: int) -> ToolParam:
                     ),
                 },
             },
-            "required": ["subqueries", "asker_level", "question_type", "answer_directive"],
+            # All six. `fallback_queries` and `standalone_question` were optional
+            # and the fast model mostly left them out: one of the last 14 audited
+            # plans carried fallback queries, so the second pass — the recovery
+            # for weak retrieval — had nothing to search on the turns it existed
+            # for.
+            "required": [
+                "subqueries",
+                "fallback_queries",
+                "standalone_question",
+                "asker_level",
+                "question_type",
+                "answer_directive",
+            ],
         },
     }
 
@@ -323,6 +340,10 @@ class RetrievalStep:
     score: float  # fused RRF score, or the reranker's score when reranking ran
     #: "primary" | "coverage_followup" (the fallback-query pass) | "neighbour"
     #: (not searched for: the chunk beside one that was — chat/neighbours.py)
+    #: | "subquery_seat" (a part of the question that won nothing on the fused
+    #: ranking, given its own best passages) | "section_route" (a broad
+    #: question's section, found by its summary) | "source_diversity" (seated
+    #: in place of a dominant source's weakest passage)
     via: str
 
 
@@ -346,6 +367,9 @@ class RetrievalTrail:
     duplicate_hits: int = 0
     graph_expanded: bool = False
     steps: list[RetrievalStep] = field(default_factory=list)
+    #: Which reranker scored the passages ("cohere", "llm_window", "none"). The
+    #: two score on different scales and one threshold is applied to both.
+    reranker: str | None = None
 
 
 @dataclass
@@ -365,6 +389,9 @@ class RetrievedContext:
     # answer is shaped for the person who asked. Optional for the same reason as
     # `trail`; composition falls back to neutral shaping when it is absent.
     plan: QueryPlan | None = None
+    # How much the passages support an answer: "strong", "partial" or "thin"
+    # (see `evidence_strength`). None when nothing scored relevance.
+    evidence: str | None = None
 
 
 @dataclass
@@ -401,12 +428,73 @@ def _contradiction_block(points: list[str]) -> str:
     )
 
 
+EVIDENCE_STRONG = "strong"
+EVIDENCE_PARTIAL = "partial"
+EVIDENCE_THIN = "thin"
+
+# Reranker scores at which evidence reads as thin or strong. From the 2026-09-19
+# head-to-head: every answer whose best passage scored under 0.2 (death 0.14,
+# king 0.15, first winter 0.15) lost, written to full length from three to six
+# tangential passages; every answer at 0.6 or above had the text in hand.
+_EVIDENCE_THIN_TOP = 0.2
+_EVIDENCE_STRONG_TOP = 0.45
+# Passages near the best one that make the evidence more than a single hit.
+_EVIDENCE_STRONG_MIN = 3
+
+
+def evidence_strength(scores: list[float], part_uncovered: bool = False) -> str:
+    """How far the searched passages in the prompt support an answer.
+
+    ``scores`` are the reranker's, for the passages the prompt carries (not
+    neighbours, which nothing scored). ``part_uncovered`` means a subquery won
+    nothing on its own and was seated regardless — a part of the question the
+    evidence reaches only through its best leftovers.
+    """
+    top = max(scores, default=0.0)
+    if top < _EVIDENCE_THIN_TOP:
+        return EVIDENCE_THIN
+    near = sum(1 for s in scores if s >= relevance_threshold(scores))
+    if top < _EVIDENCE_STRONG_TOP or near < _EVIDENCE_STRONG_MIN or part_uncovered:
+        return EVIDENCE_PARTIAL
+    return EVIDENCE_STRONG
+
+
+# What the model is told about the evidence. Nothing for strong evidence: the
+# contract already says what to do with passages that answer the question. The
+# other two exist because the contract had two settings — answer from the
+# passages, or say they hold nothing — and most weak retrieval is neither:
+# three tangential passages are not nothing, so the model answered, and nothing
+# told it the evidence was thin, so it wrote 5,000 characters from them.
+# Worded as conditions, not phrases: any quotable line in a prompt comes back
+# as a heading.
+_EVIDENCE_NOTES: dict[str, str] = {
+    EVIDENCE_PARTIAL: (
+        "Evidence: partial. These passages establish some of what a full answer "
+        "to this question covers, not all of it. Answer from what they establish, "
+        "citing it. Where a part of a full answer is beyond them, say so in one "
+        "plain sentence at the point it arises, give brief general background if "
+        "it genuinely helps (marked as such, uncited), and move on — never stretch "
+        "a passage to cover a part it does not address."
+    ),
+    EVIDENCE_THIN: (
+        "Evidence: thin. These passages only touch the edges of this question. "
+        "Keep the answer short. First say what the passages do establish that "
+        "bears on the question, cited, and no more than they say. Then add one "
+        "brief paragraph of general background that answers the question as "
+        "asked, opening with a plain statement that it is general background "
+        "rather than something this expert's sources establish, and carrying no "
+        "citations. Length follows evidence: a few short paragraphs at most."
+    ),
+}
+
+
 def build_user_message(
     question: str,
     context_block: str,
     plan: QueryPlan | None = None,
     has_contradiction: bool = False,
     contradiction_points: list[str] | None = None,
+    evidence: str | None = None,
 ) -> MessageParam:
     """The single grounded-prompt shape sent to Claude for composition.
 
@@ -423,6 +511,8 @@ def build_user_message(
     contradiction = (
         f"{_contradiction_block(contradiction_points or [])}\n\n" if has_contradiction else ""
     )
+    note = _EVIDENCE_NOTES.get(evidence or "")
+    strength = f"{note}\n\n" if note else ""
     return {
         "role": "user",
         "content": (
@@ -433,6 +523,7 @@ def build_user_message(
             f"{context_block}\n\n"
             "---\n"
             f"{contradiction}"
+            f"{strength}"
             f"Question: {question}\n\n"
             f"{plan.shaping_block()}"
         ),
@@ -453,7 +544,13 @@ _ADAPTIVE_THINKING_PREFIXES = (
 )
 
 
-def composition_params(model: str, max_answer_tokens: int) -> dict[str, Any]:
+#: Question types that ask for synthesis rather than one thing explained.
+BROAD_QUESTION_TYPES = frozenset({"comparison", "orientation", "open_ended"})
+
+
+def composition_params(
+    model: str, max_answer_tokens: int, question_type: str | None = None
+) -> dict[str, Any]:
     """``max_tokens``, ``thinking`` and ``output_config`` for composing an answer.
 
     ``max_answer_tokens`` is the tier's answer length. It used to be sent as the
@@ -475,8 +572,14 @@ def composition_params(model: str, max_answer_tokens: int) -> dict[str, Any]:
     return {
         "max_tokens": max_answer_tokens + max(0, settings.CHAT_THINKING_HEADROOM_TOKENS),
         "thinking": {"type": "adaptive"},
-        "output_config": {"effort": settings.CHAT_EFFORT},
+        "output_config": {"effort": _effort(question_type)},
     }
+
+
+def _effort(question_type: str | None) -> str:
+    if settings.CHAT_BROAD_EFFORT and question_type in BROAD_QUESTION_TYPES:
+        return settings.CHAT_BROAD_EFFORT
+    return settings.CHAT_EFFORT
 
 
 def build_cached_system(persona_style: str | None, topic: str) -> list[TextBlockParam]:
@@ -518,6 +621,7 @@ def build_composition_messages(
     plan: QueryPlan | None = None,
     has_contradiction: bool = False,
     contradiction_points: list[str] | None = None,
+    evidence: str | None = None,
 ) -> list[MessageParam]:
     """Trim history, mark the cache breakpoint, and append the grounded question.
 
@@ -557,7 +661,9 @@ def build_composition_messages(
                 }
             ]
     messages.append(
-        build_user_message(question, context_block, plan, has_contradiction, contradiction_points)
+        build_user_message(
+            question, context_block, plan, has_contradiction, contradiction_points, evidence
+        )
     )
     return messages
 
@@ -579,6 +685,10 @@ def _build_trail(
     coverage_satisfied: bool | None,
     context_cap: int,
     neighbours: list | None = None,
+    seats: list | None = None,
+    reranker: str | None = None,
+    routed: list | None = None,
+    swapped: list | None = None,
 ) -> RetrievalTrail:
     """Record every retrieved passage once, in retrieval order.
 
@@ -601,7 +711,13 @@ def _build_trail(
     searched = [
         (e, "primary" if i < primary_count else "coverage_followup") for i, e in enumerate(enriched)
     ]
-    for e, via in [*searched, *((n, "neighbour") for n in neighbours or [])]:
+    for e, via in [
+        *searched,
+        *((n, "subquery_seat") for n in seats or []),
+        *((n, "section_route") for n in routed or []),
+        *((n, "source_diversity") for n in swapped or []),
+        *((n, "neighbour") for n in neighbours or []),
+    ]:
         if e.related_concepts or e.relationships:
             graph_expanded = True
         chunk_id = e.result.chunk_id
@@ -634,12 +750,42 @@ def _build_trail(
         duplicate_hits=duplicates,
         graph_expanded=graph_expanded,
         steps=steps,
+        reranker=reranker,
     )
 
 
-def _strong_count(results: list, floor: float) -> int:
-    """Passages whose reranker score clears the relevance floor."""
-    return sum(1 for r in results if r.score >= floor)
+def relevance_threshold(scores: list[float]) -> float:
+    """The score a passage must reach to be kept, relative to this question.
+
+    ``RELEVANCE_RELATIVE`` × the best score, never under ``RELEVANCE_FLOOR``.
+    Reranker scores are not comparable across questions — top scores in the
+    audit trail run from 0.10 to 0.86, and an evaluative question ("who was
+    the most impactful king?") has no passage that answers it, so everything
+    it retrieves scores low. An absolute floor gave exactly those questions the
+    fewest passages.
+    """
+    top = max(scores, default=0.0)
+    return max(settings.RELEVANCE_FLOOR, settings.RELEVANCE_RELATIVE * top)
+
+
+def min_kept(max_context_passages: int) -> int:
+    """How many passages are kept whatever they score — scaled to the tier."""
+    return max(settings.RELEVANCE_MIN_PASSAGES, max_context_passages // 2)
+
+
+def retrieval_is_weak(scores: list[float]) -> bool:
+    """Whether retrieval found too little: what runs the second pass.
+
+    Separate from what is kept. The best passage scoring under
+    ``RELEVANCE_WEAK_TOP``, or fewer than ``RELEVANCE_MIN_STRONG`` passages
+    clearing the relative floor, means the question was not answered by what
+    the first search found.
+    """
+    if not scores:
+        return True
+    threshold = relevance_threshold(scores)
+    strong = sum(1 for s in scores if s >= threshold)
+    return max(scores) < settings.RELEVANCE_WEAK_TOP or strong < settings.RELEVANCE_MIN_STRONG
 
 
 def apply_relevance_floor(
@@ -655,34 +801,163 @@ def apply_relevance_floor(
     relevance. Retrieval order is preserved. When too few clear the floor, the
     best-ranked of the rest are kept to make up ``min_keep`` unique chunks — a
     hard question with weak evidence still gets something to reason from, and
-    the grounding contract covers what to do when it is not enough.
+    the evidence-strength note tells the model how little it is.
 
-    Measured on audited answers, cited passages averaged a Cohere score of 0.31
-    and uncited ones 0.22; ranks 6–10 are cited a third of the time, so the
-    floor is set low enough to keep those and cut only the padding.
+    ``floor`` is the question's own threshold (:func:`relevance_threshold`).
     """
     keep = [not s or e.result.score >= floor for e, s in zip(enriched, scored, strict=True)]
     kept_chunks = {e.result.chunk_id for e, k in zip(enriched, keep, strict=True) if k}
     if len(kept_chunks) < min_keep:
-        for i, e in enumerate(enriched):
+        # Best score first: a follow-up pass appends its passages after the
+        # first pass's, so retrieval order is not rank order across passes.
+        for i in sorted(range(len(enriched)), key=lambda i: -enriched[i].result.score):
             if len(kept_chunks) >= min_keep:
                 break
             if not keep[i]:
                 keep[i] = True
-                kept_chunks.add(e.result.chunk_id)
+                kept_chunks.add(enriched[i].result.chunk_id)
     return [e for e, k in zip(enriched, keep, strict=True) if k]
 
 
+def diversify(
+    retrieved: list,
+    neighbours: list,
+    fixed: list,
+    candidates: list,
+    threshold: float,
+    protected: set[int] | None = None,
+) -> tuple[list, list, list]:
+    """Swap a dominant source's weakest passages for other sources' good ones.
+
+    While one source holds more than half of the prompt — neighbours counted
+    toward the source they came from — and another source has a candidate
+    scoring at least ``threshold`` that is not in the prompt, the dominant
+    source gives up a seat: its last neighbour first (neighbours arrive best
+    anchor first, so that is the text around its weakest anchor), then its
+    lowest-scored retrieved passage. Seats and routed sections (``fixed``) and
+    the chunk ids in ``protected`` are never given up.
+
+    ``candidates`` are the reranker's scored ``SearchResult``s, best first.
+    Returns ``(retrieved, neighbours, to_add)``; ``to_add`` still needs graph
+    expansion.
+    """
+    retrieved, neighbours = list(retrieved), list(neighbours)
+    keep = protected or set()
+    in_prompt = {e.result.chunk_id for e in [*retrieved, *neighbours, *fixed]}
+    held_shingles = [shingles(e.text) for e in [*retrieved, *fixed]]
+    pool = [
+        c
+        for c in candidates
+        if c.score >= threshold and c.chunk_id not in in_prompt and is_prose(c.text)
+    ]
+    to_add: list = []
+    for _ in range(len(retrieved) + len(neighbours)):
+        counts = Counter(e.result.source_id for e in [*retrieved, *neighbours, *fixed])
+        counts.update(r.source_id for r in to_add)
+        source, n = counts.most_common(1)[0] if counts else (None, 0)
+        if n * 2 <= sum(counts.values()):
+            break
+        alternative = next(
+            (
+                c
+                for c in pool
+                if c.source_id != source
+                and not any(near_duplicate(shingles(c.text), sh) for sh in held_shingles)
+            ),
+            None,
+        )
+        if alternative is None:
+            break
+        mine = [
+            e for e in neighbours if e.result.source_id == source and e.result.chunk_id not in keep
+        ]
+        theirs = [
+            e for e in retrieved if e.result.source_id == source and e.result.chunk_id not in keep
+        ]
+        if mine:
+            neighbours.remove(mine[-1])
+        elif theirs and sum(e.result.source_id == source for e in retrieved) > 1:
+            retrieved.remove(min(theirs, key=lambda e: e.result.score))
+        else:
+            break
+        pool.remove(alternative)
+        to_add.append(alternative)
+        held_shingles.append(shingles(alternative.text))
+    return retrieved, neighbours, to_add
+
+
+# A subquery counts as represented when one of its first five hits is in the
+# context; its seats are the reranker's best of its first ten.
+_SUBQUERY_COVERED_WITHIN = 5
+_SUBQUERY_SEAT_POOL = 10
+
+
+def uncovered_subquery_seats(
+    subqueries: list[str],
+    per_query: dict[str, list[int]],
+    candidates: list,
+    held: set[int],
+    per_subquery: int = 2,
+) -> list:
+    """The best passages of each subquery that has none in the context.
+
+    A two-part question — "why is God simple, and what is the strongest
+    objection?" — was retrieved as one: fusion and a single rerank against the
+    whole question gave all twenty seats to the first half, and Plantinga and
+    modal collapse, both in the corpus, never reached the prompt. So a subquery
+    whose hits won nothing gets its own best ``per_subquery``, in the
+    reranker's order, exempt from the floor: it is the planner's statement
+    that this part of the question exists.
+
+    ``candidates`` is the reranker's scored list (best first); a subquery's
+    hits are found in it by chunk id.
+    """
+    by_id = {c.chunk_id: c for c in candidates}
+    rank = {c.chunk_id: i for i, c in enumerate(candidates)}
+    seats: list = []
+    taken = set(held)
+    for query in subqueries:
+        # What the subquery itself found first. Its full list runs to fifty and
+        # always brushes the context somewhere; a part of the question is
+        # covered when one of its own leading hits is there.
+        own = per_query.get(query, [])
+        if not own or any(c in held for c in own[:_SUBQUERY_COVERED_WITHIN]):
+            continue
+        hits = [c for c in own[:_SUBQUERY_SEAT_POOL] if c in by_id]
+        best = sorted(hits, key=lambda c: rank[c])
+        for chunk_id in [c for c in best if c not in taken][:per_subquery]:
+            taken.add(chunk_id)
+            seats.append(by_id[chunk_id])
+    return seats
+
+
 def _unique_chunks(enriched: list, cap: int) -> list:
-    """The first ``cap`` distinct chunks, in order — a chunk both retrieval
-    passes returned is one passage, and only the first ``cap`` reach the prompt."""
+    """The first ``cap`` distinct passages, in order.
+
+    A chunk both retrieval passes returned is one passage. So is the same text
+    held twice: expert 63 holds question 3 of the Prima Pars four times (the
+    Gutenberg volume, New Advent, archive.org, quoted through the SEP) and *De
+    ente et essentia* twice, and each copy took a seat. A later passage mostly
+    contained in an earlier one from another source is dropped.
+    """
     unique: list = []
     seen: set[int] = set()
+    kept_shingles: list[tuple[int, set]] = []
     for e in enriched:
-        if e.result.chunk_id not in seen:
-            seen.add(e.result.chunk_id)
-            unique.append(e)
-    return unique[:cap]
+        if e.result.chunk_id in seen:
+            continue
+        seen.add(e.result.chunk_id)
+        mine = shingles(e.text)
+        if any(
+            source != e.result.source_id and near_duplicate(mine, theirs)
+            for source, theirs in kept_shingles
+        ):
+            continue
+        kept_shingles.append((e.result.source_id, mine))
+        unique.append(e)
+        if len(unique) >= cap:
+            break
+    return unique
 
 
 def _conversation_block(history: list[dict] | None) -> str:
@@ -714,6 +989,35 @@ def _message_text(content: Any) -> str:
     return ""
 
 
+async def _plan_call(client: Any, request: dict[str, Any]) -> dict | None:
+    """The planner's tool input, with one retry.
+
+    The SDK already retries a 5xx, and a planner call still failed with a
+    provider 500 in the head-to-head run — whereupon the turn ran on the
+    one-query fallback plan, as a user's would have. One more attempt, after a
+    pause, on a provider error or a response with no plan in it, is cheap next
+    to answering a question on the question alone.
+    """
+    for attempt in range(2):
+        try:
+            resp = await client.messages.create(**request)
+        except (anthropic.APIStatusError, anthropic.APIConnectionError) as exc:
+            status = getattr(exc, "status_code", None)
+            if attempt or (status is not None and status < 500):
+                raise
+            logger.warning("Planner call failed (%s); retrying once", exc)
+            await asyncio.sleep(_PLAN_RETRY_DELAY)
+            continue
+        block = tool_input(resp)
+        if block is not None or attempt:
+            return block
+        logger.warning("Planner returned no plan; retrying once")
+    return None
+
+
+_PLAN_RETRY_DELAY = 1.0
+
+
 # Yielded items: ("status", str) progress updates, then exactly one
 # ("context", RetrievedContext) as the final item.
 RetrieveEvent = tuple[str, "str | RetrievedContext"]
@@ -738,8 +1042,6 @@ class ChatAgent:
         The final yielded item is always ``("context", RetrievedContext)``.
         """
         cfg = expert.config
-        floor = settings.RELEVANCE_FLOOR
-        min_strong = settings.RELEVANCE_MIN_PASSAGES
 
         # 1. Plan subqueries, and read who is asking for what
         yield ("status", "Planning search queries…")
@@ -758,21 +1060,24 @@ class ChatAgent:
             question=search_question,
             queries=subqueries,
             top_k=cfg.retrieval_top_k,
+            topic=expert.topic,
         )
 
         # 3. Graph expansion
         yield ("status", "Expanding knowledge graph…")
         enriched = await self._graph.expand(search_resp.results, expert.id, hops=cfg.graph_hops)
         scored = [search_resp.reranked] * len(enriched)
+        reranked = search_resp.reranked
+        reranker = search_resp.reranker
+        candidates = list(search_resp.candidates)
+        per_query = dict(search_resp.per_query)
 
-        # 4. The relevance gate. The reranker has already scored every passage
-        # against the question; too few above the floor means retrieval was
-        # weak, and only then does the second pass run — on the planner's
-        # fallback phrasings, which approach the question from another angle.
-        # This replaced an LLM judge that read 600-char previews on every turn
-        # (~1.7K tokens), said "unsatisfied" on 43% of them, and proposed
-        # follow-ups that paraphrased the first set; none of its passages were
-        # ever cited in the audited sample.
+        # 4. Is retrieval weak? The reranker has scored every passage against
+        # the question; a low best score, or too few passages near it, means
+        # the first search missed — and only then does the second pass run, on
+        # the planner's fallback phrasings, which come at the question from
+        # another angle. This replaced an LLM judge that read 600-char previews
+        # on every turn and whose follow-ups paraphrased the first set.
         #
         # Everything retrieved so far came from the planned subqueries; anything
         # appended below came from the follow-up. Tracking the boundary here is
@@ -780,8 +1085,8 @@ class ChatAgent:
         primary_count = len(enriched)
         followup_queries: list[str] = []
         coverage_satisfied: bool | None = None
-        if search_resp.reranked:
-            coverage_satisfied = _strong_count(search_resp.results, floor) >= min_strong
+        if reranked:
+            coverage_satisfied = not retrieval_is_weak([r.score for r in search_resp.results])
 
         if coverage_satisfied is False and plan.fallback_queries:
             yield ("status", "Retrieving additional context…")
@@ -792,37 +1097,111 @@ class ChatAgent:
                 queries=followup_queries,
                 top_k=cfg.coverage_extra_k,
                 include_question=False,
+                topic=expert.topic,
             )
             extra_enriched = await self._graph.expand(
                 extra_resp.results, expert.id, hops=cfg.graph_hops
             )
             enriched = enriched + extra_enriched
             scored = scored + [extra_resp.reranked] * len(extra_enriched)
+            candidates += extra_resp.candidates
+            per_query.update(extra_resp.per_query)
+            if not reranked and extra_resp.reranked:
+                reranker = extra_resp.reranker
 
-        # 5. What retrieval contributes to the prompt: below-floor padding
-        # removed, one entry per chunk, capped at the tier's limit.
+        # 5. What retrieval contributes to the prompt: passages under this
+        # question's threshold removed, one entry per chunk, capped at the
+        # tier's limit.
+        scores = [e.result.score for e, s in zip(enriched, scored, strict=True) if s]
+        threshold = relevance_threshold(scores) if scores else 0.0
         retrieved = _unique_chunks(
-            apply_relevance_floor(enriched, scored, floor, min_strong), cfg.max_context_passages
+            apply_relevance_floor(enriched, scored, threshold, min_kept(cfg.max_context_passages)),
+            cfg.max_context_passages,
         )
+
+        # 5b. Every part of the question gets a seat: a subquery none of whose
+        # own leading hits made it in brings its best two, floor or no floor.
+        seats: list[EnrichedResult] = []
+        if reranked and candidates:
+            ranked_candidates = sorted(candidates, key=lambda r: r.score, reverse=True)
+            seat_hits = uncovered_subquery_seats(
+                subqueries,
+                per_query,
+                ranked_candidates,
+                {e.result.chunk_id for e in retrieved},
+            )
+            if seat_hits:
+                seats = await self._graph.expand(seat_hits, expert.id, hops=cfg.graph_hops)
 
         # 6. The best of those bring the text either side of them, so an
         # argument that runs across several chunks arrives as an argument.
+        # Anchors are chosen by rank, not by clearing a floor: on a question
+        # where everything scores low, the best passage still has context
+        # worth reading. Neighbours fill what is left of the cap after the
+        # retrieved passages and the subqueries' seats.
         anchor_count = min(settings.NEIGHBOUR_ANCHORS, cfg.retrieval_top_k // 2)
         neighbour_cap = max(0, anchor_count) * (
             settings.NEIGHBOUR_BEFORE + settings.NEIGHBOUR_AFTER
         )
+        context_cap = cfg.max_context_passages + neighbour_cap
+
+        # 5c. A broad question — who mattered most, how did this change, what
+        # are the positions — is also routed through the section summaries
+        # (ingestion/summaries.py): the best sections across distinct sources
+        # each seat their passages nearest the question. The reranker scored
+        # every chunk against a question no chunk answers; the summaries say
+        # which parts of which works are about it.
+        routed: list[EnrichedResult] = []
+        if plan.question_type in BROAD_QUESTION_TYPES and search_resp.query_embeddings:
+            routed = await self._route_sections(
+                expert, search_resp.query_embeddings, search_question, retrieved + seats
+            )
+
+        held = retrieved + seats + routed
+        room = max(0, context_cap - len(held))
         neighbours: list[EnrichedResult] = []
-        if neighbour_cap:
+        if neighbour_cap and room:
             yield ("status", "Reading around the strongest passages…")
-            anchors = [e for e in retrieved if not search_resp.reranked or e.result.score >= floor][
-                :anchor_count
-            ]
-            neighbours = await self._neighbours(expert, anchors, retrieved)
+            by_rank = (
+                sorted(retrieved, key=lambda e: e.result.score, reverse=True)
+                if reranked
+                else retrieved
+            )
+            neighbours = await self._neighbours(expert, by_rank[:anchor_count], held, room)
+
+        # 6b. No source takes more than half the prompt while another source
+        # has a passage near the best one. Retrieval measured 2.5 sources in
+        # context and 1.4 cited per answer, for experts built from 18–33.
+        swapped: list[EnrichedResult] = []
+        by_rank = sorted(retrieved, key=lambda e: e.result.score, reverse=True)
+        if reranked and candidates:
+            top = by_rank[0] if by_rank else None
+            reach = max(settings.NEIGHBOUR_BEFORE, settings.NEIGHBOUR_AFTER)
+            retrieved, neighbours, swap_in = diversify(
+                retrieved,
+                neighbours,
+                fixed=seats + routed,
+                candidates=sorted(candidates, key=lambda r: r.score, reverse=True),
+                threshold=threshold,
+                # The best passage and its own run are never given up: seven
+                # consecutive chunks of the First Way are why a held question
+                # wins.
+                protected={
+                    e.result.chunk_id
+                    for e in [*retrieved, *neighbours]
+                    if top is not None
+                    and e.result.source_id == top.result.source_id
+                    and abs(e.result.sequence_n - top.result.sequence_n) <= reach
+                },
+            )
+            if swap_in:
+                swapped = await self._graph.expand(swap_in, expert.id, hops=cfg.graph_hops)
+                retrieved = retrieved + swapped
+            held = retrieved + seats + routed
 
         # 7. Numbered context block, in reading order
         yield ("status", "Composing response…")
-        in_context = reading_order(retrieved, neighbours)
-        context_cap = cfg.max_context_passages + neighbour_cap
+        in_context = reading_order(held, neighbours)
         context_block, indexed = build_grounded_context(in_context, context_cap)
         trail = _build_trail(
             enriched=enriched,
@@ -832,8 +1211,13 @@ class ChatAgent:
             coverage_satisfied=coverage_satisfied,
             context_cap=context_cap,
             neighbours=neighbours,
+            seats=seats,
+            routed=routed,
+            swapped=swapped,
+            reranker=reranker,
         )
         shown = {p.chunk_id for p in indexed}
+        searched_scores = [e.result.score for e in retrieved + seats if e.result.chunk_id in shown]
         yield (
             "context",
             RetrievedContext(
@@ -851,6 +1235,7 @@ class ChatAgent:
                 ),
                 trail=trail,
                 plan=plan,
+                evidence=(evidence_strength(searched_scores, bool(seats)) if reranked else None),
             ),
         )
 
@@ -859,8 +1244,14 @@ class ChatAgent:
         expert: Expert,
         anchors: list[EnrichedResult],
         retrieved: list[EnrichedResult],
+        limit: int | None = None,
     ) -> list[EnrichedResult]:
         """The chunks either side of ``anchors`` — see ``chat/neighbours.py``.
+
+        At most ``limit``, nearest the best anchor first. A neighbour that is
+        not prose (``ingestion/quality.py``) is dropped: two of the three that
+        joined the king question's passages were a page of textual apparatus
+        and a paragraph of Old English.
 
         Graph-expanded like any other passage: a neighbour is numbered and
         citable, so it carries its concepts and its disputes the same way. A
@@ -873,13 +1264,80 @@ class ChatAgent:
             settings.NEIGHBOUR_BEFORE,
             settings.NEIGHBOUR_AFTER,
         )
+        if limit is not None:
+            wanted = wanted[:limit]
         if not wanted:
             return []
         try:
             found = await self._search.fetch_by_position(expert.id, wanted)
+            # In the order asked for — best anchor first — which is the order
+            # `diversify` gives neighbours up in reverse.
+            order = {pos: i for i, pos in enumerate(wanted)}
+            found.sort(key=lambda r: order.get((r.source_id, r.sequence_n), len(order)))
+            held = [(e.result.source_id, shingles(e.text)) for e in retrieved]
+            found = [
+                r
+                for r in found
+                if is_prose(r.text)
+                and not any(
+                    source != r.source_id and near_duplicate(shingles(r.text), theirs)
+                    for source, theirs in held
+                )
+            ]
             return await self._graph.expand(found, expert.id, hops=expert.config.graph_hops)
         except Exception as exc:
             logger.warning("Neighbour expansion failed: %s", exc)
+            return []
+
+    async def _route_sections(
+        self,
+        expert: Expert,
+        query_embeddings: dict[str, list[float]],
+        question: str,
+        held: list[EnrichedResult],
+    ) -> list[EnrichedResult]:
+        """Passages from the sections whose summaries best match a broad question.
+
+        One section per source, ``SECTION_ROUTE_K`` sources, skipping a section
+        the prompt already draws on; each brings its ``SECTION_ROUTE_PASSAGES``
+        chunks nearest the question. Best-effort: an expert built before the
+        index existed, or any failure, routes nothing.
+        """
+        if not settings.SECTION_INDEX_ENABLED or settings.SECTION_ROUTE_K <= 0:
+            return []
+        try:
+            hits = await search_sections(
+                self._search._pool,
+                expert.id,
+                list(query_embeddings.values()),
+                settings.SECTION_ROUTE_K * 2,
+            )
+            positions = {(e.result.source_id, e.result.sequence_n) for e in held}
+            spans = [
+                (h.source_id, h.seq_start, h.seq_end)
+                for h in hits
+                if not any(
+                    source == h.source_id and h.seq_start <= seq <= h.seq_end
+                    for source, seq in positions
+                )
+            ][: settings.SECTION_ROUTE_K]
+            if not spans:
+                return []
+            anchor = query_embeddings.get(question) or next(iter(query_embeddings.values()))
+            found = await self._search.best_in_spans(
+                expert.id, spans, anchor, settings.SECTION_ROUTE_PASSAGES
+            )
+            held_shingles = [shingles(e.text) for e in held]
+            chosen = [
+                r
+                for group in found
+                for r in group
+                if is_prose(r.text)
+                and not any(near_duplicate(shingles(r.text), sh) for sh in held_shingles)
+            ]
+            return await self._graph.expand(chosen, expert.id, hops=expert.config.graph_hops)
+        except Exception as exc:
+            logger.warning("Section routing failed: %s", exc)
             return []
 
     async def gather_context(
@@ -909,12 +1367,17 @@ class ChatAgent:
             ctx.plan,
             ctx.has_contradiction,
             ctx.contradiction_points,
+            ctx.evidence,
         )
         resp = await client.messages.create(
             model=settings.CLAUDE_MODEL,
             system=build_cached_system(expert.persona_style, expert.topic),
             messages=messages,
-            **composition_params(settings.CLAUDE_MODEL, expert.config.max_response_tokens),
+            **composition_params(
+                settings.CLAUDE_MODEL,
+                expert.config.max_response_tokens,
+                ctx.plan.question_type if ctx.plan else None,
+            ),
         )
         answer_text = "".join(b.text for b in resp.content if hasattr(b, "text"))
 
@@ -973,30 +1436,33 @@ class ChatAgent:
                 else f"Question: {question}"
             )
 
-            client = get_anthropic_client()
-            resp = await client.messages.create(
-                model=settings.FAST_MODEL,
-                max_tokens=768,
-                system=(
-                    f"You plan answers for a {topic} expert. Three jobs, one call.\n"
-                    "1. If there is a conversation, resolve what the question refers "
-                    "to in it, and write the question so it stands alone.\n"
-                    f"2. Decompose the question into 2–{max_subqueries} declarative "
-                    "retrieval subqueries — phrases a relevant passage would "
-                    "contain, not questions — each self-contained, never relying on "
-                    "the conversation for meaning. Add up to two fallback queries "
-                    "that come at it from a broader or neighbouring angle.\n"
-                    "3. Read the question: how much background the asker has, what "
-                    "kind of answer would satisfy them, and one imperative sentence "
-                    "saying what this answer must do. Judge the asker from the "
-                    "question as written, not from how technical the field is."
-                    f"{vocabulary}"
-                ),
-                tools=[tool],
-                tool_choice=ToolChoiceToolParam(type="tool", name="create_plan"),
-                messages=[MessageParam(role="user", content=content)],
+            system = (
+                f"You plan answers for a {topic} expert. Three jobs, one call.\n"
+                "1. If there is a conversation, resolve what the question refers "
+                "to in it, and write the question so it stands alone.\n"
+                f"2. Decompose the question into 2–{max_subqueries} declarative "
+                "retrieval subqueries — phrases a relevant passage would "
+                "contain, not questions — each self-contained, never relying on "
+                "the conversation for meaning. Always add one or two fallback "
+                "queries that come at it from a broader or neighbouring angle.\n"
+                "3. Read the question: how much background the asker has, what "
+                "kind of answer would satisfy them, and one imperative sentence "
+                "saying what this answer must do. Judge the asker from the "
+                "question as written, not from how technical the field is."
+                f"{vocabulary}"
             )
-            block = tool_input(resp) or {}
+            client = get_anthropic_client()
+            request: dict[str, Any] = {
+                "model": settings.FAST_MODEL,
+                "max_tokens": 768,
+                "system": system,
+                "tools": [tool],
+                "tool_choice": ToolChoiceToolParam(type="tool", name="create_plan"),
+                "messages": [MessageParam(role="user", content=content)],
+            }
+            block = await _plan_call(client, request)
+            if block is None:
+                return QueryPlan.fallback(question)
             return QueryPlan.from_tool_input(dict(block), question, max_subqueries)
         except Exception as exc:
             logger.warning("Planning failed: %s", exc)

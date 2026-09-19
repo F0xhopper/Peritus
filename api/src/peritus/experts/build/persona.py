@@ -9,6 +9,8 @@ other side — what this corpus cannot be trusted to say — and the two are sho
 together.
 """
 
+import re
+
 from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
 
 from peritus.core.config import settings
@@ -17,6 +19,14 @@ from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_i
 from peritus.sources.domain import ValidatedSource
 
 logger = get_logger(__name__)
+
+
+#: The longest a persona's style block may be. Stored personas ran to 3,300–
+#: 3,400 characters, placed after the answer rules in the system prompt — the
+#: position that weighs most — and one guard sentence did not stop them scripting
+#: the opening of every answer ("Let's see what the chronicler says…" on the
+#: production answer to the king question, with the guard in place).
+PERSONA_MAX_CHARS = 1_500
 
 
 _PERSONA_TOOL: ToolParam = {
@@ -59,7 +69,8 @@ _PERSONA_TOOL: ToolParam = {
                     "to the subject. Positive voice instructions only — write "
                     "what they do, never a list of rules about sourcing, "
                     "citation, hedging, or uncertainty, and nothing about how "
-                    "an answer opens or is structured."
+                    "an answer opens or is structured. At most "
+                    f"{PERSONA_MAX_CHARS} characters."
                 ),
             },
         },
@@ -98,9 +109,10 @@ _PERSONA_SYSTEM = (
     "subject. Describe the method so it can be used, not performed.\n\n"
     "The bio and the style block have different jobs and should not read alike. "
     "The bio is what a reader skims in five seconds to decide if this is the "
-    "right expert — keep it short and plain. The style block is what actually "
-    "governs how the expert teaches, so it can be as thorough as that job "
-    "requires; length there is not the problem the bio has."
+    "right expert — keep it short and plain. The style block governs how the "
+    "expert teaches: two or three tight paragraphs, at most "
+    f"{PERSONA_MAX_CHARS} characters. It sits beside rules about how every "
+    "answer opens and is laid out, and a longer persona outweighs them."
 )
 
 
@@ -168,7 +180,96 @@ async def generate_persona(
             f"(stop_reason={resp.stop_reason!r}). Raise max_tokens if this is "
             "'max_tokens'."
         )
+    # Asked for, not guaranteed: what scripts an opening is removed, and an
+    # over-long block is condensed rather than shipped.
+    persona["style"] = await condense_persona(persona["style"])
     return persona
+
+
+# A sentence that scripts how an answer opens, or tells the expert to perform
+# its method rather than use it. Written against the stored personas: "You open
+# almost every explanation the same way: …", "you tell students you are using a
+# 'ladder from creatures to Creator,' and you name the rung you're standing on",
+# "you never start with God — you start with a chair".
+_SCRIPTING = re.compile(
+    r"\byou (?:almost )?(?:always |usually |typically |often )?"
+    r"(?:open|begin|start|launch)\b(?! a (?:hive|frame|box))"
+    r"|\b(?:open|begin|start)s? (?:almost )?every (?:answer|explanation|lesson|reply)"
+    r"|\byou (?:tell|remind) (?:students|newcomers|them|the (?:asker|reader|student))\b"
+    r"|\byou (?:are explicit about|announce|name the (?:rung|step|stage))"
+    r"|\bsignature (?:phrase|line|opening|routine)"
+    r"|[\"“'‘](?:let'?s|let me|now|first|so|here'?s)\b[^\"”’]{12,}[\"”’]",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT = re.compile(r"(?:(?<=[.!?])|(?<=[.!?][\"”’]))\s+(?=[A-Z\"“])")
+
+
+def scripted_sentences(style: str) -> list[str]:
+    """The sentences of a persona that script an opening or narrate a method."""
+    return [s for p in style.split("\n") for s in _SENTENCE_SPLIT.split(p) if _SCRIPTING.search(s)]
+
+
+def strip_scripted(style: str) -> str:
+    """``style`` without its scripting sentences, paragraphs kept."""
+    paragraphs = []
+    for paragraph in (style or "").strip().split("\n"):
+        kept = [s for s in _SENTENCE_SPLIT.split(paragraph) if not _SCRIPTING.search(s)]
+        paragraphs.append(" ".join(kept).strip())
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(paragraphs)).strip()
+
+
+_CONDENSE_SYSTEM = (
+    "You condense a teaching persona for a grounded AI tutor. Keep what makes "
+    "this teacher distinct: the framings, analogies and worked examples they "
+    "reach for, what they emphasise and what they cut. Drop anything about how "
+    "an answer opens or is laid out, any routine or catchphrase, and anything "
+    "telling them to announce or narrate their method. Second person, positive "
+    f"voice, two or three paragraphs, about {PERSONA_MAX_CHARS - 400} "
+    "characters. Reply with the condensed persona only."
+)
+
+
+# The cap is "about", not exact: a model asked for a length lands within a few
+# hundred characters of it, and a persona 10% over the cap is not the problem
+# a persona twice the cap was.
+_CAP_SLACK = 1.15
+
+
+async def condense_persona(style: str) -> str:
+    """``style`` cut to ``PERSONA_MAX_CHARS`` by the model, scripting removed.
+
+    Deterministic stripping first; the model only runs when what is left is
+    still too long, and its output is stripped again rather than trusted.
+    """
+    stripped = strip_scripted(style)
+    if len(stripped) <= PERSONA_MAX_CHARS:
+        return stripped
+    client = get_anthropic_client()
+    messages: list[MessageParam] = [MessageParam(role="user", content=stripped)]
+    condensed = ""
+    for _ in range(2):
+        resp = await client.messages.create(
+            model=settings.CLAUDE_MODEL,
+            max_tokens=1024,
+            system=_CONDENSE_SYSTEM,
+            messages=messages,
+        )
+        text = "".join(getattr(b, "text", "") for b in resp.content).strip()
+        condensed = strip_scripted(text)
+        if condensed and len(condensed) <= PERSONA_MAX_CHARS * _CAP_SLACK:
+            return condensed
+        # Models overshoot a character count; told by how much, they do not.
+        messages += [
+            MessageParam(role="assistant", content=text),
+            MessageParam(
+                role="user",
+                content=(
+                    f"That is {len(condensed)} characters. Cut it to under "
+                    f"{PERSONA_MAX_CHARS - 200}, keeping the most distinctive parts."
+                ),
+            ),
+        ]
+    raise RuntimeError(f"Condensed persona is {len(condensed)} chars; expected under the cap")
 
 
 async def _generate_persona(

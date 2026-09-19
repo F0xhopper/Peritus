@@ -101,6 +101,9 @@ def build_audit_payload(
             "satisfied": trail.coverage_satisfied if trail else None,
             "second_pass": bool(trail.second_pass) if trail else False,
         },
+        # Which reranker scored the passages; its scores and another's are not
+        # on one scale.
+        "reranker": trail.reranker if trail else None,
         "passages": {
             "retrieved": unique + (trail.duplicate_hits if trail else 0),
             "duplicate_hits": trail.duplicate_hits if trail else 0,
@@ -169,6 +172,7 @@ def audit_db_rows(
         "contradiction_traversed": bool(payload["graph"]["contradiction_traversed"]),
         "answer_chars": payload["answer_chars"],
         "dangling_citations": payload.get("dangling_citations", []),
+        "reranker": payload.get("reranker"),
     }
     rows = [
         {

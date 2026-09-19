@@ -478,3 +478,88 @@ def deduplicate_by_url[T: (RawSource, SourceCandidate)](items: Iterable[T]) -> l
             seen.add(key)
         unique.append(item)
     return unique
+
+
+# ── Editions ─────────────────────────────────────────────────────────────────
+#
+# Simhash catches two renderings of one document. It misses the two ways one
+# work ended up in expert 63 and 66 several times over: an excerpt of a text
+# already held (question 3 of the Prima Pars from New Advent, while the
+# Gutenberg volume holds it too), and a second edition that is mostly another
+# language (an OCR'd Old English Bede beside the translation). Each copy took
+# context seats, and the second was 230 chunks of text the expert cannot quote.
+
+_EXCERPT_SHINGLE = 8
+# Share of the shorter text's shingles found in the longer one.
+_EXCERPT_CONTAINMENT = 0.6
+# How much more English one edition of a work must be to displace the other.
+_EDITION_SHARE_GAP = 0.15
+_TITLE_WORD = re.compile(r"[a-z]{3,}")
+_TITLE_STOP = frozenset({"the", "and", "version", "edition", "english", "translated", "from"})
+
+
+def _hashed_shingles(text: str) -> set[int]:
+    words = re.findall(r"\w+", text.casefold())
+    return {
+        hash(tuple(words[i : i + _EXCERPT_SHINGLE]))
+        for i in range(max(0, len(words) - _EXCERPT_SHINGLE + 1))
+    }
+
+
+def _title_words(title: str) -> set[str]:
+    return {w for w in _TITLE_WORD.findall(title.casefold()) if w not in _TITLE_STOP}
+
+
+def deduplicate_editions(
+    sources: list[RawSource],
+) -> tuple[list[RawSource], list[tuple[RawSource, str]]]:
+    """Keep one edition of a work: drop excerpts of held texts and foreign editions.
+
+    Returns ``(kept, [(dropped, reason)])``. Longest first, so the complete text
+    is the one kept and the excerpt the one dropped. Two sources are editions
+    of one work when every distinctive word of one title is in the other; the
+    one with markedly less English in it (``sources/language.english_share``)
+    is dropped. Same-language editions of one work are left to the excerpt
+    check, which compares text, not titles — "Summa Theologica" on one question
+    and "Summa Theologica, Part I" are the same title and different passages.
+    """
+    from peritus.sources.language import english_share
+
+    order = sorted(range(len(sources)), key=lambda i: -len(sources[i].text))
+    kept: list[int] = []
+    shingle_sets: dict[int, set[int]] = {}
+    dropped: list[tuple[RawSource, str]] = []
+    for i in order:
+        source = sources[i]
+        mine = _hashed_shingles(source.text)
+        reason = None
+        displaced: int | None = None
+        for j in kept:
+            other = sources[j]
+            if mine and len(mine & shingle_sets[j]) / len(mine) >= _EXCERPT_CONTAINMENT:
+                reason = f"an excerpt of {other.url}"
+                break
+            a, b = _title_words(source.title), _title_words(other.title)
+            if not (a and b and (a <= b or b <= a)):
+                continue
+            ours, theirs = english_share(source.text), english_share(other.text)
+            if ours is None or theirs is None:
+                continue
+            if theirs - ours >= _EDITION_SHARE_GAP:
+                reason = f"another edition of {other.url}, mostly not in English"
+                break
+            if ours - theirs >= _EDITION_SHARE_GAP:
+                displaced = j
+                break
+        if reason:
+            dropped.append((source, reason))
+            continue
+        if displaced is not None:
+            kept.remove(displaced)
+            dropped.append(
+                (sources[displaced], f"another edition of {source.url}, mostly not in English")
+            )
+        kept.append(i)
+        shingle_sets[i] = mine
+    kept_set = set(kept)
+    return [s for i, s in enumerate(sources) if i in kept_set], dropped

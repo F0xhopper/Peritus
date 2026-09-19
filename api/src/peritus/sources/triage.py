@@ -29,6 +29,13 @@ from peritus.infrastructure.anthropic_client import tool_input
 from peritus.sources.canonical import classify_extent, matching_work, title_key
 from peritus.sources.domain import SourceCandidate, SourceType
 from peritus.sources.hosts import host_and_path, suffix_matches
+from peritus.sources.subject import (
+    SUBJECT_CANON,
+    SUBJECT_PRACTICE,
+    SUBJECT_RESEARCH_FRONT,
+    normalise_subject_kind,
+    recency_adjustment,
+)
 
 logger = get_logger(__name__)
 
@@ -334,6 +341,9 @@ class TriagedCandidate:
     model_score: float | None = None
     domain_adjustment: float = 0.0
     status: str = STATUS_SCORED
+    # The recency prior for a practice or a research front (sources/subject.py);
+    # 0.0 for a canon, where age is not a demerit.
+    recency_adjustment: float = 0.0
 
 
 async def triage_candidates(
@@ -341,8 +351,17 @@ async def triage_candidates(
     key_concepts: list[str],
     must_have_titles: list[str],
     candidates: list[SourceCandidate],
+    subject_kind: str = SUBJECT_CANON,
 ) -> list[TriagedCandidate]:
     """Score all candidates in batched Haiku calls. Order is preserved.
+
+    ``subject_kind`` (sources/subject.py) is what the research plan said this
+    subject is. For a canon — and for every caller that does not pass it — triage
+    is exactly what it was. For a practice or a research front the model is told
+    what counts as authoritative there, and a modest recency prior is added next
+    to the domain prior: a dated recent source gains a little, a Gutenberg text or
+    a source dated more than thirty years ago loses a point. Old material is
+    reordered, never excluded; a must-have work is lifted past both.
 
     Calls run through the Message Batches API (half price) when enabled, else
     as concurrent live calls. Scores are matched to candidates by the id the
@@ -374,7 +393,10 @@ async def triage_candidates(
             reasked.update(pending)
         batches = [pending[i : i + size] for i in range(0, len(pending), size)]
         responses = await gather_claude_calls(
-            [_triage_params(topic, key_concepts, [candidates[j] for j in b]) for b in batches],
+            [
+                _triage_params(topic, key_concepts, [candidates[j] for j in b], subject_kind)
+                for b in batches
+            ],
             live_concurrency=settings.VALIDATE_CONCURRENCY,
             description="triage" if attempt == 0 else "triage-reask",
         )
@@ -408,11 +430,13 @@ async def triage_candidates(
     for index, candidate in enumerate(candidates):
         model = model_scores.get(index)
         adjustment = domain_adjustment(candidate.url)
+        recency = recency_adjustment(candidate.source_type, candidate.metadata, subject_kind)
         if model is None:
             score, status = 0.0, STATUS_UNSCORED
         else:
-            # Provenance prior, then clamp back onto the model's own scale.
-            score = min(max(model + adjustment, 0.0), 10.0)
+            # Provenance and recency priors, then clamp back onto the model's
+            # own scale.
+            score = min(max(model + adjustment + recency, 0.0), 10.0)
             status = STATUS_REASKED if index in reasked else STATUS_SCORED
         # A must-have work found by search should never lose the triage —
         # applied last, so a canonical text hosted somewhere unglamorous
@@ -446,6 +470,7 @@ async def triage_candidates(
                 model_score=model,
                 domain_adjustment=adjustment,
                 status=status,
+                recency_adjustment=recency,
             )
         )
     return triaged
@@ -532,10 +557,32 @@ def _near_duplicate(
     return False
 
 
+# What the model is told about a subject that is not a canon. Appended to the
+# user message, never the system prompt, so a canon's request is byte-for-byte
+# what it was. Without it an extension service's leaflet and an 1853 manual look
+# alike from a title and a snippet — both are "a practical guide to X" — and the
+# undated web guide, which the recency prior cannot see, has only this to lift it.
+_SUBJECT_NOTES: dict[str, str] = {
+    SUBJECT_PRACTICE: (
+        "This subject is a practice — a craft or how-to field. What is authoritative "
+        "is current practice: extension services, professional and trade bodies, "
+        "standard handbooks, recent reviews and practitioners' own guidance. A "
+        "century-old manual is history, worth having but not as the answer to 'how "
+        "do I'; a narrow research paper is one finding, not practice."
+    ),
+    SUBJECT_RESEARCH_FRONT: (
+        "This subject is a research front — a fast-moving field. What is "
+        "authoritative is the recent literature and its reviews; older work matters "
+        "as foundation, and is superseded where the field has moved."
+    ),
+}
+
+
 def _triage_params(
     topic: str,
     key_concepts: list[str],
     batch: list[SourceCandidate],
+    subject_kind: str = SUBJECT_CANON,
 ) -> dict[str, Any]:
     """Request params for one triage batch (consumed by gather_claude_calls)."""
     candidates_block = "\n\n".join(
@@ -555,6 +602,8 @@ def _triage_params(
         if key_concepts
         else ""
     )
+    note = _SUBJECT_NOTES.get(normalise_subject_kind(subject_kind))
+    subject_block = f"{note}\n\n" if note else ""
     return {
         "model": settings.FAST_MODEL,
         "max_tokens": 64 * len(batch) + 256,
@@ -566,6 +615,7 @@ def _triage_params(
                 "role": "user",
                 "content": (
                     f"Topic: {topic}\n\n"
+                    f"{subject_block}"
                     f"{concepts_block}"
                     f"{candidates_block}\n\n"
                     f"Score all {len(batch)} candidates above."

@@ -301,3 +301,42 @@ def test_the_threshold_still_keeps_distinct_papers_on_one_topic_apart():
     )
     assert len(kept) == 2
     assert duplicates == []
+
+
+def test_one_edition_per_work():
+    from peritus.sources.dedup import deduplicate_editions
+    from peritus.sources.domain import RawSource, SourceType
+
+    def src(title: str, text: str, url: str) -> RawSource:
+        return RawSource(SourceType.WEB, url, title, None, text)
+
+    article = " ".join(
+        f"In article {n} it is argued that the simple being has no parts and no composition "
+        f"of any kind, because whatever is composite is posterior to its parts {n}."
+        for n in range(40)
+    )
+    whole = src("Summa Theologica, Part I", "Front matter. " + article * 3, "https://g/1")
+    excerpt = src("SUMMA THEOLOGIAE: The simplicity of God", article, "https://newadvent/3")
+    english = src(
+        "Bede's ecclesiastical history of the English people",
+        (
+            "The king of the English was baptized by the bishop in the city of York, and "
+            "the people of the kingdom were converted to the faith of the church. "
+        )
+        * 40,
+        "https://a/eng",
+    )
+    latin = src(
+        "The Old English version of Bede's Ecclesiastical history of the English people",
+        (
+            "Cum enim malignus spiritus peccatum suggerit in mente, si nulla peccati delectatio "
+            "sequatur, peccatum omnimodo perpetratum non est; tunc peccatum incipit nasci. "
+        )
+        * 60,
+        "https://a/oe",
+    )
+    kept, dropped = deduplicate_editions([excerpt, latin, whole, english])
+    assert {s.url for s in kept} == {"https://g/1", "https://a/eng"}
+    reasons = {s.url: why for s, why in dropped}
+    assert reasons["https://newadvent/3"].startswith("an excerpt of https://g/1")
+    assert reasons["https://a/oe"].startswith("another edition of https://a/eng")
