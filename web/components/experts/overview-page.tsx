@@ -12,6 +12,7 @@ import { ShareDialog } from '@/components/experts/share-panel'
 import { TopBar } from '@/components/shell/top-bar'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { MenuItem, MenuLinkItem, MenuSeparator } from '@/components/ui/menu'
+import { BuildingNow } from '@/components/experts/building-now'
 import { Notice } from '@/components/ui/notice'
 import { RelativeTime } from '@/components/ui/relative-time'
 import { dotState } from '@/components/ui/status-dot'
@@ -66,6 +67,9 @@ export function OverviewPage({
   const chattable = expert.readiness !== 'pending'
   const state = dotState(expert.status, expert.readiness, expert.build_active)
   const building = state === 'queued' || state === 'building'
+  // A build is running, whether or not the expert can already answer. `building`
+  // above means "and cannot answer yet"; this is the wider one.
+  const inFlight = building || state === 'chat-ready'
   const failed = expert.status === 'failed' && !chattable
   const askFirst = chattable && conversations.length === 0
   // A build that finished but left no persona: the corpus is usable and the
@@ -125,7 +129,7 @@ export function OverviewPage({
           Below `lg` there is no sidebar, so this is the only route to them —
           and it carries the same relative time the sidebar does. */}
       {conversations.length > 0 && (
-        <ul className="mt-4 space-y-0.5 rounded-card bg-panel p-1 lg:hidden">
+        <ul className="mt-4 space-y-0.5 rounded-card border border-border-soft bg-panel p-1 lg:hidden">
           {conversations.slice(0, 6).map((conversation) => (
             <li key={conversation.id}>
               <Link
@@ -260,7 +264,17 @@ export function OverviewPage({
             </Notice>
           )}
 
-          {chattable && expert.readiness === 'chat_ready' && building && (
+          {/* The way to the build, for as long as there is one running. It
+              used to exist only while the expert could not answer: the moment
+              it could, the top bar's "Building…" became Ask and nothing on the
+              page led to the build any more. */}
+          {inFlight && buildStatus && (
+            <BuildingNow expert={expert} heading="Still building" className="mb-5" />
+          )}
+
+          {/* `chat-ready`, not `building`: the two are mutually exclusive, and
+              this read `… && building`, so it never once appeared. */}
+          {state === 'chat-ready' && (
             <Notice tone="info" title="It can answer now" className="mb-5">
               Answers already cite its sources. When the concept map finishes, they will also draw
               on related concepts and flag where sources disagree.

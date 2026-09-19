@@ -135,6 +135,12 @@ export function useShell(): ShellState {
  * or a bottom sheet.
  */
 export interface ContextPanelContent {
+  /**
+   * Which mounted `ContextSlot` published this. The panel's "closed" state
+   * belongs to one publisher: closing a source's panel on Knowledge must not
+   * keep the build page's Cost panel shut an hour later.
+   */
+  owner: number
   title: string
   /** Called when the reader closes the panel — clear the selection behind it. */
   onClose?: () => void

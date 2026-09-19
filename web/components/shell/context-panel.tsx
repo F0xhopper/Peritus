@@ -42,6 +42,16 @@ export function ContextPanel() {
     setWasOpen(contextOpen)
     if (contextOpen) setDismissed(false)
   }
+  // A dismissal lasts as long as the slot that was dismissed. This component
+  // lives in the layout and outlives every page, so without this the flag was
+  // for ever: close any panel anywhere, and the build page's Cost panel — which
+  // fills the slot without asking it to open — never showed inline again.
+  const owner = content?.owner ?? null
+  const [seenOwner, setSeenOwner] = useState(owner)
+  if (owner !== seenOwner) {
+    setSeenOwner(owner)
+    setDismissed(false)
+  }
 
   if (!content) return null
 
@@ -56,9 +66,10 @@ export function ContextPanel() {
     return (
       <aside
         aria-label={content.title}
-        className="scroll-col hidden w-context shrink-0 bg-panel xl:block"
+        // The sidebar's mirror: on the ground, with a hairline against the page.
+        className="scroll-col hidden w-context shrink-0 border-l border-border-soft bg-bg xl:block"
       >
-        <div className="sticky top-0 z-10 flex h-topbar items-center gap-2 bg-panel px-3">
+        <div className="sticky top-0 z-10 flex h-topbar items-center gap-2 border-b border-border-soft bg-bg px-4">
           <h2 className="min-w-0 flex-1 truncate text-label tracking-[0.04em] text-fg-3 uppercase">
             {content.title}
           </h2>
@@ -74,7 +85,7 @@ export function ContextPanel() {
             <X className="size-3.5" />
           </button>
         </div>
-        <div className="p-3">{content.node}</div>
+        <div className="p-4">{content.node}</div>
       </aside>
     )
   }
@@ -94,6 +105,8 @@ export function ContextPanel() {
     </Sheet>
   )
 }
+
+let nextOwner = 0
 
 /**
  * Publish content into the panel from a page.
@@ -118,13 +131,16 @@ export function ContextSlot({
 }) {
   const { publish } = useContextSlot()
   const { setContextOpen } = useShell()
+  // One number per mount. Not `useId`, which is derived from the position in
+  // the tree and so comes back the same when a page is left and returned to.
+  const [owner] = useState(() => (nextOwner += 1))
 
   // An effect, not a render-time call: publishing writes to the layout's state,
   // and doing that during this component's render is a React error.
   useEffect(() => {
-    publish({ title, snapPoints, onClose, node: children })
+    publish({ owner, title, snapPoints, onClose, node: children })
     return () => publish(null)
-  }, [title, snapPoints, onClose, children, publish])
+  }, [owner, title, snapPoints, onClose, children, publish])
 
   useEffect(() => {
     if (open) setContextOpen(true)

@@ -17,11 +17,23 @@ import type { BuildEvent } from '@/lib/api/types'
  *
  * Three things here are load-bearing and easy to get wrong:
  *
- * **Never abort on unmount.** Strict Mode double-mounts every effect in
- * development, so an abort in the cleanup kills the first request immediately —
- * which looks exactly like a flaky backend. A connection is abandoned instead:
- * the loop checks a generation counter and stops reducing, and the socket closes
- * when the response is garbage collected.
+ * **An abandoned connection is closed, and each run of the effect closes only
+ * its own.** The tail is a `GET` with a cursor, opened *inside* the effect, so
+ * every run owns one `AbortController` and its cleanup aborts that one. Strict
+ * Mode's throwaway first mount therefore cancels a request nothing was going to
+ * read, and the re-run opens the real one — unlike the chat stream, a `POST`
+ * started by a click, where a cleanup abort would cancel the only request there
+ * is (which is where "never abort on unmount" comes from, and why it still
+ * holds there).
+ *
+ * It used to be abandoned without being closed — the loop stopped reducing and
+ * the socket was left "until the response is garbage collected", which for an
+ * open event stream is never. A build can go minutes between events, so every
+ * visit to a page that tails one (the build page, Home, Knowledge) left a stream
+ * open, two under Strict Mode. A browser allows six connections per host over
+ * HTTP/1.1, which is what `next dev` and a plain `next start` speak: by the third
+ * visit the new tail, `/map` and the cost poll were all queued behind streams
+ * nobody was reading, and the page came back with no map and no cost.
  *
  * **A closed stream is not a finished build.** Only `done`, `error` or
  * `cancelled` ends the tail. Anything else means reconnect with
@@ -98,6 +110,8 @@ export function useBuildEvents(
 
     const myGeneration = ++generation.current
     const stale = () => generation.current !== myGeneration
+    // This run's connection, and only this run's. See the docstring.
+    const connection = new AbortController()
     let backoff = BACKOFF_START_MS
     let cancelled = false
     let wakeTimer: ReturnType<typeof setTimeout> | null = null
@@ -118,7 +132,11 @@ export function useBuildEvents(
         try {
           const res = await fetch(
             `/api/experts/${encodeURIComponent(slug)}/build/events?after=${lastSeq.current}`,
-            { headers: { Accept: 'text/event-stream' }, cache: 'no-store' }
+            {
+              headers: { Accept: 'text/event-stream' },
+              cache: 'no-store',
+              signal: connection.signal,
+            }
           )
 
           if (res.status === 404) {
@@ -176,8 +194,10 @@ export function useBuildEvents(
             }
           }
         } catch {
-          // A network blip, a proxy timeout, a server restart. Indistinguishable
-          // here and treated the same way: wait and resume from the cursor.
+          // A network blip, a proxy timeout, a server restart — or this run's
+          // own abort, which the check below turns into a silent return. The
+          // rest are indistinguishable here and treated the same way: wait and
+          // resume from the cursor.
         }
 
         if (cancelled || stale() || terminal.current) return
@@ -193,9 +213,10 @@ export function useBuildEvents(
     void run()
 
     return () => {
-      // Deliberately no AbortController — see the docstring. The generation
-      // bump makes this connection's remaining events inert.
+      // `cancelled` makes anything already read inert; the abort gives the
+      // connection back, whether the fetch is still pending or mid-stream.
       cancelled = true
+      connection.abort()
       if (wakeTimer) clearTimeout(wakeTimer)
       wake.current = null
     }

@@ -43,6 +43,7 @@ export function OverviewProperties({
       ? 'Ready · concept map built'
       : stateLabel(state)
   const building = state === 'queued' || state === 'building'
+  const inFlight = building || state === 'chat-ready'
   const showCorpus = !failed && !building
   const base = `/experts/${expert.name}`
   // `updated_at` on the job is when the build stopped; `created_at` on the
@@ -56,6 +57,15 @@ export function OverviewProperties({
           <StatusDot state={state} />
           <span className={statusTextClass[state]}>{statusText}</span>
         </span>
+        {/* While it runs, the status is also the way to watch it. */}
+        {inFlight && buildStatus && (
+          <>
+            <span aria-hidden="true" className="mx-1.5 text-fg-4">
+              ·
+            </span>
+            <PropertyLink href={`${base}/build`}>View build</PropertyLink>
+          </>
+        )}
       </Property>
       <Property label="Depth">
         <span className="text-fg-2">{humanise(expert.tier)}</span>

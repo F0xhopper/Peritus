@@ -57,10 +57,23 @@ These come from `web-production.md` and are enforced in code, not in copy.
 - **`ViewTransition` is a stable export from `react`** in React 19.3, and needs
   no `experimental` flag in `next.config.ts`. The plan's
   `unstable_ViewTransition` and `experimental.viewTransition` are both stale.
-- **Never abort a stream fetch on unmount.** Strict Mode double-mounts, so an
-  abort in the cleanup kills the first request and looks exactly like a flaky
-  backend. `useBuildEvents` abandons the connection via a generation counter
-  instead. Only the Stop button aborts a chat.
+- **Never abort a _chat_ stream on unmount; always close a _build_ tail.** The
+  chat stream is a `POST` started by a click: Strict Mode double-mounts, a
+  cleanup abort would cancel the only request there is, and it looks exactly like
+  a flaky backend — so only the Stop button aborts a chat. The build tail is the
+  opposite case: an idempotent `GET` with a cursor, opened _inside_ the effect, so
+  each run of the effect owns an `AbortController` and its cleanup aborts that
+  one (`useBuildEvents`). It used to be abandoned without being closed, on the
+  first rule's authority, and an open event stream is never garbage collected:
+  every visit to the build page, Home or Knowledge left one open (two under
+  Strict Mode), the browser's six-connections-per-host limit on HTTP/1.1 filled
+  by the third visit, and the page came back with no map and no cost because its
+  own requests were queued behind streams nobody was reading.
+- **State in the `(app)` layout outlives every page.** `ContextPanel`'s
+  "dismissed" flag was one boolean for the life of the session, so closing any
+  side panel anywhere kept the build page's Cost panel shut. It is now scoped to
+  the `ContextSlot` that was dismissed (`owner`, one number per mount — not
+  `useId`, which is positional and comes back the same on a return visit).
 - **A closed SSE stream is not a finished build.** Only `done`, `error` or
   `cancelled` ends a tail; anything else means reconnect with `after=<lastSeq>`.
 - **Do not await `body.cancel()`** on a discarded streaming response — it may not
@@ -131,8 +144,9 @@ These come from `web-production.md` and are enforced in code, not in copy.
 - **`@dicebear/core` is 9.4.3, not 10.7.** `@dicebear/collection` 9.4 peers on
   core `^9`; the pairing in the plan does not install.
 - **shadcn was not run.** `components/ui/*` is a small hand-written set on Base
-  UI, because the design's rules (rounded fills instead of rules, colour as text,
-  no shadows except popovers) fight shadcn's defaults more than they share them.
+  UI, because the design's rules (pills and hairlines on a black ground, colour
+  as text, no shadows except popovers) fight shadcn's defaults more than they
+  share them.
   The exception is shape, not styling: `ui/field.tsx` and `ui/card.tsx` are
   shadcn's `Field` and `Card` APIs ported onto these tokens, and the auth forms
   follow shadcn's `login-03` block. Use them for new forms; do not install the
@@ -157,7 +171,8 @@ sent (the key stays in the stored shape, always null, for older clients), and
 `resolveRecipe` ignores a hue an older row still carries.
 
 `--accent` (the primary button, the wordmark, the landing page's markers) is ink
-on paper: near-white on the dark theme, near-black on the light one. It used to
+on paper: pure white on the dark theme, near-black on the light one. The greys
+are pure neutrals — no blue cast — so the app is black, white and status. It used to
 be violet, and the primary button used to read `bg-expert` — which outside an
 expert's own pages resolves to the _root_ hue, so every primary button in the
 product was violet. Together with hues hashed from persona names (five experts
@@ -168,12 +183,44 @@ Two consequences worth knowing before changing this:
 - `text-expert` and `bg-expert-soft` are a neutral grey. They are identity, not
   emphasis. Reach for `--fg` when something has to be the most visible thing on
   screen (the focus ring and the rail's active bar both do).
-- **Depth is carried by the surface, not by rules.** Cards, the stat tiles, the
-  build box, the chat cards and the assistant card have no borders — they are
-  `bg-panel` on `bg-bg`, and the light theme's ground is a real grey (`#f4f4f5`)
-  precisely so that step is visible. Borders are left only where an edge is the
-  affordance: inputs, menus, popovers, dialogs, the tier radio cards and table
-  cells. Do not put a border back on a container "for definition".
+- **A container is a lighter fill _and_ a hairline.** Since the September 2026
+  restyle the ground is near-black (`--bg #070707`) and every card, stat tile,
+  table box, chat card and the assistant card is `bg-panel` with
+  `border border-border-soft`. On a ground that dark a 4% surface step alone
+  disappears on most displays; the hairline is what draws the box. `--border`
+  (the stronger of the two) is for controls — inputs, the quiet button, menus,
+  popovers, dialogs, the tier radio cards — and for a card under the pointer.
+- **The whole window is one ground.** The rail, the sidebar, the page and the
+  context column are all `bg-bg`; what separates them is one hairline each
+  (`border-r` on the navigation's trailing edge, `border-l` on the context
+  column), and the top bar's `border-b` runs across the rail and the sidebar's
+  search row too, so there is one line under one band, edge to edge. A lighter
+  sidebar was the step that "read as odd" the first time a darker ramp was
+  tried; a line instead of a step is what fixed it.
+
+## Shape
+
+**Single-line controls are pills; small square ones are circles; containers are
+generously round.** The scale is in `globals.css`:
+
+- `rounded-chip` and `rounded-row` are **half the height of the control they go
+  on** (`--icon-btn-sm` and `--row-h`), so a row-height button, input, nav row or
+  menu item is a full pill under a mouse _and_ at 44px under a thumb. On a box
+  taller than one line they are just a generous corner — which is what a wrapped
+  hint wants — so do not reach for them to make a multi-line box "a pill".
+- A control taller than a row (`h-(--btn-lg)`) says `rounded-full` itself. So do
+  `Button`, `Input`, `Select`, `Chip` and `Segmented`, whatever height a caller
+  gives them. `Textarea` is `rounded-card`; a tooltip is a fixed `10px`, because
+  it wraps.
+- `rounded-card` is 16px, `rounded-panel` 20px (dialogs, menus, the auth card,
+  the Home expert cards). The avatar's corner is `0.4 × size`, so the 40px rail
+  tile lands on `rounded-card` and the build ring round it follows the same curve.
+- **An active nav row is a `--raised` pill with a `ring-border` edge**, in the
+  sidebar, the drawer and `Segmented` alike; its count badge inverts to
+  `bg-fg text-bg`. A resting row is text on the ground.
+- The primary button is a white pill (black in the light theme) and there is at
+  most one per view. The Home cards' _Ask_ is `secondary` until its card is
+  under the pointer, when it takes the primary fill.
 
 ## Decisions from the September 2026 UX review
 
@@ -203,8 +250,9 @@ Two consequences worth knowing before changing this:
   (`lib/source-kind.ts`); discovery keys and text-read methods as phrases.
 - **Light-theme status colours are ≥4.5:1 as text** on ground, panel and
   raised (`--ok #1a7033`, `--warn #7f5808`, `--bad #b42d2d`). A higher-contrast
-  surface ramp (near-black dark ground, bigger card step) was tried and
-  reverted: the ground-to-sidebar step read as odd. Keep the surfaces as they are.
+  surface ramp (near-black dark ground, bigger card step) was tried then and
+  reverted, because the ground-to-sidebar step read as odd. It came back in the
+  restyle below _without_ that step — see _Colour_.
 - **Contrast:** `--fg-3` meets 4.5:1 on ground, panel and raised in both themes;
   `--fg-4` is for decoration and disabled states only, never for text a reader
   needs.
@@ -228,6 +276,32 @@ are in `docs/deploy.md`. Rules for the web side:
   empty body as a failure.
 - **Nothing reveals whether an email has an account.** Copy after sign-up, resend
   and forgot-password says "if there is an account" or moves on regardless.
+
+## The landing page
+
+`app/(marketing)/page.tsx` has the shape of a SaaS product site — a lit hero, a
+product window, feature cards, a tiers row, a boxed FAQ, a closing call, a full
+footer — and three rules that the shape usually breaks:
+
+- **Nothing on it is invented.** No customer logos, no "trusted by", no
+  testimonial, no accuracy figure, no price. The strip under the hero names what
+  is _searched_; the cards are line drawings (`components/marketing/wireframes.tsx`)
+  because a screenshot is a claim about content; and the one piece of product
+  shown with content in it is the recorded build log. New copy should be
+  traceable to something the app or the FAQ already says.
+- **The tiers row is depths, not plans** (rule 3: there is no checkout). Its copy
+  comes from `DEPTH` in `lib/build/copy.ts`, it never states a credit price —
+  prices come from the API and a static page would drift — every button goes to
+  `/signup`, and the note under it says credits are issued by hand.
+- **All of the light is CSS gradients** (`.mk-*` in `globals.css`, scaled by
+  `--mk-light` so it is a beam on black and a faint shade on paper). No images,
+  no `filter`, no `backdrop-filter`: the CSP allows no outside image, and `/` is
+  one of the two pages with a Lighthouse budget. The page is server-rendered
+  except the log replay.
+
+The hero's question box is a real `GET` form to `/experts/new?topic=…`, which
+the proxy turns into `/login?next=…` when there is no session — so it works
+before hydration and carries the subject through sign-in.
 
 ## Sharing and the viewer
 
@@ -274,7 +348,11 @@ resolves them in this order:
   rebuild wrote a new persona name and silently changed an expert's monogram.
 - **The found picture** (`expert_pictures`, migration 027) is what a freshly built
   expert arrives with: the lead image of the Wikipedia article on its subject, found
-  during the build, licence-checked, stored as bytes in Postgres and served by
+  during the build — a first look seconds in, off the plan, and a **second look at
+  the end** for an expert the first left bare, which may also ask a small model what
+  would _illustrate_ the subject when nothing about the subject itself has a free
+  picture (`api/src/peritus/experts/picture.py`) — licence-checked, stored as bytes in
+  Postgres and served by
   `GET /experts/{slug}/picture` under the same read rule as the expert itself. The
   `?v=` on that URL is the image's content hash, which is the only reason its
   `immutable` cache header is safe — always build it with `pictureUrl()`.
