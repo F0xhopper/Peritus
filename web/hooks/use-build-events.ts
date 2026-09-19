@@ -165,8 +165,8 @@ export function useBuildEvents(
             const done = isTerminalEvent(frame.data)
             if (done) terminal.current = true
 
-            // The picture lands seconds into a build, while discovery is still
-            // running, and it changes what the rail draws for this expert. The
+            // The picture lands seconds into a build, usually before the plan
+            // does, and it changes what the rail draws for this expert. The
             // rail is server-rendered, so nothing moves without a refresh —
             // this is the same `router.refresh()` a terminal event does, just
             // earlier and for a different reason.

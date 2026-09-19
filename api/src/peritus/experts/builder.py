@@ -260,8 +260,8 @@ class ExpertBuilder:
         # validator. Held here so they reach the ledger as explicit drops with a
         # reason instead of disappearing between fetching and validation.
         self._content_duplicates: list[DroppedSource] = []
-        # The picture finder, started off `plan_ready` and awaited before the
-        # persona stage. Held on the instance so the `finally` in `build` can
+        # The picture finder, started as the build's first act and awaited before
+        # the persona stage. Held on the instance so the `finally` in `_run` can
         # cancel it when the build is cancelled or fails.
         self._picture_task: asyncio.Task | None = None
         # Discovery's working state, reset at the start of every discovery run:
@@ -413,6 +413,21 @@ class ExpertBuilder:
     ) -> BuildResult:
         topic = expert.topic
 
+        # The expert's picture, before anything else. It used to start off
+        # `plan_ready`, which is a model call away — most of a minute on a slow
+        # day, and the whole build away when planning fails — so a new expert
+        # sat in the rail as a monogram for exactly the stretch in which its
+        # owner is looking at it. The topic is all the search leans on anyway
+        # (the planner's concepts are syllabus lines, not searches), so it goes
+        # on the topic alone, and it may widen: with no corpus to take hints
+        # from, asking what would illustrate the subject is the only way an
+        # abstract topic gets a picture now rather than at the end. It runs
+        # beside the build, never blocks it, and cannot fail it — see
+        # `_find_and_store_picture`.
+        self._picture_task = asyncio.create_task(
+            self._find_and_store_picture(expert, topic, [], on_event, widen=True)
+        )
+
         # Stage 0: Research planning
         await _emit_event(on_event, {"type": "stage", "stage": 0, "name": "plan"})
         plan = await _plan_research(topic, expert.config.max_key_concepts)
@@ -446,15 +461,6 @@ class ExpertBuilder:
                 "figures": plan.get("figures", []),
                 "orientation": plan.get("orientation") or {"overviews": [], "note": ""},
             },
-        )
-
-        # The expert's picture. Started here, the moment the topic and the key
-        # concepts both exist, so the rail's tile stops being a monogram within
-        # seconds rather than at the end of a build that takes minutes. It runs
-        # beside discovery, never blocks it, and cannot fail it — see
-        # `_find_and_store_picture`.
-        self._picture_task = asyncio.create_task(
-            self._find_and_store_picture(expert, topic, key_concepts, on_event)
         )
 
         weights = {name: p["weight"] for name, p in plan["fetcher_plans"].items()}
@@ -1013,20 +1019,21 @@ class ExpertBuilder:
     async def _retry_picture(self, expert: Expert, on_event: EventCallback | None) -> None:
         """A second and last look for a picture, once the corpus exists. Never raises.
 
-        The first look runs seconds into the build, off the plan, so the rail's
-        tile fills in early. It gets one try, and everything that can go wrong
-        with it is momentary: Wikimedia answering a 429 or a 5xx, a timeout, a
-        topic phrased in a way its search does not recognise. A real expert was
-        built with no picture for exactly that reason — `provider_unavailable`
-        at second four, and nothing ever asked again — and stayed a monogram
-        until someone ran the backfill by hand.
+        The first look is the first thing a build does, on the topic alone, so
+        the rail's tile fills in early. It gets one try, and everything that can
+        go wrong with it is momentary: Wikimedia answering a 429 or a 5xx, a
+        timeout, a topic phrased in a way its search does not recognise. A real
+        expert was built with no picture for exactly that reason —
+        `provider_unavailable` at second four, and nothing ever asked again —
+        and stayed a monogram until someone ran the backfill by hand.
 
         So an expert still bare when its sources are read is looked for again,
-        and better: the titles of its own validated Wikipedia sources go in as
-        hints, which the first look could not have had; the deadline is the
-        longer `PICTURE_FINAL_TIMEOUT` because nothing comes after this; and the
-        search may widen (`suggest_subjects`) when the topic's own articles have
-        no free picture at all, which is true of most abstract subjects.
+        and better: the titles of its own validated Wikipedia sources and the
+        plan's key concepts go in, neither of which the first look could have
+        had; the deadline is the longer `PICTURE_FINAL_TIMEOUT` because nothing
+        comes after this; and, like the first look, the search may widen
+        (`suggest_subjects`) when the topic's own articles have no free picture
+        at all, which is true of most abstract subjects.
 
         It is a no-op for every expert the first look served, for a rebuild (the
         picture is already there, and may be one the owner chose), and with the

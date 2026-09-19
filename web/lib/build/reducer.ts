@@ -707,9 +707,10 @@ function reduceLog(state: BuildState, seq: number, event: BuildEvent): BuildStat
     }
 
     case 'picture_ready': {
-      // Not a stage: finding a picture runs beside discovery, off `plan_ready`,
-      // and cannot fail or delay the build. It gets a log line and nothing on
-      // the timeline, because there is no segment it belongs to.
+      // Not a stage: finding a picture is the first thing a build starts, runs
+      // beside it, and cannot fail or delay it — so this can arrive before
+      // `plan_ready`. It gets a log line and nothing on the timeline, because
+      // there is no segment it belongs to.
       const title = str(event.title)
       const license = str(event.license)
       push({

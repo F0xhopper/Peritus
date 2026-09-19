@@ -623,9 +623,11 @@ async def find_picture(
 
     ``widen`` allows one more pass when the direct search finds nothing usable:
     :func:`suggest_subjects` names articles whose lead image would illustrate
-    the topic, and those are searched instead. It costs one small model call, so
-    the build's first look — which is free, and runs for every expert — leaves
-    it off; the second look and every explicit refresh turn it on.
+    the topic, and those are searched instead. It costs one small model call,
+    and only when the direct search came up empty — so a concrete topic still
+    gets its picture for free. Every caller turns it on: the build's first look
+    (which has nothing but the topic, and no other way to picture an abstract
+    one at the start), its second look, and every explicit refresh.
 
     Raising rather than returning ``None`` so the reason travels with the
     failure: the caller turns it straight into the ``picture_skipped`` event,

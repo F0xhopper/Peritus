@@ -199,9 +199,11 @@ class Settings(BaseSettings):
     # ── Expert picture (found on Wikimedia at build time) ────────────────────
     # A new expert gets a real picture of its subject — the lead image of the
     # Wikipedia article, with its licence and attribution — instead of only a
-    # monogram. Nothing here can fail a build: the finder runs as a background
-    # task off `plan_ready`, has its own deadline, and emits `picture_skipped`
-    # with a reason when it comes up empty. An expert still without one when its
+    # monogram. Nothing here can fail a build: the finder is the first thing a
+    # build starts, runs as a background task beside it under its own deadline,
+    # and emits `picture_skipped` with a reason when it comes up empty. A direct
+    # search that finds nothing costs one small FAST_MODEL call, for what would
+    # illustrate the subject instead. An expert still without a picture when its
     # corpus is done gets a second look then — see `PICTURE_FINAL_TIMEOUT`.
     # See experts/picture.py.
     PICTURE_ENABLED: bool = True

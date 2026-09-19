@@ -504,7 +504,7 @@ failures destroy a working corpus:
 | Nothing embeds | `BuildError` — terminal, refunded | `error` | rebuild |
 | Graph extraction / resolution | Build continues; expert stays **chat-ready**, no graph expansion | `stage_degraded {stage: "graph"}` | rebuild |
 | Persona | Build continues; expert answers without a named voice | `stage_degraded {stage: "persona"}` | `ExpertService.regenerate_persona` — one model call, no rebuild |
-| Picture | Build continues untouched; the expert shows its monogram | `picture_skipped {reason}` | `ExpertService.refresh_picture` — five HTTP requests, no model call, no rebuild |
+| Picture | Build continues untouched; the expert shows its monogram | `picture_skipped {reason}` | the build's own second look, once the corpus exists; then `ExpertService.refresh_picture` — a handful of HTTP requests, at most one small model call, no rebuild |
 | Spend cap crossed | Aborted mid-stage, **not retried**, refunded in full | `error {code: spend_cap_exceeded}` | evidence kept in `build_usage_events` |
 
 Provider dependence, for operators:
@@ -556,10 +556,13 @@ carry none — clients default a missing `round` to 0. Totals across rounds must
 `validate_done` reports one round's corpus as the whole of it.
 
 **`picture_ready` and `picture_skipped` are not stage events.** Finding the
-expert's picture starts as a background task the moment `plan_ready` fires, runs
-beside discovery under its own deadline, and is awaited only just before the
-persona stage — so the event is in the log before `done` for a client replaying
-from seq 0, but the search never delays or fails a build. It writes to
+expert's picture is the first thing a build starts — a background task on the
+topic alone, before stage 0, so either event can arrive **before** `plan_ready` —
+which runs beside the build under its own deadline and is awaited only just
+before the persona stage. So the event is in the log before `done` for a client
+replaying from seq 0, but the search never delays or fails a build. An expert
+still bare when its corpus is done gets one more look then, which is why a build
+can log `picture_skipped` and later `picture_ready`. It writes to
 `expert_pictures`, never to `experts.avatar`, so it cannot overwrite an identity
 the owner chose. `picture_skipped` carries `reason`: `no_candidate` |
 `provider_unavailable` | `timeout` | `too_large` | `disabled`.

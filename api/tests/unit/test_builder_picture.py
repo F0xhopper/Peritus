@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from peritus.core.exceptions import IncompleteBuildError
 from peritus.experts.builder import ExpertBuilder
 from peritus.experts.domain import Expert, ExpertStatus, ExpertTier
 from peritus.experts.picture import FoundPicture, PictureSkipped
@@ -192,6 +193,46 @@ async def test_awaiting_the_picture_never_blocks_a_finished_build():
 async def test_awaiting_with_no_task_is_a_no_op():
     builder, _ = _builder()
     await builder._await_picture()
+
+
+# ── the first look, before the plan ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_picture_search_starts_before_the_plan_is_asked_for():
+    """The first thing a build does, not something it gets to after planning.
+
+    Planning is a model call: most of a minute when it is slow, and the whole
+    build when it fails. So the plan here fails — and the search must already
+    have been started, on the topic alone (there are no concepts yet) and
+    allowed to widen (there is no corpus to take hints from either).
+    """
+    builder, _ = _builder()
+    order: list[str] = []
+    looked: list[tuple] = []
+
+    async def look(expert, topic, key_concepts, on_event, **kwargs):
+        order.append("picture")
+        looked.append((topic, key_concepts, kwargs))
+
+    async def plan(topic, max_concepts):
+        # Yield, as the real model call does: a task created before this point
+        # gets to run, and one created after it does not exist yet.
+        await asyncio.sleep(0)
+        order.append("plan")
+        return {"key_concepts": []}
+
+    builder._find_and_store_picture = look  # type: ignore[method-assign]
+    with (
+        patch("peritus.experts.builder._plan_research", plan),
+        patch("peritus.experts.builder._route_must_have_works"),
+        patch("peritus.experts.builder._raise_if_provider_down"),
+        pytest.raises(IncompleteBuildError),
+    ):
+        await builder._build(_expert(), builder._on_event)
+
+    assert order == ["picture", "plan"]
+    assert looked == [("Stoic philosophy", [], {"widen": True})]
 
 
 # ── the second look, at the end of the build ─────────────────────────────────
