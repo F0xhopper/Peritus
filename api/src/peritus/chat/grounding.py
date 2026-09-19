@@ -122,26 +122,45 @@ ANSWER_SHAPE = (
 )
 
 # How the answer is laid out. Every client renders GitHub-flavoured Markdown —
-# the web chat, the Rust TUI and the Rich CLI — so structure is worth asking for; but
-# structure is for the reader, and a two-paragraph answer dressed in headings and
-# bullets reads as a slide deck. The rules scale the formatting with the answer.
+# the web chat, the Rust TUI and the Rich CLI — so the answer is asked to *use* it.
+#
+# An earlier version of this held structure back ("a short answer is plain
+# paragraphs", headings only past four paragraphs, "don't turn ordinary reasoning
+# into bullets") for fear of answers that read as slide decks. What it produced
+# instead was the opposite failure: five dense paragraphs with nothing to find
+# your place by. A reader scans before they read, so anything longer than a
+# couple of paragraphs is now laid out to be scanned — a direct answer first,
+# then titled sections, lists for anything parallel, bold for the terms that
+# matter. The one case left as plain prose is the genuinely short answer, where
+# a heading would be longer than what it heads.
 ANSWER_FORMAT = (
     "HOW TO FORMAT THE ANSWER\n"
     "\n"
-    "Write in GitHub-flavoured Markdown. It is rendered, so use it to make the "
-    "answer easy to read — and only where it helps.\n"
+    "Write in GitHub-flavoured Markdown. It is rendered, so use it: the answer "
+    "should be easy to scan before it is read, never a wall of text.\n"
     "\n"
-    "- Short paragraphs: two to four sentences each, separated by a blank line.\n"
-    "- A short answer is plain paragraphs. Add `##` section headings only when "
-    "the answer has several distinct parts a reader would want to find (roughly "
-    "four or more paragraphs), and `###` only beneath a `##`. Never use `#`. "
-    'Never open the answer with a heading, and never add a "Summary" or '
-    '"Conclusion" heading.\n'
-    "- Use a numbered list for steps or anything in sequence, and a bulleted "
-    "list for three or more parallel items. Keep each item to a sentence or two; "
-    "don't turn ordinary reasoning into bullets.\n"
-    "- Use **bold** sparingly: a key term the first time it is defined, or the "
-    "one takeaway a reader must not miss. Never bold whole sentences.\n"
+    "- Open with the direct answer as one short paragraph of one to three "
+    "sentences, with no heading above it.\n"
+    "- If that paragraph is the whole answer — a definition, a yes or no, a "
+    "single fact — stop there, or add one more short paragraph. Do not dress a "
+    "short answer in headings.\n"
+    "- Anything longer is organised under `##` section headings: one for each "
+    "distinct part of the answer, usually two to five. A heading is a short "
+    "title of two to six words that names that part of the subject — never "
+    'generic ("Overview", "Details", "Key points"), never a full sentence, '
+    "never a question. Use `###` only beneath a `##`, and never use `#`. Never "
+    'add a "Summary" or "Conclusion" section.\n'
+    "- Keep paragraphs short: two or three sentences, never more than four, "
+    "with a blank line between them.\n"
+    "- Reach for a list whenever points are parallel — factors, options, "
+    "criteria, causes, examples, things to check. Use a bulleted list for "
+    "those and a numbered list for steps or anything in sequence. Where it "
+    "helps, open an item with a short **bold label** followed by an em dash, "
+    "then the explanation. Keep each item to a sentence or two. Connected "
+    "reasoning, where each point depends on the last, stays as prose.\n"
+    "- Use **bold** for a key term the first time it is defined, for the label "
+    "that opens a list item, and for the one takeaway a reader must not miss. "
+    "Never bold whole sentences.\n"
     "- Use a table when comparing two or more options across the same "
     "attributes. Keep cells short; put citations in cells, never in the header "
     "row.\n"
@@ -150,7 +169,7 @@ ANSWER_FORMAT = (
     "- Use a `>` blockquote only for a direct quotation from a passage.\n"
     "- Citation markers go at the end of the sentence or list item they "
     "support, before the full stop — like this [2]. Never put a citation in a "
-    "heading.\n"
+    "heading or inside a bold label.\n"
     "- No emoji, no horizontal rules, no HTML."
 )
 
