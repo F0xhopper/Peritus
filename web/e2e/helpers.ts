@@ -267,6 +267,57 @@ export async function clickUntil(control: Locator, produces: Locator) {
 }
 
 /**
+ * Press a key and wait for what pressing it is supposed to produce.
+ *
+ * The keyboard twin of `clickUntil`. A shortcut is a window listener attached
+ * in an effect, and `waitForHydration` only knows that the root has started:
+ * ⌘K pressed between the two is a key with nothing bound to it, and the palette
+ * that never opens reads as a broken palette.
+ */
+export async function pressUntil(page: Page, key: string, produces: Locator) {
+  await waitForHydration(page)
+  await page.keyboard.press(key)
+  try {
+    await expect(produces).toBeVisible({ timeout: 3_000 })
+  } catch {
+    await page.keyboard.press(key)
+    await expect(produces).toBeVisible({ timeout: 10_000 })
+  }
+}
+
+/**
+ * Type a topic into Home's composer and press Build, until the build page opens.
+ *
+ * Almost always that is one press. What CI's iPad profiles recorded, though —
+ * in the trace, not by inference — was a press at 1.11s, `GET /experts?` at
+ * 1.24s, and no `POST /api/experts/build` at all: the browser performed the
+ * submit itself. The composer is a real `GET` form for exactly that case, so
+ * the press lands on `/experts/new` with the topic carried into it, and the
+ * build is started from there — which is the path a person on a slow device
+ * takes too, so this follows it rather than reloading and hoping.
+ */
+export async function startBuild(page: Page, topic: string, opens: RegExp) {
+  await fillField(page.getByLabel('Topic'), topic)
+  await page.getByRole('button', { name: 'Build' }).click()
+  try {
+    await expect(page).toHaveURL(opens, { timeout: 8_000 })
+  } catch {
+    await expect(page).toHaveURL(/\/experts\/new\?/)
+    await expect(page.getByLabel('Subject')).toHaveValue(topic)
+    // Two Build buttons are in the HTML, one per width; one is visible.
+    const build = page.getByRole('button', { name: 'Build' }).filter({ visible: true })
+    await waitForHydration(page)
+    // Pressed until the build page opens, and never once it has: a press that
+    // did start the build leaves a button that is busy and then gone, and the
+    // next pass finds the URL already right.
+    await expect(async () => {
+      if (!opens.test(page.url())) await build.click({ timeout: 3_000 })
+      await expect(page).toHaveURL(opens, { timeout: 8_000 })
+    }).toPass({ timeout: 30_000 })
+  }
+}
+
+/**
  * Type a question into the chat composer and send it.
  *
  * Send is disabled until the composer's *React state* holds a question, and

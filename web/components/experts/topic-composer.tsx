@@ -19,6 +19,15 @@ import type { ExpertTier, TierPrice } from '@/lib/api/types'
  * valid request and choosing a tier is an override, not a step. *Options*
  * expands the picker inline with the grid-rows collapse rather than navigating
  * to `/experts/new`, so the common case is one field and one key.
+ *
+ * **It is also a real form**: a `GET` to `/experts/new` with the topic as its
+ * one named field, the same way out the landing page's hero has. `submit` below
+ * cancels that whenever React is the one handling it, so nobody normally sees
+ * it. But a submit React never receives is the browser's to perform, and a form
+ * with no action performs it against its own page: CI's slower iPad profiles
+ * recorded a Build press answered by `GET /experts?` — Home reloaded, the topic
+ * gone, and no build request ever sent. The same press now lands on the full
+ * form with the topic carried into it.
  */
 const MAX_TOPIC = 300
 
@@ -57,10 +66,16 @@ export function TopicComposer({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-card border border-border-soft bg-panel p-3">
+    <form
+      action="/experts/new"
+      method="get"
+      onSubmit={submit}
+      className="rounded-card border border-border-soft bg-panel p-3"
+    >
       <div className="flex items-center gap-2">
         <input
           ref={input}
+          name="topic"
           value={topic}
           onChange={(event) => {
             setTopic(event.target.value)

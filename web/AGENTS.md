@@ -128,6 +128,18 @@ These come from `web-production.md` and are enforced in code, not in copy.
   silently dropped the size, and every label, table header and stat value styled
   through `cn` rendered at whatever size it inherited. `tests/knowledge-overview`
   asserts the five that exist.
+- **Import `z` from `lib/validation.ts`, and add what a schema needs to it.** It
+  is assembled from named imports. Zod's own `z` is a namespace object carrying
+  `locales`, Turbopack cannot shake a namespace that escapes as a value, and the
+  login page shipped all sixty-four of Zod's translations — 389 KB, a third of
+  its JavaScript — which is what held `/login` at 204–220ms of blocking time
+  against the 200ms budget, passing or failing a deploy by the runner it drew.
+- **A form that starts something is a real form.** `TopicComposer` is a `GET` to
+  `/experts/new` with the topic as its named field, like the landing page's hero.
+  React cancels that whenever it handles the submit; when it does not, the
+  browser performs it, and a form with no action performs it against its own
+  page — CI's iPad traces show a Build press answered by `GET /experts?`, Home
+  reloaded and the topic gone, with no build request sent.
 - **`md:` is not "desktop".** An iPad is wide _and_ touch, so a width-only
   breakpoint hands a tablet the mouse-sized control. Density overrides that
   exist for a pointer use `pointer-fine:md:`; sizes that must grow for a thumb
@@ -501,6 +513,13 @@ how the ideas themselves hold together, the List is the sources. The old
   it does not know about and leaves it there, so the field _looks_ filled while
   the component's state is empty — and the failure then points at whatever was
   supposed to appear next.
+- **An interaction that can be swallowed is retried on what it produces**, never
+  on a timer: `clickUntil`, `fillUntil`, `pressUntil`, `askQuestion` and
+  `startBuild` in `e2e/helpers.ts`. `waitForHydration` only knows the root has
+  started; an island, a window shortcut bound in an effect, or a dialog still
+  arriving can each miss a press that lands milliseconds later, and CI's iPad
+  profiles are slow enough to find every one. Where a second press could repeat
+  the action, guard it on the state (`expect(async () => { … }).toPass()`).
 - **A canvas test must assert that pixels were painted.** `knowledge.spec`
   counts opaque pixels on the map, at the fixture's twenty-two concepts and at
   two hundred and fifty (`big-map` in the mock). Asserting a correctly sized

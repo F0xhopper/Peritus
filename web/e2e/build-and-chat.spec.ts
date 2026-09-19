@@ -8,8 +8,10 @@ import {
   expectResponsive,
   isPhoneProject,
   isTouchProject,
+  pressUntil,
   resetApi,
   signIn,
+  startBuild,
   useScenario,
   waitForHydration,
 } from './helpers'
@@ -60,13 +62,12 @@ test('a topic builds, reaching chat-ready before the build finishes', async ({
 }, testInfo) => {
   await page.goto('/experts')
 
-  await fillField(page.getByLabel('Topic'), 'Beekeeping in cold climates')
-  await page.getByRole('button', { name: 'Build' }).click()
-
   // The slug came from the server's `created` event, not from the client.
-  await expect(page).toHaveURL(/\/experts\/beekeeping-in-cold-climates\/build/, {
-    timeout: 20_000,
-  })
+  await startBuild(
+    page,
+    'Beekeeping in cold climates',
+    /\/experts\/beekeeping-in-cold-climates\/build/
+  )
 
   // Stages appear in order, from the streamed events.
   await expect(page.getByText('Research plan ready', { exact: false })).toBeVisible({
@@ -94,6 +95,20 @@ test('a topic builds, reaching chat-ready before the build finishes', async ({
   await expectResponsive(page, isTouchProject(testInfo.project.name))
 })
 
+test('a Build press React never receives still carries the topic onward', async ({ page }) => {
+  await page.goto('/experts')
+  await fillField(page.getByLabel('Topic'), 'Overwintering nucleus colonies')
+
+  // `form.submit()` is the browser performing the submit with no `submit`
+  // event, so no handler can cancel it — which is what CI's iPad profiles
+  // recorded happening to a real press. With no action this reloaded Home and
+  // the topic was gone.
+  await page.getByLabel('Topic').evaluate((field: HTMLInputElement) => field.form?.submit())
+
+  await expect(page).toHaveURL(/\/experts\/new\?topic=Overwintering\+nucleus\+colonies/)
+  await expect(page.getByLabel('Subject')).toHaveValue('Overwintering nucleus colonies')
+})
+
 test('a dropped build stream resumes from its cursor rather than replaying', async ({ page }) => {
   // Every tail the client opens, by its `after=` cursor.
   const cursors: number[] = []
@@ -105,11 +120,7 @@ test('a dropped build stream resumes from its cursor rather than replaying', asy
   await page.goto('/experts')
   await useScenario(page, 'drop-midway', 'resumable-build-test')
 
-  await fillField(page.getByLabel('Topic'), 'Resumable build test')
-  await page.getByRole('button', { name: 'Build' }).click()
-  await expect(page).toHaveURL(/\/experts\/resumable-build-test\/build/, {
-    timeout: 20_000,
-  })
+  await startBuild(page, 'Resumable build test', /\/experts\/resumable-build-test\/build/)
 
   // The connection dies part-way through; the client says so and reopens. It
   // is announced twice on purpose — once in the log's tail, once as a retry
@@ -162,23 +173,23 @@ test('a 402 renders the numbers and the one remedy, and keeps the form', async (
 
 test('cancelling a build refunds and says so', async ({ page }) => {
   await page.goto('/experts')
-  await fillField(page.getByLabel('Topic'), 'Cancel me please')
-  await page.getByRole('button', { name: 'Build' }).click()
-  await expect(page).toHaveURL(/\/experts\/cancel-me-please\/build/, {
-    timeout: 20_000,
-  })
+  await startBuild(page, 'Cancel me please', /\/experts\/cancel-me-please\/build/)
 
   await page
     .getByRole('button', { name: /^Cancel/ })
     .first()
     .click()
   await expect(page.getByRole('heading', { name: 'Cancel this build?' })).toBeVisible()
-  await page.getByRole('button', { name: 'Cancel build' }).click()
 
-  // In the toast, which lives outside `main`.
-  await expect(page.getByText(/credits refunded/i)).toBeVisible({
-    timeout: 20_000,
-  })
+  // Pressed until the refund is announced, and never once the dialog has gone.
+  // A press ten milliseconds after the heading appears lands while the dialog
+  // is still arriving, and nothing is sent — no person is that fast, but this
+  // is. The announcement is in the toast, which lives outside `main`.
+  const confirm = page.getByRole('button', { name: 'Cancel build' })
+  await expect(async () => {
+    if (await confirm.isVisible()) await confirm.click({ timeout: 3_000 })
+    await expect(page.getByText(/credits refunded/i)).toBeVisible({ timeout: 5_000 })
+  }).toPass({ timeout: 30_000 })
 })
 
 test('the overview reads correctly and gates chat on readiness', async ({ page }, testInfo) => {
@@ -288,13 +299,17 @@ test('a citation shows the passage in its source, and opens the whole of it', as
   // Citation 2 is the five-year cohort, read through an open-access copy — so
   // its whole text may be shown. (Citation 1's source is abstract-only, which
   // the panel flags and which has nothing more to read.)
-  await content(page)
-    .getByRole('button', { name: /^Citation 2:/ })
-    .first()
-    .click()
   const panel = page
     .getByRole('complementary', { name: 'Cited passage' })
     .or(page.getByRole('dialog', { name: 'Cited passage' }))
+  // Until the panel opens: the transcript is in the server's HTML, and a chip
+  // pressed before its island has hydrated is a press nothing hears.
+  await clickUntil(
+    content(page)
+      .getByRole('button', { name: /^Citation 2:/ })
+      .first(),
+    panel
+  )
 
   // The paragraphs either side of the quote, from the same source — the
   // difference between quoting the evidence and showing it.
@@ -389,11 +404,8 @@ test('the command palette finds an expert and jumps to it', async ({ page }, tes
   // ⌘K is a window listener React attaches on hydration; pressing it a
   // millisecond early is a key that lands with nothing bound to it, and the
   // failure then looks like a broken palette.
-  await waitForHydration(page)
-  await page.keyboard.press('ControlOrMeta+k')
-
   const search = page.getByLabel('Search experts, chats and actions')
-  await expect(search).toBeVisible()
+  await pressUntil(page, 'ControlOrMeta+k', search)
   await fillField(search, 'varroa')
   await page.keyboard.press('Enter')
 
