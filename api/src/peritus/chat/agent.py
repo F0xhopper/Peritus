@@ -7,6 +7,7 @@ route consume it, so the two paths cannot drift.
 """
 
 import math
+import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, cast
@@ -21,10 +22,11 @@ from peritus.chat.grounding import (
     parse_cited_indices,
     used_citation_labels,
 )
+from peritus.chat.neighbours import position, reading_order, wanted_positions
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
 from peritus.experts.domain import Expert
-from peritus.graph.retriever import GraphRetriever
+from peritus.graph.retriever import EnrichedResult, GraphRetriever
 from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.search.service import SearchService
 
@@ -33,6 +35,7 @@ logger = get_logger(__name__)
 ASKER_LEVELS: tuple[str, ...] = ("novice", "informed", "expert")
 QUESTION_TYPES: tuple[str, ...] = (
     "orientation",
+    "explanation",
     "specific_fact",
     "comparison",
     "how_to",
@@ -40,9 +43,15 @@ QUESTION_TYPES: tuple[str, ...] = (
 )
 
 # What each classification means for the answer. Deterministic rather than asked
-# of the planner: the planner is a fast model choosing between five labels, which
+# of the planner: the planner is a fast model choosing between six labels, which
 # it does reliably; writing the pedagogy for each label is a different job and
 # doesn't need to be re-derived (or re-paid for) on every question.
+#
+# "explanation" was missing, and its absence is why answers ran short. Most of
+# what anyone asks an expert — what is X, why is it so, what is the best
+# argument for it — had nowhere to go but "specific_fact": "What is the most
+# tangible proof for God?" was filed there eight times out of eight, and the
+# answerer was duly told to give one thing and "add only what makes it usable".
 _LEVEL_GUIDANCE: dict[str, str] = {
     "novice": (
         "no background in this subject — define every term of art the first time "
@@ -65,9 +74,17 @@ _TYPE_GUIDANCE: dict[str, str] = {
         "what actually matters and what to do with it — organised by what they "
         "should understand or do, not by what happens to be covered"
     ),
+    "explanation": (
+        "they want to understand something — an idea, an argument, or why a thing "
+        "is so. State it plainly first, then give the reasoning itself rather "
+        "than a description of it: each step in order and how it leads to the "
+        "next, and one example that makes it concrete. Where the idea faces a "
+        "serious, well-known objection, take it on. Depth is the point here"
+    ),
     "specific_fact": (
-        "they want one specific thing. Answer it in the first sentence, then add "
-        "only what makes it usable or properly qualified"
+        "they want one definite thing — a date, a name, a figure, a yes or no. "
+        "Answer it in the first sentence, then add only what makes it usable or "
+        "properly qualified"
     ),
     "comparison": (
         "they want to know how these differ and which applies when. Compare on "
@@ -89,26 +106,35 @@ def _plan_tool(max_subqueries: int) -> ToolParam:
     A builder rather than a module constant that gets `deepcopy`'d and poked:
     the bounds are the only thing that varies, and reaching four levels into a
     schema by string key to set them is not something a type can check — mypy
-    says so, and it is right. Depth also does not survive being read: the old
-    form put `maxItems` a long way from the description that explains it.
+    says so, and it is right.
+
+    A **strict** tool: the input is constrained to the schema as it is decoded,
+    not hoped to match it. Unconstrained, the fast model returned ``subqueries``
+    as a string with its own tool-call markup in it (``'<item>Thomistic
+    arguments…'``) on 7 of 24 calls; strict, 0 of 24. Strict schemas take no
+    array-size constraints, so the bounds live in the descriptions and are
+    enforced by ``_query_list`` — which stays, because a guarantee from the
+    provider is still not a reason to iterate a string.
     """
     return {
         "name": "create_plan",
         "description": ("Plan the answer: how to search for evidence, and who is asking for what."),
+        "strict": True,
         "input_schema": {
             "type": "object",
+            "additionalProperties": False,
             "properties": {
                 "subqueries": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "minItems": min(2, max_subqueries),
-                    "maxItems": max_subqueries,
-                    "description": "2–4 declarative retrieval-phrased subqueries.",
+                    "description": (
+                        f"{min(2, max_subqueries)}–{max_subqueries} declarative "
+                        "retrieval-phrased subqueries, never more."
+                    ),
                 },
                 "fallback_queries": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "maxItems": 2,
                     "description": (
                         "Up to two broader or differently-angled retrieval phrasings, "
                         "used only if the subqueries find little. Not paraphrases of "
@@ -141,9 +167,13 @@ def _plan_tool(max_subqueries: int) -> ToolParam:
                     "enum": list(QUESTION_TYPES),
                     "description": (
                         "What kind of answer would satisfy them: 'orientation' for "
-                        "getting into a subject, 'specific_fact' for one definite "
-                        "thing, 'comparison' for how options differ, 'how_to' for "
-                        "doing something, 'open_ended' when none of those fit."
+                        "getting into a subject; 'explanation' for understanding an "
+                        "idea, an argument, or why something is so — most 'what is "
+                        "X', 'why', 'how does X work' and 'what is the best case for "
+                        "X' questions; 'specific_fact' only for one definite datum "
+                        "(a date, a name, a figure, a yes or no); 'comparison' for "
+                        "how options differ; 'how_to' for doing something; "
+                        "'open_ended' when none of those fit."
                     ),
                 },
                 "answer_directive": {
@@ -159,6 +189,38 @@ def _plan_tool(max_subqueries: int) -> ToolParam:
             "required": ["subqueries", "asker_level", "question_type", "answer_directive"],
         },
     }
+
+
+# Tool-call markup the fast model occasionally leaks into a string value.
+_MARKUP_RE = re.compile(r"<[^>]*>")
+
+
+def _query_list(value: object, limit: int) -> list[str]:
+    """The planner's queries as a clean list, whatever shape they arrived in.
+
+    The schema says array and nothing enforces it: the fast model has returned
+    ``subqueries`` as one string with its own tool-call markup leaked into it
+    (``'<parameter name="item">cosmological argument…'``). Iterating that gave 72
+    one-character "subqueries", each embedded and searched, and their rankings
+    outvoted the one real query in the fusion — the answer was written from
+    three passages of a table of contents while the article it needed sat in the
+    corpus. So a string is read as the queries it contains, markup is dropped,
+    and the count is capped here rather than trusted to ``maxItems``.
+    """
+    if isinstance(value, str):
+        logger.warning("Planner returned a query list as a string: %.120r", value)
+        value = [value]
+    if not isinstance(value, list):
+        return []
+    queries: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        for part in _MARKUP_RE.split(item):
+            text = " ".join(part.split())
+            if text and text not in queries:
+                queries.append(text)
+    return queries[:limit]
 
 
 # How much of a previous turn the planner sees. Enough to resolve "the second
@@ -200,28 +262,23 @@ class QueryPlan:
         return cls(subqueries=[question])
 
     @classmethod
-    def from_tool_input(cls, data: dict, question: str) -> "QueryPlan":
+    def from_tool_input(cls, data: dict, question: str, max_subqueries: int = 4) -> "QueryPlan":
         """Build a plan from the planner's tool output, normalising as we go.
 
         The enum values are the contract with ``_LEVEL_GUIDANCE`` /
         ``_TYPE_GUIDANCE``; anything unrecognised falls back to the neutral
         label rather than producing a prompt with a blank guidance clause.
         """
-        raw_subqueries = data.get("subqueries") or []
-        subqueries = [s for s in raw_subqueries if isinstance(s, str) and s.strip()]
+        subqueries = _query_list(data.get("subqueries"), max_subqueries)
 
         level = data.get("asker_level")
         qtype = data.get("question_type")
         directive = data.get("answer_directive")
-        fallbacks = [
-            f.strip()
-            for f in data.get("fallback_queries") or []
-            if isinstance(f, str) and f.strip()
-        ]
+        fallbacks = _query_list(data.get("fallback_queries"), 2)
         standalone = data.get("standalone_question")
 
         return cls(
-            fallback_queries=fallbacks[:2],
+            fallback_queries=fallbacks,
             standalone_question=(
                 standalone.strip() if isinstance(standalone, str) and standalone.strip() else None
             ),
@@ -264,7 +321,9 @@ class RetrievalStep:
     quality_score: float | None
     rank: int  # 1-based, in the order retrieval produced it
     score: float  # fused RRF score, or the reranker's score when reranking ran
-    via: str  # "primary" | "coverage_followup" (the fallback-query pass)
+    #: "primary" | "coverage_followup" (the fallback-query pass) | "neighbour"
+    #: (not searched for: the chunk beside one that was — chat/neighbours.py)
+    via: str
 
 
 @dataclass
@@ -519,6 +578,7 @@ def _build_trail(
     followup_queries: list[str],
     coverage_satisfied: bool | None,
     context_cap: int,
+    neighbours: list | None = None,
 ) -> RetrievalTrail:
     """Record every retrieved passage once, in retrieval order.
 
@@ -527,18 +587,28 @@ def _build_trail(
     first occurrence and counts the rest as duplicate hits. Passages the
     relevance floor kept out of the prompt stay in the trail, in their retrieval
     position — the audit resolves each step to its passage number by chunk id.
+
+    ``neighbours`` follow, marked as such: no query found them and no reranker
+    scored them, and a reader asking how a passage reached the answer should be
+    told it came along with the one beside it. A neighbour a search had already
+    found keeps the step — and the score — it was found with.
     """
     steps: list[RetrievalStep] = []
     seen: set[int] = set()
     duplicates = 0
     graph_expanded = False
 
-    for i, e in enumerate(enriched):
+    searched = [
+        (e, "primary" if i < primary_count else "coverage_followup") for i, e in enumerate(enriched)
+    ]
+    for e, via in [*searched, *((n, "neighbour") for n in neighbours or [])]:
         if e.related_concepts or e.relationships:
             graph_expanded = True
         chunk_id = e.result.chunk_id
         if chunk_id in seen:
-            duplicates += 1
+            # The same chunk from a second query is a duplicate hit; a neighbour
+            # a query had already found is not a hit at all.
+            duplicates += via != "neighbour"
             continue
         seen.add(chunk_id)
         ref = e.result.source_ref
@@ -551,7 +621,7 @@ def _build_trail(
                 quality_score=ref.quality_score,
                 rank=len(steps) + 1,
                 score=e.result.score,
-                via="primary" if i < primary_count else "coverage_followup",
+                via=via,
             )
         )
 
@@ -601,6 +671,18 @@ def apply_relevance_floor(
                 keep[i] = True
                 kept_chunks.add(e.result.chunk_id)
     return [e for e, k in zip(enriched, keep, strict=True) if k]
+
+
+def _unique_chunks(enriched: list, cap: int) -> list:
+    """The first ``cap`` distinct chunks, in order — a chunk both retrieval
+    passes returned is one passage, and only the first ``cap`` reach the prompt."""
+    unique: list = []
+    seen: set[int] = set()
+    for e in enriched:
+        if e.result.chunk_id not in seen:
+            seen.add(e.result.chunk_id)
+            unique.append(e)
+    return unique[:cap]
 
 
 def _conversation_block(history: list[dict] | None) -> str:
@@ -661,7 +743,9 @@ class ChatAgent:
 
         # 1. Plan subqueries, and read who is asking for what
         yield ("status", "Planning search queries…")
-        plan = await self._plan(question, expert.topic, cfg.max_subqueries, history)
+        plan = await self._plan(
+            question, expert.topic, cfg.max_subqueries, history, expert.key_concepts
+        )
         subqueries = plan.subqueries
         # A follow-up is searched and reranked as the question it stands for.
         search_question = plan.standalone_question or question
@@ -715,17 +799,39 @@ class ChatAgent:
             enriched = enriched + extra_enriched
             scored = scored + [extra_resp.reranked] * len(extra_enriched)
 
-        # 5. Numbered, deduplicated context block — below-floor padding removed
+        # 5. What retrieval contributes to the prompt: below-floor padding
+        # removed, one entry per chunk, capped at the tier's limit.
+        retrieved = _unique_chunks(
+            apply_relevance_floor(enriched, scored, floor, min_strong), cfg.max_context_passages
+        )
+
+        # 6. The best of those bring the text either side of them, so an
+        # argument that runs across several chunks arrives as an argument.
+        anchor_count = min(settings.NEIGHBOUR_ANCHORS, cfg.retrieval_top_k // 2)
+        neighbour_cap = max(0, anchor_count) * (
+            settings.NEIGHBOUR_BEFORE + settings.NEIGHBOUR_AFTER
+        )
+        neighbours: list[EnrichedResult] = []
+        if neighbour_cap:
+            yield ("status", "Reading around the strongest passages…")
+            anchors = [e for e in retrieved if not search_resp.reranked or e.result.score >= floor][
+                :anchor_count
+            ]
+            neighbours = await self._neighbours(expert, anchors, retrieved)
+
+        # 7. Numbered context block, in reading order
         yield ("status", "Composing response…")
-        in_context = apply_relevance_floor(enriched, scored, floor, min_strong)
-        context_block, indexed = build_grounded_context(in_context, cfg.max_context_passages)
+        in_context = reading_order(retrieved, neighbours)
+        context_cap = cfg.max_context_passages + neighbour_cap
+        context_block, indexed = build_grounded_context(in_context, context_cap)
         trail = _build_trail(
             enriched=enriched,
             primary_count=primary_count,
             subqueries=subqueries,
             followup_queries=followup_queries,
             coverage_satisfied=coverage_satisfied,
-            context_cap=cfg.max_context_passages,
+            context_cap=context_cap,
+            neighbours=neighbours,
         )
         shown = {p.chunk_id for p in indexed}
         yield (
@@ -747,6 +853,34 @@ class ChatAgent:
                 plan=plan,
             ),
         )
+
+    async def _neighbours(
+        self,
+        expert: Expert,
+        anchors: list[EnrichedResult],
+        retrieved: list[EnrichedResult],
+    ) -> list[EnrichedResult]:
+        """The chunks either side of ``anchors`` — see ``chat/neighbours.py``.
+
+        Graph-expanded like any other passage: a neighbour is numbered and
+        citable, so it carries its concepts and its disputes the same way. A
+        failure here costs the answer nothing it had before, so it degrades to
+        no neighbours rather than raising.
+        """
+        wanted = wanted_positions(
+            anchors,
+            {position(e) for e in retrieved},
+            settings.NEIGHBOUR_BEFORE,
+            settings.NEIGHBOUR_AFTER,
+        )
+        if not wanted:
+            return []
+        try:
+            found = await self._search.fetch_by_position(expert.id, wanted)
+            return await self._graph.expand(found, expert.id, hops=expert.config.graph_hops)
+        except Exception as exc:
+            logger.warning("Neighbour expansion failed: %s", exc)
+            return []
 
     async def gather_context(
         self, expert: Expert, question: str, history: list[dict] | None = None
@@ -800,6 +934,7 @@ class ChatAgent:
         topic: str,
         max_subqueries: int = 4,
         history: list[dict] | None = None,
+        key_concepts: list[str] | None = None,
     ) -> QueryPlan:
         """Decompose the question for retrieval and read who is asking for what.
 
@@ -811,9 +946,25 @@ class ChatAgent:
         follow-up ("what about the second one?") was decomposed with no idea
         what it referred to, and retrieval searched for the words of the
         reference rather than the thing.
+
+        It also sees ``key_concepts``, what this expert's corpus was built
+        around. Without them it plans in the asker's vocabulary, which is rarely
+        the sources': asked for "the most tangible proof for God", it searched
+        a corpus of Aquinas for "fine-tuning design argument" while "The Five
+        Ways" sat in the expert's own concept list.
         """
         try:
             tool = _plan_tool(max_subqueries)
+            vocabulary = (
+                "\nThis expert's sources are built around these concepts: "
+                + "; ".join(key_concepts)
+                + ". Where the question touches one, phrase a subquery in that "
+                "concept's own terms — the words its sources would use, which "
+                "are often not the asker's. Ignore the list where it does not "
+                "bear on the question."
+                if key_concepts
+                else ""
+            )
 
             conversation = _conversation_block(history)
             content = (
@@ -839,13 +990,14 @@ class ChatAgent:
                     "kind of answer would satisfy them, and one imperative sentence "
                     "saying what this answer must do. Judge the asker from the "
                     "question as written, not from how technical the field is."
+                    f"{vocabulary}"
                 ),
                 tools=[tool],
                 tool_choice=ToolChoiceToolParam(type="tool", name="create_plan"),
                 messages=[MessageParam(role="user", content=content)],
             )
             block = tool_input(resp) or {}
-            return QueryPlan.from_tool_input(dict(block), question)
+            return QueryPlan.from_tool_input(dict(block), question, max_subqueries)
         except Exception as exc:
             logger.warning("Planning failed: %s", exc)
             return QueryPlan.fallback(question)

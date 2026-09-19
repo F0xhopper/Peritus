@@ -55,6 +55,7 @@ def _agent(plan: QueryPlan, *responses: SearchResponse) -> ChatAgent:
     agent = ChatAgent(MagicMock())
     agent._plan = AsyncMock(return_value=plan)
     agent._search.batch_search = AsyncMock(side_effect=list(responses))
+    agent._search.fetch_by_position = AsyncMock(return_value=[])
 
     async def expand(results, expert_id, hops=1):
         return [EnrichedResult(result=r) for r in results]
@@ -172,6 +173,32 @@ def test_plan_parses_fallbacks_and_standalone_question():
     assert plan.fallback_queries == ["x", "y"]
     assert plan.standalone_question == "What is X?"
     assert QueryPlan.from_tool_input({"subqueries": ["a"]}, "q").standalone_question is None
+
+
+def test_plan_reads_a_string_of_subqueries_as_queries_not_characters():
+    # What the fast model actually returned for "What is the most tangible proof
+    # for God…": a string, with its own tool-call markup leaked into it. Iterated,
+    # it became 72 one-character subqueries that swamped the real one.
+    leaked = '<parameter name="item">cosmological argument proof God existence modern atheism'
+    plan = QueryPlan.from_tool_input({"subqueries": leaked, "fallback_queries": leaked}, "q")
+    assert plan.subqueries == ["cosmological argument proof God existence modern atheism"]
+    assert plan.fallback_queries == plan.subqueries
+
+    several = '<parameter name="item">first mover</parameter><parameter name="item">five ways'
+    assert QueryPlan.from_tool_input({"subqueries": several}, "q").subqueries == [
+        "first mover",
+        "five ways",
+    ]
+
+
+def test_plan_caps_subqueries_and_falls_back_to_the_question():
+    many = [f"query {i}" for i in range(9)]
+    assert QueryPlan.from_tool_input({"subqueries": many}, "q", 4).subqueries == many[:4]
+    assert QueryPlan.from_tool_input({"subqueries": many}, "q", 6).subqueries == many[:6]
+    for junk in (None, 7, {"a": 1}, [], [" ", 3], "<parameter>"):
+        assert QueryPlan.from_tool_input({"subqueries": junk}, "the question").subqueries == [
+            "the question"
+        ]
 
 
 async def test_audit_matches_steps_to_passages_by_chunk_not_position():

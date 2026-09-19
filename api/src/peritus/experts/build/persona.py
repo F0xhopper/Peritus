@@ -52,13 +52,14 @@ _PERSONA_TOOL: ToolParam = {
                 "type": "string",
                 "description": (
                     "A system-prompt block, in the second person, describing how "
-                    "this expert TEACHES: how they open an explanation, the "
-                    "framings and analogies they characteristically reach for, "
-                    "the kind of worked example they use, what they insist "
-                    "matters most and what they consider a distraction, and how "
-                    "they talk to someone new to the subject. Positive voice "
-                    "instructions only — write what they do, never a list of "
-                    "rules about sourcing, citation, hedging, or uncertainty."
+                    "this expert TEACHES: the framings and analogies they "
+                    "characteristically reach for, the kind of worked example "
+                    "they use, what they insist matters most and what they "
+                    "consider a distraction, and how they talk to someone new "
+                    "to the subject. Positive voice instructions only — write "
+                    "what they do, never a list of rules about sourcing, "
+                    "citation, hedging, or uncertainty, and nothing about how "
+                    "an answer opens or is structured."
                 ),
             },
         },
@@ -89,6 +90,12 @@ _PERSONA_SYSTEM = (
     "qualifying claims, or handling uncertainty. Separate absolute rules govern "
     "all of that, and duplicating them here produces a hedging, evasive voice "
     "instead of a teaching one.\n\n"
+    "Do not script how answers open or are laid out either, and do not tell the "
+    "expert to announce or narrate their own method ('tell students you are "
+    "using…', 'name the step you are on'). Every answer opens with the direct "
+    "answer, under rules of its own; an expert told to introduce their method "
+    "first spends the opening of every answer on the method instead of the "
+    "subject. Describe the method so it can be used, not performed.\n\n"
     "The bio and the style block have different jobs and should not read alike. "
     "The bio is what a reader skims in five seconds to decide if this is the "
     "right expert — keep it short and plain. The style block is what actually "

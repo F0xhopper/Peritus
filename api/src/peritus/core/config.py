@@ -258,6 +258,17 @@ class Settings(BaseSettings):
     RELEVANCE_FLOOR: float = 0.15
     RELEVANCE_MIN_PASSAGES: int = 3
 
+    # Neighbour expansion (chat/neighbours.py). The best NEIGHBOUR_ANCHORS
+    # retrieved passages each bring the chunks either side of them, so an
+    # argument that runs across several ~1,000-character chunks reaches the model
+    # as an argument and not as its first paragraph. More after than before:
+    # prose states a point and then develops it. At most
+    # ANCHORS × (BEFORE + AFTER) extra passages, about 250 tokens each;
+    # NEIGHBOUR_ANCHORS=0 turns it off.
+    NEIGHBOUR_ANCHORS: int = 4
+    NEIGHBOUR_BEFORE: int = 1
+    NEIGHBOUR_AFTER: int = 2
+
     # Source validation concurrency limit
     VALIDATE_CONCURRENCY: int = 5
 

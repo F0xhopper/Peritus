@@ -58,6 +58,27 @@ so planning fell back to the raw question throughout. A like-for-like measure
 needs the golden set generated *after* a rebuild and run against two retrieval
 configurations on that one corpus, not against two corpora.
 
+### Addendum, 2026-09-19 — thin answers
+
+Started from one bad answer: asked for "the most tangible proof for God", the
+Thomism expert (63) wrote four paragraphs *about* the proof and said its sources
+lacked the Five Ways. They hold the article whole (Prima Pars q.2 a.3, seven
+consecutive chunks). Four causes, none of them the corpus:
+
+| # | Where | Notes |
+|---|---|---|
+| R14 | `chat/agent._plan_tool` (strict), `_query_list` | The fast model returned `subqueries` as a **string** with its own tool-call markup in it; iterated, that was 72 one-character subqueries which outvoted the real query in the fusion. Measured on the unconstrained tool: 7 of 24 calls malformed. As a `strict` tool: 0 of 24. `_query_list` still reads a string as the queries it contains and caps the count in code — strict schemas take no `minItems`/`maxItems`. Other fast-model tools with array fields (`sources/validator.py`, `sources/triage.py`, `experts/feedback.py`, `ingestion/contextualizer.py`, …) are unconstrained and unmeasured. |
+| R15 | `chat/neighbours.py`, `SearchService.fetch_by_position`, `NEIGHBOUR_*` settings | The top 4 passages above the floor bring `sequence_n` −1/+1/+2 from their source. Neighbours are **separately numbered passages**, never text folded into their anchor: citations, the passage reader and the audit all resolve `[n]` to one chunk. Context is ordered as runs in reading order, a continuation labelled `(continues directly from [n])`; trail `via="neighbour"`. Same question: 6 → 17 passages, the First Way contiguous. ~3K extra input tokens a turn. |
+| R16 | `chat/agent.QUESTION_TYPES`, `ANSWER_SHAPE` | There was no `explanation` type, so "what is / why / best case for" went to `specific_fact` (8 of 8), whose guidance is "add only what makes it usable". Now 23 of 24 such questions classify as `explanation`; a true single-fact question still answers in ~80 words. `ANSWER_SHAPE` gained "Then develop it". |
+| R17 | `chat/agent._plan` (`key_concepts`), `chat/grounding.build_system_prompt`, `experts/build/persona.py` | Planner sees the expert's key concepts, so subqueries use the corpus's words ("Five Ways") and not only the asker's ("fine-tuning design argument"). Personas may no longer script how an answer opens — a stored one said "name the rung you're standing on at every step" and the expert did. |
+
+Measured: on a fresh 26-question golden set for expert 63, R17's vocabulary hint
+is neutral (recall@10 1.000, MRR 0.766 both arms) — the set is generated from
+chunk text, so it is saturated and cannot show a vocabulary gain; it shows no
+regression. `CHAT_EFFORT=medium` was tried and rejected: +20% words, same time
+to first token, no better answer. Unmeasured: answer quality at scale — the
+evidence is five answers read by hand.
+
 ---
 
 ## 1. Summary

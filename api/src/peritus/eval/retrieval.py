@@ -288,7 +288,11 @@ async def run(
         async with sem:
             if pace:
                 await asyncio.sleep(pace)
-            plan = await agent._plan(item.question, expert.topic, cfg.max_subqueries)
+            # As `ChatAgent.retrieve` calls it, so the eval measures the planner
+            # that answers are actually planned with.
+            plan = await agent._plan(
+                item.question, expert.topic, cfg.max_subqueries, None, expert.key_concepts
+            )
             resp = await agent._search.batch_search(
                 expert_id=expert.id,
                 question=plan.standalone_question or item.question,

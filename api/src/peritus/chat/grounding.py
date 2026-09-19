@@ -20,6 +20,7 @@ is a constraint on claims, not a licence to stop thinking.
 import re
 from dataclasses import dataclass, field
 
+from peritus.chat.neighbours import continues_previous
 from peritus.graph.retriever import EnrichedResult
 
 # Hard, non-negotiable rules. Always prepended to the persona so the persona can
@@ -86,12 +87,27 @@ GROUNDING_CONTRACT = (
 # versus primary material, and not one term defined for someone who said they
 # were a beginner. The through-line is that the asker wants the subject, not a
 # report on the retrieval.
+#
+# "Develop it" is the newest, and came from the opposite direction to the rest:
+# asked for the most tangible proof of God, an expert holding Aquinas's article
+# on the question answered with where the argument sits in his order of
+# teaching and what kind of argument it is — four paragraphs about a proof, and
+# no proof. Nothing above told it that was not enough.
 ANSWER_SHAPE = (
     "HOW TO WRITE THE ANSWER\n"
     "\n"
     "- Lead with the answer. The first sentence carries the substance — the "
     "actual guidance, finding, or definition asked for. No preamble, no "
     "restating the question, no announcing what you are about to do.\n"
+    "- Then develop it. Unless one definite fact was all that was asked for, "
+    "the direct answer is where an expert starts, not where they stop. Give "
+    "the thing itself rather than a description of it: an argument's steps in "
+    "order and how each leads to the next, a process's stages, the grounds a "
+    "position rests on, and — only where there is a serious one — the "
+    "objection to it and how it is met. When consecutive passages carry a line of reasoning, walk "
+    "through that reasoning — do not report that it exists. Depth means more "
+    "of the subject, never more words about it: no padding, no restating, and "
+    "stop when the question is answered.\n"
     "- Organise by the subject, never by the sources. The person wants to "
     "understand the topic, not to learn what your retrieval turned up. Never "
     "structure an answer around who said what, and never write in the register "
@@ -140,7 +156,9 @@ ANSWER_FORMAT = (
     "should be easy to scan before it is read, never a wall of text.\n"
     "\n"
     "- Open with the direct answer as one short paragraph of one to three "
-    "sentences, with no heading above it.\n"
+    "sentences. Nothing comes before it: the first line of the answer is that "
+    "paragraph's first sentence, never a heading and never a title. The first "
+    "`##` heading comes after it.\n"
     "- If that paragraph is the whole answer — a definition, a yes or no, a "
     "single fact — stop there, or add one more short paragraph. Do not dress a "
     "short answer in headings.\n"
@@ -184,6 +202,13 @@ def build_system_prompt(persona_style: str | None, topic: str) -> str:
     and a persona that asked for hedging or source-narration would still be
     overridden by it.
 
+    Nor can it touch how an answer opens. Personas are generated, and one came
+    back telling its expert to "name the rung you're standing on at every step";
+    the expert obeyed, and an answer that should have led with a proof led with
+    "Let me start on the rung Aquinas himself insists on standing on". A
+    teaching method is for use, not for narration, so the block that introduces
+    the persona says so — which also covers every persona already stored.
+
     Byte-stable for a given ``(persona_style, topic)`` pair, which is what makes
     the prompt-cache breakpoint in ``chat/agent.py`` worth having.
     """
@@ -203,7 +228,11 @@ def build_system_prompt(persona_style: str | None, topic: str) -> str:
         "This is your voice and your way of teaching: what you emphasise, how "
         "you explain a hard idea, which examples you reach for. It shapes how "
         "the answer reads and how it teaches — it never changes what counts as "
-        "grounded.\n"
+        "grounded, and it never changes how an answer opens or is laid out. If "
+        "your method has steps, a ladder, or a signature routine, use it inside "
+        "the answer where it helps the asker; never announce it, never narrate "
+        "which step you are on, and never let it delay the direct answer that "
+        "comes first.\n"
         f"{persona}"
     )
 
@@ -245,11 +274,17 @@ def build_grounded_context(
     nothing to say whether it was the finding or the background. It is labelled
     as a note, not passage text, because it was written about the passage and
     is not a quotation from the source.
+
+    A passage that is the very next chunk of the one numbered before it says so.
+    Neighbour expansion (``chat/neighbours.py``) hands the model runs of
+    consecutive text, and without the marker three numbered passages from one
+    work read as three separate finds rather than one argument in three parts.
     """
     parts: list[str] = []
     passages: list[Passage] = []
     seen_chunks: set[int] = set()
     index = 0
+    previous: EnrichedResult | None = None
     for e in enriched:
         chunk_id = e.result.chunk_id
         if chunk_id in seen_chunks:
@@ -268,8 +303,14 @@ def build_grounded_context(
             )
         )
         note = " ".join((e.result.context_text or "").split())
-        lead = f"[{index}] {e.citation}" + (f"\n(Where this passage sits: {note})" if note else "")
+        continued = (
+            f" (continues directly from [{index - 1}])" if continues_previous(previous, e) else ""
+        )
+        lead = f"[{index}] {e.citation}{continued}" + (
+            f"\n(Where this passage sits: {note})" if note else ""
+        )
         parts.append(f"{lead}\n{e.context_block()}")
+        previous = e
         if index >= max_passages:
             break
     return "\n\n".join(parts), passages

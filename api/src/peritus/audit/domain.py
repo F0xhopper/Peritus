@@ -170,6 +170,7 @@ DISPOSITION_MEANINGS = {
 
 RETRIEVED_VIA_PRIMARY = "primary"
 RETRIEVED_VIA_FOLLOWUP = "coverage_followup"
+RETRIEVED_VIA_NEIGHBOUR = "neighbour"
 
 
 # ── small helpers ───────────────────────────────────────────────────────────

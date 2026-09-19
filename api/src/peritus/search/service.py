@@ -136,6 +136,38 @@ class SearchService:
 
         return SearchResponse(query=question, results=merged, total=len(merged), reranked=scored)
 
+    async def fetch_by_position(
+        self,
+        expert_id: int,
+        positions: list[tuple[int, int]],
+    ) -> list[SearchResult]:
+        """The chunks at these ``(source_id, sequence_n)`` positions, unscored.
+
+        Not a search: this is how a retrieved passage gets the text either side
+        of it (``chat/neighbours.py``). Nothing ranked these, so the score is 0.0
+        and a caller must not hold them to a relevance floor. A position that
+        does not exist — the start or end of a source, a chunk hygiene removed —
+        is simply absent from the result.
+        """
+        if not positions:
+            return []
+        sql = """
+            SELECT sc.id, sc.expert_id, sc.source_id, sc.text, sc.context_text,
+                   sc.sequence_n, sc.chunk_meta,
+                   s.title AS source_title, s.source_type, s.quality_score,
+                   0.0 AS rrf_score
+            FROM unnest($2::int[], $3::int[]) AS wanted(source_id, sequence_n)
+            JOIN source_chunks sc
+              ON sc.source_id = wanted.source_id AND sc.sequence_n = wanted.sequence_n
+            JOIN sources s ON s.id = sc.source_id
+            WHERE sc.expert_id = $1
+        """
+        async with self._pool.acquire(timeout=settings.DB_ACQUIRE_TIMEOUT) as conn:
+            rows = await conn.fetch(
+                sql, expert_id, [p[0] for p in positions], [p[1] for p in positions]
+            )
+        return [_row_to_result(r) for r in rows]
+
     async def _hybrid_search(
         self,
         expert_id: int,
