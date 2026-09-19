@@ -127,7 +127,8 @@ def refresh_picture(name: str = typer.Argument(..., help="Expert name or fuzzy m
 
     A build finds a picture once and then leaves it alone, so this is the way to
     get one for an expert built before pictures existed, or a different one when
-    the first pick was wrong. No model tokens — five or six HTTP requests.
+    the first pick was wrong. Five or six HTTP requests — plus one small model
+    call, only when nothing about the topic itself has a free picture.
     """
 
     async def _inner():

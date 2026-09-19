@@ -201,11 +201,19 @@ class Settings(BaseSettings):
     # Wikipedia article, with its licence and attribution — instead of only a
     # monogram. Nothing here can fail a build: the finder runs as a background
     # task off `plan_ready`, has its own deadline, and emits `picture_skipped`
-    # with a reason when it comes up empty. See experts/picture.py.
+    # with a reason when it comes up empty. An expert still without one when its
+    # corpus is done gets a second look then — see `PICTURE_FINAL_TIMEOUT`.
+    # See experts/picture.py.
     PICTURE_ENABLED: bool = True
     # Whole-search deadline, per build. Five or six HTTP requests fit easily;
     # this is the bound that keeps a slow Wikimedia from being the build's problem.
     PICTURE_TIMEOUT: float = 20
+    # The deadline for the second look, at the end of the build. Longer than the
+    # first because it is the last chance this build has: a single honoured
+    # `Retry-After` from a throttling Wikimedia is most of twenty seconds, and
+    # the cost of waiting is a finished corpus reaching its persona a little
+    # later — once, and only for an expert the first look left bare.
+    PICTURE_FINAL_TIMEOUT: float = 45
     # Refuse a thumbnail larger than this. Mirrored by a CHECK on the table, so
     # raising it here alone will not let a bigger file through.
     PICTURE_MAX_BYTES: int = 400000

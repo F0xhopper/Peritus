@@ -38,8 +38,11 @@ import unicodedata
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 
+from anthropic.types import MessageParam, ToolChoiceToolParam, ToolParam
+
 from peritus.core.config import settings
 from peritus.core.logging import get_logger
+from peritus.infrastructure.anthropic_client import get_anthropic_client, tool_input
 from peritus.infrastructure.wikimedia import WikimediaClient, normalise_title
 
 logger = get_logger(__name__)
@@ -508,6 +511,105 @@ def build_queries(topic: str, key_concepts: list[str], hints: tuple[str, ...] = 
     return out[:6]
 
 
+_SUBJECT_TOOL: ToolParam = {
+    "name": "suggest_illustrations",
+    "description": "Name Wikipedia articles whose lead image would illustrate a subject.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "articles": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "description": "The exact title of an English Wikipedia article.",
+                },
+                "maxItems": 6,
+            }
+        },
+        "required": ["articles"],
+    },
+}
+
+_SUBJECT_SYSTEM = (
+    "You choose what should illustrate a subject, the way an editor picks the "
+    "picture for an encyclopedia entry or a book cover. Name up to six English "
+    "Wikipedia articles whose lead image would be a fitting, recognisable "
+    "picture for the subject, best first.\n"
+    "\n"
+    "Name concrete things that are photographed or painted: a historical figure "
+    "central to the subject who is no longer living, a famous manuscript, "
+    "instrument, machine, artifact, building, place, organism, experiment or "
+    "artwork.\n"
+    "\n"
+    "Never name the subject itself, and never a broad field or an abstract "
+    'concept ("Artificial intelligence", "Data science", "Logic", "Ethics") — '
+    "the lead image of a broad article is arbitrary and usually a diagram. "
+    "Never name a living person, a company, a commercial product, a logo, a "
+    "flag or a map. Use the exact article title.\n"
+    "\n"
+    "Examples of the kind of answer wanted:\n"
+    "- Stoic philosophy: Zeno of Citium; Marcus Aurelius; Seneca the Younger; "
+    "Epictetus\n"
+    "- Machine learning in production: Frank Rosenblatt; Perceptron; Arthur "
+    "Samuel (computer scientist); Alan Turing; Data center; Supercomputer\n"
+    "- Varroa mite control in beekeeping: Varroa destructor; Western honey bee; "
+    "Beehive; Langstroth hive\n"
+    "- Measurement error in nutritional epidemiology: Food diary; Doubly "
+    "labeled water; Ancel Keys; Framingham Heart Study"
+)
+
+
+async def suggest_subjects(topic: str, key_concepts: list[str]) -> list[str]:
+    """Articles whose lead image would illustrate ``topic``. One ``FAST_MODEL`` call.
+
+    The direct search can only find a picture when an article *about the topic*
+    happens to have a free lead image, and a great many do not: "Machine
+    learning" has none at all, and neither does "Term logic", which is where a
+    search for Aristotelian logic lands. The subject is perfectly illustratable
+    — a bust of Aristotle, the Mark I Perceptron — but getting from the topic to
+    *that* is a judgement about the field, not a string operation on its name.
+
+    So this asks for the judgement and nothing else. What comes back is only a
+    list of places to look: every suggestion goes through the same gates as any
+    other hit — free licence, no living people, no marks, the size cap — so a
+    bad suggestion costs a request and cannot produce a bad picture.
+
+    Never raises: no suggestions is simply the end of the search.
+    """
+    try:
+        client = get_anthropic_client()
+        concepts = "; ".join(c for c in key_concepts[:6] if c)
+        resp = await client.messages.create(
+            model=settings.FAST_MODEL,
+            max_tokens=300,
+            system=_SUBJECT_SYSTEM,
+            tools=[_SUBJECT_TOOL],
+            tool_choice=ToolChoiceToolParam(type="tool", name="suggest_illustrations"),
+            messages=[
+                MessageParam(
+                    role="user",
+                    content=f"Subject: {topic}" + (f"\nIt covers: {concepts}" if concepts else ""),
+                )
+            ],
+        )
+        articles = (tool_input(resp) or {}).get("articles") or []
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.warning("Picture suggestions failed for %r (%s: %s)", topic, type(exc).__name__, exc)
+        return []
+    seen: set[str] = set()
+    out: list[str] = []
+    for raw in articles:
+        title = raw.strip() if isinstance(raw, str) else ""
+        if title and title.casefold() not in seen:
+            seen.add(title.casefold())
+            out.append(title)
+    if out:
+        logger.info("Picture suggestions for %r: %s", topic, "; ".join(out))
+    return out[:6]
+
+
 async def find_picture(
     client: WikimediaClient,
     topic: str,
@@ -515,8 +617,15 @@ async def find_picture(
     hints: tuple[str, ...] = (),
     *,
     deadline: float | None = None,
+    widen: bool = False,
 ) -> FoundPicture:
     """Search, filter, rank, fetch. Raises :class:`PictureSkipped` if none fits.
+
+    ``widen`` allows one more pass when the direct search finds nothing usable:
+    :func:`suggest_subjects` names articles whose lead image would illustrate
+    the topic, and those are searched instead. It costs one small model call, so
+    the build's first look — which is free, and runs for every expert — leaves
+    it off; the second look and every explicit refresh turn it on.
 
     Raising rather than returning ``None`` so the reason travels with the
     failure: the caller turns it straight into the ``picture_skipped`` event,
@@ -529,9 +638,39 @@ async def find_picture(
     timeout = deadline if deadline is not None else settings.PICTURE_TIMEOUT
     try:
         async with asyncio.timeout(timeout):
-            return await _find(client, topic, key_concepts or [], hints)
+            try:
+                return await _find(client, topic, key_concepts or [], hints)
+            except PictureSkipped as skip:
+                # Only an empty result widens. `timeout` never reaches here, and
+                # anything else is not something a different query would fix.
+                if not widen or skip.reason not in {"no_candidate", "too_large"}:
+                    raise
+                subjects = await suggest_subjects(topic, key_concepts or [])
+                if not subjects:
+                    raise
+                return await _find(client, topic, [], tuple(subjects), suggested=True)
     except TimeoutError:
         raise PictureSkipped("timeout") from None
+
+
+def _positions(per_query: list[list[str]], kept: set[str], *, suggested: bool) -> dict[str, int]:
+    """Where each kept title stood in the search that found it, for :func:`rank`.
+
+    Normally that is its depth within its own query, so every query's best hit
+    competes with every other query's best hit. In the widened pass the queries
+    are themselves ordered, best suggestion first, so the query's index counts
+    too — and the earliest suggestion to find a title is the one that places it.
+    """
+    order: dict[str, int] = {}
+    for index, hits in enumerate(per_query):
+        for depth, title in enumerate(hits):
+            if title not in kept:
+                continue
+            if suggested:
+                order.setdefault(title, 10 * index + depth)
+            else:
+                order[title] = depth
+    return order
 
 
 async def _find(
@@ -539,8 +678,13 @@ async def _find(
     topic: str,
     key_concepts: list[str],
     hints: tuple[str, ...],
+    *,
+    suggested: bool = False,
 ) -> FoundPicture:
-    queries = build_queries(topic, key_concepts, hints)
+    # In the widened pass the hints *are* the search: the topic's own query has
+    # just failed, so it does not get a slot, and the suggestions arrive best
+    # first — an order worth keeping, so it goes into each candidate's rank.
+    queries = list(hints[:6]) if suggested else build_queries(topic, key_concepts, hints)
 
     # 1–2. Articles: every query's best hit before any query's second.
     #
@@ -552,9 +696,15 @@ async def _find(
     # Interpretation"; the picture it settled for was a Susan Sontag dust
     # jacket. Interleaving keeps the topic's own best hit first — which is what
     # the ranking leans on — while guaranteeing every query is represented.
+    #
+    # A suggestion is already an article title, so it is looked up as one and
+    # not searched for: `page_images` follows redirects, a title that does not
+    # exist simply comes back with no image, and the six searches it saves are
+    # most of this pass's requests — which matters, because this pass only runs
+    # after a whole search has already spent its share of Wikimedia's patience.
     per_query: list[list[str]] = []
     for query in queries:
-        per_query.append(await client.search_articles(query, limit=3))
+        per_query.append([query] if suggested else await client.search_articles(query, limit=3))
 
     titles: list[str] = []
     title_query: dict[str, str] = {}
@@ -573,12 +723,7 @@ async def _find(
 
     # 3. Lead images and identity, one batched call.
     pages = await client.page_images(titles, thumb_size=settings.PICTURE_THUMB_WIDTH)
-    order = {
-        title: depth
-        for hits in per_query
-        for depth, title in enumerate(hits)
-        if title in title_query
-    }
+    order = _positions(per_query, set(title_query), suggested=suggested)
     candidates: list[Candidate] = []
     for page in pages:
         title = page.get("title", "")

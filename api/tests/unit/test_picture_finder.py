@@ -415,3 +415,116 @@ async def test_an_article_unrelated_to_what_was_searched_is_not_the_picture():
 
     # "Ethics" came from the topic's own search, which always has standing.
     assert found.page_title == "Ethics"
+
+
+# ── the widened pass: "what would illustrate this?" ──────────────────────────
+
+
+def _logic_client() -> FakeWikimedia:
+    """Aristotelian logic as Wikipedia really has it: the topic's own articles
+    carry no free lead image, and the pictures are one judgement away."""
+    return FakeWikimedia(
+        search={
+            "Aristotelian logic": ["Term logic", "Organon"],
+            "Geoffrey Example": ["Geoffrey Example"],
+            "Aristotle": ["Aristotle", "Aristotle's biology"],
+            "Organon": ["Organon"],
+        },
+        pages=[
+            _page(1, "Term logic", None),
+            _page(2, "Organon", None),
+            _page(3, "Geoffrey Example", "Geoffrey_Example_2019.jpg", qid="Q900"),
+            _page(4, "Aristotle", "Aristotle_Altemps.jpg", qid="Q868"),
+            _page(5, "Aristotle's biology", "Aristotle_lagoon.jpg", qid="Q2"),
+        ],
+        claims={"Q900": _human(died=False), "Q868": _human(died=True)},
+        infos={
+            "File:Geoffrey_Example_2019.jpg": _imageinfo(),
+            "File:Aristotle_Altemps.jpg": _imageinfo(),
+            "File:Aristotle_lagoon.jpg": _imageinfo(),
+        },
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_first_look_never_asks_a_model(monkeypatch):
+    """`widen` is off by default: the build's first look is free, for every expert."""
+    asked = []
+
+    async def suggest(topic, key_concepts):
+        asked.append(topic)
+        return ["Aristotle"]
+
+    monkeypatch.setattr("peritus.experts.picture.suggest_subjects", suggest)
+
+    with pytest.raises(PictureSkipped) as skipped:
+        await find_picture(_logic_client(), "Aristotelian logic", [])
+
+    assert skipped.value.reason == "no_candidate"
+    assert asked == []
+
+
+@pytest.mark.asyncio
+async def test_a_topic_with_no_picture_of_its_own_is_illustrated_by_a_suggestion(monkeypatch):
+    """The model's first suggestion is a living person, and the gates do not care
+    who suggested it: it falls through to the bust of Aristotle."""
+
+    async def suggest(topic, key_concepts):
+        return ["Geoffrey Example", "Aristotle", "Organon"]
+
+    monkeypatch.setattr("peritus.experts.picture.suggest_subjects", suggest)
+
+    found = await find_picture(_logic_client(), "Aristotelian logic", [], widen=True)
+
+    assert found.page_title == "Aristotle"
+    assert found.query == "Aristotle"
+    # A suggestion is a title, looked up and not searched for: the related
+    # article a search would also have turned up is never in the running.
+    assert [c["page_title"] for c in found.candidates] == ["Aristotle"]
+
+
+@pytest.mark.asyncio
+async def test_suggestions_are_tried_in_the_order_they_were_given(monkeypatch):
+    async def suggest(topic, key_concepts):
+        return ["Organon", "Aristotle"]
+
+    monkeypatch.setattr("peritus.experts.picture.suggest_subjects", suggest)
+    client = _logic_client()
+    client._pages[1] = _page(2, "Organon", "Organon_manuscript.jpg", qid="Q3")
+    client._infos["File:Organon_manuscript.jpg"] = _imageinfo()
+
+    found = await find_picture(client, "Aristotelian logic", [], widen=True)
+
+    assert found.page_title == "Organon"
+
+
+@pytest.mark.asyncio
+async def test_no_suggestions_leaves_the_original_reason_standing(monkeypatch):
+    async def suggest(topic, key_concepts):
+        return []
+
+    monkeypatch.setattr("peritus.experts.picture.suggest_subjects", suggest)
+
+    with pytest.raises(PictureSkipped) as skipped:
+        await find_picture(_logic_client(), "Aristotelian logic", [], widen=True)
+
+    assert skipped.value.reason == "no_candidate"
+
+
+@pytest.mark.asyncio
+async def test_a_direct_hit_never_widens(monkeypatch):
+    """The model is the fallback, not the method."""
+
+    async def suggest(topic, key_concepts):
+        raise AssertionError("not needed: the topic's own article has a picture")
+
+    monkeypatch.setattr("peritus.experts.picture.suggest_subjects", suggest)
+    client = FakeWikimedia(
+        search={"Stoicism": ["Stoicism"]},
+        pages=[_page(1, "Stoicism", "Zeno.jpg", qid="Q1")],
+        infos={"File:Zeno.jpg": _imageinfo()},
+    )
+
+    found = await find_picture(client, "Stoicism", [], widen=True)
+
+    assert found.page_title == "Stoicism"

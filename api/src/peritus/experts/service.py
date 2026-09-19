@@ -304,13 +304,14 @@ class ExpertService:
         from peritus.infrastructure.wikimedia import WikimediaClient
 
         expert = await self.get(name_or_id)
-        hints = await self._wikipedia_source_titles(expert.id) if hints_from_corpus else ()
+        pictures = ExpertPictureRepository(self._pool)
+        hints = await pictures.wikipedia_source_titles(expert.id) if hints_from_corpus else ()
 
         async with WikimediaClient() as client:
             found = await find_picture(
-                client, expert.topic, expert.key_concepts, hints, deadline=deadline
+                client, expert.topic, expert.key_concepts, hints, deadline=deadline, widen=True
             )
-        await ExpertPictureRepository(self._pool).upsert(expert.id, found, chosen_by="build")
+        await pictures.upsert(expert.id, found, chosen_by="build")
         logger.info(
             "Refreshed picture for expert %d (%r): %s (%s)",
             expert.id,
@@ -319,18 +320,3 @@ class ExpertService:
             found.license,
         )
         return await self.get(expert.id)
-
-    async def _wikipedia_source_titles(self, expert_id: int) -> tuple[str, ...]:
-        """Titles of this expert's validated Wikipedia sources, best first."""
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                """
-                SELECT title
-                FROM sources
-                WHERE expert_id = $1 AND passed = true AND source_type = 'wikipedia'
-                ORDER BY quality_score DESC NULLS LAST
-                LIMIT 3
-                """,
-                expert_id,
-            )
-        return tuple(r["title"] for r in rows if r["title"])

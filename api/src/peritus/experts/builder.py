@@ -723,6 +723,9 @@ class ExpertBuilder:
         # await exists so `picture_ready` is in the durable log before `done`,
         # which is what a client replaying the log from seq 0 depends on.
         await self._await_picture()
+        # And if that first look left the expert bare, look once more now that
+        # there is a corpus to look with.
+        await self._retry_picture(expert, on_event)
 
         await _emit_event(on_event, {"type": "stage", "stage": 5, "name": "persona"})
         persona_name: str | None = None
@@ -936,6 +939,10 @@ class ExpertBuilder:
         topic: str,
         key_concepts: list[str],
         on_event: EventCallback | None,
+        *,
+        hints: tuple[str, ...] = (),
+        deadline: float | None = None,
+        widen: bool = False,
     ) -> None:
         """Find a licensed picture of the subject and store it. Never raises.
 
@@ -962,7 +969,9 @@ class ExpertBuilder:
                 return
 
             async with WikimediaClient() as client:
-                found = await find_picture(client, topic, key_concepts)
+                found = await find_picture(
+                    client, topic, key_concepts, hints, deadline=deadline, widen=widen
+                )
             await pictures.upsert(expert.id, found, chosen_by="build")
         except asyncio.CancelledError:
             raise
@@ -999,6 +1008,67 @@ class ExpertBuilder:
                 "license": found.license,
                 "version": found.version,
             },
+        )
+
+    async def _retry_picture(self, expert: Expert, on_event: EventCallback | None) -> None:
+        """A second and last look for a picture, once the corpus exists. Never raises.
+
+        The first look runs seconds into the build, off the plan, so the rail's
+        tile fills in early. It gets one try, and everything that can go wrong
+        with it is momentary: Wikimedia answering a 429 or a 5xx, a timeout, a
+        topic phrased in a way its search does not recognise. A real expert was
+        built with no picture for exactly that reason — `provider_unavailable`
+        at second four, and nothing ever asked again — and stayed a monogram
+        until someone ran the backfill by hand.
+
+        So an expert still bare when its sources are read is looked for again,
+        and better: the titles of its own validated Wikipedia sources go in as
+        hints, which the first look could not have had; the deadline is the
+        longer `PICTURE_FINAL_TIMEOUT` because nothing comes after this; and the
+        search may widen (`suggest_subjects`) when the topic's own articles have
+        no free picture at all, which is true of most abstract subjects.
+
+        It is a no-op for every expert the first look served, for a rebuild (the
+        picture is already there, and may be one the owner chose), and with the
+        feature off — so the common build pays one `SELECT 1`.
+
+        It runs from `_enrich_and_finish`, which a *resumed* build shares with a
+        full one. A resume never planned, so it never had a first look at all;
+        this is the only one it gets, which is why the key concepts are read
+        back from the row rather than handed down from the plan.
+        """
+        if not settings.PICTURE_ENABLED:
+            return
+        key_concepts: list[str] = []
+        hints: tuple[str, ...] = ()
+        try:
+            pictures = ExpertPictureRepository(self._pool)
+            if await pictures.exists(expert.id):
+                return
+            fresh = await self._repo.get_by_id(expert.id)
+            key_concepts = list(fresh.key_concepts) if fresh else []
+            hints = await pictures.wikipedia_source_titles(expert.id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            # Both improve the search and neither is a condition of it: the
+            # topic alone is what the first look mostly runs on anyway.
+            logger.warning(
+                "Could not read picture hints for expert %d (%s: %s)",
+                expert.id,
+                type(exc).__name__,
+                exc,
+            )
+        await self._find_and_store_picture(
+            expert,
+            expert.topic,
+            key_concepts,
+            on_event,
+            hints=hints,
+            deadline=settings.PICTURE_FINAL_TIMEOUT,
+            # The last chance, so it may also ask what would illustrate the
+            # subject when nothing about the subject itself has a free picture.
+            widen=True,
         )
 
     async def _await_picture(self) -> None:

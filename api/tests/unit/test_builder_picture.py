@@ -8,6 +8,7 @@ visible to the build is which event was emitted.
 """
 
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -191,3 +192,109 @@ async def test_awaiting_the_picture_never_blocks_a_finished_build():
 async def test_awaiting_with_no_task_is_a_no_op():
     builder, _ = _builder()
     await builder._await_picture()
+
+
+# ── the second look, at the end of the build ─────────────────────────────────
+
+
+async def _retry(builder, *, finder, exists: bool, hints=("Thomism", "Summa Theologica")):
+    repo = AsyncMock()
+    repo.exists = AsyncMock(return_value=exists)
+    repo.upsert = AsyncMock()
+    repo.wikipedia_source_titles = (
+        hints if isinstance(hints, AsyncMock) else AsyncMock(return_value=tuple(hints))
+    )
+    # The key concepts come off the row, not the plan: a resumed build never planned.
+    stored = replace(_expert(), key_concepts=["act and potency"])
+    builder._repo = MagicMock()
+    builder._repo.get_by_id = AsyncMock(return_value=stored)
+    with (
+        patch("peritus.experts.builder.ExpertPictureRepository", return_value=repo),
+        patch("peritus.experts.builder.WikimediaClient", return_value=_FakeClientCtx()),
+        patch("peritus.experts.builder.find_picture", finder),
+    ):
+        await builder._retry_picture(_expert(), builder._on_event)
+    return repo
+
+
+@pytest.mark.asyncio
+async def test_the_second_look_is_a_no_op_once_there_is_a_picture():
+    """The common build: the first look served it, so nothing is searched again.
+
+    Also what protects a rebuild — the picture that is there may be one the
+    owner chose.
+    """
+    builder, events = _builder()
+    finder = AsyncMock(return_value=_found())
+
+    repo = await _retry(builder, finder=finder, exists=True)
+
+    finder.assert_not_awaited()
+    repo.wikipedia_source_titles.assert_not_awaited()
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_the_second_look_searches_with_the_corpus_and_a_longer_deadline():
+    """The case it exists for: `provider_unavailable` at second four of the build.
+
+    The first look has no corpus; this one hands the finder the expert's own
+    validated Wikipedia titles, and the deadline sized for a last chance.
+    """
+    from peritus.core.config import settings
+
+    builder, events = _builder()
+    finder = AsyncMock(return_value=_found())
+
+    repo = await _retry(builder, finder=finder, exists=False)
+
+    finder.assert_awaited_once()
+    args, kwargs = finder.await_args
+    assert args[1:] == (
+        "Stoic philosophy",
+        ["act and potency"],
+        ("Thomism", "Summa Theologica"),
+    )
+    assert kwargs == {"deadline": settings.PICTURE_FINAL_TIMEOUT, "widen": True}
+    assert settings.PICTURE_FINAL_TIMEOUT > settings.PICTURE_TIMEOUT
+    repo.upsert.assert_awaited_once()
+    assert [e["type"] for e in events] == ["picture_ready"]
+
+
+@pytest.mark.asyncio
+async def test_the_second_look_coming_up_empty_says_so_and_nothing_more():
+    builder, events = _builder()
+    finder = AsyncMock(side_effect=PictureSkipped("no_candidate"))
+
+    repo = await _retry(builder, finder=finder, exists=False)
+
+    repo.upsert.assert_not_awaited()
+    assert events == [{"type": "picture_skipped", "reason": "no_candidate"}]
+
+
+@pytest.mark.asyncio
+async def test_the_second_look_still_runs_when_the_hints_cannot_be_read():
+    """Hints improve the search; they are not a condition of it."""
+    builder, events = _builder()
+    finder = AsyncMock(return_value=_found())
+    broken = AsyncMock(side_effect=RuntimeError("connection reset"))
+
+    await _retry(builder, finder=finder, exists=False, hints=broken)
+
+    finder.assert_awaited_once()
+    assert finder.await_args.args[3] == ()
+    assert [e["type"] for e in events] == ["picture_ready"]
+
+
+@pytest.mark.asyncio
+async def test_the_second_look_is_silent_with_the_feature_off():
+    """`disabled` was already said once, by the first look."""
+    builder, events = _builder()
+    finder = AsyncMock(return_value=_found())
+
+    with patch("peritus.experts.builder.settings") as fake:
+        fake.PICTURE_ENABLED = False
+        await _retry(builder, finder=finder, exists=False)
+
+    finder.assert_not_awaited()
+    assert events == []

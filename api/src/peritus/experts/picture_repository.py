@@ -102,6 +102,29 @@ class ExpertPictureRepository:
                 await conn.fetchval("SELECT 1 FROM expert_pictures WHERE expert_id = $1", expert_id)
             )
 
+    async def wikipedia_source_titles(self, expert_id: int, limit: int = 3) -> tuple[str, ...]:
+        """Titles of this expert's validated Wikipedia sources, best first.
+
+        Search hints for the finder. They exist only once a corpus does, which
+        is why the build's first look — seconds in, off the plan — has none and
+        its second look, and every refresh, does. The validator has already
+        judged them relevant to *this* expert, so on a topic string that is
+        vague or oddly phrased they are a much better search than the topic is.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT title
+                FROM sources
+                WHERE expert_id = $1 AND passed = true AND source_type = 'wikipedia'
+                ORDER BY quality_score DESC NULLS LAST
+                LIMIT $2
+                """,
+                expert_id,
+                limit,
+            )
+        return tuple(r["title"] for r in rows if r["title"])
+
     async def upsert(
         self, expert_id: int, found: FoundPicture, chosen_by: str = "build"
     ) -> ExpertPicture:

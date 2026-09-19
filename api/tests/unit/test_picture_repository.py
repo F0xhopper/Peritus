@@ -169,3 +169,49 @@ async def test_list_missing_is_the_backfills_worklist(db_pool):
     ids = [row[0] for row in missing]
     assert without.id in ids
     assert with_picture.id not in ids
+
+
+@pytest.mark.asyncio
+async def test_wikipedia_source_titles_are_the_kept_ones_best_first(db_pool):
+    """The finder's hints: only validated Wikipedia sources, ordered by quality."""
+    expert = await ExpertRepository(db_pool).create(
+        "hints-expert", "Thomistic Philosophy", owner_id=OWNER, tier=ExpertTier.STANDARD
+    )
+    async with db_pool.acquire() as conn:
+        await conn.executemany(
+            """
+            INSERT INTO sources (expert_id, url, title, source_type, passed, quality_score)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            """,
+            [
+                (
+                    expert.id,
+                    "https://en.wikipedia.org/wiki/Thomism",
+                    "Thomism",
+                    "wikipedia",
+                    True,
+                    7.0,
+                ),
+                (
+                    expert.id,
+                    "https://en.wikipedia.org/wiki/Summa",
+                    "Summa Theologica",
+                    "wikipedia",
+                    True,
+                    9.0,
+                ),
+                (
+                    expert.id,
+                    "https://en.wikipedia.org/wiki/Dropped",
+                    "Dropped",
+                    "wikipedia",
+                    False,
+                    9.5,
+                ),
+                (expert.id, "https://example.org/paper", "A paper", "openalex", True, 9.9),
+            ],
+        )
+
+    titles = await ExpertPictureRepository(db_pool).wikipedia_source_titles(expert.id)
+
+    assert titles == ("Summa Theologica", "Thomism")
