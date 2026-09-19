@@ -10,7 +10,7 @@ import { cn } from '@/lib/cn'
  */
 
 const field = [
-  'w-full rounded-row border border-border bg-raised px-2.5 text-sm text-fg',
+  'w-full border border-border bg-raised text-sm text-fg',
   'placeholder:text-fg-3',
   'transition-[border-color,background-color] duration-(--dur-1)',
   'hover:border-fg-4',
@@ -20,11 +20,17 @@ const field = [
 ].join(' ')
 
 export function Input({ className, ...props }: React.ComponentProps<'input'>) {
-  return <input {...props} className={cn(field, 'h-(--row-h)', className)} />
+  // A pill, whatever height a caller gives it; the padding clears the curve.
+  return <input {...props} className={cn(field, 'h-(--row-h) rounded-full px-3.5', className)} />
 }
 
 export function Textarea({ className, ...props }: React.ComponentProps<'textarea'>) {
-  return <textarea {...props} className={cn(field, 'py-2 leading-relaxed', className)} />
+  return (
+    <textarea
+      {...props}
+      className={cn(field, 'rounded-card px-3.5 py-2.5 leading-relaxed', className)}
+    />
+  )
 }
 
 export function Label({ className, ...props }: React.ComponentProps<'label'>) {

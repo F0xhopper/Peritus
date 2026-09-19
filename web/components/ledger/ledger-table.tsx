@@ -12,7 +12,7 @@ import type { LedgerSource, SourceSort } from '@/lib/api/types'
 /**
  * The sources, as a table.
  *
- * 28px rows (40px on touch, from `--table-row-h`), a sticky header, and a
+ * 40px rows (44px on touch, from `--table-row-h`), a sticky header, and a
  * horizontal scroll container with the title column `sticky left-0` at `md` —
  * a table is one of the three things allowed to scroll sideways, and only
  * inside its own box.
@@ -69,19 +69,19 @@ export function LedgerTable({
   return (
     <div
       className={cn(
-        'overflow-x-auto rounded-card bg-panel',
+        'overflow-x-auto rounded-card border border-border-soft bg-panel',
         'transition-opacity duration-(--dur-1)',
         pending && 'opacity-60'
       )}
     >
-      <table className="w-full min-w-[560px] table-fixed border-collapse text-sm">
+      <table className="w-full min-w-[600px] table-fixed border-collapse text-sm">
         <colgroup>
           <col />
           <col className="hidden w-40 lg:table-column" />
-          <col className="w-28" />
+          <col className="w-32" />
           <col className="hidden w-24 lg:table-column" />
-          <col className="w-20" />
-          <col className="w-8" />
+          <col className="w-28" />
+          <col className="w-10" />
         </colgroup>
         <thead className="sticky top-0 z-10 bg-panel">
           <tr>
@@ -92,7 +92,7 @@ export function LedgerTable({
                 className={cn(
                   // `font-normal`: a `<th>` is bold by default, and bold 11px
                   // capitals read as shouting next to the rows beneath.
-                  'border-b border-border px-2 py-1.5 text-label font-normal tracking-[0.04em] whitespace-nowrap text-fg-3 uppercase',
+                  'border-b border-border-soft px-4 py-2 text-label font-normal tracking-[0.04em] whitespace-nowrap text-fg-3 uppercase',
                   column.align === 'right' ? 'text-right' : 'text-left',
                   column.wide && 'hidden lg:table-cell',
                   // The title column stays put while the rest scrolls.
@@ -124,12 +124,12 @@ export function LedgerTable({
                 )}
               </th>
             ))}
-            <th scope="col" className="border-b border-border">
+            <th scope="col" className="border-b border-border-soft">
               <span className="sr-only">Details</span>
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="[&>tr:last-child>td]:border-b-0">
           {sources.map((source) => (
             <tr
               key={source.id}
@@ -156,7 +156,7 @@ export function LedgerTable({
                 <td
                   key={column.key}
                   className={cn(
-                    'overflow-hidden border-b border-border-soft px-2',
+                    'overflow-hidden border-b border-border-soft px-4',
                     column.align === 'right' ? 'text-right' : 'text-left',
                     column.wide && 'hidden lg:table-cell',
                     column.key === 'title' &&
@@ -166,7 +166,7 @@ export function LedgerTable({
                   <Cell column={column.key} source={source} />
                 </td>
               ))}
-              <td className="border-b border-border-soft pr-1.5">
+              <td className="border-b border-border-soft pr-3">
                 <ChevronRight
                   aria-hidden="true"
                   className="size-3.5 text-fg-4 transition-colors duration-(--dur-1) group-hover:text-fg-2"
@@ -189,9 +189,11 @@ function Cell({ column, source }: { column: string; source: LedgerSource }) {
             type={source.source_type}
             className="text-fg-3 transition-colors duration-(--dur-1) group-hover:text-fg-2"
           />
-          <span className="block min-w-0 truncate text-fg-2" title={source.title}>
+          <span className="block min-w-0 truncate font-medium text-fg" title={source.title}>
             {source.title}
-            {source.author && <span className="ml-1.5 text-xs text-fg-3">{source.author}</span>}
+            {source.author && (
+              <span className="ml-1.5 text-xs font-normal text-fg-3">{source.author}</span>
+            )}
           </span>
         </span>
       )

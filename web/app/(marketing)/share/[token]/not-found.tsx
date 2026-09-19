@@ -16,7 +16,7 @@ export default function ShareNotFound() {
       </p>
       <Link
         href="/"
-        className="mt-5 inline-flex h-(--btn-lg) items-center rounded-row border border-border px-4 text-sm text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
+        className="mt-5 inline-flex h-(--btn-lg) items-center rounded-full border border-border px-4 text-sm text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
       >
         What is Peritus?
       </Link>

@@ -103,7 +103,7 @@ export function AssistantCard({
   return (
     <article
       className={cn(
-        'cv-auto rounded-card bg-panel p-3 md:p-4',
+        'cv-auto rounded-card border border-border-soft bg-panel p-3 md:p-4',
         'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fade-in',
         className
       )}

@@ -36,7 +36,7 @@ export function PasswordInput({
         aria-label={visible ? 'Hide password' : 'Show password'}
         aria-pressed={visible}
         className={cn(
-          'absolute inset-y-0 right-0 flex w-(--row-h) items-center justify-center rounded-r-row',
+          'absolute inset-y-0 right-1 flex w-(--row-h) items-center justify-center rounded-r-full',
           'text-fg-3 transition-colors duration-(--dur-1) hover:text-fg',
           'focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-fg'
         )}

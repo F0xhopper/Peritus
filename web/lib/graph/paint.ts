@@ -245,8 +245,8 @@ export function readColours(element: Element): PaintColours {
   const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
   return {
     expert: read('--expert', '#8b7cf6'),
-    fg: read('--fg', '#ececee'),
+    fg: read('--fg', '#fafafa'),
     fg3: read('--fg-3', '#6b6b73'),
-    border: read('--border', '#26262a'),
+    border: read('--border', '#2e2e2e'),
   }
 }

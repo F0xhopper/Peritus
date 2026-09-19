@@ -117,7 +117,7 @@ test('the sidebar folds away, and says so on the next load', async ({ page }, te
 
   // And the column's edge is a wider mouse target for the same toggle.
   const edge = await sidebar.evaluate(
-    (el) => el.closest('.bg-panel')!.getBoundingClientRect().right
+    (el) => el.closest('[data-sidebar]')!.getBoundingClientRect().right
   )
   await page.mouse.click(edge + 4, 500)
   await expect(sidebar).toBeHidden()

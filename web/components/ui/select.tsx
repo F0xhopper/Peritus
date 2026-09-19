@@ -13,8 +13,8 @@ export function Select({ className, ...props }: React.ComponentProps<'select'>) 
     <select
       {...props}
       className={cn(
-        'h-(--row-h) rounded-row border border-border bg-raised px-2 pr-7 text-sm text-fg',
-        'appearance-none bg-[length:12px] bg-[position:right_8px_center] bg-no-repeat',
+        'h-(--row-h) rounded-full border border-border bg-raised pr-8 pl-3.5 text-sm text-fg',
+        'appearance-none bg-[length:12px] bg-[position:right_12px_center] bg-no-repeat',
         "bg-[url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' fill='none' stroke='%236b6b73' stroke-width='1.5'><path d='M3 4.5 6 7.5 9 4.5'/></svg>\")]",
         'transition-colors duration-(--dur-1) hover:border-fg-4 focus:border-expert focus:outline-none',
         className

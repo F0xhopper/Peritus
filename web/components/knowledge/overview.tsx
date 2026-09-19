@@ -298,7 +298,12 @@ function Stat({
 }) {
   return (
     <div
-      className={cn('min-w-0 rounded-card bg-raised/60', compact ? 'px-2 py-1.5' : 'px-2.5 py-2')}
+      className={cn(
+        'min-w-0 rounded-card border border-border-soft',
+        // Folded above the List it is already inside a card; in its own column
+        // it stands on the ground.
+        compact ? 'bg-raised/60 px-2.5 py-1.5' : 'bg-panel px-3 py-2.5'
+      )}
     >
       <dt className="truncate text-label tracking-[0.04em] text-fg-3 uppercase">{label}</dt>
       <dd

@@ -36,7 +36,7 @@ export function LedgerCards({
             className={cn(
               // Surface, not border — depth comes from the panel step, and the
               // selected card is the one that gains a ring.
-              'w-full rounded-card bg-panel p-3 text-left',
+              'w-full rounded-card border border-border-soft bg-panel p-3 text-left',
               'transition-colors duration-(--dur-1)',
               selectedId === source.id ? 'ring-1 ring-fg-3 ring-inset' : 'hover:bg-raised'
             )}

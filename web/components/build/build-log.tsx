@@ -140,7 +140,7 @@ export function BuildLog({
         role="log"
         aria-live="off"
         aria-label="Build log"
-        className="anchor-none h-full overflow-y-auto overscroll-contain pan-y rounded-card bg-panel font-mono text-xs"
+        className="anchor-none h-full overflow-y-auto overscroll-contain pan-y rounded-card border border-border-soft bg-panel font-mono text-xs"
       >
         {items.length === 0 ? (
           <p className="p-3 text-fg-3">

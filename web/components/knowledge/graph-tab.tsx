@@ -113,7 +113,7 @@ export function GraphTab({
         <GraphLimit id="graph-limit" limit={limit} pending={pending} onLimit={onLimit} />
       </div>
 
-      <p className="pointer-events-none absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] rounded-row bg-panel/90 px-2 py-1 text-xs text-fg-3">
+      <p className="pointer-events-none absolute bottom-3 left-3 max-w-[calc(100%-1.5rem)] rounded-row border border-border-soft bg-panel/90 px-3 py-1 text-xs text-fg-3">
         {formatNumber(graph.nodes.length)} of {formatNumber(graph.total_nodes)} concepts ·{' '}
         {formatNumber(graph.edges.length)} links
         {graph.truncated && <span className="ml-1.5">busiest first</span>}

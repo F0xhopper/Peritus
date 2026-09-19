@@ -26,7 +26,12 @@ export function GraphLimit({
   className?: string
 }) {
   return (
-    <div className={cn('flex items-center gap-2 rounded-row bg-raised/95 px-2 py-1.5', className)}>
+    <div
+      className={cn(
+        'flex items-center gap-2 rounded-row border border-border bg-raised/95 px-3 py-1.5',
+        className
+      )}
+    >
       <label htmlFor={id} className="text-xs text-fg-3">
         Nodes
       </label>

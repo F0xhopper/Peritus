@@ -37,7 +37,7 @@ export function SkeletonTopBar({
   titleWidth?: string
 }) {
   return (
-    <div className="flex h-topbar-touch shrink-0 items-center gap-2 border-b border-border-soft px-3 md:h-topbar">
+    <div className="flex h-topbar-touch shrink-0 items-center gap-2 border-b border-border-soft px-3 md:h-topbar md:px-4">
       {crumb && (
         <>
           <Skeleton className="size-5 rounded-chip" />

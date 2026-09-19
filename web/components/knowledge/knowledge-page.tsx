@@ -752,14 +752,14 @@ export function KnowledgePage({
                   handleRef={canvas}
                 />
                 {!map.computed && (
-                  <p className="pointer-events-none absolute right-3 bottom-14 left-3 mx-auto w-fit max-w-full rounded-row bg-panel/90 px-2 py-1 text-center text-xs text-fg-3">
+                  <p className="pointer-events-none absolute right-3 bottom-14 left-3 mx-auto w-fit max-w-full rounded-row border border-border-soft bg-panel/90 px-3 py-1 text-center text-xs text-fg-3">
                     Concepts are still being extracted. This expert may already be answering
                     questions.
                   </p>
                 )}
                 {cited && <CitedChip onClear={() => writeParams({ cited: null })} />}
                 {expandedLabel && (
-                  <div className="absolute top-3 right-3 flex items-center gap-1 rounded-row bg-panel/90 py-1 pr-1 pl-2 text-xs text-fg-2">
+                  <div className="absolute top-3 right-3 flex items-center gap-1 rounded-row border border-border-soft bg-panel/90 py-1 pr-1 pl-3 text-xs text-fg-2">
                     Every concept in {expandedLabel}
                     <button
                       type="button"
@@ -772,7 +772,7 @@ export function KnowledgePage({
                   </div>
                 )}
                 <MapLegend disputed={map.concepts.some((concept) => concept.disputes > 0)} />
-                <div className="absolute right-3 bottom-3 flex items-center gap-0.5 rounded-row bg-panel/90 p-0.5">
+                <div className="absolute right-3 bottom-3 flex items-center gap-0.5 rounded-row border border-border-soft bg-panel/90 p-0.5">
                   <Button
                     variant="ghost"
                     size="icon-sm"
@@ -842,7 +842,9 @@ export function KnowledgePage({
                 above the sources it summarises. */}
             {hasOverview && (
               <div className="px-3 pt-3 md:px-4 md:pt-4 lg:hidden">
-                <div className="rounded-card bg-panel p-3">{overview(true)}</div>
+                <div className="rounded-card border border-border-soft bg-panel p-3">
+                  {overview(true)}
+                </div>
               </div>
             )}
             <ListView
@@ -869,7 +871,7 @@ export function KnowledgePage({
         {hasOverview && overviewOpen && (
           <div
             className={cn(
-              'scroll-col hidden w-72 shrink-0 bg-panel p-3 lg:block xl:w-context',
+              'scroll-col hidden w-72 shrink-0 border-l border-border-soft bg-bg p-4 lg:block xl:w-context',
               (panel || graphPanel) && 'xl:hidden'
             )}
           >
@@ -933,7 +935,7 @@ function CitedChip({ onClear, bottom = false }: { onClear: () => void; bottom?: 
   return (
     <div
       className={cn(
-        'absolute left-3 flex items-center gap-1 rounded-row bg-panel/90 py-1 pr-1 pl-2 text-xs text-fg-2',
+        'absolute left-3 flex items-center gap-1 rounded-row border border-border-soft bg-panel/90 py-1 pr-1 pl-3 text-xs text-fg-2',
         // The Flow's column titles are pinned to its top edge.
         bottom ? 'bottom-3' : 'top-3'
       )}
@@ -969,7 +971,7 @@ function MapLegend({ disputed }: { disputed: boolean }) {
   return (
     <ul
       aria-label="What the map's marks mean"
-      className="pointer-events-none absolute bottom-3 left-3 hidden max-w-[calc(100%-9rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-row bg-panel/90 px-2 py-1.5 text-label text-fg-3 sm:flex"
+      className="pointer-events-none absolute bottom-3 left-3 hidden max-w-[calc(100%-9rem)] flex-wrap items-center gap-x-3 gap-y-1 rounded-row border border-border-soft bg-panel/90 px-3 py-1.5 text-label text-fg-3 sm:flex"
     >
       {LEGEND.map((item) => (
         <li key={item.mark} className="inline-flex items-center gap-1">

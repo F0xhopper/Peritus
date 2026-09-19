@@ -36,7 +36,9 @@ const button = cva(
         // `opacity`, not `brightness`: near-white cannot get brighter, so the
         // old hover was invisible in the dark theme.
         primary: 'bg-accent text-accent-fg hover:opacity-90',
-        secondary: 'bg-raised text-fg hover:bg-border',
+        // A hairline on the quiet fill: on a black ground `--raised` alone is a
+        // smudge, and the edge is what makes it a control.
+        secondary: 'border border-border bg-raised text-fg hover:bg-border',
         outline: 'border border-border text-fg-2 hover:bg-raised hover:text-fg',
         ghost: 'text-fg-2 hover:bg-raised hover:text-fg',
         danger: 'bg-bad/12 text-bad hover:bg-bad/20',
@@ -45,8 +47,10 @@ const button = cva(
       size: {
         // Heights come from the `--row-h` family, so every control grows to
         // 44px under a coarse pointer without a single component knowing.
-        sm: 'h-(--icon-btn-sm) rounded-chip px-2 text-xs',
-        md: 'h-(--row-h) rounded-row px-3',
+        // Every size is a pill, and the icon sizes are circles. `rounded-full`
+        // rather than the row token, because `lg` is taller than a row.
+        sm: 'h-(--icon-btn-sm) rounded-full px-2.5 text-xs',
+        md: 'h-(--row-h) rounded-full px-3.5',
         /**
          * `md`, plus "be square once the label is hidden".
          *
@@ -57,10 +61,10 @@ const button = cva(
          * the height come from the same token pair, so it is square under both
          * pointers.
          */
-        action: 'h-(--row-h) w-(--icon-btn) rounded-row px-0 sm:w-auto sm:pl-2.5 sm:pr-3',
-        lg: 'h-(--btn-lg) rounded-row px-4',
-        icon: 'size-(--icon-btn) rounded-row',
-        'icon-sm': 'size-(--icon-btn-sm) rounded-chip',
+        action: 'h-(--row-h) w-(--icon-btn) rounded-full px-0 sm:w-auto sm:pl-3 sm:pr-3.5',
+        lg: 'h-(--btn-lg) rounded-full px-5',
+        icon: 'size-(--icon-btn) rounded-full',
+        'icon-sm': 'size-(--icon-btn-sm) rounded-full',
       },
     },
     defaultVariants: { variant: 'secondary', size: 'md' },

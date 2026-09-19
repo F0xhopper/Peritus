@@ -24,7 +24,12 @@ export function StatTile({
   // tile a role-based handle that does not collide with the same word used as a
   // heading or a sidebar row elsewhere on the page.
   return (
-    <dl className={cn('container-tile rounded-card bg-panel p-3', className)}>
+    <dl
+      className={cn(
+        'container-tile rounded-card border border-border-soft bg-panel px-4 py-3.5',
+        className
+      )}
+    >
       <dt className="text-label tracking-[0.04em] text-fg-3 uppercase">{label}</dt>
       <dd
         className={cn('mt-1.5 text-stat leading-none font-medium', tone ? TONES[tone] : 'text-fg')}

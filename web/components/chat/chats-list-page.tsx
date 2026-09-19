@@ -161,7 +161,7 @@ export function ChatsListPage({
                       <span className="shrink-0 text-xs text-fg-3">{list.length}</span>
                     </Link>
 
-                    <ul className="mt-2 space-y-0.5 rounded-card bg-panel p-1">
+                    <ul className="mt-2 space-y-0.5 rounded-card border border-border-soft bg-panel p-1">
                       {list.map((conversation) => (
                         <li key={conversation.id} className="group relative">
                           <Link

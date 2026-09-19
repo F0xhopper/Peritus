@@ -27,7 +27,7 @@ export function CreditLedger({
   return (
     <div className={cn('container-row', className)}>
       {/* Table form. */}
-      <div className="hidden overflow-x-auto rounded-card bg-panel @md:block">
+      <div className="hidden overflow-x-auto rounded-card border border-border-soft bg-panel @md:block">
         <table className="w-full text-sm">
           <thead>
             <tr>
@@ -36,7 +36,7 @@ export function CreditLedger({
                   key={label}
                   scope="col"
                   className={cn(
-                    'border-b border-border px-2 py-1.5 text-label tracking-[0.04em] whitespace-nowrap text-fg-3 uppercase',
+                    'border-b border-border-soft px-4 py-2 text-label font-normal tracking-[0.04em] whitespace-nowrap text-fg-3 uppercase',
                     index >= 2 ? 'text-right' : 'text-left'
                   )}
                 >
@@ -45,13 +45,13 @@ export function CreditLedger({
               ))}
             </tr>
           </thead>
-          <tbody>
+          <tbody className="[&>tr:last-child>td]:border-b-0">
             {entries.map((entry) => (
               <tr key={entry.id} className="h-(--table-row-h)">
-                <td className="border-b border-border-soft px-2 whitespace-nowrap text-fg-3">
+                <td className="border-b border-border-soft px-4 whitespace-nowrap text-fg-3">
                   <DateText iso={entry.created_at} withTime />
                 </td>
-                <td className="border-b border-border-soft px-2">
+                <td className="border-b border-border-soft px-4">
                   <span className="text-fg-2">{humanise(entry.entry_type)}</span>
                   {entry.reason && <span className="ml-1.5 text-xs text-fg-3">{entry.reason}</span>}
                   {entry.job_id !== null && (
@@ -60,16 +60,16 @@ export function CreditLedger({
                 </td>
                 <td
                   className={cn(
-                    'border-b border-border-soft px-2 text-right font-mono',
+                    'border-b border-border-soft px-4 text-right font-mono',
                     entry.delta > 0 ? 'text-ok' : entry.delta < 0 ? 'text-fg-2' : 'text-fg-3'
                   )}
                 >
                   {entry.delta > 0 ? `+${entry.delta}` : entry.delta}
                 </td>
-                <td className="border-b border-border-soft px-2 text-right text-xs text-fg-3">
+                <td className="border-b border-border-soft px-4 text-right text-xs text-fg-3">
                   {entry.tier ? humanise(entry.tier) : '—'}
                 </td>
-                <td className="border-b border-border-soft px-2 text-right font-mono text-xs text-fg-3">
+                <td className="border-b border-border-soft px-4 text-right font-mono text-xs text-fg-3">
                   {formatUsd(entry.cost_usd)}
                 </td>
               </tr>
@@ -81,7 +81,7 @@ export function CreditLedger({
       {/* Card form, below the container's `md`. */}
       <ul className="space-y-2 @md:hidden">
         {entries.map((entry) => (
-          <li key={entry.id} className="rounded-card bg-panel p-2.5">
+          <li key={entry.id} className="rounded-card border border-border-soft bg-panel p-2.5">
             <div className="flex items-baseline justify-between gap-2">
               <span className="min-w-0 truncate text-sm text-fg-2">
                 {humanise(entry.entry_type)}

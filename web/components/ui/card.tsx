@@ -2,8 +2,7 @@ import { cn } from '@/lib/cn'
 
 /**
  * shadcn/ui's `Card` family on this app's surfaces: `bg-panel` on `bg-bg`,
- * a border only because the auth card floats alone on the page (AGENTS.md:
- * depth is the surface step; a lone card on the ground needs its edge).
+ * with the hairline edge every container has (AGENTS.md, _Colour_).
  */
 
 export function Card({ className, ...props }: React.ComponentProps<'div'>) {
@@ -11,7 +10,7 @@ export function Card({ className, ...props }: React.ComponentProps<'div'>) {
     <div
       data-slot="card"
       className={cn(
-        'flex flex-col gap-5 rounded-panel border border-border bg-panel py-5',
+        'flex flex-col gap-6 rounded-panel border border-border-soft bg-panel py-6',
         className
       )}
       {...props}
@@ -21,7 +20,7 @@ export function Card({ className, ...props }: React.ComponentProps<'div'>) {
 
 export function CardHeader({ className, ...props }: React.ComponentProps<'div'>) {
   return (
-    <div data-slot="card-header" className={cn('flex flex-col gap-1 px-5', className)} {...props} />
+    <div data-slot="card-header" className={cn('flex flex-col gap-1 px-6', className)} {...props} />
   )
 }
 
@@ -42,11 +41,11 @@ export function CardDescription({ className, ...props }: React.ComponentProps<'p
 }
 
 export function CardContent({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div data-slot="card-content" className={cn('px-5', className)} {...props} />
+  return <div data-slot="card-content" className={cn('px-6', className)} {...props} />
 }
 
 export function CardFooter({ className, ...props }: React.ComponentProps<'div'>) {
   return (
-    <div data-slot="card-footer" className={cn('flex items-center px-5', className)} {...props} />
+    <div data-slot="card-footer" className={cn('flex items-center px-6', className)} {...props} />
   )
 }

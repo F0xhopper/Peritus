@@ -121,7 +121,7 @@ export function NewChatComposer({
   }
 
   return (
-    <div className={cn('rounded-card border border-border bg-panel p-2', className)}>
+    <div className={cn('rounded-panel border border-border bg-panel p-2.5', className)}>
       <Textarea
         id={ASK_FIELD_ID}
         ref={field}

@@ -40,9 +40,10 @@ import type { ConversationSummary, CreditState, ExpertSummary } from '@/lib/api/
  * The second column: the selected expert's pages and chats, or — on Home — the
  * workspace.
  *
- * Active rows are a rounded `--raised` fill with no rule and no left bar. That
- * is the third reference's rule (web-design.md §1c): grouping is done by
- * rounded surfaces, so the shell carries far fewer borders.
+ * Active rows are a `--raised` pill with a hairline edge and no left bar; a
+ * resting row is text on the ground. The column itself is on the ground too,
+ * and its trailing hairline is the only rule between the navigation and the
+ * page.
  *
  * **This column never lists the experts.** The rail immediately to its left
  * *is* the expert list — one avatar each, with the name in a tooltip — so a
@@ -97,7 +98,13 @@ export function ExpertSidebar({
   if (collapsible && sidebarCollapsed) return <SidebarRail collapsed />
 
   return (
-    <div className={cn('relative flex h-full min-h-0 flex-col bg-panel', className)}>
+    <div
+      data-sidebar
+      className={cn(
+        'relative flex h-full min-h-0 flex-col border-r border-border-soft bg-bg',
+        className
+      )}
+    >
       {collapsible && <SidebarRail collapsed={false} />}
       {showSearch && <SearchTrigger collapsible={collapsible} />}
       {selected ? (
@@ -143,7 +150,7 @@ function ExpertForm({
       <div className="shrink-0 p-2">
         <Link
           href={base}
-          className="flex items-start gap-2.5 rounded-card bg-expert-soft p-2.5 transition-colors duration-(--dur-1) hover:bg-expert/15"
+          className="flex items-start gap-2.5 rounded-card border border-border-soft bg-panel p-2.5 transition-colors duration-(--dur-1) hover:border-border hover:bg-raised"
         >
           <Avatar expert={expert} size={32} />
           <span className="min-w-0 flex-1">
@@ -215,7 +222,7 @@ function ExpertForm({
 
         <div className="pan-y min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {filtered.length === 0 ? (
-            <p className="px-1.5 py-2 text-xs text-fg-3">
+            <p className="px-3 py-2 text-xs text-fg-3">
               {conversations.length > 0
                 ? 'No chats match.'
                 : expert.readiness !== 'pending'
@@ -311,7 +318,7 @@ function HomeForm({
 
         <div className="pan-y min-h-0 flex-1 overflow-y-auto overscroll-contain">
           {filtered.length === 0 ? (
-            <p className="px-1.5 py-2 text-xs text-fg-3">
+            <p className="px-3 py-2 text-xs text-fg-3">
               {conversations.length === 0
                 ? 'No chats yet. Open an expert to ask it something.'
                 : 'No chats match.'}
@@ -348,19 +355,24 @@ function SearchTrigger({ collapsible }: { collapsible: boolean }) {
   const shortcut = mac === null ? null : mac ? '⌘K' : 'Ctrl K'
 
   return (
-    <div className="flex shrink-0 items-center gap-1 px-2 pt-2">
+    // The top bar's height and the top bar's hairline, so the line under the
+    // page's bar carries on across the navigation to the window's edge.
+    <div className="flex h-topbar shrink-0 items-center gap-1 border-b border-border-soft px-2">
       <button
         type="button"
         onClick={openPalette}
         className={cn(
-          'flex h-(--row-h) w-full items-center gap-2 rounded-row border border-border bg-raised px-2 text-sm text-fg-3',
+          'flex h-(--row-h) w-full items-center gap-2 rounded-full border border-border bg-panel pr-1.5 pl-3 text-sm text-fg-3',
           'transition-colors duration-(--dur-1) hover:border-fg-4 hover:text-fg-2'
         )}
       >
         <Search className="size-4 shrink-0" />
         <span className="min-w-0 flex-1 truncate text-left">Search</span>
         {shortcut && (
-          <kbd aria-hidden className="hidden font-sans text-xs text-fg-3 pointer-fine:inline">
+          <kbd
+            aria-hidden
+            className="hidden rounded-full border border-border bg-raised px-1.5 font-sans text-label leading-[18px] text-fg-2 pointer-fine:inline"
+          >
             {shortcut}
           </kbd>
         )}
@@ -377,7 +389,7 @@ function SearchTrigger({ collapsible }: { collapsible: boolean }) {
             onClick={toggleSidebar}
             aria-label="Collapse the sidebar"
             className={cn(
-              'grid size-(--row-h) shrink-0 place-items-center rounded-row text-fg-3',
+              'grid size-(--row-h) shrink-0 place-items-center rounded-full text-fg-3',
               'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg'
             )}
           >
@@ -466,18 +478,26 @@ function SidebarRow({
       prefetch
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex h-(--row-h) items-center gap-2 rounded-row px-1.5 text-sm',
-        'transition-colors duration-(--dur-1)',
-        active ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg'
+        'flex h-(--row-h) items-center gap-2.5 rounded-full px-3 text-sm',
+        'ring-1 transition-colors duration-(--dur-1) ring-inset',
+        active
+          ? 'bg-raised font-medium text-fg ring-border'
+          : 'text-fg-2 ring-transparent hover:bg-raised hover:text-fg'
       )}
     >
-      <Icon className={cn('size-4 shrink-0', active ? 'text-fg-2' : 'text-fg-3')} />
+      <Icon className={cn('size-4 shrink-0', active ? 'text-fg' : 'text-fg-3')} />
       <span className="min-w-0 flex-1 truncate">{children}</span>
       {/* `title` only. An `aria-label` here would rename the whole row — the
           Credits link announced itself as "Credits 2 credits" — and make a
           plain span something a label query can find. */}
       {shown !== null && (
-        <span title={countLabel} className="text-xs text-fg-3">
+        <span
+          title={countLabel}
+          className={cn(
+            'rounded-full border px-1.5 text-label leading-[18px]',
+            active ? 'border-transparent bg-fg text-bg' : 'border-border text-fg-3'
+          )}
+        >
           {shown}
         </span>
       )}
@@ -503,7 +523,7 @@ function SectionHeader({
   action?: { href: string; label: string }
 }) {
   return (
-    <div className="flex h-(--row-h) shrink-0 items-center gap-1 px-1.5">
+    <div className="flex h-(--row-h) shrink-0 items-center gap-1 px-3">
       <span className="text-label tracking-[0.04em] text-fg-3 uppercase">{label}</span>
       {count !== undefined && count > 0 && <span className="text-xs text-fg-3">{count}</span>}
       {action && (
@@ -550,7 +570,7 @@ function ChatList({ chats, experts }: { chats: ConversationSummary[]; experts?: 
       {groups.map((group) => (
         <div key={group.label ?? 'all'} className="space-y-0.5">
           {group.label && (
-            <p className="px-1.5 pt-2 pb-0.5 text-label tracking-[0.04em] text-fg-3 uppercase">
+            <p className="px-3 pt-2 pb-0.5 text-label tracking-[0.04em] text-fg-3 uppercase">
               {group.label}
             </p>
           )}
@@ -581,8 +601,8 @@ function ChatRow({
   return (
     <div
       className={cn(
-        'group relative rounded-row transition-colors duration-(--dur-1)',
-        active ? 'bg-raised' : 'hover:bg-raised'
+        'group relative rounded-full ring-1 transition-colors duration-(--dur-1) ring-inset',
+        active ? 'bg-raised ring-border' : 'ring-transparent hover:bg-raised'
       )}
     >
       <Link
@@ -590,8 +610,8 @@ function ChatRow({
         prefetch
         aria-current={active ? 'page' : undefined}
         className={cn(
-          'flex h-(--row-h) items-center gap-2 rounded-row px-1.5 pr-8 text-sm',
-          active ? 'text-fg' : 'text-fg-2 group-hover:text-fg'
+          'flex h-(--row-h) items-center gap-2 rounded-full pr-8 pl-3 text-sm',
+          active ? 'font-medium text-fg' : 'text-fg-2 group-hover:text-fg'
         )}
       >
         {expert && (

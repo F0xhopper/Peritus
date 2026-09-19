@@ -171,7 +171,7 @@ export function Transcript({
            * gone wrong. The record has to be as durable as the question is.
            */}
           {unanswered && (
-            <div className="rounded-card bg-panel p-3 md:p-4">
+            <div className="rounded-card border border-border-soft bg-panel p-3 md:p-4">
               <p className="text-sm text-fg-2">
                 No answer was recorded for this question. The answer was interrupted, or the server
                 could not finish it.
@@ -300,7 +300,7 @@ function ChatIntro({
   const concepts = intro.concepts.slice(0, 5)
 
   return (
-    <section className="rounded-card bg-panel p-3 md:p-4">
+    <section className="rounded-card border border-border-soft bg-panel p-3 md:p-4">
       <div className="flex items-start gap-3">
         <Avatar expert={expert} size={32} />
         <div className="min-w-0 flex-1">

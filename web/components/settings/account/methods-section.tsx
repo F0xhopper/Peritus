@@ -38,7 +38,7 @@ export function MethodsSection({ account }: { account: Account }) {
       title="Sign-in methods"
       description="Any of these signs you in to the same account."
     >
-      <ul className="divide-y divide-border-soft rounded-card bg-raised/40">
+      <ul className="divide-y divide-border-soft rounded-card border border-border-soft bg-panel">
         <MethodRow
           icon={<Mail className="size-4 text-fg-2" aria-hidden="true" />}
           name="Email"
@@ -111,7 +111,7 @@ function MethodRow({
 }) {
   return (
     <li className="flex items-center gap-3 px-3 py-2.5">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-row bg-panel">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-raised">
         {icon}
       </span>
       <div className="min-w-0 flex-1">

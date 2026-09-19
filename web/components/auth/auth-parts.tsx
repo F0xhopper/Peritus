@@ -29,7 +29,7 @@ export function GoogleButton({
       href={href}
       aria-disabled={disabled || undefined}
       className={cn(
-        'flex h-(--btn-lg) w-full items-center justify-center gap-2.5 rounded-row',
+        'flex h-(--btn-lg) w-full items-center justify-center gap-2.5 rounded-full',
         'border border-border text-sm font-medium text-fg',
         'transition-colors duration-(--dur-1) hover:bg-raised',
         disabled && 'pointer-events-none opacity-50'
@@ -100,7 +100,7 @@ export function NoAuthNotice({ onContinue }: { onContinue: () => void }) {
       <button
         type="button"
         onClick={onContinue}
-        className="mt-3 h-(--btn-lg) w-full rounded-row bg-accent text-sm font-medium text-accent-fg"
+        className="mt-3 h-(--btn-lg) w-full rounded-full bg-accent text-sm font-medium text-accent-fg"
       >
         Continue
       </button>

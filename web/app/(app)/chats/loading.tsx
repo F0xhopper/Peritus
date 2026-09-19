@@ -16,7 +16,7 @@ export default function Loading() {
                   <Skeleton className="size-5 rounded-chip" />
                   <Skeleton className="h-3.5 w-36" />
                 </div>
-                <div className="mt-2 space-y-0.5 rounded-card bg-panel p-1">
+                <div className="mt-2 space-y-0.5 rounded-card border border-border-soft bg-panel p-1">
                   {Array.from({ length: rows }, (_, i) => (
                     <div key={i} className="flex h-(--row-h) items-center gap-2 px-2">
                       <Skeleton className="h-3.5 flex-1" style={{ maxWidth: `${70 - i * 12}%` }} />

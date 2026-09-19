@@ -57,7 +57,7 @@ export function TopicComposer({
   }
 
   return (
-    <form onSubmit={submit} className="rounded-card bg-panel p-3">
+    <form onSubmit={submit} className="rounded-card border border-border-soft bg-panel p-3">
       <div className="flex items-center gap-2">
         <input
           ref={input}

@@ -18,7 +18,7 @@ export function Chip({
   return (
     <span
       className={cn(
-        'inline-flex h-(--chip-h) shrink-0 items-center rounded-chip px-1.5 text-xs font-medium',
+        'inline-flex h-(--chip-h) shrink-0 items-center rounded-full px-2 text-xs font-medium',
         TONES[tone],
         className
       )}

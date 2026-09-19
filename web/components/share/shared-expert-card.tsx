@@ -93,7 +93,7 @@ export function SharedExpertCard({
         </section>
       )}
 
-      <section className="mt-10 rounded-card bg-panel p-4">
+      <section className="mt-10 rounded-card border border-border-soft bg-panel p-4">
         <h2 className="flex items-center gap-2 text-base font-medium text-fg">
           <MessageSquare className="size-4 text-fg-3" aria-hidden="true" />
           {answerable ? `Ask ${name}` : `${name} is still being built`}
@@ -109,7 +109,7 @@ export function SharedExpertCard({
           ) : (
             <Link
               href={`/login?next=${encodeURIComponent(sharePath(token))}`}
-              className="inline-flex h-(--btn-lg) items-center rounded-row bg-accent px-4 text-sm font-medium text-accent-fg transition-opacity duration-(--dur-1) hover:opacity-90"
+              className="inline-flex h-(--btn-lg) items-center rounded-full bg-accent px-4 text-sm font-medium text-accent-fg transition-opacity duration-(--dur-1) hover:opacity-90"
             >
               Sign in to open it
             </Link>

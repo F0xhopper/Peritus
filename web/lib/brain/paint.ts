@@ -700,13 +700,13 @@ export function readBrainColours(element: Element): BrainColours {
   const style = getComputedStyle(element)
   const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
   return {
-    fg: read('--fg', '#ececee'),
+    fg: read('--fg', '#fafafa'),
     fg2: read('--fg-2', '#b4b4bb'),
     fg3: read('--fg-3', '#8a8a93'),
     fg4: read('--fg-4', '#55555c'),
-    border: read('--border', '#26262a'),
+    border: read('--border', '#2e2e2e'),
     warn: read('--warn', '#e0a526'),
-    bg: read('--bg', '#0f0f11'),
+    bg: read('--bg', '#070707'),
     font: style.fontFamily || 'system-ui, sans-serif',
   }
 }

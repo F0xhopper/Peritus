@@ -41,7 +41,9 @@ export function Tooltip({
         <BaseTooltip.Positioner side={side} sideOffset={8} className="z-50 hidden lg:block">
           <BaseTooltip.Popup
             className={cn(
-              'max-w-64 rounded-chip border border-border bg-raised px-2 py-1 text-xs text-fg-2',
+              // A fixed corner, not the chip token: a tooltip wraps, and a
+              // pill radius on three lines of text is a lozenge.
+              'max-w-64 rounded-[10px] border border-border bg-raised px-2.5 py-1 text-xs text-fg-2',
               'shadow-md shadow-black/25',
               'transition-[opacity,transform] duration-(--dur-1) ease-(--ease-out)',
               'data-ending-style:opacity-0 data-starting-style:opacity-0',

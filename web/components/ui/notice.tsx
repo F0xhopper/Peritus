@@ -36,7 +36,7 @@ export function Notice({
   return (
     <div
       role={tone === 'bad' ? 'alert' : 'status'}
-      className={cn('rounded-card border px-3 py-2.5', wrap, className)}
+      className={cn('rounded-card border px-3.5 py-3', wrap, className)}
     >
       <div className="flex gap-2.5">
         <Icon className="mt-0.5 size-4 shrink-0" aria-hidden="true" />

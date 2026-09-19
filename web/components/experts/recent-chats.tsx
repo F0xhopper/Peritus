@@ -20,7 +20,7 @@ export function RecentChats({
   const byName = new Map(experts.map((expert) => [expert.name, expert]))
 
   return (
-    <ul className={cn('rounded-card bg-panel p-1', className)}>
+    <ul className={cn('rounded-card border border-border-soft bg-panel p-1', className)}>
       {conversations.map((conversation) => {
         // The conversation carries the joined expert columns, so a missing
         // entry in the map (an expert outside this page's list) still renders.

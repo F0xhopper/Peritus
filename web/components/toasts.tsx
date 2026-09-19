@@ -19,14 +19,14 @@ export function Toasts() {
       toastOptions={{
         classNames: {
           toast:
-            'rounded-[10px] border border-border bg-raised text-fg-2 text-sm shadow-lg shadow-black/20',
+            'rounded-card border border-border bg-raised text-fg-2 text-sm shadow-lg shadow-black/40',
           title: 'text-fg font-medium',
           description: 'text-fg-3',
           // `--accent`, not `--expert`: a toast is global chrome and can appear
           // over a page that has no expert, where `--expert` is the root
           // fallback rather than anyone's colour.
-          actionButton: 'rounded-chip bg-accent text-accent-fg text-xs px-2 py-1',
-          cancelButton: 'rounded-chip bg-panel text-fg-3 text-xs px-2 py-1',
+          actionButton: 'rounded-full bg-accent text-accent-fg text-xs px-2.5 py-1',
+          cancelButton: 'rounded-full bg-panel text-fg-3 text-xs px-2.5 py-1',
           error: 'text-bad',
           success: 'text-ok',
         },

@@ -12,7 +12,7 @@ export default function Loading() {
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col gap-4 px-3 py-4 md:px-4">
           <Skeleton className="h-4 w-2/3" />
-          <div className="rounded-card bg-panel p-3 md:p-4">
+          <div className="rounded-card border border-border-soft bg-panel p-3 md:p-4">
             <div className="mb-3 flex items-center gap-2">
               <Skeleton className="size-5 rounded-chip" />
               <Skeleton className="h-3.5 w-32" />

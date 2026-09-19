@@ -31,7 +31,7 @@ export function MenuContent({
       <BaseMenu.Positioner side={side} align={align} sideOffset={4} className="z-50">
         <BaseMenu.Popup
           className={cn(
-            'min-w-44 origin-(--transform-origin) rounded-panel border border-border bg-raised p-1',
+            'min-w-44 origin-(--transform-origin) rounded-panel border border-border bg-raised p-1.5',
             'shadow-lg shadow-black/25 outline-none',
             'transition-[opacity,transform] duration-(--dur-2) ease-(--ease-out)',
             'data-starting-style:scale-[0.98] data-starting-style:opacity-0',
@@ -67,7 +67,7 @@ export function MenuItem({
       disabled={disabled}
       closeOnClick={closeOnClick}
       className={cn(
-        'flex h-(--row-h) cursor-default items-center gap-2 rounded-row px-2 text-sm outline-none',
+        'flex h-(--row-h) cursor-default items-center gap-2 rounded-row px-3 text-sm outline-none',
         'transition-colors duration-(--dur-1)',
         tone === 'danger'
           ? 'text-bad data-highlighted:bg-bad/12'
@@ -96,7 +96,7 @@ export function MenuLinkItem({
       nativeButton={false}
       render={render}
       className={cn(
-        'flex h-(--row-h) items-center gap-2 rounded-row px-2 text-sm text-fg-2 outline-none',
+        'flex h-(--row-h) items-center gap-2 rounded-row px-3 text-sm text-fg-2 outline-none',
         'transition-colors duration-(--dur-1) data-highlighted:bg-border data-highlighted:text-fg',
         className
       )}
@@ -132,7 +132,7 @@ export function MenuLabel({
   // read as belonging to it visually.
   return (
     <BaseMenu.Group>
-      <BaseMenu.GroupLabel className="px-2 pt-1.5 pb-1 text-label tracking-[0.04em] text-fg-3 uppercase">
+      <BaseMenu.GroupLabel className="px-3 pt-1.5 pb-1 text-label tracking-[0.04em] text-fg-3 uppercase">
         {label ?? children}
       </BaseMenu.GroupLabel>
       {label ? children : null}

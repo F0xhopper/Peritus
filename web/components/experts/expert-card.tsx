@@ -1,6 +1,15 @@
 'use client'
 
-import { LogOut, MessageSquare, MoreHorizontal, Orbit, Settings, Trash2, Users } from 'lucide-react'
+import {
+  ArrowUpRight,
+  LogOut,
+  MessageSquare,
+  MoreHorizontal,
+  Orbit,
+  Settings,
+  Trash2,
+  Users,
+} from 'lucide-react'
 import Link from 'next/link'
 import { useState } from 'react'
 import { ViewTransition } from 'react'
@@ -30,15 +39,20 @@ import { apiVoid } from '@/lib/api/client'
 /**
  * One expert on Home.
  *
- * No border and no left rule. The card is a raised surface on the page's own
- * ground, which is the whole of its grouping — a grid of cards each wearing a
- * hairline box *and* a 2px coloured bar on its left was a page made of lines,
- * and the bars were the loudest colour in the product for information the
- * avatar beside them already carried.
+ * Three bands, top to bottom: **who it is** (the avatar at a size that reads as
+ * a face rather than a bullet, the name, the subject and a sentence of the
+ * About), **what it is made of** (sources,
+ * passages, concepts — a full-bleed strip, so the numbers line up across a row
+ * of cards) and **what you can do** (its state, and Ask).
  *
- * The ⋯ menu is visible at all times under `(hover: none)` and on hover
- * otherwise: a hover-only affordance on a touch device is an affordance that
- * does not exist.
+ * A hairline box on the page's ground, like every container. There is still no
+ * coloured bar: the only hue on the card is its status.
+ *
+ * Ask is the quiet button until the card is under the pointer, when it becomes
+ * the primary one — a grid of white pills would be a page of nothing but
+ * buttons, and the card you are pointing at is the one you are about to use.
+ * The ⋯ menu is always visible: a hover-only affordance on a touch device is an
+ * affordance that does not exist, and the card has the room.
  */
 export function ExpertCard({
   expert,
@@ -55,6 +69,8 @@ export function ExpertCard({
   const description = firstSentence(expert.persona_bio)
   const { start: startChat, starting: startingChat } = useStartChat(expert.name)
   const state = dotState(expert.status, expert.readiness, expert.build_active)
+  // Still being built: a count of nothing is "not yet", not a finding.
+  const pending = state !== 'ready'
   const owner = canManage(expert)
   const { leave } = useLeaveExpert(expert.name, displayName(expert))
 
@@ -80,98 +96,93 @@ export function ExpertCard({
           animationDelay: stagger !== null ? `${stagger * 40}ms` : undefined,
         }}
         className={cn(
-          // A column, so the stats row sits on the bottom edge and lines up across
-          // a grid row whether or not a card has a description.
-          'group relative flex flex-col rounded-card bg-panel p-3',
-          'transition-colors duration-(--dur-1) hover:bg-raised',
+          // A column, so the two lower bands sit on the bottom edge and line up
+          // across a grid row whether or not a card has a description.
+          'group relative flex flex-col overflow-hidden rounded-panel border border-border-soft bg-panel',
+          'transition-colors duration-(--dur-1) hover:border-border',
           stagger !== null &&
             'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fill-mode-backwards motion-safe:fade-in motion-safe:slide-in-from-bottom-1'
         )}
       >
         {/* Right padding keeps a long name clear of the absolutely placed ⋯ menu. */}
-        <Link
-          href={base}
-          prefetch
-          className="flex min-h-(--row-h) items-start gap-2.5 pr-(--icon-btn-sm)"
-        >
-          {/* The shared element for the move to the Overview header. */}
-          <ViewTransition name={`sigil-${expert.name}`}>
-            <span>
-              <Avatar expert={expert} size={32} />
-            </span>
-          </ViewTransition>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate text-sm font-medium text-fg">{displayName(expert)}</span>
-              {!owner && (
-                <span title="Shared with you" className="inline-flex shrink-0 text-fg-3">
-                  <Users className="size-3" aria-hidden="true" />
-                  <span className="sr-only">Shared with you</span>
+        <Link href={base} prefetch className="flex flex-1 flex-col p-5">
+          <span className="flex items-center gap-4 pr-(--icon-btn-sm)">
+            {/* The shared element for the move to the Overview header. */}
+            <ViewTransition name={`sigil-${expert.name}`}>
+              {/* `flex`, so the avatar is not sitting on a text baseline: a
+                  picture has none of its own, and the line box it then got was
+                  5px taller than a monogram's. */}
+              <span className="flex shrink-0">
+                <Avatar expert={expert} size={56} />
+              </span>
+            </ViewTransition>
+            <span className="min-w-0 flex-1">
+              <span className="flex min-w-0 items-center gap-1.5">
+                <span className="truncate text-lg leading-snug font-semibold text-fg">
+                  {displayName(expert)}
                 </span>
+                {!owner && (
+                  <span title="Shared with you" className="inline-flex shrink-0 text-fg-3">
+                    <Users className="size-3.5" aria-hidden="true" />
+                    <span className="sr-only">Shared with you</span>
+                  </span>
+                )}
+              </span>
+              {subtitle(expert) && (
+                <span className="mt-1 block truncate text-sm text-fg-3">{subtitle(expert)}</span>
               )}
             </span>
-            {subtitle(expert) && (
-              <span className="mt-0.5 block truncate text-xs text-fg-3">{subtitle(expert)}</span>
-            )}
-            {description && (
-              <span className="mt-1.5 line-clamp-2 text-xs leading-snug text-fg-2">
-                {description}
-              </span>
-            )}
+          </span>
+
+          {/* Three lines' height whether or not there is text, so the strips
+              below line up across a grid row. A build has no persona yet, and
+              an empty gap there read as a card that failed to load. */}
+          <span className="mt-4 line-clamp-3 min-h-[calc(3lh)] text-sm leading-relaxed text-fg-2">
+            {description ??
+              (pending ? (
+                <span className="text-fg-3">
+                  Still reading. Its voice is written once the sources are in.
+                </span>
+              ) : null)}
           </span>
         </Link>
 
-        {/* One line at a fixed height, with or without the Ask button, so every
-            card in the grid lines up. The build date lives on the Overview. */}
-        <div className="mt-auto pt-3">
-          <dl className="flex min-h-(--icon-btn-sm) items-center gap-x-3 text-xs">
-            <div className="flex min-w-0 items-center gap-1">
-              <dt className="sr-only">Status</dt>
-              <dd className="flex min-w-0 items-center gap-1.5">
-                <StatusDot state={state} />
-                <span className={cn('truncate', statusTextClass[state])}>{stateLabel(state)}</span>
-              </dd>
-            </div>
-            <div className="flex shrink-0 items-center gap-1">
-              <dt className="text-fg-3">Sources</dt>
-              <dd className="text-fg-2 tabular-nums">{formatInt(expert.source_count)}</dd>
-            </div>
-            {/* Concepts only once the graph has any: a building expert has
-                none yet, and "Concepts 0" beside "Building" reads as a fault. */}
-            {expert.node_count > 0 && (
-              <div className="flex shrink-0 items-center gap-1">
-                <dt className="text-fg-3">Concepts</dt>
-                <dd className="text-fg-2 tabular-nums">{formatInt(expert.node_count)}</dd>
-              </div>
-            )}
-            {chattable && (
-              // Straight into a new chat from Home, composer focused — no stop at
-              // the Overview on the way.
-              <Button
-                variant="secondary"
-                size="sm"
-                loading={startingChat}
-                onClick={() => void startChat()}
-                aria-label={`Ask ${displayName(expert)}`}
-                className="ml-auto"
-              >
-                <MessageSquare className="size-3" />
-                Ask
-              </Button>
-            )}
-          </dl>
+        <dl className="grid grid-cols-3 divide-x divide-border-soft border-y border-border-soft">
+          <Count label="Sources" value={expert.source_count} pending={pending} />
+          <Count label="Passages" value={expert.chunk_count} pending={pending} />
+          <Count label="Concepts" value={expert.node_count} pending={pending} />
+        </dl>
+
+        {/* A fixed height, with or without the Ask button, so every card in the
+            grid lines up. The build date lives on the Overview. */}
+        <div className="flex min-h-[calc(var(--row-h)+2rem)] items-center gap-3 px-5 py-4">
+          <span className="flex min-w-0 items-center gap-2 text-sm">
+            <StatusDot state={state} />
+            <span className={cn('truncate', statusTextClass[state])}>{stateLabel(state)}</span>
+          </span>
+          {chattable && (
+            // Straight into a new chat from Home, composer focused — no stop at
+            // the Overview on the way.
+            <Button
+              variant="secondary"
+              loading={startingChat}
+              onClick={() => void startChat()}
+              aria-label={`Ask ${displayName(expert)}`}
+              className="ml-auto px-4 group-hover:border-accent group-hover:bg-accent group-hover:text-accent-fg"
+            >
+              Ask
+              <ArrowUpRight className="size-3.5" />
+            </Button>
+          )}
         </div>
 
         <MenuRoot>
           <MenuTrigger
             aria-label={`Actions for ${displayName(expert)}`}
             className={cn(
-              'absolute top-2 right-2 grid size-(--icon-btn-sm) place-items-center rounded-chip text-fg-3',
-              'transition-[opacity,background-color,color] duration-(--dur-1)',
-              'hover:bg-raised hover:text-fg',
-              // Hidden until hover on a mouse, always present on touch.
-              'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
-              '[@media(hover:none)]:opacity-100'
+              'absolute top-4 right-4 grid size-(--icon-btn-sm) place-items-center rounded-full text-fg-3',
+              'transition-[background-color,color] duration-(--dur-1)',
+              'hover:bg-raised hover:text-fg'
             )}
           >
             <MoreHorizontal className="size-3.5" />
@@ -229,5 +240,21 @@ export function ExpertCard({
         />
       )}
     </>
+  )
+}
+
+/**
+ * One cell of the strip. While a build is running a zero is an em dash — the
+ * count has not been made yet, which is what the dash means everywhere else —
+ * and "Concepts 0" beside "Building" read as a fault.
+ */
+function Count({ label, value, pending }: { label: string; value: number; pending: boolean }) {
+  return (
+    <div className="min-w-0 px-5 py-3.5">
+      <dt className="truncate text-label tracking-[0.04em] text-fg-3 uppercase">{label}</dt>
+      <dd className="mt-1 text-xl font-semibold tracking-tight text-fg tabular-nums">
+        {pending && value === 0 ? '—' : formatInt(value)}
+      </dd>
+    </div>
   )
 }

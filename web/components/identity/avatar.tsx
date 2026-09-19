@@ -57,7 +57,9 @@ export function Avatar({
   pictureSrc,
 }: AvatarProps) {
   const resolved = recipe ?? resolveRecipe(expert)
-  const radius = shape === 'circle' ? '9999px' : `${Math.max(4, Math.round(size * 0.3))}px`
+  // 0.4, so the 40px rail tile lands on `--radius-card` (16px) and the ring
+  // drawn round it while a build runs follows the same curve.
+  const radius = shape === 'circle' ? '9999px' : `${Math.max(4, Math.round(size * 0.4))}px`
   const svg = renderAvatarSvg(resolved, size)
   // Only reachable when `resolveRecipe` saw a picture, or when a preview recipe
   // asked for one on an expert that has it — both imply both fields are here.

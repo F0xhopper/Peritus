@@ -247,7 +247,11 @@ export function AddSourceDialog({
       }
     >
       {prefill?.context && <p className="mb-3 text-xs text-fg-3">{prefill.context}</p>}
-      <div role="tablist" aria-label="Source kind" className="flex gap-0.5 rounded-row bg-bg p-0.5">
+      <div
+        role="tablist"
+        aria-label="Source kind"
+        className="flex gap-0.5 rounded-full border border-border-soft bg-bg p-0.5"
+      >
         {(
           [
             { id: 'file', label: 'PDF or file', icon: Upload },
@@ -265,9 +269,11 @@ export function AddSourceDialog({
               setError(null)
             }}
             className={cn(
-              'inline-flex h-(--icon-btn-sm) flex-1 items-center justify-center gap-1.5 rounded-[6px] text-xs',
-              'transition-colors duration-(--dur-1)',
-              tab === option.id ? 'bg-raised text-fg' : 'text-fg-3 hover:text-fg-2'
+              'inline-flex h-(--icon-btn-sm) flex-1 items-center justify-center gap-1.5 rounded-full text-xs',
+              'ring-1 transition-colors duration-(--dur-1) ring-inset',
+              tab === option.id
+                ? 'bg-raised font-medium text-fg ring-border'
+                : 'text-fg-3 ring-transparent hover:text-fg-2'
             )}
           >
             <option.icon className="size-3.5" />

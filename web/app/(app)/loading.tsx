@@ -18,17 +18,17 @@ export default function Loading() {
         <div className="mx-auto w-full max-w-6xl px-4 pt-5 pb-12 md:px-6">
           <Skeleton className="h-7 w-24" />
           <Skeleton className="mt-2 h-3.5 w-80 max-w-full" />
-          <Skeleton className="mt-6 h-[88px] w-full rounded-card" />
+          <Skeleton className="mt-6 h-[96px] w-full rounded-card" />
           <Skeleton className="mt-3 h-3 w-40 md:hidden" />
-          <div className="mt-6 hidden grid-cols-2 gap-2 md:grid">
+          <div className="mt-6 hidden grid-cols-2 gap-3 md:grid">
             {Array.from({ length: 2 }, (_, i) => (
-              <Skeleton key={i} className="h-[72px] rounded-card" />
+              <Skeleton key={i} className="h-[93px] rounded-card" />
             ))}
           </div>
           <Skeleton className="mt-6 h-3 w-16" />
-          <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
             {Array.from({ length: 6 }, (_, i) => (
-              <Skeleton key={i} className="h-[128px] rounded-card" />
+              <Skeleton key={i} className="h-[246px] rounded-panel" />
             ))}
           </div>
         </div>

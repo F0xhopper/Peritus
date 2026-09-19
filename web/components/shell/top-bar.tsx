@@ -12,7 +12,7 @@ import { useShell } from '@/components/shell/shell-context'
 import type { ExpertSummary } from '@/lib/api/types'
 
 /**
- * The breadcrumb bar: 40px, 44px under a coarse pointer.
+ * The breadcrumb bar: `--spacing-topbar`, a little taller under a coarse pointer.
  *
  * One line, and a strict budget on what may be in it: the menu button below
  * `md`, the 20px avatar, the persona name, the page title truncated, **one**
@@ -68,7 +68,7 @@ export function TopBar({
   return (
     <header
       className={cn(
-        'flex h-topbar-touch shrink-0 items-center gap-2 border-b border-border-soft bg-bg px-2 md:h-topbar md:px-3'
+        'flex h-topbar-touch shrink-0 items-center gap-2 border-b border-border-soft bg-bg px-2 md:h-topbar md:px-4'
       )}
     >
       <button

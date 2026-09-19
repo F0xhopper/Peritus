@@ -67,7 +67,7 @@ export default async function ExpertsHomePage() {
               the tiles in it, so two do not sit in a four-column row. */}
           <div
             className={cn(
-              'mt-6 hidden gap-2 md:grid',
+              'mt-6 hidden gap-3 md:grid',
               building.length > 0 ? 'grid-cols-3' : 'grid-cols-2'
             )}
           >
@@ -104,7 +104,10 @@ export default async function ExpertsHomePage() {
           ) : (
             <section className="mt-6">
               <h2 className="text-label tracking-[0.04em] text-fg-3 uppercase">Experts</h2>
-              <div className="mt-2 grid grid-cols-1 gap-2 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+              {/* Three across at most: at four the cards were too narrow to hold a
+                  name, a subject and a sentence of About without truncating
+                  all three. */}
+              <div className="mt-3 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {experts.map((expert, index) => (
                   <ExpertCard
                     key={expert.id}

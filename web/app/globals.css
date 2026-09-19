@@ -10,22 +10,23 @@
 @custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 :root {
-  /* Surface — light is the inverted ramp of the dark design (web-design.md §2).
-     The ground is a real grey rather than near-white: with the container
-     borders gone, a white panel on a #fafafa ground was a 2% step and the
-     cards, the rail and the sidebar all dissolved into the page. Depth here is
-     carried entirely by the surface, so the surfaces have to differ. */
-  --bg: #f4f4f5;
+  /* Surface — black and white, and nothing between them is tinted. The greys
+     are pure neutrals (no blue cast), the ground is one colour for the whole
+     window — rail, sidebar and page alike — and a container is told from it by
+     a lighter fill *and* a hairline edge. Light is the inverted ramp of the
+     dark design; its ground is a real grey rather than near-white so a white
+     card still steps off it. */
+  --bg: #f5f5f5;
   --panel: #ffffff;
-  --raised: #e9e9ec;
-  --border: #e0e0e6;
-  --border-soft: #eaeaee;
+  --raised: #ebebeb;
+  --border: #d6d6d6;
+  --border-soft: #e4e4e4;
 
   /* Text */
-  --fg: #17171a;
-  --fg-2: #4d4d55;
-  --fg-3: #62626a; /* ≥4.5:1 on ground, panel and raised — AA for the small text it carries */
-  --fg-4: #aaaab1;
+  --fg: #0a0a0a;
+  --fg-2: #3d3d3d;
+  --fg-3: #5f5f5f; /* ≥4.5:1 on ground, panel and raised — AA for the small text it carries */
+  --fg-4: #a8a8a8;
 
   /* The primary action, and it is **monochrome on purpose**.
      Colour in this product is information: green/amber/red say what state a
@@ -34,8 +35,13 @@
      on a page where it was never the most important, and against a wall of
      violet-hashed avatars the whole app looked blue. Ink on paper, or paper on
      ink, says "press this" without spending a colour to do it. */
-  --accent: #17171a;
-  --accent-fg: #fafafa;
+  --accent: #0a0a0a;
+  --accent-fg: #ffffff;
+
+  /* How strongly the marketing page's light is drawn. It is `--fg` at some
+     alpha, which is a beam of light on black and would be a wedge of soot on
+     paper — so the light theme keeps it to a breath. */
+  --mk-light: 0.14;
 
   /* Status — the only fixed colours left, because each one means something */
   /* Deep enough to read as text on the ground, a card and a hover (≥4.5:1). */
@@ -44,7 +50,7 @@
   --bad: #b42d2d;
   /* Neutral, not blue: an informational notice is the *quietest* thing on a
      page, and a blue one shouted as loudly as an error. */
-  --info: #4d4d55;
+  --info: #3d3d3d;
 
   /* The avatar and identity tone. There are no per-expert colours, so this is
      a neutral grey at a lightness the theme sets — dark enough for 4.5:1 on
@@ -59,52 +65,56 @@
 
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) {
-    --bg: #0e0e10;
-    --panel: #141416;
-    --raised: #1b1b1e;
-    --border: #26262a;
-    --border-soft: #1f1f22;
+    --bg: #070707;
+    --panel: #121212;
+    --raised: #1c1c1c;
+    --border: #2e2e2e;
+    --border-soft: #222222;
 
-    --fg: #ececee;
-    --fg-2: #b0b0b7;
-    --fg-3: #8b8b93;
-    --fg-4: #45454c;
+    --fg: #fafafa;
+    --fg-2: #b9b9b9;
+    --fg-3: #8e8e8e;
+    --fg-4: #4a4a4a;
 
-    --accent: #ececee;
-    --accent-fg: #0e0e10;
+    --accent: #ffffff;
+    --accent-fg: #0a0a0a;
+
+    --mk-light: 1;
 
     --expert-l: 0.74;
 
     --ok: #5cc47a;
     --warn: #e0b24a;
     --bad: #e05c5c;
-    --info: #a1a1a8;
+    --info: #a3a3a3;
 
     color-scheme: dark;
   }
 }
 
 :root[data-theme='dark'] {
-  --bg: #0e0e10;
-  --panel: #141416;
-  --raised: #1b1b1e;
-  --border: #26262a;
-  --border-soft: #1f1f22;
+  --bg: #070707;
+  --panel: #121212;
+  --raised: #1c1c1c;
+  --border: #2e2e2e;
+  --border-soft: #222222;
 
-  --fg: #ececee;
-  --fg-2: #b0b0b7;
-  --fg-3: #8b8b93;
-  --fg-4: #45454c;
+  --fg: #fafafa;
+  --fg-2: #b9b9b9;
+  --fg-3: #8e8e8e;
+  --fg-4: #4a4a4a;
 
-  --accent: #ececee;
-  --accent-fg: #0e0e10;
+  --accent: #ffffff;
+  --accent-fg: #0a0a0a;
+
+  --mk-light: 1;
 
   --expert-l: 0.74;
 
   --ok: #5cc47a;
   --warn: #e0b24a;
   --bad: #e05c5c;
-  --info: #a1a1a8;
+  --info: #a3a3a3;
 
   color-scheme: dark;
 }
@@ -160,11 +170,17 @@
   --text-hero: 2rem; /* 32px — marketing headline */
   --text-hero--line-height: 1.15;
 
-  /* Radius scale (web-design.md §3) */
-  --radius-chip: 6px;
-  --radius-row: 8px;
-  --radius-card: 10px;
-  --radius-panel: 12px;
+  /* Radius scale. Round, on purpose: a single-line control is a **pill** and a
+     small square one is a **circle**. `chip` and `row` are half the height of
+     the control they go on, so they follow it to 44px under a thumb instead of
+     leaving a touch-sized button with a mouse-sized corner. On anything taller
+     than one line they are simply a generous corner, which is what a wrapped
+     hint or a textarea wants. A control taller than `--row-h` (the `lg`
+     button) says `rounded-full` itself. */
+  --radius-chip: calc(var(--icon-btn-sm) / 2);
+  --radius-row: calc(var(--row-h) / 2);
+  --radius-card: 16px;
+  --radius-panel: 20px;
 
   /* Motion. Three durations, two easings, nothing else. */
   --dur-1: 120ms;
@@ -180,9 +196,9 @@
      The bar is deliberately taller than the control inside it: at 40px a 32px
      action left 4px above and below and read as crammed into the chrome, and on
      touch a 44px bar around a 44px control left *nothing* — the pill spanned
-     the bar edge to edge. 6px on a mouse, 4px on a thumb. */
-  --spacing-topbar: 44px;
-  --spacing-topbar-touch: 52px;
+     the bar edge to edge. 10px on a mouse, 6px on a thumb. */
+  --spacing-topbar: 52px;
+  --spacing-topbar-touch: 56px;
   --spacing-rail: 56px;
   --spacing-context: 360px;
 }
@@ -202,7 +218,7 @@
     /* Control metrics. The coarse-pointer block is the only place touch sizing
        is defined, so a component never branches on device. */
     --row-h: 32px;
-    --table-row-h: 28px;
+    --table-row-h: 40px;
     --icon-btn: 32px;
     --icon-btn-sm: 28px;
     --chip-h: 20px;
@@ -224,7 +240,7 @@
   @media (pointer: coarse) {
     :root {
       --row-h: 44px;
-      --table-row-h: 40px;
+      --table-row-h: 44px;
       /* 44px, not the 40px web-design.md §8 suggests: §13's checklist sets a
          44px floor for every control and is the stricter of the two, and it is
          the one written as a gate the e2e suite enforces. */
@@ -273,7 +289,7 @@
   h3,
   h4 {
     color: var(--fg);
-    font-weight: 500;
+    font-weight: 600;
     text-wrap: balance;
   }
 
@@ -355,6 +371,105 @@
      own scroll anchoring. */
   .anchor-none {
     overflow-anchor: none;
+  }
+
+  /* ── Marketing ──────────────────────────────────────────────────────────
+     The landing page's light. All of it is gradients — no image, no `filter`,
+     no `backdrop-filter` — so it costs one paint and nothing per frame, and the
+     CSP's `img-src 'self'` has nothing to allow. Every colour is `--fg` at an
+     alpha, scaled by `--mk-light`, so it is a beam on black and a faint shade
+     on paper. Decorative: each sits in an `aria-hidden` box behind the text. */
+
+  /* The hero: a cone of light entering from the right edge. A conic gradient
+     is the wedge, a radial one is the bloom at its source, and the mask fades
+     both with distance so the beam dies before it reaches the headline. */
+  .mk-beam {
+    opacity: var(--mk-light);
+    background:
+      radial-gradient(
+        ellipse 34% 58% at 100% 44%,
+        color-mix(in srgb, var(--fg) 24%, transparent),
+        transparent 72%
+      ),
+      conic-gradient(
+        from 230deg at 118% 44%,
+        transparent 0deg,
+        color-mix(in srgb, var(--fg) 3%, transparent) 12deg,
+        color-mix(in srgb, var(--fg) 11%, transparent) 26deg,
+        color-mix(in srgb, var(--fg) 18%, transparent) 36deg,
+        color-mix(in srgb, var(--fg) 18%, transparent) 44deg,
+        color-mix(in srgb, var(--fg) 11%, transparent) 54deg,
+        color-mix(in srgb, var(--fg) 3%, transparent) 68deg,
+        transparent 80deg
+      );
+    mask-image: radial-gradient(ellipse 100% 95% at 100% 44%, #000 6%, transparent 70%);
+  }
+  /* On a phone the text runs the full width, so the bloom would sit on top of
+     the paragraph's line ends. Half as bright, and masked to the corner above
+     it, where the headline's short lines leave room. */
+  @media (max-width: 767px) {
+    .mk-beam {
+      opacity: calc(var(--mk-light) * 0.8);
+      mask-image: radial-gradient(ellipse 85% 46% at 100% 20%, #000 0%, transparent 72%);
+    }
+  }
+
+  /* A sky of very few stars, so the black has depth without a texture file. */
+  .mk-stars {
+    opacity: calc(var(--mk-light) * 0.7);
+    background-image:
+      radial-gradient(1px 1px at 12% 22%, var(--fg) 50%, transparent 51%),
+      radial-gradient(1px 1px at 27% 64%, var(--fg) 50%, transparent 51%),
+      radial-gradient(1px 1px at 41% 12%, var(--fg) 50%, transparent 51%),
+      radial-gradient(1px 1px at 58% 78%, var(--fg) 50%, transparent 51%),
+      radial-gradient(1px 1px at 66% 31%, var(--fg) 50%, transparent 51%),
+      radial-gradient(1px 1px at 83% 84%, var(--fg) 50%, transparent 51%),
+      radial-gradient(1px 1px at 91% 9%, var(--fg) 50%, transparent 51%);
+  }
+
+  /* Behind the product window: a low bloom, as if the window were lit from
+     underneath its top edge. */
+  .mk-halo {
+    opacity: var(--mk-light);
+    background: radial-gradient(
+      ellipse 60% 70% at 50% 0%,
+      color-mix(in srgb, var(--fg) 16%, transparent),
+      transparent 70%
+    );
+  }
+
+  /* The closing section: light coming up over a horizon. */
+  .mk-horizon {
+    opacity: var(--mk-light);
+    background:
+      radial-gradient(
+        ellipse 70% 55% at 50% 118%,
+        color-mix(in srgb, var(--fg) 22%, transparent),
+        transparent 70%
+      ),
+      radial-gradient(
+        ellipse 120% 40% at 50% 100%,
+        color-mix(in srgb, var(--fg) 6%, transparent),
+        transparent 75%
+      );
+  }
+
+  /* The highlighted depth card: lit from its top-left corner. */
+  .mk-lit {
+    background-image: linear-gradient(
+      150deg,
+      color-mix(in srgb, var(--fg) calc(14% * var(--mk-light)), transparent),
+      transparent 55%
+    );
+  }
+
+  /* The display face: Inter, light and tight, which is what makes a large
+     grotesk headline read as drawn rather than shouted. */
+  .mk-display {
+    font-weight: 300;
+    letter-spacing: -0.04em;
+    line-height: 1.02;
+    text-wrap: balance;
   }
 
   /* No crossfade until the document has loaded (`ShellBody` sets the flag on

@@ -70,7 +70,7 @@ export function Dialog({
       <BaseDialog.Portal>
         <BaseDialog.Backdrop
           className={cn(
-            'fixed inset-0 z-40 bg-black/50',
+            'fixed inset-0 z-40 bg-black/70',
             'transition-opacity duration-(--dur-2) ease-(--ease-out)',
             'data-ending-style:opacity-0 data-starting-style:opacity-0',
             'data-ending-style:duration-(--dur-1)'
@@ -86,7 +86,7 @@ export function Dialog({
             'max-h-[calc(100dvh-max(3rem,12vh)-1.5rem)] -translate-x-1/2 overflow-y-auto',
             // The only shadowed elements are popovers and the palette, and a
             // dialog reads as one of those.
-            'rounded-panel border border-border bg-panel p-4 shadow-xl shadow-black/30 outline-none',
+            'rounded-panel border border-border bg-panel p-5 shadow-xl shadow-black/50 outline-none',
             // Scale and opacity only. Exits fade without moving.
             'transition-[opacity,transform] duration-(--dur-2) ease-(--ease-out)',
             'data-starting-style:scale-[0.98] data-starting-style:opacity-0',

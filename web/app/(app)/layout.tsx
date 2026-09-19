@@ -62,12 +62,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <ShellBody />
 
           <ShellGrid>
-            {/* Rail and sidebar are one navigation region on one surface, with
-                no rule between them and none against the content. Depth is the
-                surface step (`--panel` beside `--bg`), which is the design's
-                own rule and how the references do it — a vertical hairline down
-                the whole window is the loudest line in a layout that otherwise
-                has almost none. */}
+            {/* Rail and sidebar are one navigation region with no rule between
+                them. The whole window is one ground (`--bg`), so what separates
+                the navigation from the page is a single hairline on the
+                region's trailing edge — the sidebar's, or the rail's own when
+                the sidebar is not beside it. */}
             <Rail
               experts={experts}
               conversations={conversations}

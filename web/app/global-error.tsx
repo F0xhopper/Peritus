@@ -29,13 +29,13 @@ export default function GlobalError({
           placeItems: 'center',
           padding: '1.5rem',
           fontFamily: 'ui-sans-serif, system-ui, sans-serif',
-          background: '#0e0e10',
-          color: '#a1a1a8',
+          background: '#070707',
+          color: '#b9b9b9',
         }}
       >
         <title>Peritus — something went wrong</title>
         <main style={{ maxWidth: '28rem', textAlign: 'center' }}>
-          <h1 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 500, color: '#ececee' }}>
+          <h1 style={{ margin: 0, fontSize: '1.125rem', fontWeight: 600, color: '#fafafa' }}>
             Peritus could not start
           </h1>
           <p style={{ marginTop: '0.5rem', fontSize: '0.875rem', lineHeight: 1.6 }}>
@@ -47,7 +47,7 @@ export default function GlobalError({
                 marginTop: '0.5rem',
                 fontFamily: 'ui-monospace, monospace',
                 fontSize: '0.75rem',
-                color: '#6b6b73',
+                color: '#8e8e8e',
               }}
             >
               digest {error.digest}
@@ -59,11 +59,11 @@ export default function GlobalError({
             style={{
               marginTop: '1rem',
               height: '2.5rem',
-              padding: '0 1rem',
+              padding: '0 1.25rem',
               border: 0,
-              borderRadius: '8px',
-              background: '#8b7cf6',
-              color: '#12121a',
+              borderRadius: '9999px',
+              background: '#ffffff',
+              color: '#0a0a0a',
               fontSize: '0.875rem',
               fontWeight: 500,
               cursor: 'pointer',

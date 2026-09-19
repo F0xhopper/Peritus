@@ -23,13 +23,17 @@ import type { ConversationSummary, ExpertSummary, Me } from '@/lib/api/types'
  * phone. It is derived from the active index rather than measured, which is why
  * every row in this column has to be a fixed height.
  *
+ * Home sits in a cell the height of the top bar, above the same hairline: the
+ * rail, the sidebar's search row and the page's bar are one band across the
+ * window, and the line under it runs edge to edge.
+ *
  * The rail is honest about its limit: it works to about fifteen experts and
  * then relies on scrolling and the Home list. That matches a product where
  * builds cost credits.
  */
 
 const AVATAR_SIZE = 40
-const HEADER_SLOTS = 1 // the Home button above the list
+const BAR_HEIGHT = 32
 
 export function Rail({
   experts,
@@ -49,35 +53,47 @@ export function Rail({
   className?: string
 }) {
   const pathname = usePathname()
+  const { sidebarCollapsed } = useShell()
   const activeSlug = useActiveSlug(conversations)
   const activeIndex = experts.findIndex((e) => e.name === activeSlug)
   const homeActive = pathname === '/experts' || pathname === '/chats'
 
-  // The bar's own offset, in slots rather than pixels: the slot pitch is
+  // The bar's own offset, in CSS rather than pixels: the slot pitch is
   // `--rail-slot`, which is 8px taller on a touch pointer, so multiplying it
   // here in JavaScript would put the bar beside the wrong avatar on an iPad.
-  const activeSlot = homeActive ? 0 : activeIndex >= 0 ? activeIndex + HEADER_SLOTS : null
+  // Home is centred in the top-bar cell; an expert is centred on its tile, one
+  // `pt-2` below that cell.
+  const barOffset = homeActive
+    ? `calc((var(--spacing-topbar) - ${BAR_HEIGHT}px) / 2)`
+    : activeIndex >= 0
+      ? `calc(var(--spacing-topbar) + 0.5rem + var(--rail-slot) * ${activeIndex} + (var(--rail-item) - ${BAR_HEIGHT}px) / 2)`
+      : null
 
   return (
     <nav
       aria-label="Experts"
-      className={cn('relative flex w-rail flex-col items-center gap-2 bg-panel py-2', className)}
+      // On the ground, like everything else in the window. The navigation's one
+      // hairline is on its trailing edge — the sidebar's when that is beside
+      // the rail, the rail's own when it is not (below `lg`, or folded away).
+      className={cn(
+        'relative flex w-rail flex-col items-center border-r border-border-soft bg-bg pb-2',
+        !sidebarCollapsed && 'lg:border-r-0',
+        className
+      )}
     >
       {/* The one moving thing in the shell. `--fg`, not the expert colour: it
           marks *where you are*, which is not a property of the expert. */}
       <span
         aria-hidden="true"
-        style={{
-          transform: `translateY(calc(var(--rail-slot) * ${activeSlot ?? 0} + 8px))`,
-        }}
+        style={{ transform: `translateY(${barOffset ?? '0px'})`, height: BAR_HEIGHT }}
         className={cn(
-          'pointer-events-none absolute top-2 left-0 h-8 w-[3px] rounded-r-full bg-fg',
+          'pointer-events-none absolute top-0 left-0 z-10 w-[3px] rounded-r-full bg-fg',
           'transition-transform duration-(--dur-3) ease-(--ease-out)',
-          activeSlot === null && 'opacity-0'
+          barOffset === null && 'opacity-0'
         )}
       />
 
-      <div className="pan-y flex w-full flex-col items-center gap-2 overflow-y-auto overscroll-contain">
+      <div className="grid h-topbar w-full shrink-0 place-items-center border-b border-border-soft">
         <Tooltip content="Home" side="right">
           <Link
             href="/experts"
@@ -94,7 +110,9 @@ export function Rail({
             <Home className="size-4" />
           </Link>
         </Tooltip>
+      </div>
 
+      <div className="pan-y flex w-full flex-col items-center gap-2 overflow-y-auto overscroll-contain pt-2">
         {experts.map((expert) => (
           <RailAvatar key={expert.id} expert={expert} active={expert.name === activeSlug} />
         ))}
@@ -123,7 +141,7 @@ export function Rail({
             className={cn(
               'grid size-(--rail-item) place-items-center rounded-card text-fg-3',
               'transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg',
-              pathname.startsWith('/settings') && 'bg-raised text-fg'
+              pathname.startsWith('/settings') && 'bg-raised text-fg ring-1 ring-border ring-inset'
             )}
           >
             <Settings className="size-4" />
@@ -190,7 +208,7 @@ function RailAvatar({ expert, active }: { expert: ExpertSummary; active: boolean
         {failed && (
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-bad ring-2 ring-panel"
+            className="pointer-events-none absolute -right-0.5 -bottom-0.5 size-2.5 rounded-full bg-bad ring-2 ring-bg"
           />
         )}
       </Link>

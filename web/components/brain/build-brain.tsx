@@ -139,7 +139,7 @@ export function BuildBrain({
   return (
     <section
       aria-label="The expert, growing"
-      className="relative mx-auto aspect-square w-full max-w-[280px] shrink-0 overflow-hidden rounded-card bg-panel lg:aspect-auto lg:h-[420px] lg:max-w-none"
+      className="relative mx-auto aspect-square w-full max-w-[280px] shrink-0 overflow-hidden rounded-card border border-border-soft bg-panel lg:aspect-auto lg:h-[420px] lg:max-w-none"
     >
       {hasPlan ? (
         <BrainCanvas
@@ -163,7 +163,7 @@ export function BuildBrain({
       <p className="sr-only" aria-live="polite">
         {stage}
       </p>
-      <div className="pointer-events-none absolute bottom-2 left-2 hidden max-w-[70%] rounded-row bg-panel/90 px-2 py-1 text-xs text-fg-3 lg:block">
+      <div className="pointer-events-none absolute bottom-2 left-2 hidden max-w-[70%] rounded-row border border-border-soft bg-panel/90 px-3 py-1 text-xs text-fg-3 lg:block">
         {summary}
       </div>
       {finished && (
@@ -182,7 +182,7 @@ export function BuildBrain({
           )}
           <Link
             href={`/experts/${expert.name}/knowledge?view=map`}
-            className="inline-flex h-(--row-h) items-center gap-1.5 rounded-row bg-panel/90 px-2.5 text-xs text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
+            className="inline-flex h-(--row-h) items-center gap-1.5 rounded-row border border-border-soft bg-panel/90 px-3 text-xs text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
           >
             <Orbit className="size-3" />
             <span className="hidden lg:inline">Open the map</span>

@@ -83,7 +83,7 @@ export function NavDrawer({
             Home
           </DrawerRow>
 
-          <p className="px-1.5 pt-2 pb-0.5 text-label tracking-[0.04em] text-fg-3 uppercase">
+          <p className="px-3 pt-2 pb-0.5 text-label tracking-[0.04em] text-fg-3 uppercase">
             Switch expert
           </p>
           {experts.map((expert) => (
@@ -130,7 +130,7 @@ export function NavDrawer({
             experts={experts}
             conversations={conversations}
             credits={credits}
-            className="bg-transparent"
+            className="border-r-0 bg-transparent"
           />
         </div>
 
@@ -140,7 +140,7 @@ export function NavDrawer({
             how you end up on the wrong one. */}
         <Link
           href="/settings"
-          className="flex min-h-(--row-h) items-center gap-2 rounded-row px-1.5 py-1 text-sm text-fg-2 hover:bg-raised"
+          className="flex min-h-(--row-h) items-center gap-2.5 rounded-row px-3 py-1 text-sm text-fg-2 hover:bg-raised"
         >
           {me ? (
             <UserAvatar name={me.name} email={me.email} avatarUrl={me.avatar_url} size={20} />
@@ -180,9 +180,11 @@ function DrawerRow({
       aria-label={label}
       aria-current={active ? 'page' : undefined}
       className={cn(
-        'flex h-(--row-h) items-center gap-2 rounded-row px-1.5 text-sm',
-        'transition-colors duration-(--dur-1)',
-        active ? 'bg-raised text-fg' : 'text-fg-2 hover:bg-raised hover:text-fg'
+        'flex h-(--row-h) items-center gap-2.5 rounded-full px-3 text-sm',
+        'ring-1 transition-colors duration-(--dur-1) ring-inset',
+        active
+          ? 'bg-raised font-medium text-fg ring-border'
+          : 'text-fg-2 ring-transparent hover:bg-raised hover:text-fg'
       )}
     >
       {icon}

@@ -67,13 +67,13 @@ export function SessionsSection({ sessions }: { sessions: SignInSession[] | null
       {sessions === null ? (
         <Notice tone="info">This server cannot list sessions.</Notice>
       ) : (
-        <ul className="divide-y divide-border-soft rounded-card bg-raised/40">
+        <ul className="divide-y divide-border-soft rounded-card border border-border-soft bg-panel">
           {sessions.map((session) => {
             const device = describeUserAgent(session.user_agent)
             const Icon = ICONS[device.kind]
             return (
               <li key={session.id} className="flex items-center gap-3 px-3 py-2.5">
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-row bg-panel">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-raised">
                   <Icon className="size-4 text-fg-2" aria-hidden="true" />
                 </span>
                 <div className="min-w-0 flex-1">

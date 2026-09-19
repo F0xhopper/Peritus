@@ -98,7 +98,7 @@ export function Composer({
   if (disabled) {
     return (
       <div className="pb-keyboard shrink-0 bg-bg px-3 pt-3 md:px-4">
-        <p className="mx-auto max-w-[720px] rounded-card bg-panel px-3 py-2.5 text-sm text-fg-3">
+        <p className="mx-auto max-w-[720px] rounded-card border border-border-soft bg-panel px-3 py-2.5 text-sm text-fg-3">
           {disabledReason ?? 'This expert cannot answer yet.'}
         </p>
       </div>
@@ -138,7 +138,9 @@ export function Composer({
 
         <div
           className={cn(
-            'flex items-end gap-2 rounded-card border border-border bg-panel p-1.5',
+            // 22px is half the one-line height, so an empty composer is a pill
+            // and a five-line one is still a box with the same corners.
+            'flex items-end gap-2 rounded-[22px] border border-border bg-panel p-1.5 pl-3',
             'transition-colors duration-(--dur-1)',
             'focus-within:border-fg-4'
           )}

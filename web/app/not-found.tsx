@@ -15,7 +15,7 @@ export default function NotFound() {
         </p>
         <Link
           href="/"
-          className="mt-4 inline-flex h-(--btn-lg) items-center rounded-row border border-border px-4 text-sm text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
+          className="mt-4 inline-flex h-(--btn-lg) items-center rounded-full border border-border px-4 text-sm text-fg-2 transition-colors duration-(--dur-1) hover:bg-raised hover:text-fg"
         >
           Back to the start
         </Link>

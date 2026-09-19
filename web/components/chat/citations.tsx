@@ -131,7 +131,7 @@ function CitationChip({
         // The visible chip sits in the line of text; on a coarse pointer the
         // `before:` box extends the tap target to the chip-height token without
         // prying the lines apart.
-        'relative mx-0.5 inline-flex h-[1.15rem] min-w-[1.15rem] shrink-0 scroll-mt-20 items-center justify-center rounded-[5px] px-1',
+        'relative mx-0.5 inline-flex h-[1.15rem] min-w-[1.15rem] shrink-0 scroll-mt-20 items-center justify-center rounded-full px-1',
         'align-[0.2em] font-mono text-[0.7em] leading-none font-medium',
         "before:absolute before:inset-x-[-4px] before:top-1/2 before:h-(--chip-h) before:-translate-y-1/2 before:content-['']",
         'transition-colors duration-(--dur-1)',
