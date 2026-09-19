@@ -282,6 +282,33 @@ export function stashPendingQuestion(conversationId: string, question: string) {
   }
 }
 
+/**
+ * The question being carried to a new chat, without consuming it.
+ *
+ * Read during render — by the chat's loading screen, which does not know the
+ * conversation id yet, and by the chat's first frame — so the question is on
+ * screen from the moment the Ask is pressed. Before this the route went Overview
+ * → a skeleton of a made-up question and answer → the empty-chat intro → the
+ * question, each step crossfaded: a flash of three screens that were never the
+ * one being opened.
+ */
+export function peekPendingQuestion(conversationId?: string): string | null {
+  try {
+    const raw = sessionStorage.getItem(PENDING_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as { conversationId?: string; question?: string }
+    if (conversationId !== undefined && parsed.conversationId !== conversationId) return null
+    return typeof parsed.question === 'string' ? parsed.question : null
+  } catch {
+    return null
+  }
+}
+
+/** For `useSyncExternalStore`: the stash changes only through this tab's own writes. */
+export function subscribeToNothing() {
+  return () => {}
+}
+
 export function takePendingQuestion(conversationId: string): string | null {
   try {
     const raw = sessionStorage.getItem(PENDING_KEY)

@@ -3,7 +3,7 @@
 import { Pencil } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { toast } from 'sonner'
 
 import { Composer } from '@/components/chat/composer'
@@ -16,7 +16,12 @@ import { Button } from '@/components/ui/button'
 import { Dialog } from '@/components/ui/dialog'
 import { MenuItem } from '@/components/ui/menu'
 import { Notice } from '@/components/ui/notice'
-import { takePendingQuestion, useChatStream } from '@/hooks/use-chat-stream'
+import {
+  peekPendingQuestion,
+  subscribeToNothing,
+  takePendingQuestion,
+  useChatStream,
+} from '@/hooks/use-chat-stream'
 import { auditsByMessageId } from '@/lib/chat-audits'
 import { cn } from '@/lib/cn'
 import { chatTitle } from '@/lib/format'
@@ -122,14 +127,25 @@ export function ChatView({
   // either the whole turn has landed, or (after a failure) the stored question
   // is the transcript's last message.
   const lastPersisted = conversation.messages.at(-1)
+  // The question carried from the Overview, read during render so the first
+  // frame already shows it — the effect below that sends it runs a frame
+  // later, and until then the chat drew its empty-state intro. `null` on the
+  // server, so a hard reload hydrates without a mismatch.
+  const arriving = useSyncExternalStore(
+    subscribeToNothing,
+    () => (handed.current ? null : peekPendingQuestion(conversation.id)),
+    () => null
+  )
   const pendingQuestion =
-    chat.question &&
-    chat.phase !== 'idle' &&
-    chat.phase !== 'busy' &&
-    !streamedTurnPersisted &&
-    !(lastPersisted?.role === 'user' && lastPersisted.content.trim() === chat.question)
-      ? chat.question
-      : null
+    !chat.question && chat.phase === 'idle' && arriving
+      ? arriving
+      : chat.question &&
+          chat.phase !== 'idle' &&
+          chat.phase !== 'busy' &&
+          !streamedTurnPersisted &&
+          !(lastPersisted?.role === 'user' && lastPersisted.content.trim() === chat.question)
+        ? chat.question
+        : null
 
   const ask = (question: string) => void chat.send(question)
 
