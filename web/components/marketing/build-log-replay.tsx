@@ -146,28 +146,34 @@ export function BuildLogReplay({ className }: { className?: string }) {
   return (
     <div
       ref={wrapper}
-      className={cn('overflow-hidden rounded-card border border-border bg-panel', className)}
+      className={cn(
+        'overflow-hidden rounded-panel border border-border bg-panel shadow-2xl shadow-black/40',
+        className
+      )}
     >
-      <div className="flex h-8 items-center gap-2 border-b border-border-soft px-3">
-        <span className="flex gap-1" aria-hidden="true">
-          <span className="size-2 rounded-full bg-border" />
-          <span className="size-2 rounded-full bg-border" />
-          <span className="size-2 rounded-full bg-border" />
+      <div className="flex h-11 items-center gap-3 border-b border-border-soft px-4">
+        <span className="flex gap-1.5" aria-hidden="true">
+          <span className="size-2.5 rounded-full bg-border" />
+          <span className="size-2.5 rounded-full bg-border" />
+          <span className="size-2.5 rounded-full bg-border" />
         </span>
-        <span className="text-xs text-fg-3">
+        <span className="min-w-0 flex-1 truncate text-xs text-fg-3">
           varroa mite control in temperate beekeeping · standard
+        </span>
+        <span className="hidden shrink-0 font-mono text-label tracking-[0.14em] text-fg-3 uppercase sm:inline">
+          Recorded build
         </span>
       </div>
       <div
         ref={scroller}
         aria-label="A recorded build log"
-        className="h-[280px] overflow-y-auto px-3 py-2 font-mono text-xs lg:h-[360px]"
+        className="h-[300px] overflow-y-auto px-4 py-3 font-mono text-xs md:h-[380px] md:text-sm"
       >
         {ROWS.slice(0, visible).map((row, index) => (
           <div
             key={index}
             className={cn(
-              'flex items-baseline gap-2 py-0.5 leading-4',
+              'flex items-baseline gap-2 py-0.5 leading-5',
               // Fade and rise per row, and only when it actually animates.
               !reducedMotion &&
                 'motion-safe:animate-in motion-safe:duration-(--dur-2) motion-safe:fade-in motion-safe:slide-in-from-bottom-1'
@@ -179,7 +185,7 @@ export function BuildLogReplay({ className }: { className?: string }) {
             >
               {MARK[row.kind]}
             </span>
-            <span className="hidden w-16 shrink-0 text-fg-3 sm:inline">{row.stage}</span>
+            <span className="hidden w-20 shrink-0 text-fg-3 sm:inline">{row.stage}</span>
             <span className={cn('min-w-0 flex-1', TEXT_COLOUR[row.kind])}>{row.text}</span>
           </div>
         ))}

@@ -157,8 +157,11 @@ test('the landing page states the claim and replays a real log', async ({ page }
   await page.goto('/')
 
   await expect(page.getByRole('heading', { level: 1 })).toContainText(/receipts/)
-  // The hero is a recorded build log, not an illustration.
-  await expect(page.getByLabel('A recorded build log')).toBeVisible()
+  // The product window is a recorded build log, not an illustration. It sits
+  // under the hero and replays only while it is on screen, so bring it there.
+  const log = page.getByLabel('A recorded build log')
+  await log.scrollIntoViewIfNeeded()
+  await expect(log).toBeVisible()
   await expect(content(page).getByText(/Planning the search/)).toBeVisible({ timeout: 15_000 })
   // Including a drop with its reason, which is the whole claim.
   await expect(content(page).getByText(/no primary data/)).toBeVisible({ timeout: 25_000 })

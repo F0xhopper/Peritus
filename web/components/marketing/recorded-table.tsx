@@ -3,8 +3,8 @@ import { cn } from '@/lib/cn'
 /**
  * "What gets recorded", as a table.
  *
- * Deliberately the same shape as the ledger the app renders — 28px rows, a
- * `--border-soft` divider per row, a sticky-able header in label case — inside
+ * Deliberately the same shape as the ledger the app renders — a hairline box, a
+ * `--border-soft` divider per row, a header in label case — inside
  * its own `overflow-x-auto` container, which is the only way anything on this
  * site is allowed to scroll sideways.
  */
@@ -49,31 +49,33 @@ const ROWS: { question: string; recorded: string }[] = [
 
 export function RecordedTable({ className }: { className?: string }) {
   return (
-    <div className={cn('overflow-x-auto rounded-card border border-border bg-panel', className)}>
+    <div
+      className={cn('overflow-x-auto rounded-card border border-border-soft bg-panel', className)}
+    >
       <table className="w-full min-w-[520px] text-sm">
         <thead>
           <tr>
             <th
               scope="col"
-              className="border-b border-border px-3 py-2 text-left text-label tracking-[0.04em] text-fg-3 uppercase"
+              className="border-b border-border-soft px-4 py-2.5 text-left text-label font-normal tracking-[0.04em] text-fg-3 uppercase"
             >
               Question
             </th>
             <th
               scope="col"
-              className="border-b border-border px-3 py-2 text-left text-label tracking-[0.04em] text-fg-3 uppercase"
+              className="border-b border-border-soft px-4 py-2.5 text-left text-label font-normal tracking-[0.04em] text-fg-3 uppercase"
             >
               What is recorded
             </th>
           </tr>
         </thead>
-        <tbody>
+        <tbody className="[&>tr:last-child>td]:border-b-0">
           {ROWS.map((row) => (
             <tr key={row.question} className="transition-colors duration-(--dur-1) hover:bg-raised">
-              <td className="border-b border-border-soft px-3 py-2 align-top text-fg-2">
+              <td className="border-b border-border-soft px-4 py-3 align-top font-medium text-fg">
                 {row.question}
               </td>
-              <td className="border-b border-border-soft px-3 py-2 align-top text-fg-3">
+              <td className="border-b border-border-soft px-4 py-3 align-top text-fg-3">
                 {row.recorded}
               </td>
             </tr>

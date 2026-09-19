@@ -1,3 +1,5 @@
+import { Plus } from 'lucide-react'
+
 import { cn } from '@/lib/cn'
 
 /**
@@ -5,8 +7,8 @@ import { cn } from '@/lib/cn'
  *
  * Native because it works before hydration, it is keyboard- and
  * screen-reader-correct for free, and find-in-page opens a closed answer — none
- * of which a hand-rolled accordion gets without work. Styled with the
- * grid-rows collapse, the one layout animation the design permits.
+ * of which a hand-rolled accordion gets without work. Each question is its own
+ * box, and the open one takes the stronger edge.
  *
  * The answers are also where the product's limits are stated plainly. Claiming
  * less than a reader might assume is the point: an evidence tool that oversells
@@ -30,10 +32,9 @@ const ITEMS: { question: string; answer: React.ReactNode }[] = [
     answer: (
       <>
         An answer is composed only from passages that were actually retrieved, and each inline
-        <span className="mx-1 font-mono text-xs text-accent">[n]</span> marker points at one of
-        them. Opening it shows the passage and the source it came from. If an answer ever cites a
-        number that resolves to nothing, it is shown as plain text rather than dressed up as a
-        reference.
+        <span className="mx-1 font-mono text-xs text-fg">[n]</span> marker points at one of them.
+        Opening it shows the passage and the source it came from. If an answer ever cites a number
+        that resolves to nothing, it is shown as plain text rather than dressed up as a reference.
       </>
     ),
   },
@@ -85,19 +86,20 @@ const ITEMS: { question: string; answer: React.ReactNode }[] = [
 
 export function Faq({ className }: { className?: string }) {
   return (
-    <div className={cn('divide-y divide-border-soft rounded-card bg-panel', className)}>
+    <div className={cn('space-y-2', className)}>
       {ITEMS.map((item) => (
-        <details key={item.question} className="group px-4">
-          <summary className="flex cursor-pointer list-none items-center gap-2 py-3 text-sm font-medium text-fg marker:hidden">
+        <details
+          key={item.question}
+          className="group rounded-card border border-border-soft bg-panel px-4 transition-colors duration-(--dur-1) open:border-border hover:border-border"
+        >
+          <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 py-3 text-sm font-medium text-fg marker:hidden [&::-webkit-details-marker]:hidden">
             <span className="min-w-0 flex-1">{item.question}</span>
-            <span
+            <Plus
               aria-hidden="true"
-              className="shrink-0 text-fg-4 transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-45"
-            >
-              +
-            </span>
+              className="size-4 shrink-0 text-fg-3 transition-transform duration-(--dur-2) ease-(--ease-out) group-open:rotate-45"
+            />
           </summary>
-          <div className="pb-3 text-sm leading-relaxed text-fg-3">{item.answer}</div>
+          <div className="pr-7 pb-4 text-sm leading-relaxed text-fg-3">{item.answer}</div>
         </details>
       ))}
     </div>
