@@ -5670,6 +5670,115 @@
         ]
       }
     },
+    "/experts/{slug}/outline": {
+      "get": {
+        "description": "What the expert holds: each work, its parts, and what each part establishes.\n\nA work is a kept source. A part is a run of its passages under one heading\nor locus, read one way \u2014 ``held: false`` for passages read closely\n(contextualised, in the concept graph), ``true`` for the rest of a long work\nthat is embedded and findable but was never read by a model. Each part\ncarries its locus range, the passage to open it at, the key concepts its\npassages serve (indices into ``key_concepts``) and ``section_count``.\n``sections`` is null here: what each section establishes is read one work at\na time, from ``/outline/works/{source_id}``.\n\nCheck ``computed``: it is ``false`` while no source has been read yet.",
+        "operationId": "expert_outline_experts__slug__outline_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Expert Outline Experts  Slug  Outline Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Expert Outline",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/experts/{slug}/outline/works/{source_id}": {
+      "get": {
+        "description": "One work of the outline, with each part's sections and a summary of each.\n\nThe parts are the ones ``/outline`` lists for this work, in the same order\nand with the same ``seq_start``. A summary is the ~120 words a build wrote to\nroute broad questions by; it is an index entry, not a quotation, and the\npassage it opens at (``passage_id``) is where the text itself is read.",
+        "operationId": "expert_outline_work_experts__slug__outline_works__source_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "title": "Source Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "title": "Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Expert Outline Work Experts  Slug  Outline Works  Source Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Expert Outline Work",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
     "/experts/{slug}/picture": {
       "delete": {
         "description": "Remove the found picture; the expert falls back to its recipe or sigil.\n\nDistinct from picking a sigil style in the avatar picker, which writes a\nrecipe that Reset would then undo \u2014 bringing the picture straight back. This\nis how an owner says \"not this, and not any\".",

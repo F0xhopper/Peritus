@@ -841,6 +841,77 @@ class AuditRepository:
             )
         return [dict(r) for r in rows]
 
+    # ── the outline (audit/outline.py) ─────────────────────────────────────
+
+    async def outline_chunks(
+        self, expert_id: int, source_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Every passage of a kept source — or of one — without its text: where it sits."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT sc.id, sc.source_id, sc.sequence_n, sc.chunk_meta,
+                       length(sc.text)::int AS chars
+                FROM source_chunks sc
+                JOIN sources s ON s.id = sc.source_id AND s.passed
+                WHERE sc.expert_id = $1 AND ($2::int IS NULL OR sc.source_id = $2::int)
+                ORDER BY sc.source_id, sc.sequence_n, sc.id
+                """,
+                expert_id,
+                source_id,
+            )
+        return [dict(r) for r in rows]
+
+    async def outline_sections(
+        self, expert_id: int, source_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """The sections a build summarised (migration 036); none for an older expert.
+
+        The summary text is read only for one source: across an expert it is
+        most of a megabyte, and the outline only counts them.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT cs.source_id, cs.seq_start, cs.seq_end,
+                       CASE WHEN $2::int IS NULL THEN NULL ELSE cs.summary END AS summary
+                FROM corpus_sections cs
+                JOIN sources s ON s.id = cs.source_id AND s.passed
+                WHERE cs.expert_id = $1 AND ($2::int IS NULL OR cs.source_id = $2::int)
+                ORDER BY cs.source_id, cs.seq_start
+                """,
+                expert_id,
+                source_id,
+            )
+        return [dict(r) for r in rows]
+
+    async def outline_concept_hits(
+        self, expert_id: int, source_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """How many concept nodes of each key concept are anchored in each passage.
+
+        Unnested rather than ``sc.id = ANY(n.chunk_ids)``: that form is a nested
+        loop over every node for every passage, and this one is a primary-key
+        lookup per anchored passage.
+        """
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT sc.source_id, sc.sequence_n, n.key_concept_idx::int AS idx,
+                       count(*)::int AS n
+                FROM expert_nodes n
+                CROSS JOIN LATERAL unnest(n.chunk_ids) AS anchored(chunk_id)
+                JOIN source_chunks sc ON sc.id = anchored.chunk_id
+                JOIN sources s ON s.id = sc.source_id AND s.passed
+                WHERE n.expert_id = $1 AND n.key_concept_idx IS NOT NULL
+                  AND ($2::int IS NULL OR sc.source_id = $2::int)
+                GROUP BY sc.source_id, sc.sequence_n, n.key_concept_idx
+                """,
+                expert_id,
+                source_id,
+            )
+        return [dict(r) for r in rows]
+
     async def map_concept(self, expert_id: int, node_id: int) -> dict[str, Any] | None:
         """One concept for the map's panel: itself, its sources, its claims and relations."""
         async with self._pool.acquire() as conn:

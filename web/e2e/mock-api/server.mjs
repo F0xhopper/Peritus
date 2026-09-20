@@ -574,6 +574,29 @@ async function handle(req, res) {
         truncated: nodes.length < graph.total_nodes,
       })
     }
+    if (rest === '/outline' && method === 'GET') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      const outline = await fixture('outline')
+      // Passages exist from `chat_ready`; before that nothing has been read.
+      if (expert.readiness === 'pending') {
+        return json(res, 200, {
+          ...outline,
+          expert: { slug: expert.name, topic: expert.topic },
+          computed: false,
+          totals: { works: 0, passages: 0, close: 0, held: 0, parts: 0, sections: 0 },
+          works: [],
+        })
+      }
+      return json(res, 200, { ...outline, expert: { slug: expert.name, topic: expert.topic } })
+    }
+    const workMatch = /^\/outline\/works\/(\d+)$/.exec(rest)
+    if (workMatch && method === 'GET') {
+      if (!expert) return json(res, 404, { detail: 'Expert not found' })
+      const work = (await fixture('outline-works'))[workMatch[1]]
+      return work
+        ? json(res, 200, work)
+        : json(res, 404, { detail: 'No such work in this expert.' })
+    }
     if (rest === '/map' && method === 'GET') {
       if (!expert) return json(res, 404, { detail: 'Expert not found' })
       if (!expert.graph_expanded) {

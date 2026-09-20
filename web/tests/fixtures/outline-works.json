@@ -1,0 +1,421 @@
+{
+  "804": {
+    "source_id": 804,
+    "title": "Varroa destructor and honeybee viral loads: a five-year cohort",
+    "author": "Beaumont, R. and Halvorsen, K.",
+    "kind": "openalex",
+    "tier": "primary",
+    "passages": 34,
+    "close": 34,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 33,
+        "passages": 34,
+        "passage_id": 9062,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [0, 3],
+        "section_count": 3,
+        "sections": [
+          {
+            "seq_start": 0,
+            "seq_end": 11,
+            "passages": 12,
+            "passage_id": 9062,
+            "locus_first": null,
+            "locus_last": null,
+            "summary": "A five-year cohort of 212 colonies across four apiaries relates mite infestation in August to viral load in October, with deformed wing virus titres rising steeply above three mites per hundred bees."
+          },
+          {
+            "seq_start": 12,
+            "seq_end": 23,
+            "passages": 12,
+            "passage_id": 9074,
+            "locus_first": null,
+            "locus_last": null,
+            "summary": "Colonies above the threshold lost 61% of their winter bees before January; those treated in July stayed below it and wintered at rates indistinguishable from mite-free controls."
+          },
+          {
+            "seq_start": 24,
+            "seq_end": 33,
+            "passages": 10,
+            "passage_id": 9086,
+            "locus_first": null,
+            "locus_last": null,
+            "summary": "The authors argue that the mite load in late summer, not in spring, predicts winter loss, and that monitoring thresholds published for spring understate the risk."
+          }
+        ]
+      }
+    ]
+  },
+  "812": {
+    "source_id": 812,
+    "title": "Amitraz resistance in field populations, 2019-2024",
+    "author": "Okonkwo, A.",
+    "kind": "pubmed",
+    "tier": "primary",
+    "passages": 4,
+    "close": 4,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 3,
+        "passages": 4,
+        "passage_id": 9096,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 0,
+        "sections": []
+      }
+    ]
+  },
+  "815": {
+    "source_id": 815,
+    "title": "Drone brood trapping as integrated pest management",
+    "author": "Lindqvist, M.",
+    "kind": "openalex",
+    "tier": "primary",
+    "passages": 22,
+    "close": 22,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": "Methods",
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 9,
+        "passages": 10,
+        "passage_id": 9040,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [2],
+        "section_count": 1,
+        "sections": [
+          {
+            "seq_start": 0,
+            "seq_end": 9,
+            "passages": 10,
+            "passage_id": 9040,
+            "locus_first": null,
+            "locus_last": null,
+            "summary": "Drone comb frames were placed at the edge of the brood nest in forty colonies and removed at capping on a 24-day cycle from April to July."
+          }
+        ]
+      },
+      {
+        "label": "Results",
+        "held": false,
+        "seq_start": 10,
+        "seq_end": 21,
+        "passages": 12,
+        "passage_id": 9050,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [2],
+        "section_count": 1,
+        "sections": [
+          {
+            "seq_start": 10,
+            "seq_end": 21,
+            "passages": 12,
+            "passage_id": 9050,
+            "locus_first": null,
+            "locus_last": null,
+            "summary": "Three removals reduced the mite population at the end of July by half against controls, without measurable cost to honey yield; one removal alone had no lasting effect."
+          }
+        ]
+      }
+    ]
+  },
+  "816": {
+    "source_id": 816,
+    "title": "Deformed wing virus: transmission by Varroa",
+    "author": "Ortega, L.",
+    "kind": "pubmed",
+    "tier": "primary",
+    "passages": 18,
+    "close": 18,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 17,
+        "passages": 18,
+        "passage_id": 9100,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 0,
+        "sections": []
+      }
+    ]
+  },
+  "817": {
+    "source_id": 817,
+    "title": "Sugar roll and alcohol wash compared",
+    "author": "Kimura, T.",
+    "kind": "exa",
+    "tier": "secondary",
+    "passages": 9,
+    "close": 9,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 8,
+        "passages": 9,
+        "passage_id": 9118,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 0,
+        "sections": []
+      }
+    ]
+  },
+  "818": {
+    "source_id": 818,
+    "title": "Varroa mite",
+    "author": null,
+    "kind": "wikipedia",
+    "tier": "tertiary",
+    "passages": 12,
+    "close": 12,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 11,
+        "passages": 12,
+        "passage_id": 9127,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 0,
+        "sections": []
+      }
+    ]
+  },
+  "819": {
+    "source_id": 819,
+    "title": "Resistance management for acaricides in apiculture",
+    "author": "Fischer, H.",
+    "kind": "web",
+    "tier": "secondary",
+    "passages": 14,
+    "close": 14,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 13,
+        "passages": 14,
+        "passage_id": 9139,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 0,
+        "sections": []
+      }
+    ]
+  },
+  "820": {
+    "source_id": 820,
+    "title": "Mite biology for beekeepers",
+    "author": "Arnott, J.",
+    "kind": "gutenberg",
+    "tier": "secondary",
+    "passages": 40,
+    "close": 20,
+    "held": 20,
+    "locus_first": "Book I, Chapter 1",
+    "locus_last": "Book II, Chapter 5",
+    "parts": [
+      {
+        "label": "Introduction",
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 7,
+        "passages": 8,
+        "passage_id": 9000,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 1,
+        "sections": [
+          {
+            "seq_start": 0,
+            "seq_end": 7,
+            "passages": 8,
+            "passage_id": 9000,
+            "locus_first": null,
+            "locus_last": null,
+            "summary": "Arnott sets out why Varroa destructor, a parasite of Apis cerana, became lethal on Apis mellifera, and frames the book around the mite's dependence on capped brood."
+          }
+        ]
+      },
+      {
+        "label": "The Mite and Its Host",
+        "held": false,
+        "seq_start": 8,
+        "seq_end": 13,
+        "passages": 6,
+        "passage_id": 9008,
+        "locus_first": "Book I, Chapter 1",
+        "locus_last": "Book I, Chapter 1",
+        "key_concepts": [0],
+        "section_count": 1,
+        "sections": [
+          {
+            "seq_start": 8,
+            "seq_end": 13,
+            "passages": 6,
+            "passage_id": 9008,
+            "locus_first": "Book I, Chapter 1",
+            "locus_last": "Book I, Chapter 1",
+            "summary": "The adult female mite is described: its flattened body, its feeding on the fat body rather than haemolymph, and the phoretic phase spent on nurse bees between brood cycles."
+          }
+        ]
+      },
+      {
+        "label": "The Reproductive Cycle",
+        "held": false,
+        "seq_start": 14,
+        "seq_end": 19,
+        "passages": 6,
+        "passage_id": 9014,
+        "locus_first": "Book I, Chapter 2",
+        "locus_last": "Book I, Chapter 2",
+        "key_concepts": [0, 2],
+        "section_count": 1,
+        "sections": [
+          {
+            "seq_start": 14,
+            "seq_end": 19,
+            "passages": 6,
+            "passage_id": 9014,
+            "locus_first": "Book I, Chapter 2",
+            "locus_last": "Book I, Chapter 2",
+            "summary": "The foundress enters a cell some fifteen hours before capping, lays a male egg first and female eggs at thirty-hour intervals; drone brood, capped longer, yields more mated daughters."
+          }
+        ]
+      },
+      {
+        "label": null,
+        "held": true,
+        "seq_start": 21,
+        "seq_end": 40,
+        "passages": 20,
+        "passage_id": 9020,
+        "locus_first": "Book II, Chapter 3",
+        "locus_last": "Book II, Chapter 5",
+        "key_concepts": [],
+        "section_count": 2,
+        "sections": [
+          {
+            "seq_start": 21,
+            "seq_end": 28,
+            "passages": 8,
+            "passage_id": 9020,
+            "locus_first": "Book II, Chapter 3",
+            "locus_last": "Book II, Chapter 3",
+            "summary": "Seasonal population growth in temperate colonies: mite numbers double roughly monthly while brood is present, and peak as the bee population falls in late summer."
+          },
+          {
+            "seq_start": 29,
+            "seq_end": 40,
+            "passages": 12,
+            "passage_id": 9028,
+            "locus_first": "Book II, Chapter 4",
+            "locus_last": "Book II, Chapter 5",
+            "summary": "Winter survival of mites on the cluster, the brood break as the point of greatest vulnerability, and why treatment timed to it removes the largest share of the population."
+          }
+        ]
+      }
+    ]
+  },
+  "821": {
+    "source_id": 821,
+    "title": "Viral co-infection in overwintering colonies",
+    "author": "Sato, Y.",
+    "kind": "arxiv",
+    "tier": "primary",
+    "passages": 16,
+    "close": 16,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 15,
+        "passages": 16,
+        "passage_id": 9153,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 0,
+        "sections": []
+      }
+    ]
+  },
+  "822": {
+    "source_id": 822,
+    "title": "Beekeeping forum: what worked this winter",
+    "author": null,
+    "kind": "reddit",
+    "tier": "tertiary",
+    "passages": 3,
+    "close": 3,
+    "held": 0,
+    "locus_first": null,
+    "locus_last": null,
+    "parts": [
+      {
+        "label": null,
+        "held": false,
+        "seq_start": 0,
+        "seq_end": 2,
+        "passages": 3,
+        "passage_id": 9169,
+        "locus_first": null,
+        "locus_last": null,
+        "key_concepts": [],
+        "section_count": 0,
+        "sections": []
+      }
+    ]
+  }
+}

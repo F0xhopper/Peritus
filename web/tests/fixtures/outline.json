@@ -1,0 +1,346 @@
+{
+  "expert": {
+    "slug": "varroa-mite-control-in-temperate-beekeeping",
+    "topic": "Varroa mite control in temperate beekeeping"
+  },
+  "computed": true,
+  "key_concepts": [
+    "varroa biology",
+    "acaricide resistance",
+    "drone brood removal",
+    "viral co-infection",
+    "monitoring thresholds"
+  ],
+  "totals": {
+    "works": 10,
+    "passages": 172,
+    "close": 152,
+    "held": 20,
+    "parts": 14,
+    "sections": 10
+  },
+  "works": [
+    {
+      "source_id": 820,
+      "title": "Mite biology for beekeepers",
+      "author": "Arnott, J.",
+      "kind": "gutenberg",
+      "tier": "secondary",
+      "passages": 40,
+      "close": 20,
+      "held": 20,
+      "locus_first": "Book I, Chapter 1",
+      "locus_last": "Book II, Chapter 5",
+      "parts": [
+        {
+          "label": "Introduction",
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 7,
+          "passages": 8,
+          "passage_id": 9000,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 1,
+          "sections": null
+        },
+        {
+          "label": "The Mite and Its Host",
+          "held": false,
+          "seq_start": 8,
+          "seq_end": 13,
+          "passages": 6,
+          "passage_id": 9008,
+          "locus_first": "Book I, Chapter 1",
+          "locus_last": "Book I, Chapter 1",
+          "key_concepts": [0],
+          "section_count": 1,
+          "sections": null
+        },
+        {
+          "label": "The Reproductive Cycle",
+          "held": false,
+          "seq_start": 14,
+          "seq_end": 19,
+          "passages": 6,
+          "passage_id": 9014,
+          "locus_first": "Book I, Chapter 2",
+          "locus_last": "Book I, Chapter 2",
+          "key_concepts": [0, 2],
+          "section_count": 1,
+          "sections": null
+        },
+        {
+          "label": null,
+          "held": true,
+          "seq_start": 21,
+          "seq_end": 40,
+          "passages": 20,
+          "passage_id": 9020,
+          "locus_first": "Book II, Chapter 3",
+          "locus_last": "Book II, Chapter 5",
+          "key_concepts": [],
+          "section_count": 2,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 804,
+      "title": "Varroa destructor and honeybee viral loads: a five-year cohort",
+      "author": "Beaumont, R. and Halvorsen, K.",
+      "kind": "openalex",
+      "tier": "primary",
+      "passages": 34,
+      "close": 34,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 33,
+          "passages": 34,
+          "passage_id": 9062,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [0, 3],
+          "section_count": 3,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 815,
+      "title": "Drone brood trapping as integrated pest management",
+      "author": "Lindqvist, M.",
+      "kind": "openalex",
+      "tier": "primary",
+      "passages": 22,
+      "close": 22,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": "Methods",
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 9,
+          "passages": 10,
+          "passage_id": 9040,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [2],
+          "section_count": 1,
+          "sections": null
+        },
+        {
+          "label": "Results",
+          "held": false,
+          "seq_start": 10,
+          "seq_end": 21,
+          "passages": 12,
+          "passage_id": 9050,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [2],
+          "section_count": 1,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 816,
+      "title": "Deformed wing virus: transmission by Varroa",
+      "author": "Ortega, L.",
+      "kind": "pubmed",
+      "tier": "primary",
+      "passages": 18,
+      "close": 18,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 17,
+          "passages": 18,
+          "passage_id": 9100,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 0,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 821,
+      "title": "Viral co-infection in overwintering colonies",
+      "author": "Sato, Y.",
+      "kind": "arxiv",
+      "tier": "primary",
+      "passages": 16,
+      "close": 16,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 15,
+          "passages": 16,
+          "passage_id": 9153,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 0,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 819,
+      "title": "Resistance management for acaricides in apiculture",
+      "author": "Fischer, H.",
+      "kind": "web",
+      "tier": "secondary",
+      "passages": 14,
+      "close": 14,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 13,
+          "passages": 14,
+          "passage_id": 9139,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 0,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 818,
+      "title": "Varroa mite",
+      "author": null,
+      "kind": "wikipedia",
+      "tier": "tertiary",
+      "passages": 12,
+      "close": 12,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 11,
+          "passages": 12,
+          "passage_id": 9127,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 0,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 817,
+      "title": "Sugar roll and alcohol wash compared",
+      "author": "Kimura, T.",
+      "kind": "exa",
+      "tier": "secondary",
+      "passages": 9,
+      "close": 9,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 8,
+          "passages": 9,
+          "passage_id": 9118,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 0,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 812,
+      "title": "Amitraz resistance in field populations, 2019-2024",
+      "author": "Okonkwo, A.",
+      "kind": "pubmed",
+      "tier": "primary",
+      "passages": 4,
+      "close": 4,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 3,
+          "passages": 4,
+          "passage_id": 9096,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 0,
+          "sections": null
+        }
+      ]
+    },
+    {
+      "source_id": 822,
+      "title": "Beekeeping forum: what worked this winter",
+      "author": null,
+      "kind": "reddit",
+      "tier": "tertiary",
+      "passages": 3,
+      "close": 3,
+      "held": 0,
+      "locus_first": null,
+      "locus_last": null,
+      "parts": [
+        {
+          "label": null,
+          "held": false,
+          "seq_start": 0,
+          "seq_end": 2,
+          "passages": 3,
+          "passage_id": 9169,
+          "locus_first": null,
+          "locus_last": null,
+          "key_concepts": [],
+          "section_count": 0,
+          "sections": null
+        }
+      ]
+    }
+  ]
+}

@@ -36,6 +36,7 @@ import { useBuildEvents } from '@/hooks/use-build-events'
 import { toast } from 'sonner'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { useExpertGraph } from '@/hooks/use-expert-graph'
+import { useExpertOutline, useOutlineSections } from '@/hooks/use-expert-outline'
 import { useStartChat } from '@/hooks/use-start-chat'
 import { canManage } from '@/lib/access'
 import { cn } from '@/lib/cn'
@@ -62,9 +63,9 @@ import type {
   SourceSort,
 } from '@/lib/api/types'
 
-export type KnowledgeView = 'map' | 'flow' | 'graph' | 'list'
+export type KnowledgeView = 'map' | 'flow' | 'graph' | 'outline' | 'list'
 
-const VIEWS: readonly KnowledgeView[] = ['map', 'flow', 'graph', 'list']
+const VIEWS: readonly KnowledgeView[] = ['map', 'flow', 'graph', 'outline', 'list']
 
 /**
  * The map's code — d3, the painter, the worker — is loaded only where the Map
@@ -92,8 +93,18 @@ const GraphTab = dynamic(
 )
 
 /**
+ * The Outline is DOM and small, and is still loaded apart: it is only ever asked
+ * for, and everything bundled with the page is paid for before the List — the
+ * whole page on a phone — can answer a tap.
+ */
+const OutlineView = dynamic(
+  () => import('@/components/knowledge/outline-view').then((module) => module.OutlineView),
+  { ssr: false }
+)
+
+/**
  * The Knowledge page: one expert's syllabus, concepts and sources, as a Map, a
- * Flow and a List, beside an Overview of all three
+ * Flow, a Graph, an Outline and a List, beside an Overview of them
  * (docs/plans/expert-brain.md, phase 5). It replaced the Sources and
  * Concepts pages, which did not connect: the concept panel's only bridge to
  * the sources matched a node label against a key concept, which happened for no
@@ -273,6 +284,13 @@ export function KnowledgePage({
   // The concepts the page has lit, which are the Graph's node ids too.
   const graphLit = lit?.concepts ?? null
 
+  // ── the outline ───────────────────────────────────────────────────────────
+
+  // Fetched when the Outline is first opened, like the Graph: works, parts and
+  // how each was read. What each part establishes is read a work at a time.
+  const outlineState = useExpertOutline(expert.name, view === 'outline')
+  const outlineSections = useOutlineSections(expert.name)
+
   const setFilter = (next: SourceFilter) => {
     setPreview(null)
     writeParams({ kind: next.kind, tier: next.tier })
@@ -370,7 +388,8 @@ export function KnowledgePage({
     else select(match.selection, { focus: true })
     setSearchOpen(false)
     // In the List the text goes on narrowing the rows; elsewhere it has done
-    // its job.
+    // its job — in the Outline too, where what was chosen opens and is scrolled
+    // to, and a narrowed list around it would hide where it sits.
     if (shown !== 'list') setQuery('')
   }
 
@@ -672,7 +691,7 @@ export function KnowledgePage({
           {map.computed && map.totals.concepts !== null && (
             <span
               className={
-                view === 'list' || view === 'graph'
+                view === 'list' || view === 'graph' || view === 'outline'
                   ? 'hidden'
                   : view
                     ? undefined
@@ -837,6 +856,24 @@ export function KnowledgePage({
             </div>
           )}
 
+          {view === 'outline' && (
+            <div className="scroll-col min-h-0 flex-1">
+              <OutlineView
+                outline={outlineState.outline}
+                error={outlineState.error}
+                slug={expert.name}
+                litSources={lit?.sources ?? null}
+                keyConcept={selection?.kind === 'keyConcept' ? selection.index : null}
+                selectedSourceId={selection?.kind === 'source' ? selection.id : null}
+                filter={query}
+                sections={outlineSections.loaded}
+                onLoadSections={outlineSections.load}
+                onSelectSource={(id) => select({ kind: 'source', id })}
+                onWatchBuild={() => router.push(`/experts/${expert.name}/build`)}
+              />
+            </div>
+          )}
+
           <div className={cn('scroll-col min-h-0 flex-1', listClass)}>
             {/* Below `lg` there is no column to stand in, so the Overview folds
                 above the sources it summarises. */}
@@ -990,7 +1027,7 @@ function MapLegend({ disputed }: { disputed: boolean }) {
 }
 
 /**
- * Map | Flow | Graph | List. With no `?view=` the active option depends on the device, which
+ * Map | Flow | Graph | Outline | List. With no `?view=` the active option depends on the device, which
  * only CSS knows at first paint — so both forms are rendered and one is hidden.
  */
 function ViewToggle({
@@ -1004,6 +1041,7 @@ function ViewToggle({
     { value: 'map' as const, label: 'Map' },
     { value: 'flow' as const, label: 'Flow' },
     { value: 'graph' as const, label: 'Graph' },
+    { value: 'outline' as const, label: 'Outline' },
     { value: 'list' as const, label: 'List' },
   ]
   if (view) return <Segmented label="View" options={options} value={view} onChange={onChange} />

@@ -26,6 +26,7 @@ from peritus.audit.domain import (
     safe_mean,
 )
 from peritus.audit.expert_map import build_concept_detail, build_map
+from peritus.audit.outline import build_outline, build_outline_work
 from peritus.audit.repository import AuditRepository, AuditScope
 from peritus.audit.screening import UNPERSISTED, DiscoveryFunnel, derive_discovery_funnel
 from peritus.core.logging import get_logger
@@ -672,6 +673,37 @@ class AuditService:
         if detail is None:
             return None
         return build_concept_detail(detail, len(expert.key_concepts or []))
+
+    # ── the expert's outline (audit/outline.py) ─────────────────────────────
+
+    async def expert_outline(self, expert: Expert) -> dict[str, Any]:
+        """Works, parts and sections: what the expert holds, and how it read each part.
+
+        Needs no graph — passages exist a stage before it — so an expert that
+        is answering but still extracting concepts has an outline; its parts
+        simply name no key concepts yet.
+        """
+        sources = await self._repo.map_sources(expert.id)
+        chunks = await self._repo.outline_chunks(expert.id)
+        sections = await self._repo.outline_sections(expert.id)
+        hits = await self._repo.outline_concept_hits(expert.id) if expert.graph_expanded else []
+        return build_outline(expert, sources, chunks, sections, hits)
+
+    async def outline_work(self, expert: Expert, source_id: int) -> dict[str, Any] | None:
+        """One work's parts with their section summaries, or None when it is not a work here."""
+        source = next(
+            (s for s in await self._repo.map_sources(expert.id) if s["id"] == source_id), None
+        )
+        if source is None:
+            return None
+        chunks = await self._repo.outline_chunks(expert.id, source_id)
+        sections = await self._repo.outline_sections(expert.id, source_id)
+        hits = (
+            await self._repo.outline_concept_hits(expert.id, source_id)
+            if expert.graph_expanded
+            else []
+        )
+        return build_outline_work(expert, source, chunks, sections, hits)
 
     # ── answer-level retrieval trail ────────────────────────────────────────
 

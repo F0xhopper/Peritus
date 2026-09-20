@@ -10,6 +10,8 @@ import graphPending from './fixtures/graph-not-computed.json' with { type: 'json
 import expertMap from './fixtures/map.json' with { type: 'json' }
 import mapConcept from './fixtures/map-concept.json' with { type: 'json' }
 import mapPending from './fixtures/map-not-computed.json' with { type: 'json' }
+import outline from './fixtures/outline.json' with { type: 'json' }
+import outlineWorks from './fixtures/outline-works.json' with { type: 'json' }
 import screeningFlow from './fixtures/screening-flow.json' with { type: 'json' }
 import {
   isEntitlementDenial,
@@ -21,6 +23,8 @@ import {
   type GraphResponse,
   type MapConceptDetail,
   type MapResponse,
+  type OutlineResponse,
+  type OutlineWork,
   type ScreeningFlow,
 } from '@/lib/api/types'
 
@@ -46,6 +50,8 @@ const graphFixture: GraphResponse = graph as GraphResponse
 const graphPendingFixture: GraphResponse = graphPending as GraphResponse
 const mapFixture: MapResponse = expertMap as MapResponse
 const mapPendingFixture: MapResponse = mapPending as MapResponse
+const outlineFixture: OutlineResponse = outline as OutlineResponse
+const outlineWorksFixture: Record<string, OutlineWork> = outlineWorks as Record<string, OutlineWork>
 const mapConceptFixture: MapConceptDetail = mapConcept as MapConceptDetail
 const chatFixtures: Record<string, ChatEvent> = chatEvents
 const flowFixture: ScreeningFlow = screeningFlow as ScreeningFlow
@@ -289,6 +295,48 @@ describe('chat events', () => {
     for (const passage of audit.passages) {
       expect(['cited', 'considered']).toContain(passage.disposition)
     }
+  })
+})
+
+describe('outline', () => {
+  it('lists the sources the map draws, and no others', () => {
+    const drawn = new Set(mapFixture.sources.map((source) => source.id))
+    for (const work of outlineFixture.works) expect(drawn.has(work.source_id)).toBe(true)
+    expect(outlineFixture.key_concepts).toEqual(
+      mapFixture.syllabus.key_concepts.map((concept) => concept.label)
+    )
+  })
+
+  it('adds up: parts to works, works to totals, read closely and held to passages', () => {
+    for (const work of outlineFixture.works) {
+      expect(work.close + work.held).toBe(work.passages)
+      expect(work.parts.reduce((sum, part) => sum + part.passages, 0)).toBe(work.passages)
+    }
+    const sum = (pick: (work: OutlineWork) => number) =>
+      outlineFixture.works.reduce((total, work) => total + pick(work), 0)
+    expect(outlineFixture.totals.passages).toBe(sum((work) => work.passages))
+    expect(outlineFixture.totals.held).toBe(sum((work) => work.held))
+    expect(outlineFixture.totals.held).toBeGreaterThan(0)
+  })
+
+  it('counts sections in the outline and carries them in one work', () => {
+    for (const work of outlineFixture.works) {
+      const detail = outlineWorksFixture[String(work.source_id)]
+      expect(detail.parts.map((part) => part.seq_start)).toEqual(
+        work.parts.map((part) => part.seq_start)
+      )
+      for (const [index, part] of work.parts.entries()) {
+        // Null is "not sent", and the count beside it is the truth.
+        expect(part.sections).toBeNull()
+        expect(detail.parts[index].sections).toHaveLength(part.section_count)
+      }
+    }
+  })
+
+  it('names no key concept on a held part: no model ever read it', () => {
+    const held = outlineFixture.works.flatMap((work) => work.parts).filter((part) => part.held)
+    expect(held.length).toBeGreaterThan(0)
+    for (const part of held) expect(part.key_concepts).toEqual([])
   })
 })
 

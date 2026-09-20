@@ -25,6 +25,7 @@ const BUILDING = 'measurement-error-in-nutritional-epidemiology'
 const MAP = `/experts/${SLUG}/knowledge?view=map`
 const FLOW = `/experts/${SLUG}/knowledge?view=flow`
 const GRAPH = `/experts/${SLUG}/knowledge?view=graph`
+const OUTLINE = `/experts/${SLUG}/knowledge?view=outline`
 const LIST = `/experts/${SLUG}/knowledge?view=list`
 
 test.beforeEach(async ({ page }) => {
@@ -489,4 +490,118 @@ test('a concept on the graph leads across to the same concept on the map', async
   await expect(page).toHaveURL(/node=5003/)
   // Now the Map's panel, with what the sources say.
   await expect(panel(page, 'Concept').getByText('Said by')).toBeVisible({ timeout: 15_000 })
+})
+
+// ── the outline ─────────────────────────────────────────────────────────────
+
+test('the outline lists each work, how it was read, and its parts in place', async ({
+  page,
+}, testInfo) => {
+  await page.goto(OUTLINE)
+
+  // The header says the whole in words: nothing here is said by a bar alone.
+  await expect(
+    content(page).getByText('10 works · 152 of 172 passages read closely, 20 held')
+  ).toBeVisible({ timeout: 15_000 })
+
+  const book = content(page).getByRole('button', { name: /^Mite biology for beekeepers/ })
+  await expect(book).toContainText('20 read closely, 20 held')
+  await expect(book).toHaveAttribute('aria-expanded', 'false')
+  await book.click()
+  await expect(book).toHaveAttribute('aria-expanded', 'true')
+
+  // A part by its heading with its place beside it, and a held stretch with no
+  // heading by its place alone — collapsed to a range, not the locus twice.
+  const host = content(page).getByRole('button', { name: /^The Mite and Its Host/ })
+  await expect(host).toContainText('Book I, Chapter 1')
+  await expect(host).toContainText('varroa biology')
+  const held = content(page).getByRole('button', { name: /^Book II, Chapter 3–5/ })
+  await expect(held).toContainText('Held')
+
+  await expectResponsive(page, isTouchProject(testInfo.project.name))
+})
+
+test('a part opens onto what it establishes, and leads to the text', async ({ page }) => {
+  await page.goto(OUTLINE)
+  const book = content(page).getByRole('button', { name: /^Mite biology for beekeepers/ })
+  await expect(book).toBeVisible({ timeout: 15_000 })
+  await book.click()
+
+  await content(page)
+    .getByRole('button', { name: /^The Reproductive Cycle/ })
+    .click()
+  // The stored summary opens with a title line; the view shows the prose.
+  await expect(content(page).getByText(/The foundress enters a cell/)).toBeVisible({
+    timeout: 15_000,
+  })
+  await expect(content(page).getByText(/Index Entry/)).toHaveCount(0)
+  // Said once, at the head of the view, and not under every part.
+  await expect(content(page).getByText(/own index of it, not a quotation/)).toHaveCount(1)
+
+  // The summary is an index entry; the text is one link away, at that passage.
+  const read = content(page).getByRole('link', { name: 'Read it' }).first()
+  await expect(read).toHaveAttribute('href', /\/sources\/820\/read\?at=\d+$/)
+})
+
+test('a source with no headings shows what it establishes, or says it has none', async ({
+  page,
+}) => {
+  await page.goto(OUTLINE)
+  const cohort = content(page).getByRole('button', { name: /^Varroa destructor and honeybee/ })
+  await expect(cohort).toBeVisible({ timeout: 15_000 })
+  await cohort.click()
+  await expect(content(page).getByText(/A five-year cohort of 212 colonies/)).toBeVisible({
+    timeout: 15_000,
+  })
+
+  await content(page)
+    .getByRole('button', { name: /^Deformed wing virus: transmission/ })
+    .click()
+  await expect(content(page).getByText('This source has no headings to outline.')).toBeVisible()
+})
+
+test('a source chosen in the outline opens its panel and keeps the view', async ({
+  page,
+}, testInfo) => {
+  await page.goto(OUTLINE)
+  const details = content(page).getByRole('button', {
+    name: 'Details of Mite biology for beekeepers',
+  })
+  await expect(details).toBeVisible({ timeout: 15_000 })
+  await details.click()
+
+  await expect(page).toHaveURL(/source=820/)
+  await expect(page).toHaveURL(/view=outline/)
+  await expect(
+    panel(page, 'Source').getByRole('heading', { name: 'Mite biology for beekeepers' })
+  ).toBeVisible({ timeout: 15_000 })
+  // On touch the panel is a modal sheet, and the page under it is inert.
+  if (isTouchProject(testInfo.project.name)) return
+  // The work in hand is open without having been opened.
+  await expect(
+    content(page).getByRole('button', { name: /^Mite biology for beekeepers/ })
+  ).toHaveAttribute('aria-expanded', 'true')
+})
+
+test('the search narrows the outline to a part and opens the work it is in', async ({ page }) => {
+  await page.goto(OUTLINE)
+  await expect(
+    content(page).getByRole('button', { name: /^Mite biology for beekeepers/ })
+  ).toBeVisible({ timeout: 15_000 })
+
+  await fillUntil(
+    page.getByRole('textbox', { name: 'Find a source or concept' }),
+    'reproductive',
+    content(page).getByRole('button', { name: /^The Reproductive Cycle/ })
+  )
+  await expect(content(page).getByRole('button', { name: /^The Mite and Its Host/ })).toHaveCount(0)
+  await expect(content(page).getByRole('button', { name: /^Varroa destructor and/ })).toHaveCount(0)
+})
+
+test('an expert that has read nothing says so in the outline', async ({ page }) => {
+  await page.goto(`/experts/${BUILDING}/knowledge?view=outline`)
+  await expect(content(page).getByText(/Nothing has been read yet/)).toBeVisible({
+    timeout: 15_000,
+  })
+  await expect(page.getByRole('button', { name: 'Watch the build' })).toBeVisible()
 })

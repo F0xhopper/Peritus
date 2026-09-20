@@ -1220,6 +1220,77 @@ export interface MapConcept {
   topped_up: boolean
 }
 
+// ── the outline (GET /experts/{slug}/outline) ───────────────────────────────
+
+/**
+ * A stretch of a part that a build summarised, for routing broad questions
+ * (`corpus_sections`). The summary is an index entry written by a model, never
+ * a quotation: `passage_id` is where the text itself is read.
+ */
+export interface OutlineSection {
+  seq_start: number
+  seq_end: number
+  passages: number
+  passage_id: number
+  locus_first: string | null
+  locus_last: string | null
+  summary: string
+}
+
+/** A run of one work's passages under one heading or locus, read one way. */
+export interface OutlinePart {
+  /** The heading, or null where the text carries none fit to show — the locus
+   *  range is the part's name then. */
+  label: string | null
+  /** True for the rest of a long work: embedded and findable, never read by a
+   *  model. False for passages read closely — annotated, in the concept graph. */
+  held: boolean
+  seq_start: number
+  seq_end: number
+  passages: number
+  /** The part's first passage, for `/sources/{id}/read?at=`. */
+  passage_id: number
+  locus_first: string | null
+  locus_last: string | null
+  /** Indices into `OutlineResponse.key_concepts`. Empty for a held part: no
+   *  concept was ever extracted from it. */
+  key_concepts: number[]
+  section_count: number
+  /** Null in the outline ("not sent"); a list in one work's payload. */
+  sections: OutlineSection[] | null
+}
+
+export interface OutlineWork {
+  source_id: number
+  title: string
+  author: string | null
+  /** The fetcher key; rendered through `lib/source-kind.ts`. */
+  kind: string
+  tier: string | null
+  passages: number
+  close: number
+  held: number
+  locus_first: string | null
+  locus_last: string | null
+  parts: OutlinePart[]
+}
+
+export interface OutlineResponse {
+  expert: { slug: string; topic: string }
+  /** False while no source has been read yet: "not yet", never "nothing". */
+  computed: boolean
+  key_concepts: string[]
+  totals: {
+    works: number
+    passages: number
+    close: number
+    held: number
+    parts: number
+    sections: number
+  }
+  works: OutlineWork[]
+}
+
 export interface MapResponse {
   expert: { slug: string; topic: string }
   /** False while concepts are still being extracted. The syllabus and the

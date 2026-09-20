@@ -240,6 +240,43 @@ async def expert_map_concept(
     return detail
 
 
+@router.get("/{slug}/outline")
+async def expert_outline(expert: ReadableExpert, audits: Audits) -> dict[str, Any]:
+    """What the expert holds: each work, its parts, and what each part establishes.
+
+    A work is a kept source. A part is a run of its passages under one heading
+    or locus, read one way — ``held: false`` for passages read closely
+    (contextualised, in the concept graph), ``true`` for the rest of a long work
+    that is embedded and findable but was never read by a model. Each part
+    carries its locus range, the passage to open it at, the key concepts its
+    passages serve (indices into ``key_concepts``) and ``section_count``.
+    ``sections`` is null here: what each section establishes is read one work at
+    a time, from ``/outline/works/{source_id}``.
+
+    Check ``computed``: it is ``false`` while no source has been read yet.
+    """
+    return await audits.expert_outline(expert)
+
+
+@router.get("/{slug}/outline/works/{source_id}")
+async def expert_outline_work(
+    source_id: int,
+    expert: ReadableExpert,
+    audits: Audits,
+) -> dict[str, Any]:
+    """One work of the outline, with each part's sections and a summary of each.
+
+    The parts are the ones ``/outline`` lists for this work, in the same order
+    and with the same ``seq_start``. A summary is the ~120 words a build wrote to
+    route broad questions by; it is an index entry, not a quotation, and the
+    passage it opens at (``passage_id``) is where the text itself is read.
+    """
+    work = await audits.outline_work(expert, source_id)
+    if work is None:
+        raise HTTPException(status_code=404, detail="No such work in this expert.")
+    return work
+
+
 @router.get("/{slug}/answer-audits")
 async def list_answer_audits(
     expert: ReadableExpert,

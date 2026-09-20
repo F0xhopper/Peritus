@@ -395,10 +395,11 @@ nowhere a 20px tile is only a navigational mark.
 ## The Knowledge page
 
 Sources and Concepts are one page, `/experts/[slug]/knowledge`, with a **Map**, a
-**Flow**, a **Graph** and a **List**, beside an **Overview** of all of it
-(`docs/plans/expert-brain.md`). Each answers a different question: the Map is the
-syllabus's picture, the Flow is what stands behind each key concept, the Graph is
-how the ideas themselves hold together, the List is the sources. The old
+**Flow**, a **Graph**, an **Outline** and a **List**, beside an **Overview** of all
+of it (`docs/plans/expert-brain.md`). Each answers a different question: the Map is
+the syllabus's picture, the Flow is what stands behind each key concept, the Graph
+is how the ideas themselves hold together, the Outline is what the expert holds and
+how far into each work it reads, the List is the sources. The old
 `/sources` and `/graph` routes redirect to it with their parameters
 (`/graph?limit=` → `?view=graph&limit=`); `/sources/[id]/read` is unchanged. Rules:
 
@@ -459,6 +460,43 @@ how the ideas themselves hold together, the List is the sources. The old
   the Map's ids, so the page's `lit.concepts` dims the Graph too
   (`PaintState.lit`). In this view the page's search finds the Graph's nodes.
   **`computed: false` is never an empty canvas.**
+- **The Outline is the corpus in the shape its authors gave it**
+  (`components/knowledge/outline-view.tsx`, `lib/brain/outline.ts`,
+  `api/src/peritus/audit/outline.py`): each kept source as a _work_, its _parts_
+  by heading and locus ("I, q. 2, a. 1–3"), and under a part the _sections_ a build
+  summarised. It exists because the other views draw the expert's ideas and none
+  could show that every long work had been cut at its first tenth. Rules:
+  - **Read closely / held is the one distinction drawn**, and it is one ink in
+    two shades — a held part (`chunk_meta.ingest = "structural"`) is not a worse
+    part, so it takes no status colour and says "Held" in words. A held part names
+    no key concept: its chips are counted from the concept graph, and no model
+    ever read it.
+  - **A part's name is its heading, or its place where the text has none fit to
+    show.** The API decides what is a heading (`_heading`): the chunker takes
+    lines of body text for headings ("part of some compound."), and a sentence,
+    a contents line or a colophon may label a citation but not a row. Parts under
+    three passages join their neighbour, and holes the prose gate left in the
+    sequence never split one — both learned from real data, both pinned in
+    `api/tests/unit/test_outline.py`.
+  - **Two requests, like the Graph's one.** `/outline` is fetched in the browser
+    when the view is first opened (`useExpertOutline`) and carries no summary
+    text — `sections: null` is "not sent", `section_count` is the truth. A work's
+    summaries are most of a megabyte across a large expert and are read when that
+    work is opened (`/outline/works/{id}`, `useOutlineSections`); the two payloads
+    are cut by one function and matched by `seq_start`.
+  - **A summary is Peritus's index entry, never a quotation**, and the view says
+    so once, at its head. Every part and section links to the reader at its
+    first passage (`/sources/{id}/read?at=`), which is where the text is.
+  - A work is open because the reader opened it, because it is the source in
+    hand, or because the search matched a part inside it — derived, not state
+    that follows a prop — and one opened by a selection can still be shut. The
+    page's search narrows works and parts here as it narrows rows in the List;
+    `lit.sources` dims works, and a key concept in hand marks the parts that
+    serve it.
+  - It is DOM — disclosure buttons in a list — so it is the second view that
+    works at 360px, under a keyboard and in a screen reader. Everything in it is
+    inside an `li`, which `expectTapTargets` exempts as prose: its row controls
+    are `min-h-(--row-h)` by hand, so keep them that way.
 - **The map explains itself**: a legend of its marks (`MarkGlyph`, kept in step
   with `paintOrbitItems`) and zoom/fit buttons through `BrainCanvasHandle`.
 - **A facet is a region of the map, never a container** (`paintRegions`). Each

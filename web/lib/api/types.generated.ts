@@ -1193,6 +1193,62 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/experts/{slug}/outline': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Expert Outline
+     * @description What the expert holds: each work, its parts, and what each part establishes.
+     *
+     *     A work is a kept source. A part is a run of its passages under one heading
+     *     or locus, read one way — ``held: false`` for passages read closely
+     *     (contextualised, in the concept graph), ``true`` for the rest of a long work
+     *     that is embedded and findable but was never read by a model. Each part
+     *     carries its locus range, the passage to open it at, the key concepts its
+     *     passages serve (indices into ``key_concepts``) and ``section_count``.
+     *     ``sections`` is null here: what each section establishes is read one work at
+     *     a time, from ``/outline/works/{source_id}``.
+     *
+     *     Check ``computed``: it is ``false`` while no source has been read yet.
+     */
+    get: operations['expert_outline_experts__slug__outline_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/experts/{slug}/outline/works/{source_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Expert Outline Work
+     * @description One work of the outline, with each part's sections and a summary of each.
+     *
+     *     The parts are the ones ``/outline`` lists for this work, in the same order
+     *     and with the same ``seq_start``. A summary is the ~120 words a build wrote to
+     *     route broad questions by; it is an index entry, not a quotation, and the
+     *     passage it opens at (``passage_id``) is where the text itself is read.
+     */
+    get: operations['expert_outline_work_experts__slug__outline_works__source_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/experts/{slug}/picture': {
     parameters: {
       query?: never
@@ -4510,6 +4566,73 @@ export interface operations {
       header?: never
       path: {
         node_id: number
+        slug: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': {
+            [key: string]: unknown
+          }
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  expert_outline_experts__slug__outline_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        slug: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': {
+            [key: string]: unknown
+          }
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  expert_outline_work_experts__slug__outline_works__source_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        source_id: number
         slug: string
       }
       cookie?: never
