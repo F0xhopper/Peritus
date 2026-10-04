@@ -4,7 +4,7 @@ import Link from 'next/link'
 
 import { Property } from '@/components/experts/overview/section'
 import { DateText } from '@/components/ui/relative-time'
-import { StatusDot, dotState, stateLabel, statusTextClass } from '@/components/ui/status-dot'
+import { StatusDot, dotState, stateLabel } from '@/components/ui/status-dot'
 import { depthHint } from '@/lib/build/copy'
 import { formatInt, humanise } from '@/lib/format'
 import type { BuildStatus, ExpertWithCatalog } from '@/lib/api/types'
@@ -55,7 +55,7 @@ export function OverviewProperties({
       <Property label="Status">
         <span className="inline-flex items-center gap-1.5">
           <StatusDot state={state} />
-          <span className={statusTextClass[state]}>{statusText}</span>
+          <span className="text-fg-2">{statusText}</span>
         </span>
         {/* While it runs, the status is also the way to watch it. */}
         {inFlight && buildStatus && (

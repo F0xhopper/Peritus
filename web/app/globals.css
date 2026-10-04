@@ -29,8 +29,8 @@
   --fg-4: #a8a8a8;
 
   /* The primary action, and it is **monochrome on purpose**.
-     Colour in this product is information: green/amber/red say what state a
-     build is in, and nothing else.
+     Colour in this product is information: green/amber/red are marks — a
+     status dot, a ring on a building avatar — and nothing else.
      A violet primary button competed with both — it read as the loudest thing
      on a page where it was never the most important, and against a wall of
      violet-hashed avatars the whole app looked blue. Ink on paper, or paper on
@@ -43,8 +43,10 @@
      paper — so the light theme keeps it to a breath. */
   --mk-light: 0.14;
 
-  /* Status — the only fixed colours left, because each one means something */
-  /* Deep enough to read as text on the ground, a card and a hover (≥4.5:1). */
+  /* Status — the only fixed colours left, and only ever a mark: the 8px dot,
+     the ring on a building avatar, a dispute mark, a 4px segment. Never text,
+     a background or a border (web/AGENTS.md, "Colour"; tests/monochrome).
+     Still deep enough to read as text (≥4.5:1), so a mark beside text holds. */
   --ok: #1a7033;
   --warn: #7f5808;
   --bad: #b42d2d;

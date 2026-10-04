@@ -244,7 +244,8 @@ export function readColours(element: Element): PaintColours {
   const style = getComputedStyle(element)
   const read = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback
   return {
-    expert: read('--expert', '#8b7cf6'),
+    // The fallback is grey, like the token: a missing variable must not paint violet.
+    expert: read('--expert', '#8e8e8e'),
     fg: read('--fg', '#fafafa'),
     fg3: read('--fg-3', '#6b6b73'),
     border: read('--border', '#2e2e2e'),

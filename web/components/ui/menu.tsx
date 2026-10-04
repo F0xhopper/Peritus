@@ -70,7 +70,7 @@ export function MenuItem({
         'flex h-(--row-h) cursor-default items-center gap-2 rounded-row px-3 text-sm outline-none',
         'transition-colors duration-(--dur-1)',
         tone === 'danger'
-          ? 'text-bad data-highlighted:bg-bad/12'
+          ? 'text-fg data-highlighted:bg-border'
           : 'text-fg-2 data-highlighted:bg-border data-highlighted:text-fg',
         'data-disabled:pointer-events-none data-disabled:opacity-50',
         className

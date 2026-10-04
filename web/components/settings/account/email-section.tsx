@@ -92,9 +92,7 @@ export function EmailSection({ account }: { account: Account }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-fg">
             {account.email ?? '—'}
-            {!account.email_confirmed && (
-              <span className="ml-2 text-xs text-warn">unconfirmed</span>
-            )}
+            {!account.email_confirmed && <span className="ml-2 text-xs text-fg">unconfirmed</span>}
           </p>
           <Button variant="outline" onClick={() => setStep({ kind: 'editing' })}>
             Change email

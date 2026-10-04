@@ -16,7 +16,7 @@ const field = [
   'hover:border-fg-4',
   'focus:border-expert focus:outline-none',
   'disabled:cursor-not-allowed disabled:opacity-50',
-  'aria-invalid:border-bad',
+  'aria-invalid:border-fg',
 ].join(' ')
 
 export function Input({ className, ...props }: React.ComponentProps<'input'>) {
@@ -51,10 +51,7 @@ export function Label({ className, ...props }: React.ComponentProps<'label'>) {
  */
 export function FieldError({ children }: { children?: React.ReactNode }) {
   return (
-    <p
-      aria-live="polite"
-      className="min-h-4 text-xs text-bad transition-opacity duration-(--dur-2)"
-    >
+    <p aria-live="polite" className="min-h-4 text-xs text-fg transition-opacity duration-(--dur-2)">
       {children}
     </p>
   )

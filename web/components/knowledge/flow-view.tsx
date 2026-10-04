@@ -299,7 +299,7 @@ export function FlowView({
                       {concept.met ? (
                         formatNumber(concept.sources)
                       ) : (
-                        <span className="text-warn">{formatNumber(concept.sources)} · short</span>
+                        <span className="text-fg">{formatNumber(concept.sources)} · short</span>
                       )}
                     </span>
                   </span>
@@ -361,7 +361,7 @@ export function FlowView({
                     )}
                     style={{ top, left: columns.source.x, width: columns.source.w, height: rowH }}
                   >
-                    <span className="shrink-0 text-label tracking-[0.04em] text-warn uppercase">
+                    <span className="shrink-0 text-label tracking-[0.04em] text-fg uppercase">
                       Missing
                     </span>
                     <span className="min-w-0 truncate italic" title={gap.title}>

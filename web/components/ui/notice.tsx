@@ -3,20 +3,21 @@ import { AlertTriangle, CircleAlert, Info, CircleCheck } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 /**
- * A tinted rounded notice: a failed build, a degraded stage, a 402 denial, a
+ * A rounded notice: a failed build, a degraded stage, a 402 denial, a
  * provenance caveat.
  *
- * Tinted at 12% rather than filled, so a red panel does not shout over the
- * content it is annotating, and the icon carries the meaning for anyone who
- * cannot see the tint.
+ * Monochrome (web/AGENTS.md, "Colour"): a panel with a hairline, the stronger
+ * hairline for what has gone wrong, and the icon and the words carry the
+ * meaning. It used to be tinted red, amber or green at 8%; a notice is the
+ * one thing on a page that is *about* its state, and the icon already said it.
  */
 export type NoticeTone = 'bad' | 'warn' | 'info' | 'ok'
 
 const TONES: Record<NoticeTone, { wrap: string; icon: typeof Info }> = {
-  bad: { wrap: 'border-bad/30 bg-bad/8 text-bad', icon: CircleAlert },
-  warn: { wrap: 'border-warn/30 bg-warn/8 text-warn', icon: AlertTriangle },
-  info: { wrap: 'border-info/30 bg-info/8 text-info', icon: Info },
-  ok: { wrap: 'border-ok/30 bg-ok/8 text-ok', icon: CircleCheck },
+  bad: { wrap: 'border-border bg-panel text-fg', icon: CircleAlert },
+  warn: { wrap: 'border-border bg-panel text-fg', icon: AlertTriangle },
+  info: { wrap: 'border-border-soft bg-panel text-fg', icon: Info },
+  ok: { wrap: 'border-border-soft bg-panel text-fg', icon: CircleCheck },
 }
 
 export function Notice({

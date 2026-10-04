@@ -167,7 +167,7 @@ function CitationChip({
               Passage {shown} · {truncate(citation.label, 80)}
             </p>
             {citation.disputed && (
-              <p className="mt-1 text-xs text-warn">
+              <p className="mt-1 text-xs text-fg">
                 {citation.dispute_points?.[0]
                   ? truncate(citation.dispute_points[0], 160)
                   : 'Another source in this corpus disagrees with this.'}
@@ -235,9 +235,7 @@ export function CitationList({
               selected === citation.n ? 'text-fg' : 'text-fg-3 hover:text-fg-2'
             )}
           >
-            <span
-              className={cn('shrink-0 font-mono', citation.disputed ? 'text-warn' : 'text-fg-2')}
-            >
+            <span className={cn('shrink-0 font-mono', citation.disputed ? 'text-fg' : 'text-fg-2')}>
               [{citation.display ?? citation.n}]
             </span>
             <span className="min-w-0 flex-1">{citation.label}</span>

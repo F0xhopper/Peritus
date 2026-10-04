@@ -40,7 +40,7 @@ export function DenialNotice({
         denial.remedy.kind === 'request_credits' ? (
           <a
             href={`mailto:${REQUEST_EMAIL}?subject=${subject}&body=${body}`}
-            className="inline-flex h-(--row-h) items-center rounded-row bg-warn/15 px-3 text-sm font-medium text-warn transition-colors duration-(--dur-1) hover:bg-warn/25"
+            className="inline-flex h-(--row-h) items-center rounded-row border border-border px-3 text-sm font-medium text-fg transition-colors duration-(--dur-1) hover:bg-raised"
           >
             {denial.remedy.label}
           </a>

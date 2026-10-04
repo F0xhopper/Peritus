@@ -2,9 +2,12 @@ import { cn } from '@/lib/cn'
 
 /**
  * A filled chip, used for exactly two things: a citation marker `[n]` and the
- * ledger's decision column. Everything else that might want a chip gets
- * coloured text instead (web-design.md §3), which is why this has no variant
- * for "tag" or "label".
+ * ledger's decision column. Everything else that might want a chip gets plain
+ * text instead, which is why this has no variant for "tag" or "label".
+ *
+ * The tones are monochrome (web/AGENTS.md, "Colour"): what is kept is filled,
+ * what is dropped is hollow — the fill-against-hairline idiom the map uses for
+ * primary and secondary — and the word in the chip says which.
  */
 export function Chip({
   children,
@@ -30,8 +33,8 @@ export function Chip({
 
 const TONES = {
   neutral: 'bg-raised text-fg-2',
-  ok: 'bg-ok/12 text-ok',
-  bad: 'bg-bad/12 text-bad',
-  warn: 'bg-warn/12 text-warn',
+  ok: 'bg-raised text-fg',
+  bad: 'border border-border text-fg-3',
+  warn: 'bg-raised text-fg-2',
   expert: 'bg-expert-soft text-expert',
 } as const

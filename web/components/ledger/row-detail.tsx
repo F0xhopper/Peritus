@@ -102,7 +102,7 @@ export function RowDetail({
         {source.full_text_method && (
           <Field label="Read">
             {source.full_text_method === 'abstract' ? (
-              <span className="text-warn">Abstract only</span>
+              <span className="text-fg">Abstract only</span>
             ) : (
               describeTextRead(source.full_text_method)
             )}
@@ -208,12 +208,7 @@ export function RowDetail({
           </Button>
         )}
         {onDeleted && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setConfirming(true)}
-            className="text-bad"
-          >
+          <Button variant="ghost" size="sm" onClick={() => setConfirming(true)} className="text-fg">
             <Trash2 className="size-3" />
             Remove
           </Button>

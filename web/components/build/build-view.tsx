@@ -307,12 +307,12 @@ export function BuildView({
               {state.counts.chunks > 0 && ` · ${state.counts.chunks} passages`}
             </span>
           )}
-          {live && <span className="text-ok">live</span>}
+          {live && <span className="text-fg-2">live</span>}
           {reconnecting && (
             <button
               type="button"
               onClick={reconnect}
-              className="text-warn underline-offset-2 hover:underline"
+              className="text-fg underline-offset-2 hover:underline"
             >
               reconnecting — retry now
             </button>

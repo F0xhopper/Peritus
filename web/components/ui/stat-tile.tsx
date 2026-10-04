@@ -11,13 +11,11 @@ export function StatTile({
   label,
   value,
   hint,
-  tone,
   className,
 }: {
   label: string
   value: string | number
   hint?: string
-  tone?: 'ok' | 'warn' | 'bad' | 'info' | 'expert'
   className?: string
 }) {
   // A `dl`, because that is what a label and a value are. It also gives the
@@ -31,21 +29,9 @@ export function StatTile({
       )}
     >
       <dt className="text-label tracking-[0.04em] text-fg-3 uppercase">{label}</dt>
-      <dd
-        className={cn('mt-1.5 text-stat leading-none font-medium', tone ? TONES[tone] : 'text-fg')}
-      >
-        {value}
-      </dd>
+      <dd className="mt-1.5 text-stat leading-none font-medium text-fg">{value}</dd>
       {/* The hint is the first thing to go when the tile is narrow. */}
       {hint && <dd className="mt-1 hidden truncate text-xs text-fg-3 @[9rem]:block">{hint}</dd>}
     </dl>
   )
 }
-
-const TONES = {
-  ok: 'text-ok',
-  warn: 'text-warn',
-  bad: 'text-bad',
-  info: 'text-info',
-  expert: 'text-expert',
-} as const

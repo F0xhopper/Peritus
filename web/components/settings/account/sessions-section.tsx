@@ -80,7 +80,7 @@ export function SessionsSection({ sessions }: { sessions: SignInSession[] | null
                   <p className="truncate text-sm text-fg">
                     {device.label}
                     {session.current && (
-                      <span className="ml-2 rounded-chip bg-ok/12 px-1.5 py-0.5 text-xs text-ok">
+                      <span className="ml-2 rounded-chip bg-raised px-1.5 py-0.5 text-xs text-fg">
                         This device
                       </span>
                     )}

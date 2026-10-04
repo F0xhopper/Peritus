@@ -204,7 +204,7 @@ export function AssistantCard({
       {!streaming && (
         <footer className="mt-3 flex items-center gap-1">
           <IconAction onClick={() => void copy()} label={copied ? 'Copied' : 'Copy'}>
-            {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
+            {copied ? <Check className="size-3.5 text-fg" /> : <Copy className="size-3.5" />}
           </IconAction>
           {onRegenerate && (
             // "Ask again", not "Regenerate": it asks the question as a new turn
@@ -449,7 +449,7 @@ function Explained({
               className={cn(
                 'rounded-chip px-1.5 text-xs transition-colors duration-(--dur-1)',
                 tone === 'warn'
-                  ? 'bg-warn/12 text-warn group-hover/chip:bg-warn/20'
+                  ? 'bg-raised text-fg group-hover/chip:bg-border'
                   : 'bg-raised text-fg-2 group-hover/chip:bg-border'
               )}
             >

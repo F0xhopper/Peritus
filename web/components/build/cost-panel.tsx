@@ -134,7 +134,7 @@ export function CostPanel({
         <p className="mt-1 text-sm text-fg-2">
           {formatUsd(usage.cost_usd)}
           {usage.spend_cap_usd !== null && <> of a {formatUsd(usage.spend_cap_usd)} cap</>}
-          {usage.cap_exceeded_at && <span className="text-bad"> · cap reached</span>}
+          {usage.cap_exceeded_at && <span className="text-fg"> · cap reached</span>}
         </p>
       </div>
 
@@ -192,7 +192,7 @@ export function CostPanel({
               <dd
                 className={
                   usage.discovery.estimator_error !== null && usage.discovery.estimator_error < 0
-                    ? 'font-mono text-warn'
+                    ? 'font-mono text-fg'
                     : 'font-mono text-fg-2'
                 }
               >

@@ -79,7 +79,7 @@ export function BuildingNow({
         </span>
         {/* The stage text crossfades on change; nothing slides. */}
         <span key={stageLabel} className="mt-0.5 flex items-center gap-1.5 text-xs">
-          <span className="animate-in text-warn duration-(--dur-2) fade-in">{stageLabel}</span>
+          <span className="animate-in text-fg-2 duration-(--dur-2) fade-in">{stageLabel}</span>
           {detail && <span className="truncate text-fg-3">{detail}</span>}
           {reconnecting && <span className="text-fg-3">reconnecting…</span>}
         </span>
@@ -89,7 +89,7 @@ export function BuildingNow({
       <ArrowRight aria-hidden="true" className="size-3.5 shrink-0 text-fg-4" />
 
       {state.chatReady && (
-        <span className="shrink-0 rounded-chip bg-ok/12 px-1.5 py-0.5 text-xs text-ok">
+        <span className="shrink-0 rounded-chip bg-raised px-1.5 py-0.5 text-xs text-fg">
           Can answer
         </span>
       )}

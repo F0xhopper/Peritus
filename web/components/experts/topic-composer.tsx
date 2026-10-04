@@ -119,7 +119,7 @@ export function TopicComposer({
           <CostLine tier={tier} tiers={tiers} balance={balance} creditsEnforced={creditsEnforced} />
         )}
         {tooLong && (
-          <span className="ml-auto text-xs text-bad">
+          <span className="ml-auto text-xs text-fg">
             {topic.length} / {MAX_TOPIC}
           </span>
         )}

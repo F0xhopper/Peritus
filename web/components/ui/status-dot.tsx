@@ -2,7 +2,9 @@ import { cn } from '@/lib/cn'
 import type { ExpertStatus, Readiness } from '@/lib/api/types'
 
 /**
- * The 8px status dot.
+ * The 8px status dot — one of the few marks in the app that keeps a hue
+ * (web/AGENTS.md, "Colour"). The word beside it is plain text: the dot says
+ * it in colour, the label says it in words, and neither is the only carrier.
  *
  * Readiness, where it is known, wins over status: an expert that is still
  * "building" but has reached `chat_ready` is answerable *now*, and showing it as
@@ -67,7 +69,7 @@ export function StatusDot({
 }: {
   state: DotState
   className?: string
-  /** Render the word beside the dot, as coloured text. */
+  /** Render the word beside the dot. */
   label?: boolean
 }) {
   const style = STYLES[state]
@@ -83,19 +85,7 @@ export function StatusDot({
   return (
     <span className={cn('inline-flex items-center gap-1.5', className)}>
       <span aria-hidden="true" className={cn('size-2 shrink-0 rounded-full', style.className)} />
-      <span className={cn('text-sm', STATE_TEXT[state])}>{style.label}</span>
+      <span className="text-sm text-fg-2">{style.label}</span>
     </span>
   )
 }
-
-/** Colour as text, not as a filled chip — see web-design.md §3. */
-const STATE_TEXT: Record<DotState, string> = {
-  queued: 'text-warn',
-  building: 'text-warn',
-  'chat-ready': 'text-ok',
-  ready: 'text-ok',
-  failed: 'text-bad',
-  stalled: 'text-fg-2',
-}
-
-export { STATE_TEXT as statusTextClass }

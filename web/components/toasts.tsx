@@ -27,8 +27,6 @@ export function Toasts() {
           // fallback rather than anyone's colour.
           actionButton: 'rounded-full bg-accent text-accent-fg text-xs px-2.5 py-1',
           cancelButton: 'rounded-full bg-panel text-fg-3 text-xs px-2.5 py-1',
-          error: 'text-bad',
-          success: 'text-ok',
         },
       }}
     />

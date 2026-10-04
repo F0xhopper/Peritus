@@ -161,7 +161,7 @@ function TierCard({
           <span
             className={cn(
               'text-xs',
-              !affordable && !disabled ? 'text-bad' : selected ? 'text-fg-2' : 'text-fg-3'
+              !affordable && !disabled ? 'text-fg' : selected ? 'text-fg-2' : 'text-fg-3'
             )}
           >
             {cost} {cost === 1 ? 'credit' : 'credits'}
@@ -173,10 +173,10 @@ function TierCard({
         className={cn('mt-1 text-xs leading-snug', selected ? 'text-fg-2' : 'text-fg-3')}
       >
         {blurb}
-        {disabledReason && <span className="mt-1.5 block text-warn">{disabledReason}</span>}
+        {disabledReason && <span className="mt-1.5 block text-fg">{disabledReason}</span>}
       </span>
       {!disabled && !affordable && (
-        <span className="mt-1.5 text-xs text-bad">More credits than you have</span>
+        <span className="mt-1.5 text-xs text-fg">More credits than you have</span>
       )}
       {/* No dollar spend cap here: the card is priced in credits, and a second
           currency beside the first raised a question the page never answered. */}
@@ -219,7 +219,7 @@ export function CostLine({
   const short = balance !== null && balance < price.credit_cost
 
   return (
-    <p className={cn('text-xs', short ? 'text-bad' : 'text-fg-3', className)}>
+    <p className={cn('text-xs', short ? 'text-fg' : 'text-fg-3', className)}>
       Holds {price.credit_cost} {price.credit_cost === 1 ? 'credit' : 'credits'}
       {balance !== null && `, you have ${balance}`}.{' '}
       {/* Credits are *held* while the build runs and refunded if it fails —

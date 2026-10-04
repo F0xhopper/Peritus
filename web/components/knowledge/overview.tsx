@@ -140,7 +140,7 @@ export function KnowledgeOverview({
                         <span
                           className={cn(
                             'shrink-0 text-label',
-                            concept.met ? 'text-fg-3' : 'text-warn'
+                            concept.met ? 'text-fg-3' : 'text-fg'
                           )}
                         >
                           {formatNumber(concept.sources)}
@@ -381,7 +381,7 @@ function Fold({
           <span
             className={cn(
               'text-label tracking-[0.04em] uppercase',
-              tone === 'warn' ? 'text-warn' : 'text-fg-2'
+              tone === 'warn' ? 'text-fg' : 'text-fg-2'
             )}
           >
             {title}

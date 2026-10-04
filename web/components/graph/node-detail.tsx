@@ -102,7 +102,7 @@ export function NodeDetail({
             <p
               className={cn(
                 'text-label tracking-[0.04em] uppercase',
-                type === 'contradicts' ? 'text-warn' : 'text-fg-3'
+                type === 'contradicts' ? 'text-fg' : 'text-fg-3'
               )}
             >
               {LABELS[type] ?? humanise(type)}

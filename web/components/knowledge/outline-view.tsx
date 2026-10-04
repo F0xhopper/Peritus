@@ -296,7 +296,7 @@ function WorkRow({
       {open && (
         <div id={bodyId} className="border-t border-border-soft px-3 py-2">
           {sections?.error && (
-            <p className="py-1 text-xs text-bad">
+            <p className="py-1 text-xs text-fg">
               What each part establishes could not be loaded. {sections.error}
             </p>
           )}

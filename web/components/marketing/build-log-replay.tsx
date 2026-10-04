@@ -205,10 +205,10 @@ const MARK: Record<ReplayRow['kind'], string> = {
 
 const MARK_COLOUR: Record<ReplayRow['kind'], string> = {
   stage: 'text-accent',
-  keep: 'text-ok',
-  drop: 'text-bad',
+  keep: 'text-fg',
+  drop: 'text-fg-3',
   info: 'text-fg-3',
-  ok: 'text-ok',
+  ok: 'text-fg-2',
 }
 
 const TEXT_COLOUR: Record<ReplayRow['kind'], string> = {

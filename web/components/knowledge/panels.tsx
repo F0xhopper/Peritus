@@ -54,7 +54,7 @@ function Section({
       <p
         className={cn(
           'text-label tracking-[0.04em] uppercase',
-          tone === 'warn' ? 'text-warn' : 'text-fg-3'
+          tone === 'warn' ? 'text-fg' : 'text-fg-3'
         )}
       >
         {title}
@@ -278,7 +278,7 @@ export function ConceptPanel({
         )}
       </div>
 
-      {loaded?.error && <p className="text-xs text-bad">{loaded.error}</p>}
+      {loaded?.error && <p className="text-xs text-fg">{loaded.error}</p>}
 
       {!loaded && (
         <div className="space-y-2" aria-hidden="true">
@@ -388,10 +388,10 @@ function ClaimItem({ claim, slug }: { claim: MapClaim; slug: string }) {
           key={`${relation.type}:${relation.claim_id}`}
           className={cn(
             'mt-1 border-l-2 pl-2 leading-relaxed',
-            relation.type === 'contradicts' ? 'border-warn text-fg-2' : 'border-border text-fg-3'
+            relation.type === 'contradicts' ? 'border-fg-3 text-fg-2' : 'border-border text-fg-3'
           )}
         >
-          <span className={relation.type === 'contradicts' ? 'text-warn' : undefined}>
+          <span className={relation.type === 'contradicts' ? 'text-fg' : undefined}>
             {relation.type === 'contradicts'
               ? 'Judged to disagree'
               : relation.type === 'qualifies'
@@ -470,7 +470,7 @@ export function KeyConceptPanel({
         {concept.met ? (
           <span className="text-fg-3">That meets this expert&rsquo;s target.</span>
         ) : (
-          <span className="text-warn">Short of this expert&rsquo;s target.</span>
+          <span className="text-fg">Short of this expert&rsquo;s target.</span>
         )}
       </p>
 
@@ -479,7 +479,7 @@ export function KeyConceptPanel({
           <p className="px-1 text-xs text-fg-2">
             <em>{concept.named_text.title ?? 'A named text'}</em>
             {concept.named_text.author ? ` (${concept.named_text.author})` : ''} —{' '}
-            <span className={concept.named_text.status === 'missing' ? 'text-warn' : 'text-fg-3'}>
+            <span className={concept.named_text.status === 'missing' ? 'text-fg' : 'text-fg-3'}>
               {NAMED_STATUS[concept.named_text.status] ?? humanise(concept.named_text.status)}
             </span>
           </p>
@@ -582,7 +582,7 @@ export function GapPanel({
     <div className="space-y-4 text-sm">
       <div>
         <h3 className="font-medium text-fg">{gap.title}</h3>
-        <p className="mt-0.5 text-xs text-warn">Not in this expert&rsquo;s sources</p>
+        <p className="mt-0.5 text-xs text-fg">Not in this expert&rsquo;s sources</p>
       </div>
       <p className="text-xs leading-relaxed text-fg-2">
         {gap.kind === 'named_text' && concept ? (

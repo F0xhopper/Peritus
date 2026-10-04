@@ -109,7 +109,7 @@ export function PassagePanel({
                 {source.full_text_method === 'abstract' ? (
                   // Worth flagging: an abstract-only source was judged, and is
                   // answering questions, on its abstract alone.
-                  <span className="text-warn">Abstract only</span>
+                  <span className="text-fg">Abstract only</span>
                 ) : (
                   describeTextRead(source.full_text_method)
                 )}

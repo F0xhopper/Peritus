@@ -42,7 +42,8 @@ const button = cva(
         secondary: 'border border-border bg-raised text-fg hover:bg-border',
         outline: 'border border-border text-fg-2 hover:bg-raised hover:text-fg',
         ghost: 'text-fg-2 hover:bg-raised hover:text-fg',
-        danger: 'bg-bad/12 text-bad hover:bg-bad/20',
+        // Not red: the word and the confirm dialog say what it does.
+        danger: 'border border-border text-fg hover:bg-raised',
         link: 'text-fg underline-offset-2 hover:underline',
       },
       size: {

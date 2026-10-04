@@ -170,7 +170,7 @@ export function ExpertSettingsPage({
           </section>
 
           <section className="mt-12 border-t border-border-soft pt-6">
-            <h2 className="text-lg font-medium text-bad">Danger zone</h2>
+            <h2 className="text-lg font-medium text-fg">Danger zone</h2>
             <p className="mt-1 text-sm text-fg-3">
               Deleting an expert removes its whole record of sources — every one it kept and every
               one it dropped — along with its passages, its concept map and its chats. It cannot be

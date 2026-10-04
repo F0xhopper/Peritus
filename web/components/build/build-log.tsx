@@ -180,7 +180,7 @@ export function BuildLog({
         )}
 
         {reconnecting && (
-          <p className="px-2 py-1 text-warn">· reconnecting to the build log…</p>
+          <p className="px-2 py-1 text-fg-2">· reconnecting to the build log…</p>
         )}
       </div>
 
@@ -276,7 +276,7 @@ function GroupSummary({
       <span className="min-w-0 flex-1 truncate text-fg-3">
         {label} · {group.rows.length} lines
         {warnings > 0 && (
-          <span className="text-warn">
+          <span className="text-fg">
             {' '}
             · {warnings} {warnings === 1 ? 'warning' : 'warnings'}
           </span>
@@ -297,22 +297,24 @@ const MARK: Record<string, string> = {
   drop: '×',
 }
 
+// Monochrome (web/AGENTS.md, "Colour"): a kept row is ink, a dropped one
+// recedes, and the ✓ and × say which — the glyphs, not a hue, are the signal.
 const MARK_COLOUR: Record<string, string> = {
   info: 'text-fg-3',
   stage: 'text-fg',
-  warn: 'text-warn',
-  bad: 'text-bad',
-  ok: 'text-ok',
+  warn: 'text-fg',
+  bad: 'text-fg',
+  ok: 'text-fg-2',
   meta: 'text-fg-3',
-  keep: 'text-ok',
-  drop: 'text-bad',
+  keep: 'text-fg',
+  drop: 'text-fg-3',
 }
 
 const MESSAGE_COLOUR: Record<string, string> = {
   info: 'text-fg-3',
   stage: 'text-fg',
-  warn: 'text-warn',
-  bad: 'text-bad',
+  warn: 'text-fg',
+  bad: 'text-fg',
   ok: 'text-fg-2',
   meta: 'text-fg-3',
   keep: 'text-fg-2',

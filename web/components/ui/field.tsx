@@ -9,8 +9,9 @@ import { cn } from '@/lib/cn'
  * / `FieldError`, plus `FieldSeparator` for "or" — is shadcn's, so a form reads
  * the way the shadcn blocks do (the sign-in forms are `login-03`). The classes
  * are not: shadcn's `text-muted-foreground`, `text-destructive` and
- * `bg-background` are `text-fg-3`, `text-bad` and `bg-panel` here, and there is
- * no `Label` or `Separator` primitive to depend on.
+ * `bg-background` are `text-fg-3`, `text-fg` and `bg-panel` here (an error is
+ * ink, not red — web/AGENTS.md, "Colour"), and there is no `Label` or
+ * `Separator` primitive to depend on.
  *
  * One deliberate departure: `FieldError` keeps a reserved line when empty
  * (`reserve`), because an error appearing must not move the submit button out
@@ -166,7 +167,7 @@ export function FieldError({
     <p
       data-slot="field-error"
       aria-live="polite"
-      className={cn('text-xs text-bad', reserve && 'min-h-4', className)}
+      className={cn('text-xs text-fg', reserve && 'min-h-4', className)}
       {...props}
     >
       {content}

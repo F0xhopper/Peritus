@@ -25,7 +25,7 @@ import {
   MenuSeparator,
   MenuTrigger,
 } from '@/components/ui/menu'
-import { StatusDot, dotState, stateLabel, statusTextClass } from '@/components/ui/status-dot'
+import { StatusDot, dotState, stateLabel } from '@/components/ui/status-dot'
 import { useLeaveExpert } from '@/hooks/use-leave-expert'
 import { useStartChat } from '@/hooks/use-start-chat'
 import { canManage } from '@/lib/access'
@@ -157,7 +157,7 @@ export function ExpertCard({
         <div className="flex min-h-[calc(var(--row-h)+2rem)] items-center gap-3 px-5 py-4">
           <span className="flex min-w-0 items-center gap-2 text-sm">
             <StatusDot state={state} />
-            <span className={cn('truncate', statusTextClass[state])}>{stateLabel(state)}</span>
+            <span className="truncate text-fg-2">{stateLabel(state)}</span>
           </span>
           {chattable && (
             // Straight into a new chat from Home, composer focused — no stop at

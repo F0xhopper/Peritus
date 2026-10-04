@@ -172,9 +172,27 @@ These come from `web-production.md` and are enforced in code, not in copy.
 
 ## Colour
 
-**The chrome is monochrome. Colour is information.** The only hues in the app are
-**status**: `--ok`, `--warn`, `--bad` say what state a build, a source or a
-readiness is in.
+**The app is monochrome. Colour is a mark.** The only hues in the app are
+**status** — `--ok`, `--warn`, `--bad` — and since October 2026 they appear on
+nothing but a mark: the 8px status dot, the ring and the corner dot on a building
+or failed avatar, the dispute mark on a citation chip and the map, and the 4px
+segments of the stage timeline and the password meter. `tests/monochrome.test.ts`
+lists those files and fails on any other use.
+
+Everything that used to be coloured says what it means another way, which it
+already had to (colour was never the only carrier): an error, a shortfall, a
+"cap reached" is `text-fg`, the strongest neutral, with the word doing the work;
+a notice is `bg-panel` with a hairline (`border-border` for what went wrong,
+`border-border-soft` otherwise) and its icon; the danger button and the danger
+menu item are the outline button and an item in `text-fg`, with the confirm
+dialog behind them; a `Chip` is filled for what is kept and hollow for what is
+dropped; the build log's kept rows are ink and its dropped rows recede, and the ✓
+and × say which. An invalid field takes a `--fg` hairline. Do not reintroduce a
+tint for "just this one" — the test will refuse it, and the point of a monochrome
+product is that the one tint would be the loudest thing on the page.
+
+**The exceptions are the pictures.** A found picture, a generated drawing or a
+monogram is the expert's identity and keeps whatever colour it has.
 
 **There are no per-expert colours.** Experts are told apart by their avatar — the
 found picture, a generated drawing, or the monogram — never by a tint. The picker
@@ -261,7 +279,8 @@ generously round.** The scale is in `globals.css`:
   "Peritus" (not the server or the worker). Source types render as kinds
   (`lib/source-kind.ts`); discovery keys and text-read methods as phrases.
 - **Light-theme status colours are ≥4.5:1 as text** on ground, panel and
-  raised (`--ok #1a7033`, `--warn #7f5808`, `--bad #b42d2d`). A higher-contrast
+  raised (`--ok #1a7033`, `--warn #7f5808`, `--bad #b42d2d`) — kept so a mark
+  beside text holds up, though they no longer colour text (see _Colour_). A higher-contrast
   surface ramp (near-black dark ground, bigger card step) was tried then and
   reverted, because the ground-to-sidebar step read as odd. It came back in the
   restyle below _without_ that step — see _Colour_.

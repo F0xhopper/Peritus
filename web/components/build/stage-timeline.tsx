@@ -47,8 +47,8 @@ export function StageTimeline({
                 'mb-1 truncate text-xs transition-colors duration-(--dur-1)',
                 state.status === 'done' && 'text-fg-2',
                 state.status === 'active' && 'text-fg',
-                state.status === 'degraded' && 'text-warn',
-                state.status === 'failed' && 'text-bad',
+                state.status === 'degraded' && 'text-fg',
+                state.status === 'failed' && 'text-fg',
                 state.status === 'pending' && 'text-fg-3',
               )}
             >

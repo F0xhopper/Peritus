@@ -61,7 +61,7 @@ export function CreditLedger({
                 <td
                   className={cn(
                     'border-b border-border-soft px-4 text-right font-mono',
-                    entry.delta > 0 ? 'text-ok' : entry.delta < 0 ? 'text-fg-2' : 'text-fg-3'
+                    entry.delta > 0 ? 'text-fg' : entry.delta < 0 ? 'text-fg-2' : 'text-fg-3'
                   )}
                 >
                   {entry.delta > 0 ? `+${entry.delta}` : entry.delta}
@@ -89,7 +89,7 @@ export function CreditLedger({
               <span
                 className={cn(
                   'shrink-0 font-mono text-sm',
-                  entry.delta > 0 ? 'text-ok' : 'text-fg-2'
+                  entry.delta > 0 ? 'text-fg' : 'text-fg-2'
                 )}
               >
                 {entry.delta > 0 ? `+${entry.delta}` : entry.delta}

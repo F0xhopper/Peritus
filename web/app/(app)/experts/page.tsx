@@ -72,9 +72,7 @@ export default async function ExpertsHomePage() {
             )}
           >
             <StatTile label="Experts" value={experts.length} />
-            {building.length > 0 && (
-              <StatTile label="Building" value={building.length} tone="warn" />
-            )}
+            {building.length > 0 && <StatTile label="Building" value={building.length} />}
             {showCredits ? (
               <StatTile
                 label="Credits"

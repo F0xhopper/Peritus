@@ -168,7 +168,7 @@ export function AccountSettingsPage({
                 </Row>
                 {credits.held > 0 && (
                   <Row label="Reserved">
-                    <span className="text-warn">{formatNumber(credits.held)}</span>
+                    <span className="text-fg">{formatNumber(credits.held)}</span>
                     <span className="ml-1.5 text-xs text-fg-3">by a running build</span>
                   </Row>
                 )}
@@ -189,7 +189,7 @@ export function AccountSettingsPage({
                     <span className={cn(tier.included_in_plan ? 'text-fg-2' : 'text-fg-3')}>
                       {humanise(tier.tier)}
                       {!tier.included_in_plan && (
-                        <span className="ml-1.5 text-xs text-warn">not on your plan</span>
+                        <span className="ml-1.5 text-xs text-fg">not on your plan</span>
                       )}
                     </span>
                     <span className="font-mono text-xs text-fg-3">
